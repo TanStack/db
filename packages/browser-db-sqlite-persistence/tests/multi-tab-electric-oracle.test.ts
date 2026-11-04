@@ -30,7 +30,7 @@
  * open tab catches up, the durable rows and every open tab show the server
  * head, however earlier lagging commits left them. When a lagging tab
  * commits an older row and then closes for good, nothing redelivers the head
- * to the faster tab, so this law fails today. That history is pinned with
+ * to the faster tab, so this law fails today. That history is a fixed history run with
  * `it.fails` until #2209 orders source writes by server position; generated
  * histories never close a tab for good.
  *
@@ -79,7 +79,7 @@
  *
  * The generated histories below judge Laws 1, 3, 4, and 5 over interleaved
  * server changes, deploys, deliveries, stops, and recoveries, against a
- * model of the durable rows. One known gap is left out of them and pinned:
+ * model of the durable rows. One known limit is left out of them and kept as a fixed history:
  * a resumed tab that lags behind a peer can receive an update for a row the
  * peer already deleted, and Electric's resume check then puts it in `error`.
  *
@@ -906,7 +906,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
     | { kind: `advance`; tab: number; pick: number }
     | { kind: `catch up`; tab: number; pick: number }
     // A tab that closes for good. Generated histories never close a tab;
-    // only the pinned #2209 replay does (see below).
+    // only the fixed #2209 regression does (see below).
     | { kind: `close`; tab: number }
     | { kind: `stop`; tab: number; pick: number }
     | {
@@ -978,7 +978,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // reset/stop suffix of 4 + 2*tabCount steps (8 or 10), or a lagging-commit
   // suffix of 6 + 3*tabCount steps (12 or 15). Removing
   // the open delivery, stop, or peer commit loses the law's premise; recovering
-  // before the peer commit would test a different boundary. Existing pinned
+  // before the peer commit would test a different boundary. Existing fixed
   // histories still use the same driver without this prefix.
   const generatedHistory = fc
     .record({
@@ -1147,7 +1147,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
 
   const runGeneratedHistory = async (
     { tabCount, steps }: GeneratedHistory,
-    onKnownGap: () => void,
+    onKnownLimit: () => void,
     onRecovery?: (
       divergentBeforeRecovery: boolean,
       how: `restart` | `reload`,
@@ -1283,9 +1283,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
       // Electric's updates carry only changed columns (the shape's default
       // replica), so an update cannot create a row the tab does not hold,
       // and Electric drops it. The tab holds the durable rows, or, inside a
-      // refetch, the snapshot it has received. Known gap: a resumed tab
+      // refetch, the snapshot it has received. Known limit: a resumed tab
       // instead reports an unseen row and fails (issue #2267). Generated
-      // campaigns leave that history out; the pinned replay below keeps it.
+      // campaigns leave that history out; the fixed regression below keeps it.
       const held = new Set<number>(model.truncates ? [] : durable.keys())
       const track = (message: Message<Item>) => {
         if (!(`key` in message)) return
@@ -1300,7 +1300,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
           message.headers.operation === `update` &&
           !held.has(message.value.id)
         ) {
-          if (model.resumed && !model.truncates) onKnownGap()
+          if (model.resumed && !model.truncates) onKnownLimit()
           return false
         }
         track(message)
@@ -1862,7 +1862,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
       fc.asyncProperty(generatedHistory, async (history) => {
         let primary: { error: unknown } | undefined
         try {
-          // fc.pre discards a history that reaches the known gap.
+          // fc.pre discards a history that reaches the known limit.
           await runGeneratedHistory(history, () => fc.pre(false))
         } catch (error) {
           primary = { error }
@@ -1896,9 +1896,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
     600_000,
   )
 
-  // Known gap #2267, pinned: the shrunk generated history in which a resumed tab
+  // Known limit #2267, as a fixed history: the shrunk generated history in which a resumed tab
   // that lags behind its peer receives an update for a row the peer already
-  // deleted. It replays through the same driver and checks with the known-gap
+  // deleted. It replays through the same driver and checks with the known-limit
   // detector off. Remove `fails` when Electric's resume check stops treating
   // rows from peers' commits as this stream's evidence.
   it.fails(
@@ -2003,7 +2003,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
     60_000,
   )
 
-  // Known gap #2209, pinned: tab A commits v1 and v2; tab B's lagging stream
+  // Known limit #2209, as a fixed history: tab A commits v1 and v2; tab B's lagging stream
   // then commits only v1, so the durable row falls back to v1, and B closes
   // for good. Nothing redelivers the head to A, so Law 2's final check fails.
   // Generated histories never close a tab for good, which leaves this
@@ -2034,7 +2034,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // tabs catch up, but after tab B stops, tab A catches up, and tab A stops,
   // the durable rows lose row 1. Law 2 expects every open tab and the durable
   // rows to show the head. The source-progress repair forces a fresh snapshot.
-  // It replays through the same driver and checks with the known-gap detector
+  // It replays through the same driver and checks with the known-limit detector
   // off. The generated source-prefix campaign extends this same law.
   it(
     `keeps a durable row after both tabs catch up to it and then stop`,

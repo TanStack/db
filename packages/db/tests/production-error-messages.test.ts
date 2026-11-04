@@ -1,5 +1,5 @@
 /**
- * Ordinary coverage pin for production error messages: every exported error
+ * Ordinary fixed-example coverage for production error messages: every exported error
  * class has sample inputs. The production-message law is owned by
  * production-error-messages-oracle.test.ts.
  */

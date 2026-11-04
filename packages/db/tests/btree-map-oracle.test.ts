@@ -285,7 +285,7 @@ declareOracle({ check: [expectRefinement], model: [stepModel] })
 
 describe(`BTree Map oracle`, () => {
   // The 120,000-operation corpus takes about nine seconds with CI coverage.
-  // This fixed lane is a stable depth campaign, not random discovery. Keep
+  // This fixed-seed campaign is a stable depth campaign, not random discovery. Keep
   // every operation and assertion. This is not a five-second performance budget.
   it(
     `matches a Map oracle under random insert/delete/overwrite with small nodes`,

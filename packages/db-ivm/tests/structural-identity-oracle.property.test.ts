@@ -39,7 +39,7 @@ import { declareOracle } from '../../db/tests/oracle-declaration.js'
  * `lastIndex`, Maps and Sets with zero to two entries, arrays with an
  * enumerable non-index field, small binary values, holes, and nesting deeper
  * than the identity's depth cap.
- * Pinned pairs cover distinct symbols with the same description, and different
+ * Fixed pairs cover distinct symbols with the same description, and different
  * object kinds with the same body. Hand-written collision pairs are ordinary
  * tests in structural-identity.test.ts. Fixed representation witnesses verify that the driver reaches each
  * prototype, key-order, and hidden-symbol variant it claims. The depth cap
@@ -63,7 +63,7 @@ type Spec =
 
 const SYMBOL = Symbol(`s`)
 const ENUMERABLE_SYMBOL = Symbol(`enumerable`)
-const { replayProperty, replaySeed } = readOracleRunConfig()
+const { replayProperty, campaignSeed } = readOracleRunConfig()
 const LEAVES: ReadonlyArray<unknown> = [
   0,
   -0,
@@ -437,12 +437,12 @@ describe(`structuralIdentity`, () => {
       2000,
       `structural-identity.equal-representations`,
     )
-    if (replaySeed === undefined)
+    if (campaignSeed === undefined)
       await fc.assert(property, { numRuns: options.numRuns, seed: 20261014 })
     await fc.assert(property, options)
   })
 
-  // Named replays of counterexamples the random campaign found. Nested `deep`
+  // Named fixed histories of counterexamples the random campaign found. Nested `deep`
   // nodes compose, so these specs build equal values; an empty text leaf and the
   // leaf it shares a value with must also normalize alike.
   it.each([
@@ -597,7 +597,7 @@ describe(`structuralIdentity`, () => {
       2000,
       `structural-identity.independent-values`,
     )
-    if (replaySeed === undefined)
+    if (campaignSeed === undefined)
       await fc.assert(property, { numRuns: options.numRuns, seed: 1158727847 })
     await fc.assert(property, options)
   })

@@ -259,7 +259,7 @@ describe(`in evaluator`, () => {
       false,
     ],
     [`an empty list`, `a`, [], false],
-  ] as const)(`pins %s`, (_name, value, list, expected) => {
+  ] as const)(`fixed history %s`, (_name, value, list, expected) => {
     const testCase = { value, list: [...list], listFromRow: false }
     expect(referenceIn(value, testCase.list)).toBe(expected)
     check(evaluateWithProduction, testCase)

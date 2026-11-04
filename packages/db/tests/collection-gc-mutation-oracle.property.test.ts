@@ -354,7 +354,7 @@ const historyArbitrary = fc.record({
   sourceValue: fc.integer({ min: -3, max: 3 }),
 })
 it.each(
-  runConfig.replaySeed === undefined ? [20261026, undefined] : [undefined],
+  runConfig.campaignSeed === undefined ? [20261026, undefined] : [undefined],
 )(
   `retains every touched Collection across mutation shapes (seed %s)`,
   async (seed) => {

@@ -17,7 +17,7 @@
  * `{ property: 'p', defaultRuns: n }`, or the framework definition
  * `oracleProperty({ id: 'p', histories: { runs: n } })`), and otherwise by its
  * fixed seed (`{ seed: s, numRuns: oracleRuns(n) }`, or a seed `s` in that
- * definition's `fixedSeeds`, whose lane runs the same `n`). A key or count is a literal, a
+ * definition's `fixedSeeds`, whose campaign runs the same `n`). A key or count is a literal, a
  * constant in the same file, or a constant that the file imports. An import
  * follows relative re-exports (`export { x } from`, `export * from`), so a
  * constant defined in a support module is tracked where the oracle uses it.
@@ -334,7 +334,7 @@ function runBudgets(file, revision, reader) {
         if (histories?.type === `ObjectExpression`) {
           const runs = propertyValue(histories, `runs`, file, reader, revision)
           if (typeof property === `string`) record(`property ${property}`, runs)
-          // Each fixed seed's lane runs the same `runs` histories.
+          // Each fixed-seed campaign runs the same `runs` histories.
           const fixedSeeds = histories.properties.find(
             (candidate) =>
               candidate.type === `Property` &&

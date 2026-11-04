@@ -1,4 +1,4 @@
-// Hostile mutants for persisted demand coverage.
+// Mutants for persisted demand coverage.
 //
 // Each mutant replaces one exact piece of production code with a plausible
 // wrong design. The harness applies it in memory through

@@ -3832,7 +3832,7 @@ describe(`Electric adapter laws`, () => {
    * client awaits the decision; and stream steps after a final failure or an
    * abort, because the stream has stopped. It also omits a second
    * up-to-date while the first snapshot's acceptance is pending. The
-   * installed-client lane cannot hold an acceptance, so this dimension runs
+   * installed-client receiving path cannot hold an acceptance, so this dimension runs
    * only here. A progressive history starts with
    * a must-refetch, so its demands wait on the established snapshot.
    *
@@ -3840,7 +3840,7 @@ describe(`Electric adapter laws`, () => {
    * ShapeStream. After each step and a timer turn it compares the status,
    * every demand's settlement and cause, a readiness wait's settlement and
    * cause, and whether the snapshot's row is visible. The model lives in `electric-retry-decision-model.ts`. An
-   * installed-client lane in `electric-sdk-delivery-oracle.property.test.ts`
+   * installed-client receiving path in `electric-sdk-delivery-oracle.property.test.ts`
    * drives the same model through the real Electric client and HTTP.
    */
   const retryDecisionArb = fc.constantFrom<RetryDecision>(
@@ -4134,7 +4134,7 @@ describe(`Electric adapter laws`, () => {
     },
     60_000,
     [
-      // Named replays: a retried provider error while a transaction holds the
+      // Named fixed histories: a retried provider error while a transaction holds the
       // recovered snapshot, for each wait, with and without a hold (this
       // replaces the former fixed "renews full recovery demand" case); a
       // held snapshot whose stream aborts before the hold settles; an
@@ -4418,7 +4418,7 @@ describe(`Electric adapter laws`, () => {
     `a rejected initial Electric row commit creates no durable source prefix (fixed)`,
     checkDurablePrefix,
   )
-  // A shared seed reseeds this random lane; a path replay selects it by property.
+  // A shared campaign seed reseeds this random campaign; a path replay selects it by property.
   oracleReplayTest(fcTest, durablePrefixProperty).prop(
     [durablePrefixArbitrary],
     durablePrefixPropertyOptions(`random`),
@@ -4871,7 +4871,7 @@ describe(`Electric adapter laws`, () => {
   )
 })
 
-// Each campaign's random lane has its own suite. An ordinary run runs it
+// Each random campaign has its own suite. An ordinary run runs it
 // beside the adapter laws. A path replay of its property runs only it.
 oracleReplayTest(describe, persistenceInterleavingProperty)(
   `persisted Electric interleaving campaign`,

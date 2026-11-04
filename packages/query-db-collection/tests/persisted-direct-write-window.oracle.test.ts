@@ -33,7 +33,7 @@ import type { Op, Row, StorageKind } from './persisted-direct-write-support'
  * the write runs. The reference does not share the persistence wrapper, which
  * is the code under judgment. It shares the Query Collection's direct-write
  * code, so it cannot find a fault in that code that both paths share. The
- * precedence rules for writes that interleave with refetches are pinned as
+ * precedence rules for writes that interleave with refetches are fixed as
  * unit tests in `persisted-direct-write.test.ts`; they are not an oracle.
  *
  * ## Contract and ownership table

@@ -2504,7 +2504,7 @@ describe(`synchronous initial full-source settlement refinement`, () => {
 // The refinement checks compare production observations with the models they
 // name. observeHistory compares each history with its finite reference inside
 // the driver. compareNullable is the nullable-order model; the palette table is
-// its authority, and expectNullableOrderMatchesPalette pins the model to it.
+// its authority, and expectNullableOrderMatchesPalette anchors the model to it.
 declareOracle({
   check: [
     observeHistory,

@@ -47,7 +47,7 @@
  * first subscriber. The separate sibling-resumption grammar below uses
  * controlled asynchronous loads. The broad grammar does not generate source
  * failure, asynchronous loads, or several live-query consumers. The
- * subscription lifecycle oracle owns those once acquisition has resumed. Pinned blocks cover pooled views,
+ * subscription lifecycle oracle owns those once acquisition has resumed. Fixed blocks cover pooled views,
  * `DbClient` stream preloads, a subscriber that outlives cleanup, and reads
  * that wait for readiness.
  */

@@ -61,7 +61,7 @@ async function assertPublicationProperty<Ts>(
 ): Promise<void> {
   if (replay.replayPath !== undefined && replay.replayProperty !== name) return
   const options = oraclePropertyOptions(runs, name)
-  if (replay.replaySeed === undefined)
+  if (replay.campaignSeed === undefined)
     await fc.assert(property, { ...options, seed: fixedSeed })
   await fc.assert(property, options)
 }

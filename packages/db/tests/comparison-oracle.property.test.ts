@@ -1036,7 +1036,7 @@ describe(`areValuesEqual property-based tests`, () => {
  * Equal-value branches construct separate objects, and the zoned branch forces
  * different zones at the same instant. The production path is the exported
  * `ascComparator` under default options; each return is the observation
- * checkpoint. This lane makes no indexed or public-query claim.
+ * checkpoint. This production path makes no indexed or public-query claim.
  */
 type IsoDateFields = { year: number; month: number; day: number }
 type PlainDateOrderInput = { left: IsoDateFields; right: IsoDateFields }

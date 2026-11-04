@@ -1177,7 +1177,7 @@ async function assertRun<T>(property: string, result: fc.RunDetails<T>) {
 }
 
 async function campaign(options: Parameters<typeof fc.assert>[1]) {
-  // A seed alone replays the whole campaign and must still enforce reach.
+  // A seed alone runs a reseeded campaign and must still enforce reach.
   // A path replays one input directly and does not owe campaign-wide reach.
   const reach = createOracleReach<CoverageReach>(PROPERTY, REACH_STATES, {
     replaying: oracleReplayRequested(),

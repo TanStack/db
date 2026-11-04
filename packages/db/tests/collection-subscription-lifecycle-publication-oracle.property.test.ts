@@ -2784,10 +2784,10 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
 
   const { multiplier, ...replay } = readOracleRunConfig()
   const restartProperty = `subscription-lifecycle.restart-publication`
-  // Each generated input runs every structural lane. Reach never depends on
+  // Each generated input runs every structural grammar. Reach never depends on
   // the random seed choosing equality, a live owner, or ordinary source delivery.
   // Both campaigns use the same budget, grammar, model, driver and comparisons.
-  for (const seed of replay.replaySeed === undefined
+  for (const seed of replay.campaignSeed === undefined
     ? [2310, undefined]
     : [undefined]) {
     for (const delivery of restartDeliveries) {
@@ -2868,7 +2868,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       }, 120_000)
     }
   }
-  for (const seed of replay.replaySeed === undefined
+  for (const seed of replay.campaignSeed === undefined
     ? [2310, undefined]
     : [undefined]) {
     for (const path of restartReceiverPaths) {

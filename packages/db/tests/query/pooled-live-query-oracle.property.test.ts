@@ -63,7 +63,7 @@
  *
  * Calibration: a partition that ignored the previous value, kept group rows
  * in arrival order, or compared literals without normalization fails the
- * pinned histories and campaigns. A view that kept reporting the source's
+ * fixed histories and campaigns. A view that kept reporting the source's
  * status, or kept its rows, after cleanup fails the cleanup histories. A
  * view that empties its groups at cleanup without advancing their revisions
  * leaves the detached reader on its old rows and fails the cleanup
@@ -371,9 +371,9 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
   ),
 })
 
-// Each pinned history moves a row across groups a short example would keep
+// Each fixed history moves a row across groups a short example would keep
 // still.
-const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
+const fixedHistories: ReadonlyArray<{ name: string; history: History }> = [
   {
     name: `a Date row joins the group of its timestamp`,
     history: {
@@ -1058,7 +1058,7 @@ declareOracle({
 })
 
 describe(`pooled live query oracle`, () => {
-  // The pinned histories and the fixed campaign stand aside during any path
+  // The fixed histories and the fixed-seed campaign stand aside during any path
   // replay. The random campaign below is the one that a replay of this
   // property selects.
   // Only generated histories count toward reach; a replay asserts nothing.
@@ -1069,7 +1069,7 @@ describe(`pooled live query oracle`, () => {
     return runHistory(history, reach)
   }
   if (!oracleReplayRequested()) {
-    // Generated fields are plain values; this pins a field whose getter
+    // Generated fields are plain values; this covers a field whose getter
     // throws, which both paths treat as a row that does not match.
     it(`matches the live-query Collection when an eq path getter throws`, async () => {
       const source = createCollection(
@@ -1105,7 +1105,7 @@ describe(`pooled live query oracle`, () => {
       await source.cleanup({ dependents: true })
     })
 
-    for (const { name, history } of pinnedHistories) {
+    for (const { name, history } of fixedHistories) {
       it(`matches the live-query Collection when ${name}`, () =>
         runHistory(history))
     }

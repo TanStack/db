@@ -52,7 +52,7 @@ afterEach(runActiveCleanupFns)
  * Refinement evidence: query execution counts prove the SELECT reached the
  * adapter. Named empty, reordered, duplicated, missing-key, and swapped-value
  * wrong answers challenge the checker. Normal execution runs the same alias
- * properties and budgets in retained fixed-seed and seedless-random lanes.
+ * properties and budgets in retained fixed-seed and seedless-random campaigns.
  * TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and TANSTACK_DB_ORACLE_PROPERTY
  * select one exact replay.
  * Real-provider refinement: frozen receipts from the published 15.2.7 Native
@@ -83,9 +83,9 @@ const aliasOracleRuns = readAliasOracleRuns()
 const aliasOracleReplay = readOracleRunConfig()
 
 /**
- * Registers a property's two campaigns. The fixed campaign pins its seed and
+ * Registers a property's two campaigns. The fixed campaign fixes its campaign seed and
  * stands aside on every path replay. The random campaign runs in ordinary and
- * seed-only runs, and as the replay of its property, where the shared helper
+ * reseeded campaigns, and as the replay of its property, where the shared helper
  * returns the recorded path.
  */
 function registerAliasOracle(

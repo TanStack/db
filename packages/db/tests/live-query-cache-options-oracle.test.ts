@@ -12,7 +12,7 @@
  * returned Promise; request start and unresolved preload are checked explicitly.
  * Public admission, dehydration rows, observer delivery, and subscriber ownership
  * are the observation cuts. React supplies client/server receiving paths using
- * the same judgment. Failure/consumption retirement is a separate lifecycle lane.
+ * the same judgment. Failure/consumption retirement is a separate lifecycle grammar.
  */
 import { afterAll, expect, test, vi } from 'vitest'
 import {

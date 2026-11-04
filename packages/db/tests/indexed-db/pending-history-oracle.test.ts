@@ -15,7 +15,7 @@
  * The driver uses independent descriptors, deferred application handlers, public
  * base/metadata, raw IDB observations and a simple downstream live query.
  * Checkpoints: handler entry, every peer read/publication, settlement, ordinary
- * suffix and restore. Pinned CRUD × remote action × decision cases reconstruct
+ * suffix and restore. Fixed CRUD × remote action × decision cases reconstruct
  * every boundary. Fixed/fresh histories use the same generator and checker.
  */
 import { fc } from '@fast-check/vitest'

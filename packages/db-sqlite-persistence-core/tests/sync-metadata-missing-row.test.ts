@@ -5,9 +5,9 @@ import {
   describeMismatch,
   missingRowMetadataCases,
   missingRowMetadataHistoriesArbitrary,
-  persistedPeerFullLane,
-  persistedPeerLane,
-  persistedPeerOnDemandLane,
+  persistedPeerFullGrammar,
+  persistedPeerGrammar,
+  persistedPeerOnDemandGrammar,
   runSessionHistory,
 } from '../../db/tests/sync-metadata-session-oracle'
 import {
@@ -29,10 +29,10 @@ import { createSQLiteDriver } from './sync-metadata-session-sqlite-driver'
  * named peer notice. Core holds vary application without delaying durability.
  * This is one sync run; restart and intermediate SQL statements are outside it.
  */
-const lanes = [
-  persistedPeerLane,
-  persistedPeerFullLane,
-  persistedPeerOnDemandLane,
+const productionPaths = [
+  persistedPeerGrammar,
+  persistedPeerFullGrammar,
+  persistedPeerOnDemandGrammar,
 ]
 const requested = readOracleRunConfig().replayProperty
 for (const [host, property] of [
@@ -46,11 +46,14 @@ for (const [host, property] of [
     )
       continue
     it(`keeps missing-row metadata local unless explicitly written (${host}, ${campaign})`, async () => {
-      const state = (lane: string, name: string) => `${lane}: ${name}`
+      const state = (productionPathName: string, name: string) =>
+        `${productionPathName}: ${name}`
       const reach = createOracleReach(
         property,
-        lanes.flatMap((lane) =>
-          missingRowMetadataCases.map(({ name }) => state(lane.name, name)),
+        productionPaths.flatMap((productionPath) =>
+          missingRowMetadataCases.map(({ name }) =>
+            state(productionPath.name, name),
+          ),
         ),
       )
       const result = await fc.check(
@@ -58,33 +61,33 @@ for (const [host, property] of [
           missingRowMetadataHistoriesArbitrary,
           async (batch) => {
             const failures: Array<string> = []
-            for (const lane of lanes) {
+            for (const productionPath of productionPaths) {
               for (const { name, history } of batch) {
                 reach.beginHistory()
                 const historyResult = await runSessionHistory(
-                  lane,
+                  productionPath,
                   history,
                   () =>
                     host === `sqlite`
-                      ? createSQLiteDriver(lane)
+                      ? createSQLiteDriver(productionPath)
                       : createPersistedDriver(
                           true,
                           true,
                           false,
                           true,
-                          lane.fullRows,
-                          lane.onDemand,
+                          productionPath.fullRows,
+                          productionPath.onDemand,
                         ),
                 )
                 if (historyResult.mismatch) {
                   failures.push(
-                    `${state(lane.name, name)}\n${describeMismatch(history, historyResult.mismatch)}`,
+                    `${state(productionPath.name, name)}\n${describeMismatch(history, historyResult.mismatch)}`,
                   )
                 } else if (historyResult.steps !== history.length)
                   throw new Error(
                     `constructive history skipped an authored action`,
                   )
-                else reach.reach(state(lane.name, name))
+                else reach.reach(state(productionPath.name, name))
               }
             }
             if (failures.length) throw new Error(failures.join(`\n\n`))

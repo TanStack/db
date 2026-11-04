@@ -106,7 +106,7 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
       code: `type JSON = { marker: true }; const witness: OracleReplayWitness = { numRuns: 1 }; JSON.stringify(witness)`,
       filename: `/repo/packages/db/tests/oracle-replay-witness.ts`,
     },
-    // A known gap is pinned as failing on a fixed seed, not skipped.
+    // A known counterexample is kept failing on a fixed seed, not skipped.
     `it.fails('checks the fixed history', () => fc.assert(property, { seed: 2128, numRuns: oracleRuns(12) }))`,
     // The shared replay helpers may select a replay, in either polarity for
     // a registration and through the alias helper.
@@ -354,7 +354,7 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
       errors: [{ messageId: `singleRun` }],
     },
     {
-      code: `fc.assert(property, { seed: replay.replaySeed, numRuns: 1 })`,
+      code: `fc.assert(property, { seed: replay.campaignSeed, numRuns: 1 })`,
       errors: [{ messageId: `singleRun` }],
     },
     {
@@ -362,7 +362,7 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
       errors: [{ messageId: `singleRun` }],
     },
     {
-      code: `fc.assert(property, { seed: replay.replaySeed, path: undefined, numRuns: 1 })`,
+      code: `fc.assert(property, { seed: replay.campaignSeed, path: undefined, numRuns: 1 })`,
       errors: [{ messageId: `singleRun` }],
     },
     {
@@ -397,7 +397,7 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
       errors: [{ messageId: `guarded` }],
     },
     {
-      code: `fc.assert(property, { seed: replay.replaySeed, path: replay.replayPath, numRuns: 1 })`,
+      code: `fc.assert(property, { seed: replay.campaignSeed, path: replay.replayPath, numRuns: 1 })`,
       errors: [{ messageId: `singleRun` }],
     },
     {
@@ -527,7 +527,7 @@ ruleTester.run(`oracle/no-disabled`, noDisabled, {
     {
       // A comment does not grant an exception.
       code: `
-        // oracle-exclusion: known gap
+        // oracle-exclusion: known limit
         it.skip('checks random histories', () => fc.assert(property))
       `,
       errors: [{ messageId: `skip` }],

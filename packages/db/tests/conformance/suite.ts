@@ -168,7 +168,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
   registerWindowHistoryOracle(rawDriver)
   registerResultShapeOracle(rawDriver)
   const { ops } = rawDriver
-  const registry = scenarioRegistry(rawDriver.knownGaps)
+  const registry = scenarioRegistry(rawDriver.limits)
 
   // Track every handle mounted during the current scenario so it is always torn
   // down, even when a scenario throws before its own

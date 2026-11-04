@@ -134,7 +134,7 @@ const reconciliationHistoryArbitrary = fc.array(reconciliationStepArbitrary, {
   maxLength: 30,
 })
 
-// Grammar controls: the pinned numeric/string key, unknown update/delete,
+// Grammar controls: the fixed numeric/string key, unknown update/delete,
 // stale previous-value, and changed-source restart histories below are all
 // reconstructible here. Upsert establishes or replaces authoritative source
 // rows; rawUpdate exercises an update without a prior sent row; replay checks

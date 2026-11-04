@@ -233,7 +233,7 @@ declareOracle({
 // trailing terms determine local order. Null and undefined share a comparator
 // position but remain distinct driver inputs. Fixed matrices reconstruct every
 // option cell and small scalar pair; random campaigns extend the integer range.
-// Width zero is pinned below as the no-cursor result, outside this generator.
+// Width zero is fixed below as the no-cursor result, outside this generator.
 // A boundary with no order is the nearby invalid state.
 
 describe(`buildCursor properties`, () => {

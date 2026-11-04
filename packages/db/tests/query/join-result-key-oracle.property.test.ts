@@ -29,11 +29,11 @@
  *
  * Calibration: the fixed pair (`a,b`, `c`) versus (`a`, `b,c`) and the pair
  * (1, `c`) versus (`1`, `c`) collided under the comma encoding; restoring it
- * fails both pinned histories and both campaigns. Plain `JSON.stringify`
- * printed `Infinity` and `-Infinity` as `null`; restoring it fails the pinned
+ * fails both fixed histories and both campaigns. Plain `JSON.stringify`
+ * printed `Infinity` and `-Infinity` as `null`; restoring it fails the fixed
  * infinity history and both campaigns. Comparing the join index's source-key
  * prefixes with `===` let a retracted `NaN`-keyed row survive; restoring it
- * fails the pinned `NaN` history.
+ * fails the fixed `NaN` history.
  *
  * Known omissions: joins over subqueries, more than two sources, custom
  * `getKey`, and optimistic mutations are outside this owner.
@@ -155,7 +155,7 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
 // and (1, `c`) and (`1`, `c`) share `[1,c]`. Under plain JSON, (`a`, Infinity)
 // and (`a`, -Infinity) share `["a",null]`, and so do the unmatched right rows
 // once `a` moves away.
-const pinnedHistories: ReadonlyArray<History> = [
+const fixedHistories: ReadonlyArray<History> = [
   {
     join: `inner`,
     left: [
@@ -263,11 +263,11 @@ async function runHistory(history: History): Promise<void> {
 declareOracle({ check: [runHistory], model: [expectedPairs] })
 
 describe(`joined result key oracle`, () => {
-  // The pinned histories and the fixed campaign stand aside during any path
+  // The fixed histories and the fixed-seed campaign stand aside during any path
   // replay. The random campaign below is the one that a replay of this
   // property selects.
   if (!oracleReplayRequested()) {
-    for (const history of pinnedHistories) {
+    for (const history of fixedHistories) {
       it(`keeps every ${history.join} join pair for ${history.left
         .map((row) =>
           typeof row.id === `number` ? String(row.id) : JSON.stringify(row.id),

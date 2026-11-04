@@ -11,10 +11,10 @@
  *   first of them in the history.
  * - `6` makes the driver throw right after it records that item.
  *
- * A segment builds its history as its prefix followed by a generated history,
+ * A constructed history builds its history as its prefix followed by a generated history,
  * cut to three items. The driver appends every history it runs, with the running test's name, to
  * the file named by SELF_ORACLE_LOG, so the self-oracle knows which
- * histories each lane ran. A `nondeterministic` spec also records, last, a
+ * histories each campaign ran. A `nondeterministic` spec also records, last, a
  * counter that changes on every run. A spec reports reach through the
  * property's `reached` part or, as the framework's default, through the
  * driver's `observe("reach", state)`. A `slow` spec's driver takes about
@@ -42,14 +42,14 @@ export type SyntheticSpec = {
   source:
     | { kind: `generated`; runs: number; seed: number }
     | { kind: `enumerated`; histories: ReadonlyArray<SyntheticHistory> }
-  /** Required states; each must be entered by a segment. */
+  /** Required states; each must be entered by a constructed history. */
   states: ReadonlyArray<string>
-  segments: ReadonlyArray<{
+  constructed: ReadonlyArray<{
     name: string
     prefix: SyntheticHistory
     enters: ReadonlyArray<string>
   }>
-  pins: ReadonlyArray<{
+  fixed: ReadonlyArray<{
     name: string
     history: SyntheticHistory
     enters?: ReadonlyArray<string>
@@ -84,10 +84,10 @@ const reachedStates = (history: SyntheticHistory) =>
   allStates.filter((state) => history.includes(Number(state.slice(4))))
 
 /**
- * The synthetic driver. `hostile` records a 3 in place of the first item, the
+ * The synthetic driver. `mutant` records a 3 in place of the first item, the
  * wrong answer a driver calibration supplies.
  */
-function syntheticDriver(spec: SyntheticSpec, hostile = false) {
+function syntheticDriver(spec: SyntheticSpec, mutant = false) {
   return async (
     history: SyntheticHistory,
     observe: (checkpoint: string, value: unknown) => void,
@@ -102,7 +102,7 @@ function syntheticDriver(spec: SyntheticSpec, hostile = false) {
     if (spec.reachVia === `observe`)
       for (const state of reachedStates(history)) observe(`reach`, state)
     for (const [index, item] of history.entries()) {
-      observe(`item ${index}`, hostile && index === 0 ? 3 : item)
+      observe(`item ${index}`, mutant && index === 0 ? 3 : item)
       if (item === 6)
         throw new Error(`synthetic driver failed at item ${index}`)
     }
@@ -136,7 +136,7 @@ function syntheticCalibrations(
 ): Array<Calibration<SyntheticHistory, SyntheticHistory>> {
   return spec.calibrations.map(
     ({ name, kind }): Calibration<SyntheticHistory, SyntheticHistory> => {
-      // A hostile driver records a 3 in place of the first item.
+      // A mutant driver records a 3 in place of the first item.
       if (kind === `driver`)
         return { name, law: `three`, driver: syntheticDriver(spec, true) }
       return {
@@ -194,15 +194,15 @@ export function syntheticProperty(spec: SyntheticSpec): void {
       measured: allStates.filter((state) => !spec.states.includes(state)),
       runs: spec.source.runs,
       fixedSeeds: [spec.source.seed],
-      segments: spec.segments.map(({ name, prefix, enters }) => ({
+      constructed: spec.constructed.map(({ name, prefix, enters }) => ({
         name,
         enters,
-        // A segment extends a generated history, so its histories depend on
-        // the lane's seed, as real segments do.
+        // A constructed history extends a generated history, so its histories
+        // depend on the campaign's seed, as real constructed histories do.
         build: (generated: SyntheticHistory) =>
           [...prefix, ...generated].slice(0, 3),
       })),
-      pins: spec.pins,
+      fixed: spec.fixed,
     },
     ...parts,
     check: syntheticCheck,

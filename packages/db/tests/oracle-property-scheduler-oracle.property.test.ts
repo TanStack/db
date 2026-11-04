@@ -132,7 +132,7 @@ oracleProperty({
     arbitrary: history,
     runs: 100,
     fixedSeeds: [20261103],
-    pins: [
+    fixed: [
       {
         name: `a queue keeps its order while another advances`,
         history: {

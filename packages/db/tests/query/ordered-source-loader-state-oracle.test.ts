@@ -2415,7 +2415,7 @@ describe(`Ordered source request authority`, () => {
 
   // The model's strand trace: a repair supersedes the in-flight tie and
   // finishes; a newer invalidation's reaction is deferred; the old tie fails.
-  it(`recovers a superseded tie that fails after its repair finished (generated-lane replay)`, async () => {
+  it(`recovers a superseded tie that fails after its repair finished (generated campaign replay)`, async () => {
     await checkAuthorityCase({
       indexed: true,
       limit: 1,
@@ -2435,8 +2435,8 @@ describe(`Ordered source request authority`, () => {
     })
   })
 
-  // Traces the generated lane found, kept as replays. Each ran through the
-  // same laws and failed before its repair:
+  // Traces the generated campaign found, kept as fixed regressions. Each ran
+  // through the same laws and failed before its repair:
   // - a release callback throws while a repair finishes, a superseded tie
   //   fails, and an explicit window move resumes the repair (a throwing
   //   release unwound the chain mid-step, so nothing resumed it);
@@ -2453,7 +2453,7 @@ describe(`Ordered source request authority`, () => {
   // - a repair tie from before a truncate that fails during the next repair
   //   (the dead failure dropped the new chain's staged step, so nothing
   //   resumed it);
-  // - the same replay trace, once one request at a time was checked (the
+  // - the same fixed trace, once one request at a time was checked (the
   //   replaced chain's prefix counted as current and issued a tie beside the
   //   replacement's prefix).
   // - a repair prefix that settles after full-source coverage completed (a
@@ -2474,9 +2474,9 @@ describe(`Ordered source request authority`, () => {
   //   start error replaced the request's own error in its participant);
   // A superseded page that fails before a covering replay settles reaches
   // the failed-lease law through a replay, which the campaigns rarely do.
-  // Two replays keep traces that first failed the lane's own model: a chain
-  // step it took for a chain start (an optimistic refill, and a shrunk
-  // window's prefix deferred by joined work).
+  // Two fixed regressions keep traces that first failed the generated
+  // campaign's own model: a chain step it took for a chain start (an optimistic
+  // refill, and a shrunk window's prefix deferred by joined work).
   it.each([
     {
       name: `a throwing release during a window move that resumes a repair`,
@@ -2897,7 +2897,7 @@ describe(`Ordered source request authority`, () => {
       },
     },
   ] satisfies Array<{ name: string; testCase: AuthorityCase }>)(
-    `keeps request authority for $name (generated-lane replay)`,
+    `keeps request authority for $name (generated campaign replay)`,
     async ({ testCase }) => {
       await checkAuthorityCase(testCase)
     },
@@ -2936,7 +2936,7 @@ describe(`Ordered source request authority`, () => {
   // there is no replay bookkeeping to distinguish from a graph pass.
   // `deferred-refill` needs a synchronous answer and a release-triggered
   // truncate together: 6 of the 96 inputs. An eager source never reaches its
-  // adapter on release, so production cannot pair them; the lane calibrates
+  // adapter on release, so production cannot pair them; the campaign calibrates
   // the driver's continuation provenance rather than a reachable product state.
   // Random draws run twice the fixed count so that rare state stays above its
   // minimum (expected 25 of 400).
@@ -3227,9 +3227,9 @@ describe(`Ordered source request authority`, () => {
     },
   )
 
-  // Fixed replays force a held answer in each real consumer. They use the
+  // Fixed histories force a held answer in each real consumer. They use the
   // same model and comparison as the generated receiving campaign, and keep
-  // hostile-mutant failure independent for the two publication paths.
+  // mutant failure independent for the two publication paths.
   it.each([
     [`collection`, `move`],
     [`collection-window`, `move`],

@@ -251,7 +251,7 @@ function adjacentDateTime(time: number): number {
 // Legal rings have 1–5 reachable nodes, integer payloads, and one of four
 // native edge carriers at each node. A zero-node ring has no root and is
 // excluded. The fixed pair enumeration below reconstructs every ordered
-// two-carrier overlap; the length cases pin the lower and upper bounds.
+// two-carrier overlap; the length cases fix the lower and upper bounds.
 const ringArbitrary = fc.array(
   fc.record({
     value: fc.integer(),
@@ -540,7 +540,7 @@ describe(`deepEquals property-based tests`, () => {
   })
   // `deepEquals` drives change-event suppression, so it deliberately ignores
   // state that draft revert detection keeps (see proxy-revert-oracle): Map and
-  // Set insertion order, RegExp `lastIndex`, and array holes. These laws pin
+  // Set insertion order, RegExp `lastIndex`, and array holes. These laws fix
   // that current relation so a shared walker cannot leak draft rules into it.
   describe(`order and state the general relation ignores`, () => {
     utilsProperty([

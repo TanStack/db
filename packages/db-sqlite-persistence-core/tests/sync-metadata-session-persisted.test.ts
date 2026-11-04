@@ -3,17 +3,17 @@ import { describe, expect, it } from 'vitest'
 import {
   describeMismatch,
   historyRegimes,
-  persistedCachedLane,
-  persistedConflictLane,
-  persistedFlatLane,
-  persistedNestedLane,
-  persistedNestedSeedLane,
-  persistedPeerFullLane,
-  persistedPeerLane,
-  persistedPeerOnDemandLane,
-  persistedReadLane,
-  persistedReadSeedLane,
-  persistedSeedLane,
+  persistedCachedGrammar,
+  persistedConflictGrammar,
+  persistedFlatGrammar,
+  persistedNestedGrammar,
+  persistedNestedSeedGrammar,
+  persistedPeerFullGrammar,
+  persistedPeerGrammar,
+  persistedPeerOnDemandGrammar,
+  persistedReadGrammar,
+  persistedReadSeedGrammar,
+  persistedSeedGrammar,
   queuedMetadataRepairHistoriesArbitrary,
   runSessionHistory,
   seedReinsertReloadReplay,
@@ -35,7 +35,7 @@ import {
 } from './sync-metadata-session-campaign'
 import type {
   SessionAction,
-  SessionLane,
+  SessionGrammar,
 } from '../../db/tests/sync-metadata-session-oracle'
 
 /**
@@ -56,10 +56,10 @@ import type {
  * Checkpoints: source reads after every action; `collection.base` only at the
  * final checkpoint, after every hold ends and the wrapper's continuations
  * drain. The wrapper hands rows to core after its durable step, so consumers
- * see them a turn or more later even with no hold. In the peer lanes the
+ * see them a turn or more later even with no hold. In the peer production paths the
  * holding adapter's stored rows are compared at the final checkpoint too.
  *
- * Lanes: `persisted-flat`, `persisted-nested`, `persisted-seeds`,
+ * Production paths: `persisted-flat`, `persisted-nested`, `persisted-seeds`,
  * `persisted-cached` (row 1 is in storage when the run starts),
  * `persisted-conflicts` (inner writes that land ahead of enclosing ones), and
  * `persisted-nested-seeds`, which crosses seeds with nesting and the cached
@@ -71,7 +71,7 @@ import type {
  * `persisted-peers-on-demand`, which loads on demand with a demand for every
  * row active from the start. Seeds
  * use a `DbClient` that owns the persisted Collection. Restart and resume
- * reads are outside these lanes.
+ * reads are outside these production paths.
  *
  * A peer is a second writer the driver plays. It writes the stored row and
  * metadata directly, takes the next stream position after this tab's
@@ -87,16 +87,16 @@ import type {
 
 async function assertPersistedHistory(
   history: ReadonlyArray<SessionAction>,
-  lane: SessionLane = persistedFlatLane,
+  productionPath: SessionGrammar = persistedFlatGrammar,
 ): Promise<void> {
-  const { mismatch } = await runSessionHistory(lane, history, () =>
+  const { mismatch } = await runSessionHistory(productionPath, history, () =>
     createPersistedDriver(
-      lane.seeds,
-      lane.cached === true,
-      lane.readHold === true,
-      lane.peers === true,
-      lane.fullRows === true,
-      lane.onDemand === true,
+      productionPath.seeds,
+      productionPath.cached === true,
+      productionPath.readHold === true,
+      productionPath.peers === true,
+      productionPath.fullRows === true,
+      productionPath.onDemand === true,
     ),
   )
   if (mismatch) throw new Error(describeMismatch(history, mismatch))
@@ -152,7 +152,7 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
         { type: `begin` },
         { type: `reinsert`, key: 1, metadata: false },
       ],
-      persistedSeedLane,
+      persistedSeedGrammar,
     )
   })
 
@@ -169,7 +169,7 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
         { type: `commit` },
         { type: `seed`, key: 1, bare: true },
       ],
-      persistedSeedLane,
+      persistedSeedGrammar,
     )
   })
 
@@ -186,7 +186,7 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
         { type: `commit` },
         { type: `seed`, key: 2, bare: true },
       ],
-      persistedNestedSeedLane,
+      persistedNestedSeedGrammar,
     )
   })
 
@@ -199,7 +199,7 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
         { type: `upsert`, key: 1, metadata: false },
         { type: `seed`, key: 1, bare: true },
       ],
-      persistedNestedSeedLane,
+      persistedNestedSeedGrammar,
     )
   })
 
@@ -217,7 +217,7 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
         { type: `upsert`, key: 1, metadata: true },
         { type: `commit` },
       ],
-      persistedNestedSeedLane,
+      persistedNestedSeedGrammar,
     )
   })
 
@@ -237,7 +237,7 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
         { type: `upsert`, key: 1, metadata: true },
         { type: `commit` },
       ],
-      persistedNestedSeedLane,
+      persistedNestedSeedGrammar,
     )
   })
 
@@ -255,7 +255,7 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
         { type: `seed`, key: 1 },
         { type: `commit` },
       ],
-      persistedNestedSeedLane,
+      persistedNestedSeedGrammar,
     )
   })
 
@@ -273,7 +273,7 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
         { type: `upsert`, key: 1, metadata: false },
         { type: `commit` },
       ],
-      persistedNestedSeedLane,
+      persistedNestedSeedGrammar,
     )
   })
 
@@ -282,7 +282,7 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
   it(`reads an enclosing transaction's write inside a nested transaction`, async () => {
     await assertPersistedHistory(
       [{ type: `begin` }, { type: `rowSet`, key: 1 }, { type: `begin` }],
-      persistedNestedLane,
+      persistedNestedGrammar,
     )
   })
 
@@ -301,7 +301,7 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
         { type: `reinsert`, key: 1, metadata: false },
         { type: `commit` },
       ],
-      persistedConflictLane,
+      persistedConflictGrammar,
     )
   })
 
@@ -318,13 +318,13 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
   it(`reaches held and open-over-held reads in the fixed campaign`, () => {
     const counts = new Map<string, number>()
     for (const history of fc.sample(
-      sessionHistoryArbitrary(persistedFlatLane),
+      sessionHistoryArbitrary(persistedFlatGrammar),
       {
         numRuns: oracleRuns(50),
         seed: fixedSeed,
       },
     ))
-      for (const regime of historyRegimes(persistedFlatLane, history))
+      for (const regime of historyRegimes(persistedFlatGrammar, history))
         counts.set(regime, (counts.get(regime) ?? 0) + 1)
     for (const regime of [
       `read with two held transactions`,
@@ -336,7 +336,7 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
   })
 
   if (requestedReplayProperty === undefined) {
-    fcTest.prop([sessionHistoryArbitrary(persistedFlatLane)], {
+    fcTest.prop([sessionHistoryArbitrary(persistedFlatGrammar)], {
       numRuns: oracleRuns(50),
       seed: fixedSeed,
     })(
@@ -345,7 +345,7 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
       120_000,
     )
     fcTest.prop(
-      [sessionHistoryArbitrary(persistedFlatLane)],
+      [sessionHistoryArbitrary(persistedFlatGrammar)],
       oraclePropertyOptions(50, property),
     )(
       `keeps the session law on flat histories (random)`,
@@ -354,7 +354,7 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
     )
   } else if (requestedReplayProperty === property) {
     fcTest.prop(
-      [sessionHistoryArbitrary(persistedFlatLane)],
+      [sessionHistoryArbitrary(persistedFlatGrammar)],
       oraclePropertyOptions(50, property),
     )(
       `replays persisted flat session histories`,
@@ -365,33 +365,33 @@ describe(`sync metadata session oracle through the persisted wrapper`, () => {
 })
 
 /**
- * Each lane's fixed campaign and the states it must reach (ORC-015). The
- * conflict lane runs more histories: an insert over a different row needs an
+ * Each production path's fixed campaign and the states it must reach (ORC-015). The
+ * conflict production path runs more histories: an insert over a different row needs an
  * outer insert, an inner write to the same row, and the inner commit.
  */
-const extraLanes: Array<{
-  lane: SessionLane
+const extraProductionPaths: Array<{
+  productionPath: SessionGrammar
   property: string
   seed: number
   runs: number
   reach: Array<string>
 }> = [
   {
-    lane: persistedNestedLane,
+    productionPath: persistedNestedGrammar,
     property: `sync-metadata-session.persisted-nested`,
     seed: 2_220_012,
     runs: 50,
     reach: [`nested commit`, `nested commit during a hold`, `store hold`],
   },
   {
-    lane: persistedSeedLane,
+    productionPath: persistedSeedGrammar,
     property: `sync-metadata-session.persisted-seeds`,
     seed: 2_220_013,
     runs: 50,
     reach: [`seed`, `store hold`],
   },
   {
-    lane: persistedCachedLane,
+    productionPath: persistedCachedGrammar,
     property: `sync-metadata-session.persisted-cached`,
     seed: 2_220_015,
     runs: 80,
@@ -402,7 +402,7 @@ const extraLanes: Array<{
     ],
   },
   {
-    lane: persistedConflictLane,
+    productionPath: persistedConflictGrammar,
     property: `sync-metadata-session.persisted-conflicts`,
     seed: 2_220_014,
     runs: 150,
@@ -416,7 +416,7 @@ const extraLanes: Array<{
   // Writes while a storage read is in flight follow the same laws: the
   // wrapper buffers their transactions until the read ends.
   {
-    lane: persistedReadLane,
+    productionPath: persistedReadGrammar,
     property: `sync-metadata-session.persisted-reads`,
     seed: 2_220_017,
     runs: 150,
@@ -430,9 +430,9 @@ const extraLanes: Array<{
   // A transaction committed during a read and abandoned before the wrapper
   // hands it to core never wrote its rows, so a seed beneath it still holds
   // them (decision 21). Abandoning a seeded row's writer is rare here; a
-  // replay pins it.
+  // fixed history covers it.
   {
-    lane: persistedReadSeedLane,
+    productionPath: persistedReadSeedGrammar,
     property: `sync-metadata-session.persisted-reads-seeds`,
     seed: 2_220_021,
     runs: 150,
@@ -443,7 +443,7 @@ const extraLanes: Array<{
   // seeds (decision 11); a full reload keeps a held seed and makes every
   // changed stored row a source write (decisions 13 and 15).
   {
-    lane: persistedPeerLane,
+    productionPath: persistedPeerGrammar,
     property: `sync-metadata-session.persisted-peers`,
     seed: 2_220_018,
     runs: 150,
@@ -458,10 +458,10 @@ const extraLanes: Array<{
       `peer write during a hold`,
     ],
   },
-  // The peer lane under full row updates: an update replaces its row, so
+  // The peer production path under full row updates: an update replaces its row, so
   // storage must not keep a seed's fields beneath it (decision 17).
   {
-    lane: persistedPeerFullLane,
+    productionPath: persistedPeerFullGrammar,
     property: `sync-metadata-session.persisted-peers-full`,
     seed: 2_220_019,
     runs: 150,
@@ -477,11 +477,11 @@ const extraLanes: Array<{
       `accepted update drops a field`,
     ],
   },
-  // The peer lane on demand: a reset is a source truncate that keeps the
+  // The peer production path on demand: a reset is a source truncate that keeps the
   // seeds this tab holds (decisions 19 and 20). Metadata of a missing row is
-  // rare here; a replay pins a reset over it.
+  // rare here; a fixed history covers a reset over it.
   {
-    lane: persistedPeerOnDemandLane,
+    productionPath: persistedPeerOnDemandGrammar,
     property: `sync-metadata-session.persisted-peers-on-demand`,
     seed: 2_220_020,
     runs: 150,
@@ -500,7 +500,7 @@ const extraLanes: Array<{
   // re-insert kept, here also when the re-insert committed ahead of the
   // enclosing transaction whose row it re-inserted.
   {
-    lane: persistedNestedSeedLane,
+    productionPath: persistedNestedSeedGrammar,
     property: `sync-metadata-session.persisted-nested-seeds`,
     seed: 2_220_016,
     runs: 300,
@@ -515,7 +515,7 @@ const extraLanes: Array<{
 ]
 
 /**
- * Shrunk peer-lane counterexamples, replayed through the same model, driver,
+ * Shrunk counterexamples from the peer production paths, replayed through the same model, driver,
  * and comparison as the campaigns. Each reached a defect that the fixed and
  * random campaigns rarely generate: a held seed that a reload must keep, a
  * row that held transactions wrote, metadata of a missing row, a write over a
@@ -772,25 +772,26 @@ const readSeedReplays: Array<[string, Array<SessionAction>]> = [
 
 describe(`sync metadata session oracle through the persisted wrapper: peer replays`, () => {
   it.each(peerReplays)(`replays: %s`, (_name, history) =>
-    assertPersistedHistory(history, persistedPeerLane),
+    assertPersistedHistory(history, persistedPeerGrammar),
   )
   it.each(peerFullReplays)(`replays under full rows: %s`, (_name, history) =>
-    assertPersistedHistory(history, persistedPeerFullLane),
+    assertPersistedHistory(history, persistedPeerFullGrammar),
   )
-  // Pinned from the persisted-peers-full random campaign (seed 654774679):
+  // Fixed history from the persisted-peers-full random campaign (seed 654774679):
   // an outer transaction inserts over a bare seed and an inner equal re-insert
   // commits first. Its implicit metadata keep writes no metadata to storage;
   // the shared model judges source reads and the later unknown-author reload
   // separately under D9, D15 and D18. This uses the campaigns' model, driver,
   // and comparison.
   it(`replays under full rows: keeps source metadata reads consistent across an inner re-insert and reload`, () =>
-    assertPersistedHistory(seedReinsertReloadReplay, persistedPeerFullLane))
+    assertPersistedHistory(seedReinsertReloadReplay, persistedPeerFullGrammar))
   it.each(peerOnDemandReplays)(`replays on demand: %s`, (_name, history) =>
-    assertPersistedHistory(history, persistedPeerOnDemandLane),
+    assertPersistedHistory(history, persistedPeerOnDemandGrammar),
   )
   it.each(readSeedReplays)(
     `replays with reads and seeds: %s`,
-    (_name, history) => assertPersistedHistory(history, persistedReadSeedLane),
+    (_name, history) =>
+      assertPersistedHistory(history, persistedReadSeedGrammar),
   )
 })
 
@@ -808,15 +809,15 @@ for (const campaign of [`fixed`, `random`] as const) {
     await runSeedReinsertReloadCampaign({
       property: seedReloadProperty,
       campaign,
-      runHistory: (history, lane) =>
-        runSessionHistory(lane, history, () =>
+      runHistory: (history, productionPath) =>
+        runSessionHistory(productionPath, history, () =>
           createPersistedDriver(
             true,
             true,
             false,
             true,
-            lane.fullRows === true,
-            lane.onDemand === true,
+            productionPath.fullRows === true,
+            productionPath.onDemand === true,
           ),
         ),
     })
@@ -825,52 +826,60 @@ for (const campaign of [`fixed`, `random`] as const) {
 
 const describeNested = oracleReplayTest(
   describe,
-  ...extraLanes.map(({ property }) => property),
+  ...extraProductionPaths.map(({ property }) => property),
 )
 describeNested(
   `sync metadata session oracle through the persisted wrapper: nesting and seeds`,
   () => {
     for (const {
-      lane,
-      property: lanePropertyName,
+      productionPath,
+      property: productionPathPropertyName,
       seed,
       runs,
       reach: states,
-    } of extraLanes) {
-      const runLane = (history: Array<SessionAction>) =>
-        assertPersistedHistory(history, lane)
+    } of extraProductionPaths) {
+      const runProductionPath = (history: Array<SessionAction>) =>
+        assertPersistedHistory(history, productionPath)
       if (requestedReplayProperty === undefined) {
-        const reach = createOracleReach(`${lanePropertyName} (fixed)`, states, {
-          minimum: 5,
-        })
-        fcTest.prop([sessionHistoryArbitrary(lane)], {
+        const reach = createOracleReach(
+          `${productionPathPropertyName} (fixed)`,
+          states,
+          {
+            minimum: 5,
+          },
+        )
+        fcTest.prop([sessionHistoryArbitrary(productionPath)], {
           numRuns: oracleRuns(runs),
           seed,
         })(
-          `keeps the session law on ${lane.name} histories (fixed)`,
+          `keeps the session law on ${productionPath.name} histories (fixed)`,
           (history) => {
             reach.beginHistory()
-            for (const regime of historyRegimes(lane, history))
+            for (const regime of historyRegimes(productionPath, history))
               if (states.includes(regime)) reach.reach(regime)
-            return runLane(history)
+            return runProductionPath(history)
           },
           240_000,
         )
-        it(`reaches the declared states in the ${lane.name} fixed campaign`, () =>
+        it(`reaches the declared states in the ${productionPath.name} fixed campaign`, () =>
           reach.assertReached())
         fcTest.prop(
-          [sessionHistoryArbitrary(lane)],
-          oraclePropertyOptions(50, lanePropertyName),
+          [sessionHistoryArbitrary(productionPath)],
+          oraclePropertyOptions(50, productionPathPropertyName),
         )(
-          `keeps the session law on ${lane.name} histories (random)`,
-          runLane,
+          `keeps the session law on ${productionPath.name} histories (random)`,
+          runProductionPath,
           120_000,
         )
-      } else if (requestedReplayProperty === lanePropertyName) {
+      } else if (requestedReplayProperty === productionPathPropertyName) {
         fcTest.prop(
-          [sessionHistoryArbitrary(lane)],
-          oraclePropertyOptions(50, lanePropertyName),
-        )(`replays ${lane.name} session histories`, runLane, 120_000)
+          [sessionHistoryArbitrary(productionPath)],
+          oraclePropertyOptions(50, productionPathPropertyName),
+        )(
+          `replays ${productionPath.name} session histories`,
+          runProductionPath,
+          120_000,
+        )
       }
     }
   },
@@ -891,15 +900,15 @@ for (const campaign of [`fixed`, `random`] as const) {
     await runKeptMetadataDurabilityCampaign({
       property: durabilityProperty,
       campaign,
-      runHistory: (history, lane) =>
-        runSessionHistory(lane, history, () =>
+      runHistory: (history, productionPath) =>
+        runSessionHistory(productionPath, history, () =>
           createPersistedDriver(
             true,
             true,
             false,
             true,
-            lane.fullRows === true,
-            lane.onDemand === true,
+            productionPath.fullRows === true,
+            productionPath.onDemand === true,
           ),
         ),
     })
@@ -929,7 +938,7 @@ for (const campaign of [`fixed`, `random`] as const) {
           for (const { bare, held, history } of batch) {
             reach.beginHistory()
             const result = await runSessionHistory(
-              persistedPeerLane,
+              persistedPeerGrammar,
               history,
               () => createPersistedDriver(true, true, false, true),
             )

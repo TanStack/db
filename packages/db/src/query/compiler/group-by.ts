@@ -409,7 +409,7 @@ export function processGroupBy(
 
   // D2 consolidates contributions that hash equal, and the hash treats -0 as 0
   // and equal Dates as one value. Today it keeps the instance it was last given;
-  // db-ivm's groupBy tests pin that as current behavior, not as a promise. A min
+  // db-ivm's groupBy tests assert that as current behavior, not as a promise. A min
   // or max returns one of its inputs, so each contribution carries the exact key
   // of the value it compares, as a group value does. A primitive's key is its
   // exact value, so equal primitives still consolidate. An object's key holds its

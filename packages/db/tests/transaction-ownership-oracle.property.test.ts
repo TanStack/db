@@ -759,7 +759,7 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
     )
   }, 300_000)
 
-  it(`pinned: a subscriber throws during an asynchronous success and failure settlement`, async () => {
+  it(`fixed history: a subscriber throws during an asynchronous success and failure settlement`, async () => {
     await runHistory([
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 3 },
@@ -774,7 +774,7 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
     ])
   })
 
-  it(`pinned: a merged-away pair, a conflicting rollback that throws, and a truncate rollback`, async () => {
+  it(`fixed history: a merged-away pair, a conflicting rollback that throws, and a truncate rollback`, async () => {
     await runHistory([
       { type: `open`, reuse: undefined },
       { type: `cancel`, tx: 0, on: `A` },
@@ -792,7 +792,7 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
     ])
   })
 
-  it(`pinned: a rolled-back transaction does not remove a live one that shares its id`, async () => {
+  it(`fixed history: a rolled-back transaction does not remove a live one that shares its id`, async () => {
     await runHistory([
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },
@@ -807,7 +807,7 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
     ])
   })
 
-  it(`pinned: a second live transaction with a tracked id is rejected`, async () => {
+  it(`fixed history: a second live transaction with a tracked id is rejected`, async () => {
     await runHistory([
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },
@@ -816,7 +816,7 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
     ])
   })
 
-  it(`pinned: conflicting rollbacks that throw settle every transaction and rethrow one subscriber error`, async () => {
+  it(`fixed history: conflicting rollbacks that throw settle every transaction and rethrow one subscriber error`, async () => {
     await runHistory([
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },
@@ -830,7 +830,7 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
     ])
   })
 
-  it(`pinned: a failed commit whose rollback subscriber throws keeps the mutation error`, async () => {
+  it(`fixed history: a failed commit whose rollback subscriber throws keeps the mutation error`, async () => {
     await runHistory([
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },

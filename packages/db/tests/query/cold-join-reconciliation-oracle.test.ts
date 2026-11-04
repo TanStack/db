@@ -839,7 +839,7 @@ declareOracle({
 })
 
 // All atom classes occur in the initial matrix. Partial matches differ only
-// in the last term; nulls occur in both tuple positions. The pinned scenario
+// in the last term; nulls occur in both tuple positions. The fixed scenario
 // leaves, restores, deletes and reinserts a match on each side.
 const compoundBoundaryRows = compoundAtoms().map((_, atom) => ({
   id: atom,

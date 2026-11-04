@@ -594,7 +594,7 @@ const actionArbitrary: fc.Arbitrary<CrossFormulationAction> = fc.oneof(
   }),
 )
 
-// The three pinned examples below reconstruct the named in-range witnesses
+// The three fixed histories below reconstruct the named in-range witnesses
 // in both generated campaigns. Each coordinate has positive probability in
 // the finite record grammar; examples keep them stable if sampling changes.
 // Group controls shared vs split/moved/unmatched routes; position controls
@@ -1474,7 +1474,7 @@ describe(`includes cross-formulation oracle`, () => {
       )
       expect(String(failure.errorInstance)).toContain(`checkpoint":0`)
       if (directReplay) {
-        expect(failure.seed).toBe(replay.replaySeed)
+        expect(failure.seed).toBe(replay.campaignSeed)
         expect(replay.replayPath).toBe(
           `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
         )
@@ -1547,7 +1547,7 @@ describe(`includes cross-formulation oracle`, () => {
       )
       expect(String(failure.errorInstance)).toContain(`checkpoint":0`)
       if (directReplay) {
-        expect(failure.seed).toBe(replay.replaySeed)
+        expect(failure.seed).toBe(replay.campaignSeed)
         expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
         return
       }

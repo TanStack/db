@@ -8,7 +8,7 @@
  * history of whole effects, with raw event and public status checks. Existing
  * peers and an ordinary successful suffix precede fresh restore.
  *
- * Fixed/random campaigns share the exact property and bounds. Pinned histories
+ * Fixed/random campaigns share the exact property and bounds. Fixed histories
  * reconstruct every action; finite templates enumerate every sender/delivery
  * choice within their stated two-operation scope. This is not exhaustive native
  * scheduling, arbitrary optimistic overlap, or a same-key conflict policy.

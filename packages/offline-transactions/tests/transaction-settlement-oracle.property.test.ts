@@ -20,7 +20,7 @@ import {
   captureUnhandledRejections,
   cleanupOfflineOracle,
 } from './oracle-lifecycle'
-import { oracleLaneOptions, readOfflineOracleConfig } from './oracle-config'
+import { oracleCampaignOptions, readOfflineOracleConfig } from './oracle-config'
 import type { TestItem } from './harness'
 import type { Transaction } from '@tanstack/db'
 import type { OfflineConfig } from '../src/types'
@@ -65,7 +65,7 @@ import type { OfflineConfig } from '../src/types'
  * generated. When nobody reads an auto-commit's receipt, the Collection that
  * tracks the transaction owns its rejection; every generated transaction
  * writes to one. A caller may also register its completion waiter before the
- * transaction is admitted. Pinned examples
+ * transaction is admitted. Fixed histories
  * reconstruct all-success, middle-failure, all-failure, and alternating
  * outcomes. Shared keys distinguish sibling rollback from disjoint-key
  * survival. Width distinguishes complete optimistic state for several rows
@@ -94,13 +94,13 @@ import type { OfflineConfig } from '../src/types'
  * crash windows around the phase write. The controlled provider and fake
  * storage establish this executor boundary, not real server acknowledgement
  * timing, native storage completion, or multiple-owner leadership. A normal
- * run pairs fixed and seedless campaigns.
+ * run pairs fixed and random campaigns.
  * A permanent named mutation function failure uses a separate rejection-pending
  * marker. The original caller promise rejects with that failure. A storage
  * failure also rejects the executor batch promise and stops further work. An
  * offline executor restart removes a marked outbox entry without another named
  * mutation function call or restoration of optimistic state.
- * Direct executor checks pin the storage error, FIFO peer hold, and refusal of
+ * Direct executor checks cover the storage error, FIFO peer hold, and refusal of
  * further attempts. Outbox replay can invoke the named mutation function after
  * a crash if the marker write failed.
  * The `shouldRetry` option changes only the decision after a named mutation
@@ -747,7 +747,7 @@ const checkSettlement = async (seed: number | undefined): Promise<void> => {
       },
     ),
     {
-      ...oracleLaneOptions(settlementOracle, seed),
+      ...oracleCampaignOptions(settlementOracle, seed),
       examples: [
         [
           {
@@ -1612,7 +1612,7 @@ async function checkRetryDecision(seed: number | undefined): Promise<void> {
       },
     ),
     {
-      ...oracleLaneOptions(retryDecisionOracle, seed),
+      ...oracleCampaignOptions(retryDecisionOracle, seed),
       examples: retryDecisionExamples,
     },
   )
@@ -2099,7 +2099,7 @@ async function checkRetryRecordFailure(seed: number | undefined) {
       }
     }),
     {
-      ...oracleLaneOptions(retryRecordOracle, seed),
+      ...oracleCampaignOptions(retryRecordOracle, seed),
       examples: [[2], [5]],
     },
   )
@@ -2115,7 +2115,7 @@ oracleReplayTest(it, RETRY_RECORD_PROPERTY).each([undefined])(
 )
 
 // The failed durable write can be first, middle, or last among three distinct
-// IDs. All positions are pinned, so the conditional failure premise is reached
+// IDs. All positions are fixed, so the conditional failure premise is reached
 // at each boundary. Removing the two admitted peers would hide accidental
 // global rejection. A duplicate ID is outside this legal admission grammar.
 async function checkDurableAdmissionFailure(seed: number | undefined) {
@@ -2211,7 +2211,7 @@ async function checkDurableAdmissionFailure(seed: number | undefined) {
       }
     }),
     {
-      ...oracleLaneOptions(admissionOracle, seed),
+      ...oracleCampaignOptions(admissionOracle, seed),
       examples: [[0], [1], [2]],
     },
   )

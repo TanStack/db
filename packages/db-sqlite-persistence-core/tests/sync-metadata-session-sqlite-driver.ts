@@ -44,7 +44,7 @@ import type {
 import type { SyncConfig } from '@tanstack/db'
 import type {
   ReceiptState,
-  SessionLane,
+  SessionGrammar,
 } from '../../db/tests/sync-metadata-session-oracle'
 
 type Row = { id: number; v: unknown }
@@ -57,7 +57,7 @@ let run = 0
  * before comparison; returned recovery inputs contain no expected metadata.
  */
 export async function createSQLiteDriver(
-  lane: SessionLane,
+  productionPath: SessionGrammar,
 ): Promise<RecoveryDriver> {
   const database = new DatabaseSync(`:memory:`)
   const { driver, drained } = createMetadataSQLiteDriver(database)
@@ -69,7 +69,7 @@ export async function createSQLiteDriver(
     new SQLiteCorePersistenceAdapter({ driver }),
   ]
   const id = `metadata-items`
-  const seedClaim = lane.onDemand
+  const seedClaim = productionPath.onDemand
     ? await adapters[0]!.claimCacheGeneration(id)
     : undefined
   const target = seedClaim
@@ -258,15 +258,19 @@ export async function createSQLiteDriver(
         persistedCollectionOptions<Row, number>({
           id,
           getKey: (row) => row.id,
-          ...(lane.onDemand ? { syncMode: `on-demand` as const } : {}),
+          ...(productionPath.onDemand
+            ? { syncMode: `on-demand` as const }
+            : {}),
           sync: {
-            rowUpdateMode: lane.fullRows ? `full` : `partial`,
+            rowUpdateMode: productionPath.fullRows ? `full` : `partial`,
             sync: (sync) => {
               actions[index] = sync
               sync.begin()
               sync.commit()
               sync.markReady()
-              return lane.onDemand ? { loadSubset: () => true } : undefined
+              return productionPath.onDemand
+                ? { loadSubset: () => true }
+                : undefined
             },
           },
           onInsert: () =>
@@ -284,10 +288,10 @@ export async function createSQLiteDriver(
   // These direct source histories have no live query to start on-demand sync.
   // Start both sources before a follower can route its first demand to its peer.
   for (const current of collections) current.startSyncImmediate()
-  if (!lane.onDemand)
+  if (!productionPath.onDemand)
     await Promise.all(collections.map((collection) => collection.preload()))
   const demands = collections.map(() => ({}))
-  if (lane.onDemand)
+  if (productionPath.onDemand)
     await Promise.all(
       collections.map((collection, index) =>
         collection._sync.loadSubset(demands[index]!),
@@ -487,7 +491,7 @@ export async function createSQLiteDriver(
           `the real coordinator did not deliver the ${notice} notice`,
         )
       console.info(
-        `SQLITE_METADATA_NOTICE ${JSON.stringify({ lane: lane.name, notice, received: notices.length - before })}`,
+        `SQLITE_METADATA_NOTICE ${JSON.stringify({ lane: productionPath.name, notice, received: notices.length - before })}`,
       )
     },
     observe: () => ({
@@ -539,7 +543,7 @@ export async function createSQLiteDriver(
       await release()
       while (depth) abort()
       await Promise.all(receipts)
-      if (lane.onDemand)
+      if (productionPath.onDemand)
         for (const [index, current] of collections.entries())
           current._sync.unloadSubset(demands[index]!)
       await quiesce()

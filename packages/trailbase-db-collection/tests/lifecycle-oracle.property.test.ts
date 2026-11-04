@@ -735,7 +735,7 @@ it.each(earlyDemandPlans)(
  * has arrived. A later change to another row then checks that the listener
  * is still alive. An older event delivered after a newer page can show its
  * older value until the newer event that follows it arrives; the adapter has
- * no row version to order an event against a page, so the lane only checks a
+ * no row version to order an event against a page, so the page-event grammar only checks a
  * row once all of its events have arrived.
  */
 type RacePlan = {
@@ -1033,8 +1033,8 @@ it.each(heldPlans)(
  * The load lists the service's current rows. Because the sync adapter stops
  * receiving changes, it reports the Collection's `error`, so an application can
  * see that the rows can grow stale; only a reload or restart subscribes again. This
- * lane makes that limit executable; reconnecting is left to the TrailBase
- * provider, and the lane does not claim the limit is the right product
+ * stream-end grammar makes that limit executable; reconnecting is left to the TrailBase
+ * provider, and the grammar does not claim the limit is the right product
  * behavior.
  *
  * Reference: the same service model. The prediction after the stream ends is
@@ -1042,7 +1042,7 @@ it.each(heldPlans)(
  *
  * Grammar (exhaustive, 2 histories): the stream closes gracefully or fails
  * with a read error after the first page applies; then the service changes a
- * row, and an on-demand load runs. The lane pins one stream end followed by
+ * row, and an on-demand load runs. The stream-end grammar covers one stream end followed by
  * one change and one load. It does not cover several later loads, a page in
  * flight when the stream ends, or cleanup between them.
  *
@@ -1126,7 +1126,7 @@ it.each([`close`, `read-error`] as const)(
 /**
  * ## Do several pages, several changes, and overlapping loads still converge?
  *
- * Law: the same one as the page-event lane. Once every page and every change
+ * Law: the same one as the page-event grammar. Once every page and every change
  * event for a row have arrived, the Collection holds the service's current
  * value for that row, or no row if the service deleted it. Between steps, a
  * row that a change event touched never returns to an older value.
@@ -1387,8 +1387,8 @@ async function checkPageHistory(history: PageHistory) {
   }
 }
 
-// Named replays: each closes one dimension the single-page lane leaves open.
-const pageReplays: Array<[string, PageHistory]> = [
+// Named fixed histories: each closes one dimension the single-page grammar leaves open.
+const pageFixedHistories: Array<[string, PageHistory]> = [
   [
     `an insert and its update in transit until after the page`,
     {
@@ -1460,7 +1460,7 @@ const pageReplays: Array<[string, PageHistory]> = [
   ],
 ]
 
-it.each(pageReplays)(`converges: %s`, (_name, history) =>
+it.each(pageFixedHistories)(`converges: %s`, (_name, history) =>
   checkPageHistory(history),
 )
 fcTest.prop([pageHistoryArb], { seed: 205_917, numRuns: oracleRuns(40) })(

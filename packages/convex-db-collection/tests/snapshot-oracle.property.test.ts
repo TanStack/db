@@ -10,7 +10,7 @@
  * Every generated history covers valid and duplicate starts, then constructs
  * omission, field removal, empty results,
  * reintroduction, duplicates and recovery, then appends arbitrary snapshots.
- * String, numeric and mixed key lanes share that history. The mixed lane
+ * String, numeric and mixed key grammars share that history. The mixed grammar
  * includes 1/'1'; finite numeric parameters include fractions and negatives.
  * Raw and selected runs compare the same law. Selection changes key shape and
  * uppercases text; the reference states that transformation independently.
@@ -77,24 +77,24 @@ it(`refines complete snapshots throughout generated histories`, async () => {
         }),
         async (numberKey, text, suffix) => {
           reach.beginHistory()
-          const lanes = [
+          const keyKinds = [
             { name: `string-keys`, keys: [`a`, `b`, `c`] },
             { name: `numeric-keys`, keys: [numberKey, numberKey + 0.5, 1] },
             { name: `mixed-key-types`, keys: [1, `1`, numberKey] },
           ] as const
-          for (const lane of lanes) {
+          for (const keyKind of keyKinds) {
             const first: KeyedRow = {
               _id: `first`,
-              key: lane.keys[0],
+              key: keyKind.keys[0],
               text: `lower:${text}`,
               optional: `remove`,
             }
             const second: KeyedRow = {
               _id: `second`,
-              key: lane.keys[1],
+              key: keyKind.keys[1],
               text,
             }
-            // The first two lane keys are always distinct. This constructive
+            // The first two keys are always distinct. This constructive
             // prefix forces adjacent laws even when the random suffix is empty.
             const history: Array<Array<KeyedRow>> = [
               [first, second],
@@ -107,7 +107,7 @@ it(`refines complete snapshots throughout generated histories`, async () => {
               ...suffix.map((snapshot) =>
                 snapshot.map((value): KeyedRow => ({
                   _id: `source:${value.slot}`,
-                  key: lane.keys[value.slot]!,
+                  key: keyKind.keys[value.slot]!,
                   text: value.text,
                   ...(value.optional === undefined
                     ? {}
@@ -216,7 +216,7 @@ it(`refines complete snapshots throughout generated histories`, async () => {
                       if (projected && selected.length > 0)
                         reach.reach(`selected-key-representation`)
                       if (!projected && selected.length > 0)
-                        reach.reach(lane.name)
+                        reach.reach(keyKind.name)
                       if (
                         selected.some((value) => value.key === 1) &&
                         selected.some((value) => value.key === `1`)

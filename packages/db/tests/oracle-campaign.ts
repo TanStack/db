@@ -7,7 +7,7 @@ import { createOracleReach } from './oracle-reach'
  * selection changes between the two calls. Every started campaign reports its
  * seed and counts even when the callback or reach assertion fails. Counts are histories, not events:
  * call beginHistory once and reach only after observing the named checkpoint.
- * A prefix SEED replay runs one campaign at the callback's full budget, and
+ * A prefix SEED reseeds one campaign at the callback's full budget, and
  * checks its reach. A SEED/PATH replay runs one recorded history and checks
  * no reach. `declared-reach-oracle.property.test.ts` owns this rule.
  * This is runner support, not an independent product judgment.

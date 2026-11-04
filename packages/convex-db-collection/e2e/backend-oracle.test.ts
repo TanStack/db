@@ -382,9 +382,7 @@ it.each([`insert`, `update`, `delete`] as const)(
             draft(fc.bigInt({ min: -(2n ** 63n), max: 2n ** 63n - 1n })),
             draft(fc.constantFrom(NaN, Infinity, -Infinity, -0)),
             draft(
-              fc
-                .uint8Array({ maxLength: 12 })
-                .map((bytes) => bytes.buffer),
+              fc.uint8Array({ maxLength: 12 }).map((bytes) => bytes.buffer),
             ),
           )
     const histories = fc.record({
@@ -407,7 +405,7 @@ it.each([`insert`, `update`, `delete`] as const)(
     ]
     // Each operation owns its replay grammar. One insert/update bundle contains
     // six process histories; three delete bundles contain six too. Fixed and
-    // random lanes therefore retain the same six-history budget per operation.
+    // random campaigns therefore retain the same six-history budget per operation.
     const replayPrefix = `CONVEX_BACKEND_${operation.toUpperCase()}_ORACLE`
     await runOracleCampaign(
       replayPrefix,

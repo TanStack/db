@@ -20,8 +20,8 @@ import { declareOracle } from '../../oracle-declaration.js'
  *
  * History grammar: each case contains a value, a pattern, and a case-fold flag.
  * The small alphabet concentrates on literal/wildcard precedence, `_`, case,
- * newlines, and non-ASCII code units. Every generated string is legal. Pinned
- * witnesses reconstruct the reported `%` collision; removing `%` removes that
+ * newlines, and non-ASCII code units. Every generated string is legal. Fixed
+ * histories reconstruct the reported `%` collision; removing `%` removes that
  * distinction, while empty and literal-only cases exercise its boundaries.
  *
  * Production driver: compile a public `like` or `ilike` expression and invoke

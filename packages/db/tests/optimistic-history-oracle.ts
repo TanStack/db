@@ -65,7 +65,7 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * sync transactions the Collection has taken, `deferred` holds committed sync
  * transactions waiting behind a wrapping sync's held durable step, and `base`
  * is the applied synced rows. `deferred` is model vocabulary; core reaches it
- * only through a wrapping sync, so the core lane never enters it. `held` is
+ * only through a wrapping sync, so the core production path never enters it. `held` is
  * a model-only flag for the hold described above: it is set when a
  * transaction completes while a queued sync transaction touches its key, and
  * the drain that applies that queue clears it.
@@ -93,7 +93,7 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * A persisting or different-key peer keeps its own settlement. Handler rejection
  * cascades; an explicit rollback can request a secondary rollback without it.
  * Ordinary source batches write rows before deletes. The ordered-operations
- * lane also permits a delete and reinsert of one key in the same transaction.
+ * grammar also permits a delete and reinsert of one key in the same transaction.
  * Its `row` action combines source insert and update; the production driver
  * resolves that kind against source membership before invoking sync writes.
  * A reentrant history commits a truncate and its suffix from a subscriber
@@ -126,7 +126,7 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * transaction does not need to stay tracked for.
  *
  * `runOptimisticHistory` gives the same edit, delete, settle, and sync history
- * to this model and a real Collection. A `WrappingSyncLane` runs the same
+ * to this model and a real Collection. A `WrappingSyncPath` runs the same
  * history through a wrapping sync, adds `hold-store` and `release-store`
  * steps, and lets the wrapping sync settle before each comparison. Right after
  * each optimistic mutation call, before any await, the driver checks that the
@@ -154,7 +154,7 @@ type SourceBatch = {
   operations?: Array<SourceOperation> | undefined
   truncate: boolean
   copies: number
-  // In the partial-update lane, the source's updates omit `c`.
+  // In the partial-update production path, the source's updates omit `c`.
   partial?: boolean | undefined
 }
 // A transaction with no operation and no truncate has no durable write.
@@ -682,7 +682,7 @@ const sourceBatch = fc.record({
   // The source may also delete keys, including keys it does not hold.
   deletes: fc.oneof(
     // A mapped constant, not `fc.constant([])`: fast-check compares a constant
-    // by identity, so a pinned `[]` would not be a member of the language.
+    // by identity, so a fixed `[]` would not be a member of the language.
     { weight: 3, arbitrary: noDeletes },
     {
       weight: 1,
@@ -705,7 +705,7 @@ const handlerSourceBatch = fc.oneof(
     weight: 1,
     arbitrary: fc.tuple(sourceBatch, fc.boolean()).map(
       ([batch, awaitReceipt]) => ({ ...batch, awaitReceipt }),
-      // So a pinned handler batch is a member of the language.
+      // So a fixed handler batch is a member of the language.
       (value) => {
         const { awaitReceipt, ...batch } = value as {
           awaitReceipt?: unknown
@@ -783,7 +783,7 @@ export const optimisticHistory = fc.record({
 // The core grammar plus store steps. While a hold is outstanding, an
 // in-handler batch does not await acceptance. Every mapped piece has an
 // unmapper, and no step is an object constant (fast-check compares those by
-// identity), so a pinned or segment-built history is a member of the language.
+// identity), so a fixed or constructed history is a member of the language.
 // A deferred transaction's signal aborts before its turn.
 const abortStep: fc.Arbitrary<OptimisticStep> = fc.record({
   type: fc.constant(`abort-deferred` as const),
@@ -895,7 +895,7 @@ export function wrappingSteps(
   return [...excludeHeldAcceptance(body), ...wrappingTail]
 }
 /**
- * The grammar for a wrapping-sync lane: the core grammar plus held durable
+ * The grammar for a wrapping-sync production path: the core grammar plus held durable
  * writes and acknowledged edits.
  */
 export const wrappingSyncHistory = fc.record({
@@ -932,7 +932,7 @@ export const wrappingSyncHistory = fc.record({
  * comparison. It can also hold a durable step, which is the only way this
  * grammar reaches the model's `deferred` state.
  */
-export type WrappingSyncLane = {
+export type WrappingSyncPath = {
   wrap: (config: CollectionConfig<HistoryRow>) => CollectionConfig<HistoryRow>
   // Hold the durable step of the next source transaction that writes.
   holdNextStore: () => void
@@ -962,13 +962,13 @@ export async function runOptimisticHistory(
     | `previous-value`
     | `update-as-insert`
     | `retained-default`
-    // Writes the partial lane's rows under `rowUpdateMode: 'full'`, so the
+    // Writes the partial-update production path's rows under `rowUpdateMode: 'full'`, so the
     // Collection replaces the row instead of merging it.
     | `partial-as-full`,
   options: {
     insertDefault?: number
     partialUpdates?: boolean
-    wrapping?: WrappingSyncLane
+    wrapping?: WrappingSyncPath
   } = {},
 ) {
   const partialUpdates = options.partialUpdates === true
@@ -980,7 +980,7 @@ export async function runOptimisticHistory(
     whenSyncAccepted,
   }
   if (wrapping && options.insertDefault !== undefined)
-    throw new Error(`The wrapping-sync lane has no schema lane`)
+    throw new Error(`The wrapping-sync production path has no schema grammar`)
   const model = new HistoryModel(initial, options.insertDefault, partialUpdates)
   let sync!: Parameters<SyncConfig<HistoryRow>[`sync`]>[0]
   let starting: ReturnType<typeof createDeferred<void>> | undefined
@@ -1005,7 +1005,7 @@ export async function runOptimisticHistory(
     onUpdate: handler,
     onDelete: handler,
     sync: {
-      // The partial-update lane keeps the default row update mode.
+      // The partial-update production path keeps the default row update mode.
       ...(partialUpdates && mutant !== `partial-as-full`
         ? {}
         : { rowUpdateMode: `full` as const }),
@@ -1159,7 +1159,7 @@ export async function runOptimisticHistory(
     beginSourceBatch(step)
     return commitSourceBatch(step)
   }
-  // In a wrapping-sync lane each source transaction carries its own signal,
+  // In a wrapping-sync production path each source transaction carries its own signal,
   // so a history can abort it while it is deferred.
   const controllers = new Map<SourceBatch, AbortController>()
   function commitSourceBatch(step: SourceBatch) {
@@ -1656,7 +1656,9 @@ export async function runOptimisticHistory(
           counts.abortedDeferred++
         } else if (step.type === `reentrant`) {
           if (wrapping)
-            throw new Error(`The wrapping-sync lane has no reentrant drain`)
+            throw new Error(
+              `The wrapping-sync production path has no reentrant drain`,
+            )
           if (open) continue
           if (!step.trigger.truncate)
             throw new Error(`Reentrant trigger must publish a truncate`)
@@ -1796,7 +1798,7 @@ declareOracle({ check: [runOptimisticHistory], model: [HistoryModel] })
 // The same laws, model, and production paths as `runOptimisticHistory`, with
 // the jobs separated (rubric, ORC-003):
 //
-// - The history is the initial rows, the steps, and the lane's options.
+// - The history is the initial rows, the steps, and the production path's options.
 // - `resolveOptimisticHistory` turns it into a plan of concrete actions. A
 //   step can name its target indirectly, such as "settle active transaction
 //   `slot`", and an edit can be a no-op; resolution replays the model's
@@ -1806,12 +1808,12 @@ declareOracle({ check: [runOptimisticHistory], model: [HistoryModel] })
 //   at each checkpoint, the allowed publication cuts, the visible rows, each
 //   request's outcome and state, the receipts that must still wait, and the
 //   unsettled transactions.
-// - `optimisticHistoryDriver(lane)` runs the plan through a real Collection
+// - `optimisticHistoryDriver(productionPath)` runs the plan through a real Collection
 //   and records, at each checkpoint, what production published and showed.
 //   It decides nothing.
 // - `checkOptimisticHistory` compares them, law by law.
 
-/** One history: rows, steps, and the lane's row options. */
+/** One history: rows, steps, and the production path's row options. */
 export type OptimisticHistory = {
   initial: Array<HistoryRow>
   steps: ReadonlyArray<OptimisticStep>
@@ -2387,19 +2389,19 @@ export type OptimisticCleanup = {
 }
 
 /**
- * The production driver for one lane: core, or a wrapping sync such as
- * persistence. `fullRows` sets up the partial-update lane in `full` row update
- * mode, a hostile configuration that a calibration uses.
+ * The production driver for one production path: core, or a wrapping sync such as
+ * persistence. `fullRows` sets up the partial-update production path in `full` row update
+ * mode, a mutant configuration that a calibration uses.
  */
 export function optimisticHistoryDriver(
-  lane: { wrapping?: WrappingSyncLane; fullRows?: boolean } = {},
+  productionPath: { wrapping?: WrappingSyncPath; fullRows?: boolean } = {},
 ) {
   return async (
     plan: OptimisticPlan,
     observe: (checkpoint: string, value: unknown) => void,
   ): Promise<void> => {
     const { history } = plan
-    const { wrapping } = lane
+    const { wrapping } = productionPath
     const partialUpdates = history.partialUpdates === true
     const ids = batchIds(plan)
     const db: HistoryDb = wrapping?.db ?? {
@@ -2409,7 +2411,7 @@ export function optimisticHistoryDriver(
       whenSyncAccepted,
     }
     if (wrapping && history.insertDefault !== undefined)
-      throw new Error(`The wrapping-sync lane has no schema lane`)
+      throw new Error(`The wrapping-sync production path has no schema grammar`)
     if (
       !wrapping &&
       plan.actions.some(
@@ -2421,7 +2423,9 @@ export function optimisticHistoryDriver(
     )
       throw new Error(`Store steps need a wrapping sync`)
     if (wrapping && plan.actions.some((action) => action.type === `reentrant`))
-      throw new Error(`The wrapping-sync lane has no reentrant drain`)
+      throw new Error(
+        `The wrapping-sync production path has no reentrant drain`,
+      )
     let sync!: Parameters<SyncConfig<HistoryRow>[`sync`]>[0]
     let starting: ReturnType<typeof createDeferred<void>> | undefined
     // The next handler call writes this batch before it returns.
@@ -2448,8 +2452,8 @@ export function optimisticHistoryDriver(
       onUpdate: handler,
       onDelete: handler,
       sync: {
-        // The partial-update lane keeps the default row update mode.
-        ...(partialUpdates && !lane.fullRows
+        // The partial-update production path keeps the default row update mode.
+        ...(partialUpdates && !productionPath.fullRows
           ? {}
           : { rowUpdateMode: `full` as const }),
         sync: (actions) => {
@@ -2526,7 +2530,7 @@ export function optimisticHistoryDriver(
         }
       }
     }
-    // In a wrapping-sync lane each source transaction carries its own signal,
+    // In a wrapping-sync production path each source transaction carries its own signal,
     // so a history can abort it while it is deferred.
     const controllers = new Map<SourceBatch, AbortController>()
     function commitSourceBatch({ batch }: PlannedBatch) {

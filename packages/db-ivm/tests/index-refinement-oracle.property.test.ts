@@ -44,7 +44,7 @@
  * compared through the same prefix identity.
  *
  * Calibration: comparing prefixes with `===` kept a cancelled `NaN`-prefixed
- * value, or threw `Mismatching prefixes`, and fails the pinned histories and
+ * value, or threw `Mismatching prefixes`, and fails the fixed histories and
  * both campaigns.
  *
  * Known omissions: `Index` joins, compaction, presence tracking, and structural
@@ -165,7 +165,7 @@ const add = (value: Value, multiplicity: number): Addition => ({
 })
 
 // Each history cancels or merges `NaN`-prefixed values in a different layout.
-const pinnedHistories: ReadonlyArray<{
+const fixedHistories: ReadonlyArray<{
   name: string
   additions: Array<Addition>
 }> = [
@@ -249,7 +249,7 @@ declareOracle({
 const INDEX_REFINEMENT_PROPERTY = `ivm.index-refinement`
 
 describe(`Index refinement oracle`, () => {
-  for (const { name, additions } of pinnedHistories) {
+  for (const { name, additions } of fixedHistories) {
     oracleReplayTest(it)(`matches the multiset model when ${name}`, () => {
       expectRefinement(additions)
       expectRefinement(additions, `prefixIdentity`)

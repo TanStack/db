@@ -74,7 +74,7 @@ const orders: Array<Array<Operation>> = [
 // value (1..100) and note (0..10 chars). Removing order loses payload-order
 // checks; removing visibility loses the draft cut; removing outcome loses a
 // settlement branch; removing either field variation hides truncated payloads.
-// Repeated operations are checked in the same-key lane below. Deleting an
+// Repeated operations are checked in the same-key grammar below. Deleting an
 // absent key is excluded from this mixed-key grammar.
 
 const sameKeySequences = [
@@ -1047,7 +1047,7 @@ function expectedTypedKeyPayload(
 // expected payload is the authored key list, including multiplicity and order;
 // no encoded production globalKey participates in the comparison. Cross each
 // same-text pair with inserts, updates, deletes, repeated updates, and rollback.
-// Existing same-key lanes still require genuine repeated keys to collapse.
+// Existing same-key grammars still require genuine repeated keys to collapse.
 for (const { numberKey, reversed } of [0, -1, 1, 1.5].flatMap((key) =>
   [false, true].map((reverseOrder) => ({
     numberKey: key,

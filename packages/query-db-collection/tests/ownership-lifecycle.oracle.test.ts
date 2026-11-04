@@ -5621,7 +5621,7 @@ describe(`query collection ownership lifecycle`, () => {
    * those indices to the documented static on-demand Query key for metadata
    * comparison. It compares public rows and exact accepted owner identities
    * after each action and release; forgetting ownership on any write fails the
-   * update lane, while retaining a deleted lifetime fails the reinsert lane.
+   * update grammar, while retaining a deleted lifetime fails the reinsert grammar.
    */
   it.each(
     ([1, 2] as const).flatMap((ownerCount) =>
@@ -5657,7 +5657,7 @@ describe(`query collection ownership lifecycle`, () => {
    * and subset release it compares public rows with the reference. A fetched
    * cached result needs no request; a local cache edit with no later fetch
    * requires one to establish authority. The inverse order rejects blindly
-   * trusting any cached result; the cache-edit lanes reject mistaking
+   * trusting any cached result; the cache-edit grammars reject mistaking
    * setQueryData for a remote success.
    */
   it.each(

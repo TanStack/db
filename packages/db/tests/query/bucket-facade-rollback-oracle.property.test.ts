@@ -109,8 +109,8 @@ import type {
  * positive is the only event a failed flush may publish.
  * The work counter wraps the iteration, `get` and `has` methods of
  * each facade's stored rows during the flush and records which facades the
- * flush read. A pinned case covers nested facades across two edges: the child
- * edge commits, then the parent edge throws. Pinned cases also cover a
+ * flush read. A fixed history covers nested facades across two edges: the child
+ * edge commits, then the parent edge throws. Fixed histories also cover a
  * facade subscriber that throws during publication, which must not hold back
  * another facade's events, and a restore that throws, which must still close
  * every facade's deferred events.
@@ -774,7 +774,7 @@ const step = fc.record({
   settleLocal: fc.integer({ min: 0, max: 5 }).map((n) => n === 0),
 })
 const history = fc.array(step, { minLength: 1, maxLength: 8 })
-// The parts this file declares. runHistory runs one generated or pinned
+// The parts this file declares. runHistory runs one generated or fixed
 // history through the real adapter and compares it with the model after each
 // flush; checkEvents is its exactly-once publication comparison. The model
 // predicts the rows that each flush owes, which events it may name, and which
@@ -800,7 +800,7 @@ describe(`bucket facade rollback`, () => {
     )
   })
 
-  // Pinned: a flush that reorders a shown row throws. The retried flush must
+  // Fixed history: a flush that reorders a shown row throws. The retried flush must
   // still publish the layout change, so the failed flush must not leave its
   // new order behind as the facade's current order.
   it(`publishes a reorder on retry after a failed reordering flush`, async () => {
@@ -827,7 +827,7 @@ describe(`bucket facade rollback`, () => {
     ])
   })
 
-  // Pinned: a reorder rolled back after `prepare()`, then sent again. The
+  // Fixed history: a reorder rolled back after `prepare()`, then sent again. The
   // rollback must restore the facade's current order, or the second flush
   // sees no order change and owes a layout revision it does not publish.
   it(`publishes a reorder sent again after a rolled-back reorder`, async () => {
@@ -854,7 +854,7 @@ describe(`bucket facade rollback`, () => {
     ])
   })
 
-  // Pinned: a failed root commit, then a retry that carries only changes to
+  // Fixed history: a failed root commit, then a retry that carries only changes to
   // other buckets, as a parent-only write would. The retry must still publish
   // the facade change that was pending when the root commit failed.
   it(`publishes a pending facade change after a failed root commit`, async () => {
@@ -902,7 +902,7 @@ describe(`bucket facade rollback`, () => {
     ])
   })
 
-  // Pinned: a failed flush that writes two existing buckets and retires a
+  // Fixed history: a failed flush that writes two existing buckets and retires a
   // third restores all three, then the retried flush applies everything.
   it(`restores two written buckets and a retired bucket, then retries`, async () => {
     await runHistory([
@@ -935,7 +935,7 @@ describe(`bucket facade rollback`, () => {
     ])
   })
 
-  // Pinned replay of a generated failure: an update to a row that an earlier
+  // Fixed regression of a generated failure: an update to a row that an earlier
   // flush wrote behind a still-persisting transaction keeps the row.
   it(`updates a row that a persisting transaction still holds`, async () => {
     await runHistory([
@@ -959,7 +959,7 @@ describe(`bucket facade rollback`, () => {
     ])
   })
 
-  // Pinned replay of a CI failure: a rollback restores a row that an earlier
+  // Fixed regression of a CI failure: a rollback restores a row that an earlier
   // flush wrote behind a still-persisting transaction. The restore must write
   // it as an update, because the held insert lands first.
   it(`restores a held row after a rolled-back update`, async () => {
@@ -987,7 +987,7 @@ describe(`bucket facade rollback`, () => {
     ])
   })
 
-  // Pinned replay of a generated failure: an optimistic row shares a graph
+  // Fixed regression of a generated failure: an optimistic row shares a graph
   // id, is rolled back, and then a flush fails while writing the facade. The
   // failed flush publishes nothing.
   it(`publishes nothing from a failed flush after a shared optimistic row leaves`, async () => {

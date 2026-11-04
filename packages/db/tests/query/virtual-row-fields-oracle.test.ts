@@ -439,9 +439,10 @@ test.each(
     const pendingKeys = new Set<string>()
     let finishMutation = async () => {}
     const check = () => {
-      // The custom-key lane has a completely independent key prediction. The
-      // default lane retains the old clean-sibling key comparison only as a
-      // differential check of undocumented compiler-generated key encoding.
+      // The custom-key histories have a completely independent key prediction.
+      // The default-key histories retain the old clean-sibling key comparison
+      // only as a differential check of undocumented compiler-generated key
+      // encoding.
       const outputKey = (id: AttributionKey) =>
         customKey
           ? `projected-${id}`
@@ -800,7 +801,7 @@ test.each(
  * A held write in either branch must not change the other's metadata. Removing
  * and reinserting that peer checks retractions and subsequent contributions.
  * Each checkpoint reuses the authored-facts model; no sibling query supplies
- * expected keys in this lane.
+ * expected keys in these histories.
  */
 const unionHistories = [false, true].flatMap((reverse) =>
   [false, true].flatMap((nested) =>

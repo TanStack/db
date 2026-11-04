@@ -15,7 +15,8 @@
  *   coverage map. A failure names it.
  * - `histories` is either an enumerated list, which runs in full (bounded
  *   exhaustiveness, glossary), or a generated source: a fast-check arbitrary
- *   with a run budget, fixed seeds, required segments, and pins (below).
+ *   with a run budget, fixed seeds, constructed histories, and fixed histories
+ *   (below).
  * - `model` gives the expected result of a history and its recorded trace,
  *   without production. A model that answers from the history alone ignores
  *   the trace; a model of an environment the driver observes reads it, and
@@ -50,20 +51,21 @@
  * - **Reach** names the states a history entered. By default the driver
  *   reports them with `observe("reach", state)`. A state that only the model
  *   can name, such as "a failure while the seed is active", comes from
- *   `reached(history, trace, expected)` instead. Each lane prints how many
+ *   `reached(history, trace, expected)` instead. Each campaign prints how many
  *   histories entered each declared state, including none (ORC-015).
- * - A **segment** builds a history that reaches states that the laws need,
- *   from a generated history, and names those states. Every lane runs every
- *   segment once as an example, and a segment run that does not enter a named
- *   state fails. Only segments make reach required: a state that random
- *   histories reach is measured, never gated. So every state in
- *   `states` must be named by a segment, and a state the property only
- *   measures is declared in `measured` instead (ORC-015). Half of a lane's
- *   generated histories also go through a segment, so the histories after
- *   each required state are explored, not visited once.
- * - A **pin** is a fixed history, such as a regression. It may name the
- *   states it `enters`, which its run must reach. A pin and a segment's
- *   history must be histories the arbitrary could generate
+ * - A **constructed history** is built from a generated history so that it
+ *   reaches states that the laws need, and it names those declared states.
+ *   Every campaign runs every constructed history once as an example, and a
+ *   constructed history that does not enter a named state fails. Only
+ *   constructed histories make reach required: a state that random histories
+ *   reach is measured, never gated. So every state in `states` must be named
+ *   by a constructed history, and a state the property only measures is
+ *   declared in `measured` instead (ORC-015). Half of a campaign's generated
+ *   histories are also constructed, so the histories after each required
+ *   state are explored, not visited once.
+ * - A **fixed history** is a named history, such as a fixed regression. It may
+ *   name the states it `enters`, which its run must reach. Fixed and
+ *   constructed histories must be histories the arbitrary could generate
  *   (`canShrinkWithoutContext`), so they shrink like generated ones and cannot
  *   cover a dimension that the grammar lacks; such a dimension belongs in the
  *   grammar, or in the property's stated limits.
@@ -75,24 +77,25 @@
  *   history still resolves to a legal plan.
  * - **Calibration.** A `calibration` names a wrong answer and the law that
  *   must reject it: a `corrupt` function that alters a recorded trace, as an
- *   observation mutant does, or a hostile `driver`, such as production set up
+ *   observation mutant does, or a mutant `driver`, such as production set up
  *   wrongly. The calibration test finds a history where the corruption
  *   applies and the clean trace passes (it skips a candidate whose clean trace
  *   fails), and requires the check to report that law for the corrupted one
  *   (rubric, ORC-006).
  * - **Determinism.** A `determinism` test runs some histories twice and
- *   requires the same trace: every pin and segment history of a generated
+ *   requires the same trace: every fixed and constructed history of a generated
  *   source and three generated histories, or up to eight evenly spaced
  *   enumerated histories. A trace that
  *   differs between runs of one history breaks replay, shrinking, and the gap
  *   report's comparison, so a driver records relations (before and after,
  *   same or different id) rather than clock readings or random ids.
  * - **Shrinking keeps the failure.** A violation can name the law it broke.
- *   Once a history fails one way, a setup error, a missed segment state, or
+ *   Once a history fails one way, a setup error, a constructed history that
+ *   missed its state, or
  *   one law, a smaller history that fails another way counts as passing, so
  *   the reported counterexample still shows the first failure (ORC-010).
  *   Within one history a driver error decides first, then a law violation,
- *   then a missed segment state.
+ *   then a constructed history that missed its state.
  *
  * `oracle-property-self-oracle.test.ts` checks these promises the way an
  * oracle checks production: it runs synthetic properties under real Vitest
@@ -122,7 +125,7 @@ export interface OracleLaw {
   authority: string
   /** What this property does not establish. */
   limits: string
-  /** The coverage-map owner. */
+  /** The oracle owner in the coverage map. */
   owner: string
 }
 
@@ -236,7 +239,7 @@ export function withinTurns(
  * releases the oldest task of queue `choices[step] % queues`, counting the
  * queues that have a pending task in the order they first did, and the oldest
  * task overall once the choices run out. A history that holds the choices replays exactly, shrinks
- * like any array, can be a pin or a segment, and prints as JSON; a
+ * like any array, can be a fixed or constructed history, and prints as JSON; a
  * `fc.scheduler()` value does none of these (it is consumed as it runs, its
  * clones do not reproduce, and it is never a member of its own language).
  */
@@ -285,10 +288,14 @@ export function scheduleFrom(choices: ReadonlyArray<number>): DataScheduler {
       queue = label.split(` `)[0]!,
     ) =>
       new Promise<T>((resolve, reject) => {
+        // The schedule owns the promise from here: a rejection waits for its
+        // release without counting as unhandled, then reaches the caller.
+        const held = Promise.resolve(promise)
+        held.catch(() => {})
         pending.push({
           label,
           queue,
-          release: () => void Promise.resolve(promise).then(resolve, reject),
+          release: () => void held.then(resolve, reject),
         })
       }),
     waitOne,
@@ -315,7 +322,7 @@ export class OracleViolation extends Error {
  * A history built from a generated one so that it reaches the states the
  * laws need. The driver reports reached states with `observe("reach", state)`.
  */
-export interface Segment<History> {
+export interface ConstructedHistory<History> {
   name: string
   enters: ReadonlyArray<string>
   build: (generated: History) => History
@@ -324,9 +331,9 @@ export interface Segment<History> {
 export interface GeneratedHistories<History> {
   arbitrary: fc.Arbitrary<History>
   /**
-   * The states the laws depend on (ORC-015). Each must be named by a segment,
-   * so every lane reaches it. Each lane reports how many histories entered
-   * each one, including none.
+   * The declared states the laws depend on (ORC-015). Each must be named by a
+   * constructed history, so every campaign reaches it. Each campaign reports
+   * how many histories entered each one, including none.
    */
   states?: ReadonlyArray<string>
   /**
@@ -334,16 +341,16 @@ export interface GeneratedHistories<History> {
    * `states` and `measured` fails, so a misspelled state cannot pass unseen.
    */
   measured?: ReadonlyArray<string>
-  /** The base run budget of each lane, scaled by the run multiplier. */
+  /** The base run budget of each campaign, scaled by the run multiplier. */
   runs: number
-  /** One fixed lane per seed, beside the random lane. */
+  /** One fixed-seed campaign per seed, beside the random campaign. */
   fixedSeeds: ReadonlyArray<number>
-  segments?: ReadonlyArray<Segment<History>>
-  pins?: ReadonlyArray<Pin<History>>
+  constructed?: ReadonlyArray<ConstructedHistory<History>>
+  fixed?: ReadonlyArray<FixedHistory<History>>
 }
 
-/** A fixed history, such as a regression, and the states it must enter. */
-export interface Pin<History> {
+/** A named fixed history, such as a fixed regression, and the states it must enter. */
+export interface FixedHistory<History> {
   name: string
   history: History
   enters?: ReadonlyArray<string>
@@ -363,7 +370,7 @@ export type Calibration<History, Plan> = {
       ) => ReadonlyArray<Observation> | undefined
     }
   | {
-      /** A hostile driver, such as production configured wrongly. */
+      /** A mutant driver, such as production configured wrongly. */
       driver: OraclePropertyOptions<History, unknown, Plan>[`driver`]
     }
 )
@@ -417,7 +424,7 @@ export function oracleProperty<History, Expected, Plan = History>(
   options: OraclePropertyOptions<History, Expected, Plan>,
 ): void {
   // Every source names a registered property, so its replay and manifest
-  // entries exist; an enumerated source has no random lane to check it.
+  // entries exist; an enumerated source has no random campaign to check it.
   assertRegisteredOracleProperty(options.id)
   const { id, histories } = options
   recordRegistration(id, options.law, histories)
@@ -690,7 +697,7 @@ function calibrationTests<History, Expected, Plan>(
         seen.push(`"${name}" reported law "${lawOf(verdict)}"`)
       }
       throw new Error(
-        `${id}: calibration "${calibration.name}" found no history whose clean trace passes and where the check reports law "${calibration.law}"${seen.length ? `; ${seen.slice(0, 3).join(`, `)}` : ``}. Add a passing pin or segment that reaches the state its wrong answer changes.`,
+        `${id}: calibration "${calibration.name}" found no history whose clean trace passes and where the check reports law "${calibration.law}"${seen.length ? `; ${seen.slice(0, 3).join(`, `)}` : ``}. Add a passing fixed or constructed history that reaches the state its wrong answer changes.`,
       )
     },
   }))
@@ -734,46 +741,51 @@ function generatedTests<History, Expected, Plan>(
   source: GeneratedHistories<History>,
 ): Array<PropertyTest> {
   const { id } = options
-  const segments = source.segments ?? []
+  const constructions = source.constructed ?? []
   const declared =
     source.states || source.measured
       ? new Set([...(source.states ?? []), ...(source.measured ?? [])])
       : undefined
-  const named = new Set(segments.flatMap((segment) => segment.enters))
-  const unsegmented = (source.states ?? []).filter((state) => !named.has(state))
-  if (unsegmented.length > 0)
+  const named = new Set(
+    constructions.flatMap((construction) => construction.enters),
+  )
+  const unconstructed = (source.states ?? []).filter(
+    (state) => !named.has(state),
+  )
+  if (unconstructed.length > 0)
     throw new Error(
-      `${id}: no segment enters ${unsegmented.join(`, `)}. A required state needs a segment; a state that is only counted belongs in \`measured\`.`,
+      `${id}: no constructed history enters ${unconstructed.join(`, `)}. A required state needs a constructed history; a state that is only counted belongs in \`measured\`.`,
     )
-  // Generated histories, half of them built by a segment. A built history
+  // Generated histories, half of them constructed. A constructed history
   // shrinks through its generated input, as a mapped arbitrary does.
   const arbitrary =
-    segments.length === 0
+    constructions.length === 0
       ? source.arbitrary
       : fc.oneof(
-          { arbitrary: source.arbitrary, weight: segments.length },
-          ...segments.map((segment) => ({
-            arbitrary: source.arbitrary.map(segment.build),
+          { arbitrary: source.arbitrary, weight: constructions.length },
+          ...constructions.map((construction) => ({
+            arbitrary: source.arbitrary.map(construction.build),
             weight: 1,
           })),
         )
-  for (const segment of segments) {
-    const undeclared = segment.enters.filter(
+  for (const construction of constructions) {
+    const undeclared = construction.enters.filter(
       (state) =>
         declared !== undefined && !(source.states ?? []).includes(state),
     )
     if (undeclared.length > 0)
       throw new Error(
-        `${id}: segment "${segment.name}" names undeclared states ${undeclared.join(`, `)}.`,
+        `${id}: constructed history "${construction.name}" names undeclared states ${undeclared.join(`, `)}.`,
       )
   }
 
-  // Each lane gets a fresh predicate: its first failure fixes the kind that
-  // shrinking must keep, a setup error, a missed segment state, or one law. A
+  // Each campaign gets a fresh predicate: its first failure fixes the kind
+  // that shrinking must keep, a setup error, a constructed history that missed
+  // its state, or one law. A
   // smaller history that fails some other way counts as passing. It counts
   // the histories that entered each state.
   const predicateFor = (
-    segmentOf: Map<History, Segment<History>>,
+    constructionOf: Map<History, ConstructedHistory<History>>,
     counts: Map<string, number>,
   ) => {
     let firstKind: string | undefined
@@ -794,14 +806,14 @@ function generatedTests<History, Expected, Plan>(
           )
         counts.set(state, (counts.get(state) ?? 0) + 1)
       }
-      // A law violation outranks a missed segment state.
+      // A law violation outranks a constructed history that missed its state.
       if (verdict.kind === `pass`) {
-        const segment = segmentOf.get(history)
+        const construction = constructionOf.get(history)
         const missing =
-          segment?.enters.filter((state) => !reached.has(state)) ?? []
-        if (missing.length === 0 || !keeps(`segment-reach`)) return
+          construction?.enters.filter((state) => !reached.has(state)) ?? []
+        if (missing.length === 0 || !keeps(`constructed-reach`)) return
         throw new Error(
-          `${id}: segment "${segment!.name}" did not enter ${missing.join(`, `)}. A segment must reach every state it names.`,
+          `${id}: constructed history "${construction!.name}" did not enter ${missing.join(`, `)}. A constructed history must reach every state it names.`,
         )
       }
       if (!keeps(`law:${lawOf(verdict)}`)) return
@@ -813,39 +825,40 @@ function generatedTests<History, Expected, Plan>(
       )
     }
   }
-  // Each lane runs every segment, built from histories its own seed draws.
+  // Each campaign runs every constructed history, built from histories its own
+  // seed draws.
   // fast-check passes example inputs by reference, which identifies them.
   const examplesFor = (seed: number) => {
-    const segmentOf = new Map<History, Segment<History>>()
-    const examples = segments.map((segment, index) => {
+    const constructionOf = new Map<History, ConstructedHistory<History>>()
+    const examples = constructions.map((construction, index) => {
       const [generated] = fc.sample(source.arbitrary, {
         seed: seed + index,
         numRuns: 1,
       })
-      const history = segment.build(generated!)
+      const history = construction.build(generated!)
       if (!source.arbitrary.canShrinkWithoutContext(history))
         throw new Error(
-          `${id}: segment "${segment.name}" built a history the arbitrary cannot generate. A segment must stay inside the generated language so that its failures shrink.`,
+          `${id}: constructed history "${construction.name}" built a history the arbitrary cannot generate. A constructed history must stay inside the generated language so that its failures shrink.`,
         )
-      segmentOf.set(history, segment)
+      constructionOf.set(history, construction)
       return [history] as [History]
     })
-    return { examples, segmentOf }
+    return { examples, constructionOf }
   }
 
-  // A lane reports its reach counts after it passes; a failing lane reports
-  // its counterexample instead.
-  const runLane = async (
+  // A campaign reports its reach counts after it passes; a failing campaign
+  // reports its counterexample instead.
+  const runCampaign = async (
     name: string,
     seed: number,
     parameters: (examples: Array<[History]>) => Parameters<typeof fc.assert>[1],
   ) => {
-    const { examples, segmentOf } = examplesFor(seed)
+    const { examples, constructionOf } = examplesFor(seed)
     const counts = new Map<string, number>(
       [...(declared ?? [])].map((state) => [state, 0]),
     )
     await fc.assert(
-      fc.asyncProperty(arbitrary, predicateFor(segmentOf, counts)),
+      fc.asyncProperty(arbitrary, predicateFor(constructionOf, counts)),
       parameters(examples),
     )
     // Vitest hides console output from a passing test; stdout reaches the log.
@@ -853,79 +866,82 @@ function generatedTests<History, Expected, Plan>(
       `${id} ${name} reach ${JSON.stringify(Object.fromEntries([...counts].sort(([a], [b]) => (a < b ? -1 : 1))))}\n`,
     )
   }
-  const fixedLanes = source.fixedSeeds.map((seed): PropertyTest => ({
+  const fixedCampaigns = source.fixedSeeds.map((seed): PropertyTest => ({
     name: `fixed seed ${seed}`,
     replays: [],
     run: () =>
-      runLane(`fixed seed ${seed}`, seed, (examples) =>
+      runCampaign(`fixed seed ${seed}`, seed, (examples) =>
         withOracleExamples(
           { numRuns: oracleRuns(source.runs), seed },
           examples,
         ),
       ),
   }))
-  // The random lane picks its seed itself, so a replay of that seed rebuilds
-  // the same segment histories, which the replay path counts.
-  const randomLane: PropertyTest = {
+  // The random campaign picks its seed itself, so a replay of that seed
+  // rebuilds the same constructed histories, which the replay path counts.
+  const randomCampaign: PropertyTest = {
     name: `random seed`,
     replays: [id],
     run: () => {
       // One call selects and logs the seed; a replay reads that log line.
       const parameters = oraclePropertyOptions(source.runs, id)
-      return runLane(`random seed`, parameters.seed!, (examples) =>
+      return runCampaign(`random seed`, parameters.seed!, (examples) =>
         withOracleExamples(parameters, examples),
       )
     },
   }
-  const pins = (source.pins ?? []).map((pin): PropertyTest => ({
-    name: `pin: ${pin.name}`,
+  const fixedTests = (source.fixed ?? []).map((fixed): PropertyTest => ({
+    name: `fixed history: ${fixed.name}`,
     replays: [],
     run: async () => {
-      if (!source.arbitrary.canShrinkWithoutContext(pin.history))
+      if (!source.arbitrary.canShrinkWithoutContext(fixed.history))
         throw new Error(
-          `${id}: pin "${pin.name}" is not a history the arbitrary can generate. A pin must stay inside the generated language, or the property must declare the missing dimension as a limit.`,
+          `${id}: fixed history "${fixed.name}" is not a history the arbitrary can generate. A fixed history must stay inside the generated language, or the property must declare the missing dimension as a limit.`,
         )
-      const { verdict, reached } = await runOne(options, pin.history)
+      const { verdict, reached } = await runOne(options, fixed.history)
       if (verdict.kind === `violation`)
         throw failure(
           options,
           verdict,
-          pin.history,
-          rerunByName(`${id} pin: ${pin.name}`),
+          fixed.history,
+          rerunByName(`${id} fixed history: ${fixed.name}`),
         )
-      const missing = (pin.enters ?? []).filter((state) => !reached.has(state))
+      const missing = (fixed.enters ?? []).filter(
+        (state) => !reached.has(state),
+      )
       if (missing.length > 0)
         throw new Error(
-          `${id}: pin "${pin.name}" did not enter ${missing.join(`, `)}; it entered ${[...reached].sort().join(`, `) || `no declared state`}. A pin must reach every state it names.`,
+          `${id}: fixed history "${fixed.name}" did not enter ${missing.join(`, `)}; it entered ${[...reached].sort().join(`, `) || `no declared state`}. A fixed history must reach every state it names.`,
         )
     },
   }))
-  // Pins and the segment histories of the first fixed seed, so these checks
-  // are reproducible; they are built when a test runs, like a lane's.
-  const fixedHistories = () => {
-    const { examples, segmentOf } = examplesFor(source.fixedSeeds[0] ?? 0)
+  // Fixed histories and the constructed histories of the first fixed seed, so
+  // these checks are reproducible; they are built when a test runs, like a
+  // campaign's.
+  const namedHistories = () => {
+    const { examples, constructionOf } = examplesFor(source.fixedSeeds[0] ?? 0)
     return [
-      ...(source.pins ?? []).map(({ name, history }) => ({
-        name: `pin: ${name}`,
+      ...(source.fixed ?? []).map(({ name, history }) => ({
+        name: `fixed history: ${name}`,
         history,
       })),
       ...examples.map(([history]) => ({
-        name: `segment: ${segmentOf.get(history)!.name}`,
+        name: `constructed history: ${constructionOf.get(history)!.name}`,
         history,
       })),
     ]
   }
   // Determinism also covers three generated histories, so a property whose
-  // driver varies is caught even without pins or segments.
+  // driver varies is caught even without fixed or constructed histories.
   const determinism = determinismTest(options, () => [
-    ...fixedHistories(),
+    ...namedHistories(),
     ...fc
       .sample(source.arbitrary, { seed: source.fixedSeeds[0] ?? 0, numRuns: 3 })
       .map((history, index) => ({ name: `generated ${index}`, history })),
   ])
   // A calibration also tries a fixed sample of generated histories.
   const calibrations = calibrationTests(options, () => [
-    ...fixedHistories(),
+    ...namedHistories(),
     ...fc
       .sample(source.arbitrary, {
         seed: source.fixedSeeds[0] ?? 0,
@@ -933,7 +949,13 @@ function generatedTests<History, Expected, Plan>(
       })
       .map((history, index) => ({ name: `sample ${index}`, history })),
   ])
-  return [...fixedLanes, randomLane, ...pins, ...calibrations, determinism]
+  return [
+    ...fixedCampaigns,
+    randomCampaign,
+    ...fixedTests,
+    ...calibrations,
+    determinism,
+  ]
 }
 
 // A collect-only run (ORACLE_MANIFEST set) records each registration, so the

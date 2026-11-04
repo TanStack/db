@@ -54,7 +54,7 @@ import { colliding } from './hash-collision-support.js'
  *   equal, so every type marker has the same hash number.
  *
  * Authority: the method comments in `src/hashing/hash.ts`, and the behavior at
- * `8283f2e8`, which this file pins before the hash dispatch refactor.
+ * `8283f2e8`, which this file fixes before the hash dispatch refactor.
  *
  * Limits:
  * - Arrays from another realm (`node:vm`) are outside the grammar. An ordinary
@@ -902,8 +902,8 @@ describe(`hash identity oracle`, () => {
     expect(merged).toBeGreaterThan(0)
   })
 
-  // Pinned witnesses for rules that a wrong design would plausibly break.
-  const pinned: Array<[string, Spec, Spec]> = [
+  // Fixed witnesses for rules that a wrong design would plausibly break.
+  const fixedWitnesses: Array<[string, Spec, Spec]> = [
     [
       `a hole differs from undefined`,
       { k: `array`, items: [null, num(1)] },
@@ -1027,7 +1027,7 @@ describe(`hash identity oracle`, () => {
       { k: `obj`, entries: [], syms: [[1, num(1)]] },
     ],
   ]
-  it.each(pinned)(`%s`, (_name, left, right) => {
+  it.each(fixedWitnesses)(`%s`, (_name, left, right) => {
     for (const seeds of [
       [1, 2],
       [3, 4],

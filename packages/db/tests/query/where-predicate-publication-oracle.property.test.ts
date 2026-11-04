@@ -64,8 +64,8 @@
  * publication, and a restarted source) compare with written values, so they
  * are unit tests in where-predicate-publication.test.ts.
  *
- * Calibration: pinned histories separate Kleene from two-valued logic, and a
- * checker test requires the two-valued answer to fail. Hostile production
+ * Calibration: fixed histories separate Kleene from two-valued logic, and a
+ * checker test requires the two-valued answer to fail. Production
  * mutants that returned FALSE for `eq(string, null)`, prefiltered on `or`
  * operands as if they were conjuncts, prefiltered number literals past Date or
  * NaN rows, skipped an empty
@@ -369,7 +369,7 @@ const historyArbitrary: fc.Arbitrary<History> = fc.oneof(
 
 // Kleene and two-valued logic disagree on each snapshot history. The first is
 // the negated nullish comparison that a FALSE-for-UNKNOWN fast path misses.
-const pinnedHistories: ReadonlyArray<History> = [
+const fixedHistories: ReadonlyArray<History> = [
   {
     kind: `snapshot`,
     rows: [
@@ -428,7 +428,7 @@ const pinnedHistories: ReadonlyArray<History> = [
 
 // An unindexed snapshot may reject stored rows by one field before copying
 // them. A pending optimistic row is visible although it is not yet synced.
-const pinnedPrefilteredSnapshot: History = {
+const fixedPrefilteredSnapshot: History = {
   kind: `snapshot`,
   rows: [
     { v: `a`, optimistic: true },
@@ -440,7 +440,7 @@ const pinnedPrefilteredSnapshot: History = {
 
 // Each change history moves rows across a predicate whose equality operand a
 // skip-if-no-match shortcut can misread.
-const pinnedChangeHistories: ReadonlyArray<History> = [
+const fixedChangeHistories: ReadonlyArray<History> = [
   {
     // `or` operands are alternatives, not conjuncts.
     kind: `changes`,
@@ -792,7 +792,7 @@ async function runHistory(history: History): Promise<void> {
 // BasicIndex, and compares every consumer's observed key set with the model's
 // keys after each checkpoint. The model is `expectedTruth`, the Kleene
 // evaluator, and `expectedVisible`, which adds the touched-row rule for a
-// subscriber without initial state. The pinned calibration and the generated
+// subscriber without initial state. The fixed calibration and the generated
 // properties reach them; the witness tests in where-predicate-publication.test.ts
 // do not.
 declareOracle({
@@ -830,13 +830,13 @@ function describePredicate(predicate: Predicate): string {
 // ---------------------------------------------------------------------------
 
 describe(`WHERE predicate publication oracle`, () => {
-  // The pinned histories and the fixed campaign stand aside during any path
+  // The fixed histories and the fixed-seed campaign stand aside during any path
   // replay. The random campaign below is the one that a replay of this
   // property selects.
   if (!oracleReplayRequested()) {
-    it(`pinned snapshot histories distinguish Kleene logic from two-valued logic`, () => {
+    it(`fixed snapshot histories distinguish Kleene logic from two-valued logic`, () => {
       // A checker that folds UNKNOWN into FALSE before NOT must disagree with
-      // the model on each pinned snapshot, or the history does not calibrate.
+      // the model on each fixed snapshot, or the history does not calibrate.
       const twoValued = (predicate: Predicate, row: ModelRow): boolean => {
         switch (predicate.kind) {
           case `eq`:
@@ -854,7 +854,7 @@ describe(`WHERE predicate publication oracle`, () => {
             return predicate.args.some((arg) => twoValued(arg, row))
         }
       }
-      for (const history of pinnedHistories) {
+      for (const history of fixedHistories) {
         if (history.kind !== `snapshot`) throw new Error(`expected a snapshot`)
         const rows = new Map(
           history.rows.map((seed, index): [string, ModelRow] => [
@@ -875,9 +875,9 @@ describe(`WHERE predicate publication oracle`, () => {
     })
 
     for (const history of [
-      ...pinnedHistories,
-      pinnedPrefilteredSnapshot,
-      ...pinnedChangeHistories,
+      ...fixedHistories,
+      fixedPrefilteredSnapshot,
+      ...fixedChangeHistories,
     ]) {
       it(`publishes TRUE rows for ${history.kind} history ${describePredicate(history.predicate)}`, () =>
         runHistory(history))

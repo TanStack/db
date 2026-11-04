@@ -16,10 +16,10 @@
  * each checkpoint, the allowed cuts, rows, outcomes, receipts, and tracked
  * transactions. The seven observation mutants are calibrations.
  *
- * Limits: the core grammar has no partial-update lane, schema default,
+ * Limits: the core grammar has no partial-update production path, schema default,
  * pending manual edit, external completion, rejected handler, reentrant drain,
  * or ordered source operations. Those dimensions are exercised by the owners
- * that still drive `runOptimisticHistory` with pinned histories (coverage map).
+ * that still drive `runOptimisticHistory` with fixed histories (coverage map).
  */
 import { oracleProperty } from './oracle-property.js'
 import {
@@ -186,7 +186,7 @@ oracleProperty({
   law: {
     statement: `Optimistic and sync histories expose the rows, publications, request outcomes, receipts, and tracked transactions that the optimistic-history model owes at every step.`,
     authority: `packages/db/tests/optimistic-history-oracle.ts header (the optimistic and sync history contract); the public transaction contract for commit admission and terminal outcomes`,
-    limits: `The core grammar and production path only: no partial-update lane, schema default, pending manual edit, external completion, rejected handler, reentrant drain, ordered source operations, acknowledged handler write, or wrapping sync.`,
+    limits: `The core grammar and production path only: no partial-update production path, schema default, pending manual edit, external completion, rejected handler, reentrant drain, ordered source operations, acknowledged handler write, or wrapping sync.`,
     owner: `Optimistic state`,
   },
   histories: {
@@ -195,7 +195,7 @@ oracleProperty({
     measured: optimisticHistoryStates,
     runs: 100,
     fixedSeeds: [86103],
-    pins: cases.map(({ name, initial, steps }) => ({
+    fixed: cases.map(({ name, initial, steps }) => ({
       name,
       history: { initial, steps } satisfies OptimisticHistory,
     })),

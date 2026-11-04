@@ -351,8 +351,8 @@ it.each([false, true])(
 
 // A truncate consumes attribution for keys it writes, while an active edit on
 // another key still owns its first later source transaction in the same drain.
-// The nonoptimistic lane exposes source origin at the drain cut; the optimistic
-// lane exposes it when the failed edit drops its overlay.
+// The nonoptimistic production path exposes source origin at the drain cut; the optimistic
+// production path exposes it when the failed edit drops its overlay.
 it.each([false, true])(
   `retains active attribution for another key after truncate, optimistic=%s`,
   async (optimistic) => {

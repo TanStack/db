@@ -60,10 +60,10 @@
  * `Object.is` alone reports `-0` written over `0`, one that skips deletions
  * loses removed fields, one that ignores whether the row owns a field drops
  * added `undefined` fields, and one that edits rows in place breaks the throw
- * and stored-draft histories; each fails a pinned history and the fixed
+ * and stored-draft histories; each fails a fixed history and the fixed
  * campaign. The proxy used to treat a field added with `undefined` as
  * reverted when another field went back to its original value, and dropped
- * the added field; the pinned history and both campaigns fail without the
+ * the added field; the fixed history and both campaigns fail without the
  * fix, because the grammar weights that run.
  *
  * Known omissions: nested objects, arrays, Dates, Maps, Sets, class
@@ -371,7 +371,7 @@ const historyArbitrary: fc.Arbitrary<History> = fc
     }),
   )
 
-// Each witness pins a shape the trackers once disagreed on to the change
+// Each witness checks a shape the trackers once disagreed on to the change
 // set both must now report: defining a field acts as assigning it, and a
 // non-enumerable field is not row data unless the callback writes it.
 const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [

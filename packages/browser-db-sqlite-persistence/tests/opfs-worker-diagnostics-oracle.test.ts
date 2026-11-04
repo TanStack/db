@@ -321,7 +321,7 @@ class, and two storage-root examples include WebKit's exact UnknownError. A
 non-Error cause is outside this promise. Removing either class or the absent
 case loses one of those fixed witnesses.
 Challenge/replay: the present-cause examples reject a response that drops the
-cause; the absent-cause examples reject an invented cause. Pinned examples run
+cause; the absent-cause examples reject an invented cause. Fixed histories run
 separately so both generated campaigns share one property and budget, and a
 reported shrink path selects its generated case directly. Verbose FastCheck
 output retains original/reduced traces. Set
@@ -334,7 +334,7 @@ declareOracle({ check: [checkDiagnostic], model: [referenceMessage] })
 describe(`OPFS worker diagnostics oracle`, () => {
   if (!oracleReplayRequested()) {
     it.each(diagnosticExamples)(
-      `preserves the pinned open-failure diagnostic (%#)`,
+      `preserves the fixed open-failure diagnostic (%#)`,
       checkDiagnostic,
     )
   }

@@ -88,7 +88,7 @@ import type { SQLiteDriver } from '../src/index.js'
  * with the generated campaign and every receiving driver,
  * `tests/persisted-demand-coverage-model-oracle.ts`. They record the
  * source's log and each query's loads and observation, and state no expected
- * answer (ORC-016). Two pinned checks whose laws other owners hold live in
+ * answer (ORC-016). Two fixed regressions whose laws other owners hold live in
  * `persisted-demand-coverage-supplemental.test.ts`.
  *
  * Limits: Electric, Query DB, React, and Solid have receiving witnesses in

@@ -727,7 +727,7 @@ declareOracle({
 /**
  * Pending window moves keep the last settled page. A later commit supersedes
  * the requested window; an older acquisition cannot publish its own page. This
- * receiving lane uses each real adapter over an on-demand source that already
+ * receiving path uses each real adapter over an on-demand source that already
  * holds the rows but has not settled its demand. Available rows alone prove no
  * coverage (ARCHITECTURE.md, atomic window publication). Settlement is explicit;
  * no timer stands in for provider completion. The core ordered-window owner
@@ -961,7 +961,7 @@ function registerPendingWindowOracle(driver: LiveQueryDriver) {
  * The application never calls imperative setWindow, whose reentrancy guard is
  * outside this input language (contract.ts; maintainer decision 2026-10-30).
  *
- * This receiving lane uses all six real framework drivers. A direct Collection
+ * This receiving path uses all six real framework drivers. A direct Collection
  * change callback changes the binding's parameter while source publication is
  * on the stack. The callback entry is measured; no delayed trigger simulates it.
  * A one-shot guard permits the moved window to publish without another input

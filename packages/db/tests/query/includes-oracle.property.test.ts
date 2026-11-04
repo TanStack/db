@@ -1496,7 +1496,7 @@ function transitionHistoryPlacements(
 }> {
   // A rekey needs one child level so it changes relationship membership. It
   // also fails when two descendant levels remain. The single-transition matrix
-  // pins that failure and will turn red when this continuation can be widened.
+  // covers that failure and will turn red when this continuation can be widened.
   const minimumTargetLevel =
     firstTransition === `rekey` || secondTransition === `rekey`
       ? Math.max(1, depth - 1)
@@ -4727,7 +4727,7 @@ const scopedNoteRows: Array<ScopedRef> = [
   { id: 200, partId: 2, clientId: 1 },
 ]
 
-function pinnedScenario(
+function fixedScenario(
   shape: ScopedShape,
   aliases: ScopedAliases,
 ): ScopedScenario {
@@ -4748,10 +4748,10 @@ function pinnedScenario(
  * overbroad shadowing check once rejected. Together they reach every optimizer site that once re-minted a
  * SourceId; the review record maps each site to its killing witness.
  */
-const pinnedScopeWitnesses: Array<[string, ScopedScenario]> = [
+const fixedScopeWitnesses: Array<[string, ScopedScenario]> = [
   [
     `an include reuses the join alias of a joined subquery`,
-    pinnedScenario(
+    fixedScenario(
       {
         topology: `fromSubquery`,
         subquery: {
@@ -4765,7 +4765,7 @@ const pinnedScopeWitnesses: Array<[string, ScopedScenario]> = [
   ],
   [
     `an include reuses the second join alias`,
-    pinnedScenario(
+    fixedScenario(
       {
         topology: `fromSubquery`,
         subquery: { ...plainSubquery, joins: `refsThenNotes` },
@@ -4776,7 +4776,7 @@ const pinnedScopeWitnesses: Array<[string, ScopedScenario]> = [
   ],
   [
     `an include reuses the source alias of an ordered, limited subquery`,
-    pinnedScenario(
+    fixedScenario(
       {
         topology: `fromSubquery`,
         subquery: { ...plainSubquery, body: `orderedLimit` },
@@ -4787,7 +4787,7 @@ const pinnedScopeWitnesses: Array<[string, ScopedScenario]> = [
   ],
   [
     `an include reuses the source alias of a DISTINCT subquery`,
-    pinnedScenario(
+    fixedScenario(
       {
         topology: `fromSubquery`,
         subquery: { ...plainSubquery, body: `distinct`, subSelect: `fields` },
@@ -4798,7 +4798,7 @@ const pinnedScopeWitnesses: Array<[string, ScopedScenario]> = [
   ],
   [
     `an include reuses the source alias of a joined union branch`,
-    pinnedScenario(
+    fixedScenario(
       {
         topology: `unionBranch`,
         subquery: { ...plainSubquery, subSelect: `fields` },
@@ -4816,7 +4816,7 @@ const pinnedScopeWitnesses: Array<[string, ScopedScenario]> = [
   ],
   [
     `an include on a joined union reuses a branch alias`,
-    pinnedScenario(
+    fixedScenario(
       { topology: `unionParent`, includeSource: `refs` },
       { activeBranch: `x`, inactiveBranch: `y`, anchor: `a`, include: `x` },
     ),
@@ -4824,7 +4824,7 @@ const pinnedScopeWitnesses: Array<[string, ScopedScenario]> = [
   [
     `an include shadows its parent source alias`,
     {
-      ...pinnedScenario(
+      ...fixedScenario(
         {
           topology: `fromSubquery`,
           subquery: plainSubquery,
@@ -4844,7 +4844,7 @@ const pinnedScopeWitnesses: Array<[string, ScopedScenario]> = [
   ],
   [
     `a nested include source shadows its outer include source`,
-    pinnedScenario(
+    fixedScenario(
       {
         topology: `fromSubquery`,
         subquery: plainSubquery,
@@ -4862,7 +4862,7 @@ const pinnedScopeWitnesses: Array<[string, ScopedScenario]> = [
   ],
   [
     `a join subquery reuses the alias of a collapsed pure wrapper`,
-    pinnedScenario(
+    fixedScenario(
       { topology: `wrapper`, wrapperJoin: `inner` },
       { wrapped: `x`, joinSub: `k`, joinSource: `x` },
     ),
@@ -4877,7 +4877,7 @@ describe(`includes alpha-renaming across lexical scopes`, () => {
     () =>
       expectScopedAlphaRenamingHolds(
         {
-          ...pinnedScopeWitnesses[0]![1],
+          ...fixedScopeWitnesses[0]![1],
           parts: [
             { id: 1, active: true },
             { id: 2, active: true },
@@ -4892,7 +4892,7 @@ describe(`includes alpha-renaming across lexical scopes`, () => {
       ),
   )
 
-  for (const [name, scenario] of pinnedScopeWitnesses) {
+  for (const [name, scenario] of fixedScopeWitnesses) {
     for (const mode of [`eager`, `onDemand`] as const) {
       fcTest(`${name} [${mode}]`, () =>
         expectScopedAlphaRenamingHolds({ ...scenario, mode }),
@@ -4914,7 +4914,7 @@ describe(`includes alpha-renaming across lexical scopes`, () => {
   }
 })
 
-// A real active-bucket receiving lane extends this owner's numeric route
+// A real active-bucket receiving path extends this owner's numeric route
 // domain with native route-string collisions. The same full-tree recompute
 // judges inline arrays and Collection facades after each source transaction.
 // The fixture proves only the collision premise; it computes no expected rows.

@@ -344,7 +344,7 @@ collisionCases.push(
   },
 )
 // A witness is named by its case name, and its multiplicities are scaled,
-// so the history is plain data and a pinned witness is a member of the
+// so the history is plain data and a fixed witness is a member of the
 // language. `opposed` gives the first record the scale and every later one
 // its negation, so distinct identities would cancel if wrongly merged;
 // otherwise each record keeps its own multiplicity times the scale.
@@ -684,9 +684,9 @@ oracleProperty({
     ],
     runs: 300,
     fixedSeeds: [2026929],
-    // Pinned witnesses for each identity rule. Generated histories can reach
-    // many of these, but pinning them makes each rule visible and stable.
-    pins: [
+    // Fixed witnesses for each identity rule. Generated histories can reach
+    // many of these, but fixing them makes each rule visible and stable.
+    fixed: [
       ...collisionCases.map(({ name }) => ({
         name,
         enters: [`keyedCollision`],

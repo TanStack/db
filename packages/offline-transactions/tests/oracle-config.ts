@@ -11,7 +11,7 @@ type OfflineOracleConfigOptions = {
 
 /**
  * The budgets of one offline oracle property. `runs` sizes its fixed-seed
- * lane. `random` holds the shared property options for its random lane: a seed
+ * campaign. `random` holds the shared property options for its random campaign: a seed
  * alone reseeds it, and a path replay of `property` runs its recorded history
  * once.
  */
@@ -23,7 +23,7 @@ export function readOfflineOracleConfig({
   runs: number
   random: ReturnType<typeof oraclePropertyOptions>
 } {
-  // Both lanes share one budget: the scaled base plus the reserved fixed
+  // Both campaigns share one run budget: the scaled base plus the reserved fixed
   // examples. A path replay keeps its single run.
   const runs = oracleRuns(defaultRuns) + reservedRuns
   const random = oraclePropertyOptions(defaultRuns, property)
@@ -34,14 +34,15 @@ export function readOfflineOracleConfig({
 }
 
 /**
- * A lane that passes fixed `examples` keeps them during a path replay.
+ * A campaign that passes fixed `examples` keeps them during a path replay.
  * fast-check counts the examples in the recorded path, so a replay without
  * them would select a different value.
  *
- * The fast-check options for one lane. An `undefined` seed selects the random
- * lane. A number selects the fixed lane, which keeps its ordinary budget.
+ * The fast-check options for one campaign. An `undefined` seed selects the random
+ * campaign. A number selects the fixed-seed campaign, which keeps its ordinary run
+ * budget.
  */
-export function oracleLaneOptions(
+export function oracleCampaignOptions(
   config: ReturnType<typeof readOfflineOracleConfig>,
   seed: number | undefined,
 ):

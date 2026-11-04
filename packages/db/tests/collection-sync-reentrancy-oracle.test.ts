@@ -24,7 +24,7 @@
  * outcomes. It compares them after the outer commit returns and after the
  * receipts settle.
  *
- * Limits: the pinned tests cover layout marks, truncates, listener errors, and
+ * Limits: the fixed examples cover layout marks, truncates, listener errors, and
  * subset release. The generated grammar covers only listener commits, aborts,
  * and one open transaction. Optimistic settlement belongs to
  * `optimistic-history-oracle.ts`.

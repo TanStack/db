@@ -866,7 +866,7 @@ export type OracleReplayManifestEntry = {
   /**
    * `browser-replay` names a Playwright owner. The guarded Vitest runner
    * cannot witness it, so it rejects the target. Replay it with `command`.
-   * `seed-replay` names a property whose generator has no shrink path. A
+   * `reseeded-campaign` names a property whose generator has no shrink path. A
    * seed alone reproduces its history: `command` runs the owner directly
    * with TANSTACK_DB_ORACLE_SEED, which reseeds its random campaign. The
    * guarded runner, which witnesses a seed and path, rejects it.
@@ -875,7 +875,7 @@ export type OracleReplayManifestEntry = {
     | `assertion`
     | `statistics-only`
     | `browser-replay`
-    | `seed-replay`
+    | `reseeded-campaign`
     | `no-named-owner`
   file?: string
   /** The module that names the property, when the owner file imports it. */
@@ -886,7 +886,7 @@ export type OracleReplayManifestEntry = {
   environment: ReadonlyArray<string>
 }
 
-// These patterns name the random/replay lane, never its fixed-seed sibling.
+// These patterns name the random/replay campaign, never its fixed-seed sibling.
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
@@ -1045,7 +1045,7 @@ const replayTestNames = new Map([
 
 // Properties whose own seeded generator replaces fast-check, so they have no
 // shrink path.
-const seedReplayProperties = new Set([`evaluators.like`])
+const reseededProperties = new Set([`evaluators.like`])
 
 function directReplayTestName(property: string): string | undefined {
   if (property.startsWith(`pagination.limit-admission-`)) {
@@ -1108,8 +1108,8 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
       ? `no-named-owner`
       : file.endsWith(`.spec.ts`)
         ? `browser-replay`
-        : seedReplayProperties.has(property)
-          ? `seed-replay`
+        : reseededProperties.has(property)
+          ? `reseeded-campaign`
           : property.endsWith(`-statistics`) ||
               property.endsWith(`.scenario-statistics`)
             ? `statistics-only`
@@ -1135,7 +1135,7 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
         ? undefined
         : status === `browser-replay`
           ? `pnpm exec playwright test --config playwright.indexed-db.config.ts ${file.split(`/`).slice(2).join(`/`)}`
-          : status === `seed-replay`
+          : status === `reseeded-campaign`
             ? `pnpm exec vitest run ${file.split(`/`).slice(2).join(`/`)}`
             : outsidePackages
               ? `node --import tsx ${`../`.repeat(cwd!.split(`/`).length)}packages/db/tests/oracle-replay.ts ${outsideConfig === undefined ? `` : `--config ${outsideConfig} `}${file.split(`/`).pop()}`
@@ -1145,7 +1145,7 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
         ? [
             `TANSTACK_DB_ORACLE_STATISTICS=1 (sampling only; no exact assertion replay)`,
           ]
-        : status === `seed-replay`
+        : status === `reseeded-campaign`
           ? [`TANSTACK_DB_ORACLE_SEED`]
           : [
               `TANSTACK_DB_ORACLE_SEED`,

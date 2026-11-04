@@ -527,7 +527,7 @@ export function runSQLiteResetResumeOracleTests(
    *
    * Observed result and known omissions: exact settled rows, exact metadata
    * keys, and whether the durable Electric state is absent/reset/resume. The
-   * external-loss lane proves the generic adapter leaves metadata reachable;
+   * external-loss grammar proves the generic adapter leaves metadata reachable;
    * only the persisted+Electric suite judges whether that cursor is safe to
    * consume. The injected loss is not a claim that arbitrary SQL is a
    * supported public API. Partial resumed updates and SDK framing retain
@@ -583,7 +583,7 @@ export function runSQLiteResetResumeOracleTests(
           }),
         )
 
-      // A seed-only shared run reseeds this campaign. Ordinary runs keep the
+      // A shared run with only a seed is a reseeded campaign of this property. Ordinary runs keep the
       // fixed seed 1659, and a path replay runs once from its recorded path.
       const parameters = oraclePropertyOptions(
         24,
@@ -808,7 +808,7 @@ export function runSQLiteResetResumeOracleTests(
  *
  * Refinement: require the exact rows, reached predicate SELECTs, no
  * SQLite error, and no statement above its declared binding cap. The original 900-item
- * OR-chunk lowering is the hostile design: it reaches the intended SELECT and
+ * OR-chunk lowering is the mutant design: it reaches the intended SELECT and
  * fails the public result/binding comparison. The legacy CLI test interpolates
  * literals, so it cannot exercise this boundary.
  *
@@ -1027,7 +1027,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
         })
       },
     )
-    // Runs in ordinary and seed-only runs, and as the replay of its property.
+    // Runs in ordinary and reseeded campaigns, and as the replay of its property.
     oracleReplayTest(it, BINDING_PROPERTY)(
       `preserves exact rows across random-seed binding histories`,
       async () => {

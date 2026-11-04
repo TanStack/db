@@ -11,18 +11,18 @@ import {
 import {
   absentMarker,
   describeMismatch,
-  flatLane,
+  flatGrammar,
   historyRegimes,
   modelCheckpoints,
-  nestedConflictLane,
-  nestedLane,
-  nestedSeedLane,
+  nestedConflictGrammar,
+  nestedGrammar,
+  nestedSeedGrammar,
   runHoldInvariance,
   runKeyIndependence,
   runSeedOrderInvariance,
   runSessionHistory,
-  seedFullLane,
-  seedLane,
+  seedFullGrammar,
+  seedGrammar,
   sessionCollectionKeys,
   sessionHistoryArbitrary,
 } from './sync-metadata-session-oracle.js'
@@ -30,7 +30,7 @@ import type {
   ReceiptState,
   SessionAction,
   SessionDriver,
-  SessionLane,
+  SessionGrammar,
   SessionModel,
 } from './sync-metadata-session-oracle.js'
 import type { SyncConfig } from '../src/types.js'
@@ -177,7 +177,7 @@ async function createCoreDriver(fullRows = false): Promise<SessionDriver> {
     collectionSet: (key, value) => metadata().collection.set(key, value),
     collectionDelete: (key) => metadata().collection.delete(key),
     hold: () => {
-      // Core lanes never generate a store hold. A fresh fixture key each time: no source action or truncate names it.
+      // Core grammars never generate a store hold. A fresh fixture key each time: no source action or truncate names it.
       blocker = collection.insert({ id: 1000 + holdCount++, v: 0 })
     },
     release,
@@ -238,11 +238,11 @@ function sortedEntries(
 }
 
 async function assertSessionHistory(
-  lane: SessionLane,
+  grammar: SessionGrammar,
   history: ReadonlyArray<SessionAction>,
 ): Promise<void> {
-  const { mismatch } = await runSessionHistory(lane, history, () =>
-    createCoreDriver(lane.fullRows),
+  const { mismatch } = await runSessionHistory(grammar, history, () =>
+    createCoreDriver(grammar.fullRows),
   )
   if (mismatch) throw new Error(describeMismatch(history, mismatch))
 }
@@ -272,7 +272,7 @@ const witnesses = {
   // source update that merges over that seed and commits ahead does: the
   // re-insert then lands on a different row (decision 10).
   lateSeedUnderMergedUpdate: {
-    lane: nestedSeedLane,
+    grammar: nestedSeedGrammar,
     history: [
       a(`seed`, 1),
       a(`begin`),
@@ -287,7 +287,7 @@ const witnesses = {
   // The same under a hold: the inner commit stays accepted but unapplied, so
   // the seed still marks the row.
   heldLateSeedUnderMergedUpdate: {
-    lane: nestedSeedLane,
+    grammar: nestedSeedGrammar,
     history: [
       a(`hold`),
       a(`seed`, 1),
@@ -302,7 +302,7 @@ const witnesses = {
   },
   // Issue #2220: a held earlier write must stay visible after a later commit.
   heldCursor: {
-    lane: flatLane,
+    grammar: flatGrammar,
     history: [
       a(`hold`),
       a(`begin`),
@@ -315,7 +315,7 @@ const witnesses = {
   },
   // The open transaction overlays every held one, not only the newest.
   openOverHeld: {
-    lane: flatLane,
+    grammar: flatGrammar,
     history: [
       a(`hold`),
       a(`begin`),
@@ -327,7 +327,7 @@ const witnesses = {
   },
   // Independent transactions: an outer abort keeps an inner commit.
   outerAbortKeepsInnerCommit: {
-    lane: nestedLane,
+    grammar: nestedGrammar,
     history: [
       a(`begin`),
       a(`begin`),
@@ -339,7 +339,7 @@ const witnesses = {
   // Commit order: the outer transaction commits after the inner one, so its
   // earlier write wins, and a hold does not change that order.
   commitOrderDuringHold: {
-    lane: nestedLane,
+    grammar: nestedGrammar,
     history: [
       a(`hold`),
       a(`begin`),
@@ -354,7 +354,7 @@ const witnesses = {
   // During a hold, the outer transaction can still write and commit after an
   // inner one commits.
   outerContinuesAfterInnerDuringHold: {
-    lane: nestedLane,
+    grammar: nestedGrammar,
     history: [
       a(`hold`),
       a(`begin`),
@@ -367,7 +367,7 @@ const witnesses = {
   },
   // An inner truncate applies at its own commit, at once despite a hold.
   innerTruncateAppliesAtItsCommit: {
-    lane: nestedLane,
+    grammar: nestedGrammar,
     history: [
       a(`begin`),
       a(`upsert`, 1, true),
@@ -384,7 +384,7 @@ const witnesses = {
   // but never makes the source's equal re-insert a duplicate, and the
   // re-insert still replaces the row: the late seed's extra field goes.
   seedUnderOpenReinsert: {
-    lane: seedLane,
+    grammar: seedGrammar,
     history: [
       a(`begin`),
       { type: `seed`, key: 1, narrow: true, bare: true },
@@ -396,7 +396,7 @@ const witnesses = {
   },
   // A seed never supersedes a source metadata write on a row the source did not write.
   seedUnderMetadataOnlyWrite: {
-    lane: seedLane,
+    grammar: seedGrammar,
     history: [
       a(`begin`),
       a(`rowSet`, 1),
@@ -408,7 +408,7 @@ const witnesses = {
   // insert replaces the seeded row and clears its metadata. Consumers see the
   // seed until the insert's transaction applies.
   seedUnderOpenInsert: {
-    lane: seedLane,
+    grammar: seedGrammar,
     history: [
       a(`begin`),
       a(`upsert`, 1, false),
@@ -419,7 +419,7 @@ const witnesses = {
   // The same history with the insert committed before the seed arrives: the
   // outcome does not depend on arrival order.
   seedAfterCommittedInsert: {
-    lane: seedLane,
+    grammar: seedGrammar,
     history: [
       a(`begin`),
       a(`upsert`, 1, false),
@@ -430,7 +430,7 @@ const witnesses = {
   // A source insert equal to a seeded row is still an insert: the source never
   // wrote the row, so the insert names its metadata and clears the seed's.
   equalInsertOverSeed: {
-    lane: seedLane,
+    grammar: seedGrammar,
     history: [
       a(`seed`, 1),
       a(`begin`),
@@ -440,7 +440,7 @@ const witnesses = {
   // The latest seed of a row no source write has written wins whole, so a
   // narrow seed drops the earlier seed's other field.
   laterSeedReplacesSeed: {
-    lane: seedLane,
+    grammar: seedGrammar,
     history: [
       a(`seed`, 1),
       { type: `seed`, key: 1, narrow: true },
@@ -449,7 +449,7 @@ const witnesses = {
   // Once the source has updated a seeded row, a later seed is ignored for the
   // row's data; the update wrote no metadata, so the late seed supplies it.
   partialUpdateThenLateSeed: {
-    lane: seedLane,
+    grammar: seedGrammar,
     history: [
       a(`seed`, 1),
       a(`begin`),
@@ -460,7 +460,7 @@ const witnesses = {
   },
   // The latest seed wins whole: a later seed without metadata leaves none.
   bareLaterSeedClearsMetadata: {
-    lane: seedLane,
+    grammar: seedGrammar,
     history: [
       a(`seed`, 1),
       { type: `seed`, key: 1, bare: true },
@@ -469,7 +469,7 @@ const witnesses = {
   // A fresh source insert over a row only a seed supplied replaces the row
   // and, naming no metadata, clears the seed's.
   insertOverSeedReplaces: {
-    lane: seedLane,
+    grammar: seedGrammar,
     history: [
       a(`seed`, 1),
       a(`begin`),
@@ -480,7 +480,7 @@ const witnesses = {
   // A source update merges over a seeded row under partial row updates, so the
   // seed's other field and its metadata stay.
   updateOverSeed: {
-    lane: seedLane,
+    grammar: seedGrammar,
     history: [
       a(`seed`, 1),
       a(`begin`),
@@ -491,7 +491,7 @@ const witnesses = {
   // Under full row updates the update replaces the seeded row; its metadata
   // stays, because the update names none.
   updateOverSeedFullRows: {
-    lane: seedFullLane,
+    grammar: seedFullGrammar,
     history: [
       a(`seed`, 1),
       a(`begin`),
@@ -501,7 +501,7 @@ const witnesses = {
   },
   // An open truncate hides a held row write: a row read stops at the truncate.
   openTruncateHidesHeldRow: {
-    lane: flatLane,
+    grammar: flatGrammar,
     history: [
       a(`hold`),
       a(`begin`),
@@ -513,7 +513,7 @@ const witnesses = {
   },
   // An open delete hides a held collection entry from `list()`.
   openDeleteHidesHeldListEntry: {
-    lane: flatLane,
+    grammar: flatGrammar,
     history: [
       a(`hold`),
       a(`begin`),
@@ -525,7 +525,7 @@ const witnesses = {
   },
   // `list('gc:')` includes the key equal to the prefix and excludes `gc`.
   prefixBoundary: {
-    lane: flatLane,
+    grammar: flatGrammar,
     history: [
       a(`begin`),
       a(`collectionSet`, `gc`),
@@ -536,7 +536,7 @@ const witnesses = {
   // of the updated row is an equal re-insert, not a duplicate. A classifier
   // that merged the held update would keep the inserted row's field `m`.
   fullUpdateThenEqualInsertDuringHold: {
-    lane: seedFullLane,
+    grammar: seedFullGrammar,
     history: [
       a(`begin`),
       a(`upsert`, 1, true),
@@ -549,16 +549,19 @@ const witnesses = {
       a(`reinsert`, 1, false),
     ] as Array<SessionAction>,
   },
-} satisfies Record<string, { lane: SessionLane; history: Array<SessionAction> }>
+} satisfies Record<
+  string,
+  { grammar: SessionGrammar; history: Array<SessionAction> }
+>
 
 /**
- * Each lane's replay names: its campaign, and the paired formulations that
+ * Each grammar's replay names: its campaign, and the paired formulations that
  * apply to it (key independence without full row updates, seed order with
  * seeds).
  */
-const lanes = [
+const grammars = [
   {
-    lane: flatLane,
+    grammar: flatGrammar,
     property: `sync-metadata-session.flat`,
     paired: {
       'hold-invariance': `sync-metadata-session.flat.hold-invariance`,
@@ -567,7 +570,7 @@ const lanes = [
     seed: 2_220_001,
   },
   {
-    lane: nestedLane,
+    grammar: nestedGrammar,
     property: `sync-metadata-session.nested`,
     paired: {
       'hold-invariance': `sync-metadata-session.nested.hold-invariance`,
@@ -576,7 +579,7 @@ const lanes = [
     seed: 2_220_002,
   },
   {
-    lane: seedLane,
+    grammar: seedGrammar,
     property: `sync-metadata-session.seeds`,
     paired: {
       'hold-invariance': `sync-metadata-session.seeds.hold-invariance`,
@@ -585,11 +588,11 @@ const lanes = [
     },
     seed: 2_220_003,
     // A seed beneath an open update needs both on one row, and duplicate
-    // inserts share the lane's weight, so it runs more fixed histories.
+    // inserts share the grammar's weight, so it runs more fixed histories.
     runs: 150,
   },
   {
-    lane: seedFullLane,
+    grammar: seedFullGrammar,
     property: `sync-metadata-session.seeds-full`,
     paired: {
       'hold-invariance': `sync-metadata-session.seeds-full.hold-invariance`,
@@ -598,7 +601,7 @@ const lanes = [
     seed: 2_220_004,
   },
   {
-    lane: nestedSeedLane,
+    grammar: nestedSeedGrammar,
     property: `sync-metadata-session.nested-seeds`,
     paired: {
       'hold-invariance': `sync-metadata-session.nested-seeds.hold-invariance`,
@@ -608,7 +611,7 @@ const lanes = [
     seed: 2_220_005,
   },
   {
-    lane: nestedConflictLane,
+    grammar: nestedConflictGrammar,
     property: `sync-metadata-session.nested-conflicts`,
     paired: {
       'hold-invariance': `sync-metadata-session.nested-conflicts.hold-invariance`,
@@ -616,13 +619,13 @@ const lanes = [
     },
     seed: 2_220_006,
     // Invalidation needs an outer insert, an inner write to the same row,
-    // and the inner commit, so this lane runs more fixed histories.
+    // and the inner commit, so this grammar runs more fixed histories.
     runs: 450,
   },
 ] as const
 
 /**
- * Declared reach (ORC-015): the states each lane's laws need, and how many
+ * Declared reach (ORC-015): the states each grammar's laws need, and how many
  * fixed-campaign histories must enter each. A seed over a source insert or an
  * open update needs both on one row, and a write to an invalid transaction
  * needs an invalidation first, so those minimums are lower.
@@ -672,9 +675,9 @@ const declaredReach: Record<string, Array<[string, number]>> = {
   ],
 }
 
-/** One reach counter per minimum, for a lane's fixed campaign. */
-function createLaneReach(lane: SessionLane, property: string) {
-  const states = declaredReach[lane.name]!
+/** One reach counter per minimum, for a grammar's fixed campaign. */
+function createCampaignReach(grammar: SessionGrammar, property: string) {
+  const states = declaredReach[grammar.name]!
   const counters = [...new Set(states.map(([, minimum]) => minimum))].map(
     (minimum) => {
       const declared = states
@@ -688,7 +691,7 @@ function createLaneReach(lane: SessionLane, property: string) {
   )
   return {
     record(history: ReadonlyArray<SessionAction>): void {
-      const regimes = historyRegimes(lane, history)
+      const regimes = historyRegimes(grammar, history)
       for (const { declared, reach } of counters) {
         reach.beginHistory()
         for (const regime of regimes)
@@ -705,8 +708,8 @@ describe(`sync metadata session oracle`, () => {
   it(`derives the named witnesses from the laws`, async () => {
     type Observation = ReturnType<SessionModel[`observe`]>
     const at = async (name: keyof typeof witnesses, step: number) => {
-      const { lane, history } = witnesses[name]
-      return (await modelCheckpoints(lane, history)).get(step) as Observation
+      const { grammar, history } = witnesses[name]
+      return (await modelCheckpoints(grammar, history)).get(step) as Observation
     }
     // Wrong answer on 30175be48: the held cursor reads as absent.
     const held = await at(`heldCursor`, 6)
@@ -823,8 +826,8 @@ describe(`sync metadata session oracle`, () => {
 
   it.each(Object.entries(witnesses))(
     `keeps the session law on witness %s`,
-    async (_name, { lane, history }) => {
-      await assertSessionHistory(lane, history)
+    async (_name, { grammar, history }) => {
+      await assertSessionHistory(grammar, history)
     },
   )
 })
@@ -840,63 +843,65 @@ describe(`sync metadata session oracle`, () => {
  */
 describe(`sync metadata session grammar ablation`, () => {
   const ablations: Array<{
-    lane: SessionLane
+    grammar: SessionGrammar
     drop: (action: SessionAction) => boolean
     regime: string
   }> = [
     {
-      lane: flatLane,
+      grammar: flatGrammar,
       drop: (x) => x.type === `hold`,
       regime: `read with two held transactions`,
     },
     {
-      lane: flatLane,
+      grammar: flatGrammar,
       drop: (x) => x.type === `truncate`,
       regime: `truncate during a hold`,
     },
     {
-      lane: flatLane,
+      grammar: flatGrammar,
       drop: (x) => x.type === `reinsert`,
       regime: `equal re-insert`,
     },
     {
-      lane: flatLane,
+      grammar: flatGrammar,
       drop: (x) => x.type === `collectionSet` && x.undefinedValue === true,
       regime: `undefined collection value`,
     },
     {
-      lane: nestedLane,
+      grammar: nestedGrammar,
       drop: (x) => x.type === `cancel`,
       regime: `abort keeps an inner commit`,
     },
     {
-      lane: { ...nestedLane, maxDepth: 1 },
+      grammar: { ...nestedGrammar, maxDepth: 1 },
       drop: () => false,
       regime: `nested commit`,
     },
-    { lane: seedLane, drop: (x) => x.type === `seed`, regime: `seed` },
+    { grammar: seedGrammar, drop: (x) => x.type === `seed`, regime: `seed` },
   ]
   it.each(ablations.map((ablation) => [ablation.regime, ablation] as const))(
     `removing the axis for %s removes that regime`,
-    (_regime, { lane, drop, regime }) => {
+    (_regime, { grammar, drop, regime }) => {
       const count = (filter: (action: SessionAction) => boolean) =>
         fc
-          .sample(sessionHistoryArbitrary(lane), {
+          .sample(sessionHistoryArbitrary(grammar), {
             numRuns: 200,
             seed: 2_220_100,
           })
           .filter((history) =>
-            historyRegimes(lane, history.filter(filter)).has(regime),
+            historyRegimes(grammar, history.filter(filter)).has(regime),
           ).length
-      const fullLane =
-        lane.maxDepth === 1 && regime === `nested commit` ? nestedLane : lane
+      const fullGrammar =
+        grammar.maxDepth === 1 && regime === `nested commit`
+          ? nestedGrammar
+          : grammar
       const full = fc
-        .sample(sessionHistoryArbitrary(fullLane), {
+        .sample(sessionHistoryArbitrary(fullGrammar), {
           numRuns: 200,
           seed: 2_220_100,
         })
         .filter((history) =>
-          historyRegimes(fullLane, history).has(regime),
+          historyRegimes(fullGrammar, history).has(regime),
         ).length
       expect(full).toBeGreaterThan(10)
       expect(count((action) => !drop(action))).toBe(0)
@@ -909,28 +914,28 @@ describe(`sync metadata session grammar ablation`, () => {
  * It does not consult the model's reads, so it cannot share a fault in them.
  */
 describe(`sync metadata session hold invariance`, () => {
-  for (const { lane, paired, seed } of lanes) {
+  for (const { grammar, paired, seed } of grammars) {
     const invariance = paired[`hold-invariance`]
     const run = async (history: Array<SessionAction>) => {
-      const mismatch = await runHoldInvariance(lane, history, () =>
-        createCoreDriver(lane.fullRows),
+      const mismatch = await runHoldInvariance(grammar, history, () =>
+        createCoreDriver(grammar.fullRows),
       )
       if (mismatch) throw new Error(describeMismatch(history, mismatch))
     }
-    oracleReplayTest(fcTest).prop([sessionHistoryArbitrary(lane)], {
+    oracleReplayTest(fcTest).prop([sessionHistoryArbitrary(grammar)], {
       numRuns: oracleRuns(50),
       seed: seed + 100,
     })(
-      `keeps ${lane.name} source reads independent of holds (fixed)`,
+      `keeps ${grammar.name} source reads independent of holds (fixed)`,
       run,
       60_000,
     )
     // A path replay of this property runs here.
     oracleReplayTest(fcTest, invariance).prop(
-      [sessionHistoryArbitrary(lane)],
+      [sessionHistoryArbitrary(grammar)],
       oraclePropertyOptions(50, invariance),
     )(
-      `keeps ${lane.name} source reads independent of holds (random)`,
+      `keeps ${grammar.name} source reads independent of holds (random)`,
       run,
       60_000,
     )
@@ -946,49 +951,57 @@ const pairedFormulations = [
     suffix: `key-independence`,
     title: `keeps row 1 independent of row 2`,
     run: runKeyIndependence,
-    lanes: lanes.filter((entry) => `key-independence` in entry.paired),
+    grammars: grammars.filter((entry) => `key-independence` in entry.paired),
   },
   {
     suffix: `seed-order`,
     title: `keeps outcomes independent of seed arrival`,
     run: runSeedOrderInvariance,
-    lanes: lanes.filter((entry) => `seed-order` in entry.paired),
+    grammars: grammars.filter((entry) => `seed-order` in entry.paired),
   },
 ] as const
 
 describe(`sync metadata session paired formulations`, () => {
   for (const formulation of pairedFormulations)
-    for (const { lane, paired, seed } of formulation.lanes) {
+    for (const { grammar, paired, seed } of formulation.grammars) {
       const name = (paired as Record<string, string>)[formulation.suffix]!
       const run = async (history: Array<SessionAction>) => {
-        const mismatch = await formulation.run(lane, history, () =>
-          createCoreDriver(lane.fullRows),
+        const mismatch = await formulation.run(grammar, history, () =>
+          createCoreDriver(grammar.fullRows),
         )
         if (mismatch) throw new Error(describeMismatch(history, mismatch))
       }
-      oracleReplayTest(fcTest).prop([sessionHistoryArbitrary(lane)], {
+      oracleReplayTest(fcTest).prop([sessionHistoryArbitrary(grammar)], {
         numRuns: oracleRuns(50),
         seed: seed + 200,
-      })(`${formulation.title} on ${lane.name} histories (fixed)`, run, 60_000)
+      })(
+        `${formulation.title} on ${grammar.name} histories (fixed)`,
+        run,
+        60_000,
+      )
       // A path replay of this property runs here.
       oracleReplayTest(fcTest, name).prop(
-        [sessionHistoryArbitrary(lane)],
+        [sessionHistoryArbitrary(grammar)],
         oraclePropertyOptions(50, name),
-      )(`${formulation.title} on ${lane.name} histories (random)`, run, 60_000)
+      )(
+        `${formulation.title} on ${grammar.name} histories (random)`,
+        run,
+        60_000,
+      )
     }
 })
 
 describe(`sync metadata session campaigns`, () => {
-  for (const entry of lanes) {
-    const { lane, property, seed } = entry
+  for (const entry of grammars) {
+    const { grammar, property, seed } = entry
     const run = (history: Array<SessionAction>) =>
-      assertSessionHistory(lane, history)
-    const reach = createLaneReach(lane, property)
-    oracleReplayTest(fcTest).prop([sessionHistoryArbitrary(lane)], {
+      assertSessionHistory(grammar, history)
+    const reach = createCampaignReach(grammar, property)
+    oracleReplayTest(fcTest).prop([sessionHistoryArbitrary(grammar)], {
       numRuns: oracleRuns(`runs` in entry ? entry.runs : 100),
       seed,
     })(
-      `keeps the session law on ${lane.name} histories (fixed)`,
+      `keeps the session law on ${grammar.name} histories (fixed)`,
       (history) => {
         reach.record(history)
         return run(history)
@@ -996,13 +1009,17 @@ describe(`sync metadata session campaigns`, () => {
       120_000,
     )
     oracleReplayTest(it)(
-      `reaches the declared states in the ${lane.name} fixed campaign`,
+      `reaches the declared states in the ${grammar.name} fixed campaign`,
       () => reach.assertReached(),
     )
     // A path replay of this property runs here.
     oracleReplayTest(fcTest, property).prop(
-      [sessionHistoryArbitrary(lane)],
+      [sessionHistoryArbitrary(grammar)],
       oraclePropertyOptions(100, property),
-    )(`keeps the session law on ${lane.name} histories (random)`, run, 60_000)
+    )(
+      `keeps the session law on ${grammar.name} histories (random)`,
+      run,
+      60_000,
+    )
   }
 })

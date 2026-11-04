@@ -10,7 +10,7 @@
  * portable error-object identity. The fixture supplies native SSR, JSON
  * transport and hydrate(); construction and pre-effects record the two public
  * cuts. A failure is the provider's fail() before readiness, a loading error
- * (`isLoadingError`). This lane does not model throwing provider callbacks,
+ * (`isLoadingError`). This grammar does not model throwing provider callbacks,
  * which crash the Collection (`isCrashed`), or Suspense.
  */
 import { TextEncoder } from 'node:util'

@@ -80,9 +80,9 @@ import type {
  *
  * The history grammar varies parent and child writes, route movement, shared
  * buckets, dormant buckets, ordering, parent-dependent filters, and joins. It
- * also varies optimistic confirmation and rollback. A bounded exhaustive lane covers every
- * two-step history in the smallest relationship domain. Random histories add
- * longer combinations and shrink failures.
+ * also varies optimistic confirmation and rollback. A bounded exhaustive
+ * campaign covers every two-step history in the smallest relationship domain.
+ * Random histories add longer combinations and shrink failures.
  *
  * The Map model stores current source Collection rows. It combines all D2
  * relation, route, and bucket state into the public result recomputation; it
@@ -91,15 +91,15 @@ import type {
  *
  * Grammar controls: the fixed route-retirement, dormant-bucket, shared-bucket,
  * and child-order witnesses reconstruct the key relationship histories. The
- * generated action lane needs both parent and child writes: removing either
+ * generated action grammar needs both parent and child writes: removing either
  * loses route transitions or child-only facade changes. Its IDs (parents 0–3,
  * children 10–14), groups (-3–3), values (-5–5), and 1–16 actions are bounded;
- * the exhaustive lane includes empty initial relations and zero actions. A
+ * the bounded exhaustive campaign includes empty initial relations and zero actions. A
  * repeated key becomes an update, so the grammar rejects a duplicate insert.
- * The public-key lane crosses one-digit and two-digit IDs to expose lexical
+ * The public-key grammar crosses one-digit and two-digit IDs to expose lexical
  * sorting; allowing equal IDs would collapse the two-row premise. The order
- * lane uses adjacent swaps among 2–8 rows; a one-row case cannot move. The
- * optimistic lane uses group/value -10–10 and disjoint IDs 10–100/101–200.
+ * grammar uses adjacent swaps among 2–8 rows; a one-row case cannot move. The
+ * optimistic grammar uses group/value -10–10 and disjoint IDs 10–100/101–200.
  * Its rollback and confirmation steps distinguish temporary from retained
  * child rows; a delete of an absent child is excluded.
  *
@@ -383,7 +383,7 @@ const optimisticChildArbitrary = fc.record({
   value: fc.integer({ min: -10, max: 10 }),
 })
 
-// Enumeration proves the small finite domain. The generated lane explores
+// Enumeration proves the small finite domain. The generated campaign explores
 // longer histories over a wider value domain. Neither replaces the other.
 function enumerateActionSequences(
   actions: ReadonlyArray<CollectionAction>,

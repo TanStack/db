@@ -2622,7 +2622,7 @@ describe(`Ordered windows across truncate replays`, () => {
     history: Array<OrderedCommand>
     scenario?: OrderedScenario
     reaches?: keyof OrderedReach
-    // A replay whose history the law places in a recovery. The pin also
+    // A fixed history that the law places in a recovery. The history also
     // holds where the model cannot tell which subscription issued a load
     // (see Limits).
     recovers?: true
@@ -3692,7 +3692,7 @@ it.each(orderedFailureCampaigns)(
             )
             // A fresh request that fails inside the marker barrier keeps the
             // query; a later suffix may legitimately end it, so only the
-            // fresh history is pinned.
+            // fresh history is checked exactly.
             if (fresh) {
               expect(reach.terminalErrors, `fresh request failure`).toBe(0)
               expect(reach.requestErrors, `fresh request failure`).toBe(1)

@@ -402,13 +402,14 @@ function checkResultShape(
 // Definition and registration
 // ---------------------------------------------------------------------------
 
-// Two segments enter every state the laws need, on every lane.
+// Two constructed histories enter every state the laws need, in every campaign
+// and production path.
 const resultShapeHistories = {
   arbitrary: shapeHistory,
   states,
   runs: 6,
   fixedSeeds: [2316],
-  segments: [
+  constructed: [
     {
       name: `every switch over a three-row window`,
       enters: states.filter(
@@ -435,7 +436,7 @@ const resultShapeHistories = {
       }),
     },
   ],
-  pins: regressions.map((history) => ({
+  fixed: regressions.map((history) => ({
     name: `${history.initial}, ${history.order}, ${history.count} rows${history.windowed ? `, window at ${history.offset}` : ``}`,
     history,
   })),

@@ -20,8 +20,8 @@
  * by one Collection with automatic handlers. Inserts are excluded: an insert
  * after a rejected delete of the same key is undecided behaviour. Manual
  * acceptance and peer writes are outside this property because they need
- * different event and ownership boundaries; the order oracle's pinned
- * witnesses and `local-storage.peers` cover them. Storage faults and
+ * different event and ownership boundaries; the order oracle's fixed
+ * histories and `local-storage.peers` cover them. Storage faults and
  * histories longer than three writes are also outside it. The prompt release
  * of a failed later handler's receipt and optimistic row is witnessed only by
  * the fixed tests in `local-storage-order.test.ts` (coverage map).

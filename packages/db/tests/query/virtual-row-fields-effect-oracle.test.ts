@@ -364,9 +364,9 @@ function sidesOf(history: History): Array<Side> {
 function historyId(history: History): string {
   return `${pathOf(history)}/confirm-${history.confirm.join(`+`) || `none`}/reject-${history.reject.join(`+`) || `none`}/settle-${history.rightFirst ? `right` : `left`}-first`
 }
-// Declare each finite lane's owed comparisons independently. Aggregate path
-// totals would let one omitted right-source action borrow another lane's reach.
-// Outcome and confirmation premises determine which cuts are legal in a lane.
+// Declare each finite campaign's owed comparisons independently. Aggregate path
+// totals would let one omitted right-source action borrow another campaign's reach.
+// Outcome and confirmation premises determine which cuts are legal in a campaign.
 function requiredEffectCuts(history: History): Array<string> {
   const sides = sidesOf(history)
   return [
@@ -398,14 +398,14 @@ const effectMetadataReach = createOracleReach(
     ),
   ),
   // This exhaustive grammar has no seed/path replay. An unrelated replay
-  // environment must not exempt its required finite lanes from reach.
+  // environment must not exempt its required finite campaigns from reach.
   { replaying: false },
 )
 const effectPassedCuts = new Map<string, number>()
 let enteredEffectHistories = 0
 afterAll(() => {
   // A checker-only selector enters no production history. Once any native
-  // history runs, every finite lane still owes its complete declared reach.
+  // history runs, every finite campaign still owes its complete declared reach.
   if (enteredEffectHistories > 0) effectMetadataReach.assertReached()
   if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
     console.info(

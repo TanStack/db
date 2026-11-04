@@ -41,7 +41,7 @@ import type { Message } from '@electric-sql/client'
 import type * as ElectricSdkModule from '@electric-sql/client'
 
 // Observe the real constructor boundary without changing the installed SDK's
-// options, prototype, methods, or HTTP behavior. Only the rotation lane enables
+// options, prototype, methods, or HTTP behavior. Only the rotation grammar enables
 // the callback; every construction still executes the original ShapeStream.
 const sdkConstruction = vi.hoisted(() => ({
   observe: undefined as (() => void) | undefined,
@@ -94,7 +94,7 @@ vi.mock(`@electric-sql/client`, async (importOriginal) => {
  * A real node:sqlite cold-launch witness starts with an incompatible partial
  * cache and no reset marker. It must exclude that row before and after the
  * installed SDK returns an empty source snapshot for the demanded predicate.
- * A source-release lane, documented at its property, checks that cleanup
+ * A source-release grammar, documented at its property, checks that cleanup
  * removes every listener that a run's streams registered on `document`.
  *
  * These finite HTTP fixtures do not prove that a live Electric service emits
@@ -702,7 +702,7 @@ fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
  * # The retry-decision law through the installed Electric client
  *
  * The retry-decision oracle in `electric-oracle.property.test.ts` drives the
- * adapter through a controlled ShapeStream. This lane receives the same law
+ * adapter through a controlled ShapeStream. This receiving path receives the same law
  * through the installed `@electric-sql/client`, its retry policy, and HTTP.
  * It uses the same independent model (`electric-retry-decision-model.ts`).
  *
@@ -726,7 +726,7 @@ fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
  * load. An eager or progressive Collection has no subset demand before its
  * first ready, so its demand is the readiness wait (`preload()`).
  *
- * At each checkpoint the lane compares the Collection status, each demand's
+ * At each checkpoint the receiving path compares the Collection status, each demand's
  * settlement, and whether the snapshot's row is visible with the model:
  * after the first error reaches `onError`, after an asynchronous decision,
  * after the outcome, and after the later demand. It also checks that a
@@ -953,7 +953,7 @@ fixedCase.each(clientRetryCells)(
  * retired HTTP snapshot arrives while rotation is held, just before replacement
  * snapshots, or after replacement settlement. A forwarding constructor observer
  * records listener ownership before invoking the real SDK. It does not release
- * resources or replace SDK behavior. This lane
+ * resources or replace SDK behavior. This receiving path
  * covers sequential rotations in an on-demand run with the installed browser
  * SDK; overlapping rotations, other SDK versions, and native hosts remain separate.
  * Both retained demands must remain pending until replacement source responses
@@ -1362,10 +1362,10 @@ sdkCampaigns(
  * bound and one-registration-per-run calibration describe this installed SDK
  * and the driver's one-stream topology, rather than a universal SDK policy.
  *
- * Limits: the lane observes the browser listener in jsdom. Client versions
+ * Limits: the receiving path observes the browser listener in jsdom. Client versions
  * that observe React Native's AppState instead register through a runtime
- * adapter, which this lane does not install. A live Electric service and
- * snapshot requests are outside this lane. The managed cache rotation case
+ * adapter, which this receiving path does not install. A live Electric service and
+ * snapshot requests are outside this receiving path. The managed cache rotation case
  * above replaces a provider session within one run; it receives the same law
  * for the retired session.
  */

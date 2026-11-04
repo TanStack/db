@@ -21,7 +21,7 @@ import type { CollectionConfig } from '@tanstack/db'
 import type {
   HistoryRow,
   OptimisticStep,
-  WrappingSyncLane,
+  WrappingSyncPath,
 } from '../../db/tests/optimistic-history-oracle'
 import type { PersistedTx, PersistenceAdapter } from '../src'
 
@@ -46,9 +46,9 @@ import type { PersistedTx, PersistenceAdapter } from '../src'
  * the wrapper discards it when its turn comes, and every settled row it alone
  * held drops in that publication. The model fixes that drop at the turn; an
  * implementation that dropped the hold at abort time would also be legal, and
- * this lane would reject it.
+ * this wrapping-sync path would reject it.
  *
- * Reach: two segments make the lane's own states required on every run. A
+ * Reach: two constructed histories make the wrapping-sync path's own states required on every run. A
  * hold across a drain (`deferred-hold`) comes after a generated history, so
  * the hold meets whatever that history left; an abort that releases a held
  * row (`abort-release`) comes first and releases the store itself, because a
@@ -57,8 +57,8 @@ import type { PersistedTx, PersistenceAdapter } from '../src'
  * Grammar limits: a handler cannot await acceptance while a hold is
  * outstanding, because acceptance follows the held durable step; the grammar
  * clears `awaitReceipt` there, and its unmapper admits only such histories.
- * The schema, partial-update, and reentrant lanes stay core-only. The adapter
- * is a Map, so SQLite timing and coordinator messages are outside this lane.
+ * The schema, partial-update, and reentrant grammars stay core-only. The adapter
+ * is a Map, so SQLite timing and coordinator messages are outside this wrapping-sync path.
  */
 function createHoldingAdapter() {
   const rows = new Map<string | number, HistoryRow>()
@@ -115,13 +115,13 @@ function createHoldingAdapter() {
   }
 }
 
-let laneRun = 0
+let productionPathRun = 0
 
-function persistedLane(): WrappingSyncLane & {
+function persistedProductionPath(): WrappingSyncPath & {
   rows: Map<string | number, HistoryRow>
 } {
   const store = createHoldingAdapter()
-  const id = `persisted-optimistic-history-${++laneRun}`
+  const id = `persisted-optimistic-history-${++productionPathRun}`
   return {
     db: {
       createCollection,
@@ -269,7 +269,7 @@ oracleProperty({
   law: {
     statement: `A persisted Collection exposes the rows, publications, request outcomes, receipts, and tracked transactions that the optimistic-history model owes at every step, including while a durable store step is held and after a deferred source transaction aborts.`,
     authority: `packages/db/tests/optimistic-history-oracle.ts header (the optimistic and sync history contract, held rows behind a wrapping sync)`,
-    limits: `An in-memory adapter, not SQLite timing or coordinator messages; no awaited acceptance during a hold; no schema, partial-update, or reentrant lane.`,
+    limits: `An in-memory adapter, not SQLite timing or coordinator messages; no awaited acceptance during a hold; no schema, partial-update, or reentrant grammar.`,
     owner: `Optimistic state`,
   },
   histories: {
@@ -280,7 +280,7 @@ oracleProperty({
     ),
     runs: 40,
     fixedSeeds: [22012],
-    segments: [
+    constructed: [
       {
         name: `a hold across a drain`,
         enters: [`deferred-hold`],
@@ -306,7 +306,7 @@ oracleProperty({
         }),
       },
     ],
-    pins: [
+    fixed: [
       {
         // The same history with partial optimistic fields, written as core
         // edits whose handler batches do not await acceptance.
@@ -344,7 +344,10 @@ oracleProperty({
   reached: optimisticHistoryReach,
   // Each history gets its own adapter and Collection id.
   driver: (plan, observe) =>
-    optimisticHistoryDriver({ wrapping: persistedLane() })(plan, observe),
+    optimisticHistoryDriver({ wrapping: persistedProductionPath() })(
+      plan,
+      observe,
+    ),
   check: checkOptimisticHistory,
   calibrations: optimisticHistoryCalibrations,
   timeout: 60_000,

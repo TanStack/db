@@ -129,7 +129,7 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
 })
 
 // Each lookalike pair publishes together, then one member's group changes.
-const pinnedHistories: ReadonlyArray<History> = [
+const fixedHistories: ReadonlyArray<History> = [
   {
     rows: [null, `null`, undefined, `undefined`],
     changes: [{ kind: `move`, index: 0, g: `null` }],
@@ -261,8 +261,8 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
 declareOracle({ check: [runHistory], model: [expectedGroups] })
 
 describe(`grouped result key oracle`, () => {
-  for (const [index, history] of pinnedHistories.entries()) {
-    it(`keeps lookalike group values apart (pinned ${index})`, () =>
+  for (const [index, history] of fixedHistories.entries()) {
+    it(`keeps lookalike group values apart (fixed history ${index})`, () =>
       runHistory(history))
   }
 

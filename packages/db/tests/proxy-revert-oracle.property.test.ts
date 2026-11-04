@@ -955,7 +955,7 @@ describe(`draft revert oracle`, () => {
     expect(keylessWrites).toBeGreaterThanOrEqual(10)
   })
 
-  // Pinned witnesses.
+  // Fixed histories.
   it.each<[string, History]>([
     [
       `reverting one of two changed fields keeps the other change`,

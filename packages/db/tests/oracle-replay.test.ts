@@ -98,7 +98,7 @@ describe(`guarded oracle replay`, () => {
     expect(result.output).not.toContain(`unrelated fixed campaign ran`)
   }, 40_000)
 
-  it(`intersects a caller alternation with the named replay lane`, () => {
+  it(`intersects a caller alternation with the named replay campaign`, () => {
     const result = runReplay([
       fixture,
       `-t`,
@@ -157,7 +157,7 @@ describe(`guarded oracle replay`, () => {
       ),
     ),
   ] as const)(
-    `selects only the requested %s replay lane`,
+    `selects only the requested %s replay campaign`,
     (property, file, expectedTests) => {
       const result = runReplay([file], undefined, property)
       expect(result.status, result.output).toBe(0)
@@ -344,7 +344,7 @@ describe(`oracle replay reporting`, () => {
   it(`runs a path replay once, and only for its selected property`, () => {
     vi.stubEnv(`TANSTACK_DB_ORACLE_REPLAY_WITNESS`, undefined)
     const replay = {
-      replaySeed: 42,
+      campaignSeed: 42,
       replayPath: `3`,
       replayProperty: `oracle-replay.calibration`,
     }
@@ -623,12 +623,12 @@ describe(`named oracle replay manifest`, () => {
     ).toEqual([])
   })
 
-  it(`replays a property without a shrink path from its seed alone`, () => {
+  it(`reseeds a property from its campaign seed alone`, () => {
     // The LIKE oracle draws its cases from its own seeded generator, so the
     // guarded runner, which witnesses a seed and a path, cannot witness it.
     expect(
       oracleReplayManifest
-        .filter(({ status }) => status === `seed-replay`)
+        .filter(({ status }) => status === `reseeded-campaign`)
         .map(({ property, command, environment }) => ({
           property,
           command,

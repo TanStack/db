@@ -28,11 +28,11 @@
  *   fewer than n fixed histories ran, a failure stopped the run inside the
  *   examples, and the check reports only that.
  * - The examples come on top of the base run budget, so they never displace
- *   a random history. A replay keeps its seed, and a path replay of the
+ *   a random history. A reseeded campaign keeps its seed, and a path replay of the
  *   property keeps its path and still runs one history.
  *
  * `runOracleCampaign` runs a fixed-seed and a random campaign, each with its
- * own reach and a minimum of one. A seed-only run of its replay prefix runs one
+ * own reach and a minimum of one. A seed-only run of its campaign prefix is a reseeded campaign and runs one
  * campaign with that seed and checks its reach; a seed and path run one
  * recorded history and check none. Every started campaign reports its seed and
  * counts on one `ORACLE_REACH` line, including a failing campaign. Fresh seed
@@ -352,9 +352,9 @@ async function checkLedger(ledger: Ledger) {
   return expected
 }
 
-// The campaign runner's replay prefix, and the environment each run kind or
+// The campaign runner's prefix, and the environment each run kind or
 // invalid environment sets for it. The runner reads only its own prefix, so a
-// replay of another property is an ordinary run for it.
+// path replay of another property is an ordinary run for it.
 const campaignPrefix = `TANSTACK_DB_REACH_LEDGER`
 function campaignRun(run: RunKind): RunKind {
   return run === `other-path` ? `ordinary` : run
@@ -401,8 +401,8 @@ function campaignLedger(ledger: Ledger): Ledger {
   }
 }
 
-// The campaign model: two campaigns without a prefix seed, one replay
-// campaign with one. Each campaign has a minimum of one and no fixed
+// The campaign model: two campaigns without a prefix seed, one campaign named
+// `replay` with one. Each campaign has a minimum of one and no fixed
 // histories, checks reach unless a path replays it, and reports its seed and counts
 // even when reach fails. The first failing campaign ends the run.
 function expectedCampaign(ledger: Ledger): CampaignObservation {
@@ -519,7 +519,7 @@ async function checkCampaign(ledger: Ledger) {
 }
 
 // The run parameters: the examples come on top of the base runs, and the
-// replay selection stays. A seed replay keeps its seed, as does a path replay
+// replay selection stays. A reseeded campaign keeps its seed, as does a path replay
 // of another property. A path replay of this property keeps its seed and path,
 // and runs one history. A replay witness channel adds reporter keys; no run
 // kind here opens one, so the check leaves them out.
@@ -599,11 +599,11 @@ function checkRunParameters(
             ? undefined
             : run === `seed`
               ? {
-                  replaySeed: 1,
+                  campaignSeed: 1,
                   replayPath: undefined,
                   replayProperty: undefined,
                 }
-              : { replaySeed: 1, replayPath: `0`, replayProperty: replayed },
+              : { campaignSeed: 1, replayPath: `0`, replayProperty: replayed },
           property,
           examples,
         ),

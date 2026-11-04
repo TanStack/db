@@ -1,15 +1,15 @@
 /**
  * Node campaign for the shared-driver K=1 contract documented in
  * `shared-driver-fairness-oracle.ts`. Fixed histories prove neutral reach and a
- * persist storm; generated legal histories vary both lane sizes, mutation
+ * persist storm; generated legal histories vary the sizes of both lanes, mutation
  * width, and tail order. Public rows and logical completion checkpoints are
  * checked independently of production scheduling, and an executable
  * named persist-first FIFO wrong answer proves the checker rejects the original
  * fault. Grammar controls reconstruct that witness, exercise the bounded
  * marginals, reject a nearby invalid storm, and ablate tail-order variation.
  * The identical generated property runs in retained fixed-seed and seedless
- * random lanes. Supplying both TANSTACK_DB_DRIVER_FAIRNESS_SEED and
- * TANSTACK_DB_DRIVER_FAIRNESS_PATH replaces those lanes with one checked
+ * random campaigns. Supplying both TANSTACK_DB_DRIVER_FAIRNESS_SEED and
+ * TANSTACK_DB_DRIVER_FAIRNESS_PATH replaces those campaigns with one checked
  * seed+shrink-path replay. An axis-removal calibration proves that removing
  * tail-order variation loses hydrate-before-later-persist histories.
  * The shared fixture holds the first `BEGIN IMMEDIATE` while cold `preload()`

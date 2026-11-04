@@ -43,7 +43,7 @@ import { declareOracle } from './oracle-declaration.js'
  *   is the reader `@tanstack/db` exported before query-aware placement. It
  *   reads the original index's reversed walk unchanged, so its nullish group
  *   sits wherever plain reversal puts it, for BTree and Basic indexes and for
- *   either null placement of the original. The pinned keys below are the
+ *   either null placement of the original. The fixed keys below are the
  *   results of the earlier release.
  * - **Capability:** ordered-query admission requires only range operations
  *   (`supports('gt')`). The reader may use the `equalityLookup` every index

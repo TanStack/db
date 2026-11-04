@@ -3,7 +3,7 @@ import { DbClient, collectionOptions } from '../src/client.js'
 import { createCollection } from '../src/collection/index.js'
 import {
   createSessionModel,
-  persistedPeerLane,
+  persistedPeerGrammar,
   runSessionHistory,
 } from './sync-metadata-session-oracle.js'
 import type { SessionDriver } from './sync-metadata-session-oracle.js'
@@ -19,7 +19,7 @@ type SyncActions = Parameters<SyncConfig<Row, number>[`sync`]>[0]
 it(`consumes completed setup inputs before authored actions`, async () => {
   const order: Array<string> = []
   let setup = true
-  const observation = createSessionModel(persistedPeerLane).observe()
+  const observation = createSessionModel(persistedPeerGrammar).observe()
   const driver: SessionDriver = {
     begin: () => {
       order.push(`action`)
@@ -54,7 +54,7 @@ it(`consumes completed setup inputs before authored actions`, async () => {
     },
   }
   const result = await runSessionHistory(
-    persistedPeerLane,
+    persistedPeerGrammar,
     [{ type: `begin` }],
     () => Promise.resolve(driver),
   )

@@ -87,10 +87,10 @@ import { declareOracle } from './oracle-declaration.js'
  * the error an invalid transaction's commit rejects with. Stale runs and
  * writes without an open transaction are fixed boundary witnesses, not
  * generated histories. Only the `seeds-full` and `persisted-peers-full`
- * lanes use full row updates. The `persisted-peers` lanes add a second tab's
- * source through its notices; no other lane has a peer, and a peer's write
+ * grammars use full row updates. The `persisted-peers` grammars add a second tab's
+ * source through its notices; no other grammar has a peer, and a peer's write
  * reaches this tab only at a point where the wrapper has no durable step or
- * storage read in flight. Only the peer lanes model storage, so only they
+ * storage read in flight. Only the peer grammars model storage, so only they
  * compare stored rows after settlement. Durable metadata is also compared
  * after each action whose storage I/O is not held, and after settlement.
  * A restart reads storage, but this oracle's claim ends with one sync run. A
@@ -188,14 +188,14 @@ export type SessionAction =
 export type PeerNotice = `row` | `metadata` | `delete` | `reload` | `reset`
 
 /**
- * A lane fixes which actions the grammar may choose and the nesting depth.
+ * A grammar profile fixes which actions the grammar may choose and the nesting depth.
  * `flat` histories are the issue's domain: no transaction begins while one
  * is open. `nested` histories begin transactions inside open ones. `seeds`
  * add a second writer; `seeds-full` repeats it under full row updates, and
- * `nested-seeds` crosses seeds with nested transactions. Each lane is its own
- * replay property.
+ * `nested-seeds` crosses seeds with nested transactions. Each grammar is its own
+ * oracle property.
  */
-export type SessionLane = {
+export type SessionGrammar = {
   name: string
   maxDepth: number
   seeds: boolean
@@ -212,14 +212,14 @@ export type SessionLane = {
   readHold?: boolean
   /**
    * Whether `collectionSet` may store `undefined`. `get` cannot tell such a
-   * key from an absent one, but `list()` includes it. The persisted lane
+   * key from an absent one, but `list()` includes it. The persisted grammar
    * excludes it: stored collection metadata must be bindable.
    */
   undefinedValues?: boolean
   /**
    * Whether the Collection uses `rowUpdateMode: 'full'`. An update then
    * replaces the row instead of merging over it, so a source insert of a
-   * seeded row drops the seed's other fields. Other lanes use `'partial'`.
+   * seeded row drops the seed's other fields. Other grammars use `'partial'`.
    */
   fullRows?: boolean
   /**
@@ -262,59 +262,59 @@ export type SessionLane = {
   peers?: boolean
 }
 
-export const flatLane: SessionLane = {
+export const flatGrammar: SessionGrammar = {
   name: `flat`,
   maxDepth: 1,
   seeds: false,
   undefinedValues: true,
 }
-export const nestedLane: SessionLane = {
+export const nestedGrammar: SessionGrammar = {
   name: `nested`,
   maxDepth: 3,
   seeds: false,
   undefinedValues: true,
 }
-export const seedLane: SessionLane = {
+export const seedGrammar: SessionGrammar = {
   name: `seeds`,
   maxDepth: 1,
   seeds: true,
   undefinedValues: true,
 }
-export const nestedSeedLane: SessionLane = {
+export const nestedSeedGrammar: SessionGrammar = {
   name: `nested-seeds`,
   maxDepth: 3,
   seeds: true,
   undefinedValues: true,
 }
-export const nestedConflictLane: SessionLane = {
+export const nestedConflictGrammar: SessionGrammar = {
   name: `nested-conflicts`,
   maxDepth: 3,
   seeds: false,
   undefinedValues: true,
   conflicts: true,
 }
-export const seedFullLane: SessionLane = {
+export const seedFullGrammar: SessionGrammar = {
   name: `seeds-full`,
   maxDepth: 1,
   seeds: true,
   undefinedValues: true,
   fullRows: true,
 }
-export const persistedFlatLane: SessionLane = {
+export const persistedFlatGrammar: SessionGrammar = {
   name: `persisted-flat`,
   maxDepth: 1,
   seeds: false,
   storeHold: true,
   insertsReplace: true,
 }
-export const persistedNestedLane: SessionLane = {
+export const persistedNestedGrammar: SessionGrammar = {
   name: `persisted-nested`,
   maxDepth: 3,
   seeds: false,
   storeHold: true,
   insertsReplace: true,
 }
-export const persistedConflictLane: SessionLane = {
+export const persistedConflictGrammar: SessionGrammar = {
   name: `persisted-conflicts`,
   maxDepth: 3,
   seeds: false,
@@ -322,7 +322,7 @@ export const persistedConflictLane: SessionLane = {
   insertsReplace: true,
   conflicts: true,
 }
-export const persistedCachedLane: SessionLane = {
+export const persistedCachedGrammar: SessionGrammar = {
   name: `persisted-cached`,
   maxDepth: 2,
   seeds: false,
@@ -330,7 +330,7 @@ export const persistedCachedLane: SessionLane = {
   insertsReplace: true,
   cached: true,
 }
-export const persistedSeedLane: SessionLane = {
+export const persistedSeedGrammar: SessionGrammar = {
   name: `persisted-seeds`,
   maxDepth: 1,
   seeds: true,
@@ -339,7 +339,7 @@ export const persistedSeedLane: SessionLane = {
 }
 /**
  * Seeds crossed with nested transactions through the persisted wrapper, with
- * the conflict lane's weighting: an inner re-insert of an enclosing row can
+ * the conflict grammar's weighting: an inner re-insert of an enclosing row can
  * commit first and land on a seeded row. The cached row and the favoured
  * metadata-keeping writes let a row's metadata stay a seed's after the
  * source wrote the row, so a later seed can replace it.
@@ -349,7 +349,7 @@ export const persistedSeedLane: SessionLane = {
  * persisted wrapper: a read hold keeps an on-demand load open, so the wrapper
  * buffers transactions committed during it.
  */
-export const persistedReadLane: SessionLane = {
+export const persistedReadGrammar: SessionGrammar = {
   name: `persisted-reads`,
   maxDepth: 2,
   seeds: false,
@@ -358,18 +358,18 @@ export const persistedReadLane: SessionLane = {
   insertsReplace: true,
 }
 /**
- * The read lane with `DbClient` seeds and the cached row, which a demand for
+ * The read-hold grammar with `DbClient` seeds and the cached row, which a demand for
  * every row loads at the start: a transaction the wrapper buffers during a
  * read may have its signal aborted after it commits, which abandons it.
  */
-export const persistedReadSeedLane: SessionLane = {
-  ...persistedReadLane,
+export const persistedReadSeedGrammar: SessionGrammar = {
+  ...persistedReadGrammar,
   name: `persisted-reads-seeds`,
   seeds: true,
   cached: true,
   onDemand: true,
 }
-export const persistedNestedSeedLane: SessionLane = {
+export const persistedNestedSeedGrammar: SessionGrammar = {
   name: `persisted-nested-seeds`,
   maxDepth: 2,
   seeds: true,
@@ -383,7 +383,7 @@ export const persistedNestedSeedLane: SessionLane = {
  * Another tab's source writes beside this tab's source, its seeds, the cached
  * row, and nested transactions, through the persisted wrapper.
  */
-export const persistedPeerLane: SessionLane = {
+export const persistedPeerGrammar: SessionGrammar = {
   name: `persisted-peers`,
   maxDepth: 2,
   seeds: true,
@@ -396,8 +396,8 @@ export const persistedPeerLane: SessionLane = {
  * The same under full row updates: an update replaces its row, so storage
  * keeps no field the update dropped, neither the stored row's nor a seed's.
  */
-export const persistedPeerFullLane: SessionLane = {
-  ...persistedPeerLane,
+export const persistedPeerFullGrammar: SessionGrammar = {
+  ...persistedPeerGrammar,
   name: `persisted-peers-full`,
   fullRows: true,
 }
@@ -405,26 +405,26 @@ export const persistedPeerFullLane: SessionLane = {
  * The same on demand, with a demand for every row: a reset keeps a held
  * `DbClient` seed and deletes every other row (decision 19).
  */
-export const persistedPeerOnDemandLane: SessionLane = {
-  ...persistedPeerLane,
+export const persistedPeerOnDemandGrammar: SessionGrammar = {
+  ...persistedPeerGrammar,
   name: `persisted-peers-on-demand`,
   onDemand: true,
 }
 
 const anyRowKey = fc.constantFrom(...sessionRowKeys)
 
-/** The cached row and metadata a `cached` lane starts with. */
+/** The cached row and metadata a `cached` grammar starts with. */
 export const cachedRow = { id: 1, v: `cached`, seeded: `cached` }
 export const cachedMetadata = { cached: true }
 
-/** A model at the start of a run on this lane. */
-export function createSessionModel(lane: SessionLane): SessionModel {
+/** A model at the start of a run on this grammar. */
+export function createSessionModel(grammar: SessionGrammar): SessionModel {
   const model = new SessionModel(
-    lane.fullRows,
-    lane.insertsReplace === true,
-    lane.onDemand === true,
+    grammar.fullRows,
+    grammar.insertsReplace === true,
+    grammar.onDemand === true,
   )
-  if (lane.cached === true)
+  if (grammar.cached === true)
     model.seed(1, cachedRow, { present: true, value: cachedMetadata }, true)
   return model
 }
@@ -436,13 +436,13 @@ const collectionKeyArbitrary = fc.constantFrom(...sessionCollectionKeys)
  * transaction, and most histories commit more than once during a hold.
  */
 export function sessionActionArbitrary(
-  lane: SessionLane,
+  grammar: SessionGrammar,
 ): fc.Arbitrary<SessionAction> {
-  // The conflict lane multiplies row writes and names row 1 three times as
+  // The conflict grammar multiplies row writes and names row 1 three times as
   // often as row 2.
-  const rows = lane.conflicts === true ? 3 : 1
+  const rows = grammar.conflicts === true ? 3 : 1
   const rowKeyArbitrary =
-    lane.conflicts === true
+    grammar.conflicts === true
       ? fc.constantFrom<SessionRowKey>(1, 1, 1, 2)
       : anyRowKey
   const weighted = (
@@ -450,7 +450,7 @@ export function sessionActionArbitrary(
     arbitrary: fc.Arbitrary<SessionAction>,
   ): fc.WeightedArbitrary<SessionAction> => ({ weight, arbitrary })
   const metadataArbitrary =
-    lane.keepsMetadata === true
+    grammar.keepsMetadata === true
       ? fc.constantFrom(false, false, false, false, false, false, false, true)
       : fc.boolean()
   const actions: Array<fc.WeightedArbitrary<SessionAction>> = [
@@ -458,7 +458,7 @@ export function sessionActionArbitrary(
     weighted(4, fc.constant({ type: `commit` as const })),
     weighted(1, fc.constant({ type: `cancel` as const })),
     weighted(
-      lane.keepsMetadata === true ? 1 : 2,
+      grammar.keepsMetadata === true ? 1 : 2,
       rowKeyArbitrary.map((key) => ({ type: `rowSet` as const, key })),
     ),
     weighted(
@@ -466,7 +466,7 @@ export function sessionActionArbitrary(
       rowKeyArbitrary.map((key) => ({ type: `rowDelete` as const, key })),
     ),
     weighted(
-      lane.keepsMetadata === true ? 4 * rows : 2 * rows,
+      grammar.keepsMetadata === true ? 4 * rows : 2 * rows,
       fc
         .tuple(rowKeyArbitrary, metadataArbitrary)
         .map(([key, metadata]) => ({ type: `upsert` as const, key, metadata })),
@@ -480,12 +480,12 @@ export function sessionActionArbitrary(
       })),
     ),
     weighted(
-      lane.keepsMetadata === true ? 1 : rows,
+      grammar.keepsMetadata === true ? 1 : rows,
       rowKeyArbitrary.map((key) => ({ type: `remove` as const, key })),
     ),
     weighted(1, fc.constant({ type: `truncate` as const })),
-    // The conflict lane leaves collection metadata to the other lanes.
-    ...(lane.conflicts === true
+    // The conflict grammar leaves collection metadata to the other grammars.
+    ...(grammar.conflicts === true
       ? []
       : [
           weighted(
@@ -495,7 +495,7 @@ export function sessionActionArbitrary(
               .map(([key, roll]) => ({
                 type: `collectionSet` as const,
                 key,
-                ...(lane.undefinedValues && roll === 0
+                ...(grammar.undefinedValues && roll === 0
                   ? { undefinedValue: true }
                   : {}),
               })),
@@ -510,26 +510,26 @@ export function sessionActionArbitrary(
         ]),
     weighted(
       3,
-      lane.readHold === true
+      grammar.readHold === true
         ? fc.constantFrom(`core`, `store`, `read`).map((kind) => ({
             type: `hold` as const,
             store: kind === `store`,
             read: kind === `read`,
           }))
-        : lane.storeHold
+        : grammar.storeHold
           ? fc.boolean().map((store) => ({ type: `hold` as const, store }))
           : fc.constant({ type: `hold` as const }),
     ),
     weighted(1, fc.constant({ type: `release` as const })),
-    ...(lane.readHold === true
+    ...(grammar.readHold === true
       ? // Legal only just after a commit during a read, so it weighs more.
         [weighted(8, fc.constant({ type: `abandon` as const }))]
       : []),
   ]
-  if (lane.seeds || lane.cached === true)
+  if (grammar.seeds || grammar.cached === true)
     actions.push(
       weighted(
-        lane.keepsMetadata === true ? 1 : 2,
+        grammar.keepsMetadata === true ? 1 : 2,
         fc.tuple(rowKeyArbitrary, fc.boolean()).map(([key, metadata]) => ({
           type: `insertOverSeed` as const,
           key,
@@ -537,7 +537,7 @@ export function sessionActionArbitrary(
         })),
       ),
     )
-  if (lane.seeds)
+  if (grammar.seeds)
     actions.push(
       weighted(
         4,
@@ -551,7 +551,7 @@ export function sessionActionArbitrary(
           })),
       ),
     )
-  if (lane.peers === true)
+  if (grammar.peers === true)
     actions.push(
       weighted(
         4,
@@ -593,9 +593,9 @@ export function sessionActionArbitrary(
 }
 
 export function sessionHistoryArbitrary(
-  lane: SessionLane,
+  grammar: SessionGrammar,
 ): fc.Arbitrary<Array<SessionAction>> {
-  return fc.array(sessionActionArbitrary(lane), {
+  return fc.array(sessionActionArbitrary(grammar), {
     minLength: 12,
     maxLength: 48,
     size: `medium`,
@@ -611,7 +611,7 @@ export function sessionHistoryArbitrary(
  * This constructive subgrammar rebuilds the #2281 metadata prefix and varies
  * both keys, seed shape/metadata and arrival, explicit metadata, repeated
  * re-inserts, a core hold, the enclosing transaction's ending, and named
- * versus full-reload notices. Every action is legal in the peer lanes. Store
+ * versus full-reload notices. Every action is legal in the peer grammars. Store
  * and read holds are excluded because their pending work blocks peer notices.
  * The general session grammar continues to cover their independent laws.
  */
@@ -726,7 +726,7 @@ export const keptMetadataDurabilityHistoriesArbitrary = fc
  * seed metadata forms with immediate writes and writes queued behind a store
  * hold. Releasing that hold may complete both commits before the next action
  * cut, so the controlled driver records each completed durable transaction.
- * All histories replay the same model and comparison, without fixed answers.
+ * All histories run through the same model and comparison, without fixed answers.
  */
 export const queuedMetadataRepairHistoriesArbitrary = fc
   .record({
@@ -905,10 +905,10 @@ export function completedSeedReinsertReloadRegime(
  * replays. The campaign reach test requires each law's premise.
  */
 export function historyRegimes(
-  lane: SessionLane,
+  grammar: SessionGrammar,
   history: ReadonlyArray<SessionAction>,
 ): Set<string> {
-  const model = createSessionModel(lane)
+  const model = createSessionModel(grammar)
   const regimes = new Set<string>()
   let reading = false
   // Under full row updates an update can drop a field its row had; the
@@ -916,7 +916,7 @@ export function historyRegimes(
   // counts once an outermost commit accepts it.
   let pendingDrop = false
   for (const [step, action] of history.entries()) {
-    if (!isLegal(lane, model, action)) continue
+    if (!isLegal(grammar, model, action)) continue
     if (action.type === `hold` && action.read === true) reading = true
     if (action.type === `release`) reading = false
     if (reading && writesSource(action) && model.depth > 0)
@@ -1085,7 +1085,7 @@ function writesSource(action: SessionAction): boolean {
  * can land on a different row that the source wrote. That transaction is then
  * invalid, as a duplicate-key insert would be: no read includes its writes,
  * it ignores later writes, a truncate included, and its commit rejects.
- * Lanes whose inserts replace (the persisted wrapper) keep the transaction,
+ * Grammars whose inserts replace (the persisted wrapper) keep the transaction,
  * and the insert replaces that row and clears its metadata.
  *
  * The source and consumers read different layers of the same order. The
@@ -2128,12 +2128,12 @@ export type SessionDriver = {
   isDuplicateKeyError?: (error: unknown) => boolean
   /**
    * Aborts the signal of the newest outermost transaction committed during
-   * the read hold. Lanes with read holds use it.
+   * the read hold. Grammars with read holds use it.
    */
   abandon?: () => void
   observe: () => SessionObservation
   /**
-   * Each row as storage holds it. Where a lane models storage, the settled
+   * Each row as storage holds it. Where a grammar models storage, the settled
    * rows must match the model's: a restart reads them, and a full reload
    * reads them back into this tab.
    */
@@ -2187,7 +2187,7 @@ export type SessionMismatch = {
  * compares the full observation at the checkpoint after the action returns.
  * Illegal actions for the current model state are skipped, so every
  * generated history is legal: `commit`, `cancel`, and writes need an open
- * transaction; `begin` respects the lane's depth; `hold` and `release`
+ * transaction; `begin` respects the grammar's depth; `hold` and `release`
  * alternate; `remove` and `reinsert` need the row. A seed is legal at any
  * point, including over a row the source has inserted.
  *
@@ -2205,7 +2205,7 @@ export type SessionMismatch = {
  * is an insert.
  */
 export async function runSessionHistory(
-  lane: SessionLane,
+  grammar: SessionGrammar,
   history: ReadonlyArray<SessionAction>,
   createDriver: () => Promise<SessionDriver>,
 ): Promise<{
@@ -2213,7 +2213,7 @@ export async function runSessionHistory(
   steps: number
   recoveryInputs: ReadonlyArray<SessionRecoveryInput>
 }> {
-  const model = createSessionModel(lane)
+  const model = createSessionModel(grammar)
   const driver = await createDriver()
   let mismatch: SessionMismatch | undefined
   let steps = 0
@@ -2235,7 +2235,7 @@ export async function runSessionHistory(
     applyRecoveryInputs()
     recordDurableMetadata()
     for (const [step, action] of history.entries()) {
-      if (!isLegal(lane, model, action)) continue
+      if (!isLegal(grammar, model, action)) continue
       steps++
       const value = { s: step }
       let thrown: string | undefined
@@ -2272,7 +2272,7 @@ export async function runSessionHistory(
         mismatch = compareStoredMetadata(
           step,
           action,
-          lane,
+          grammar,
           model,
           driver,
           durableTrace,
@@ -2300,7 +2300,7 @@ export async function runSessionHistory(
           model.observe(),
           driver.observe(),
         )
-      if (!mismatch && lane.peers === true && driver.storedRows) {
+      if (!mismatch && grammar.peers === true && driver.storedRows) {
         const expected = model.storedRows()
         const actual = driver.storedRows()
         if (canonical(expected) !== canonical(actual))
@@ -2316,7 +2316,7 @@ export async function runSessionHistory(
         mismatch = compareStoredMetadata(
           history.length,
           `settle`,
-          lane,
+          grammar,
           model,
           driver,
           durableTrace,
@@ -2355,12 +2355,12 @@ export async function runSessionHistory(
 function compareStoredMetadata(
   step: number,
   action: SessionAction | `settle`,
-  lane: SessionLane,
+  grammar: SessionGrammar,
   model: SessionModel,
   driver: SessionDriver,
   durableTrace: ReadonlyArray<Record<string, unknown>>,
 ): SessionMismatch | undefined {
-  if (lane.peers !== true || !driver.storedRowMetadata) return undefined
+  if (grammar.peers !== true || !driver.storedRowMetadata) return undefined
   // Empty transactions may stutter. Preserve every change of durable metadata,
   // including a wrong write that a later queued commit repairs during release.
   const changes = (trace: ReadonlyArray<Record<string, unknown>>) =>
@@ -2394,17 +2394,17 @@ function compareStoredMetadata(
  * holds does not change which other actions are legal.
  */
 export async function runHoldInvariance(
-  lane: SessionLane,
+  grammar: SessionGrammar,
   history: ReadonlyArray<SessionAction>,
   createDriver: () => Promise<SessionDriver>,
 ): Promise<SessionMismatch | undefined> {
   const held = await createDriver()
   const unheld = await createDriver()
-  const model = createSessionModel(lane)
+  const model = createSessionModel(grammar)
   let mismatch: SessionMismatch | undefined
   try {
     for (const [step, action] of history.entries()) {
-      if (!isLegal(lane, model, action)) continue
+      if (!isLegal(grammar, model, action)) continue
       const value = { s: step }
       let thrown: string | undefined
       try {
@@ -2445,13 +2445,13 @@ type PlannedCall = { step: number; action: SessionAction; call: DriverCall }
 
 /** The legal actions of a history and their driver calls, planned once. */
 function planHistory(
-  lane: SessionLane,
+  grammar: SessionGrammar,
   history: ReadonlyArray<SessionAction>,
 ): Array<PlannedCall> {
-  const model = createSessionModel(lane)
+  const model = createSessionModel(grammar)
   const planned: Array<PlannedCall> = []
   for (const [step, action] of history.entries()) {
-    if (!isLegal(lane, model, action)) continue
+    if (!isLegal(grammar, model, action)) continue
     planned.push({ step, action, call: planAction(model, action, { s: step }) })
   }
   return planned
@@ -2504,17 +2504,17 @@ function withoutOtherRow(observation: SessionObservation): SessionObservation {
  * where the model invalidates a transaction are therefore not compared.
  */
 export async function runKeyIndependence(
-  lane: SessionLane,
+  grammar: SessionGrammar,
   history: ReadonlyArray<SessionAction>,
   createDriver: () => Promise<SessionDriver>,
 ): Promise<SessionMismatch | undefined> {
-  if (historyRegimes(lane, history).has(`transaction invalidated`))
+  if (historyRegimes(grammar, history).has(`transaction invalidated`))
     return undefined
   const both = await createDriver()
   const rowOneOnly = await createDriver()
   let mismatch: SessionMismatch | undefined
   try {
-    for (const planned of planHistory(lane, history)) {
+    for (const planned of planHistory(grammar, history)) {
       mismatch = await performCall(both, planned)
       if (mismatch) break
       if (namesOtherRow(planned.action)) continue
@@ -2550,21 +2550,21 @@ export async function runKeyIndependence(
  * stays equal when the seed moves first. Under partial row updates a seed
  * that arrives after a source update is ignored, while a seed moved first is
  * the update's merge base, so consumers' rows are compared only under full
- * row updates; metadata is compared in every lane. For the same reason a
+ * row updates; metadata is compared in every grammar. For the same reason a
  * re-insert planned from the arrival-order row need not equal the row when
- * the seed moves first (decision "b"), so partial lanes drop `reinsert` from
+ * the seed moves first (decision "b"), so partial grammars drop `reinsert` from
  * both runs.
  */
 export async function runSeedOrderInvariance(
-  lane: SessionLane,
+  grammar: SessionGrammar,
   history: ReadonlyArray<SessionAction>,
   createDriver: () => Promise<SessionDriver>,
 ): Promise<SessionMismatch | undefined> {
   const asArrived = await createDriver()
   const seedsFirst = await createDriver()
   const planned = planHistory(
-    lane,
-    lane.fullRows
+    grammar,
+    grammar.fullRows
       ? history
       : history.filter((action) => action.type !== `reinsert`),
   )
@@ -2586,7 +2586,7 @@ export async function runSeedOrderInvariance(
     if (!mismatch) {
       await Promise.all([asArrived.settle(), seedsFirst.settle()])
       const comparable = (observation: SessionObservation) =>
-        lane.fullRows ? observation : { ...observation, base: {} }
+        grammar.fullRows ? observation : { ...observation, base: {} }
       mismatch = compare(
         history.length,
         `settle`,
@@ -2632,13 +2632,13 @@ const modelOnly: SessionDriver = {
  * expectations derived by hand from the laws.
  */
 export async function modelCheckpoints(
-  lane: SessionLane,
+  grammar: SessionGrammar,
   history: ReadonlyArray<SessionAction>,
 ): Promise<Map<number, SessionObservation>> {
-  const model = createSessionModel(lane)
+  const model = createSessionModel(grammar)
   const checkpoints = new Map<number, SessionObservation>()
   for (const [step, action] of history.entries()) {
-    if (!isLegal(lane, model, action)) continue
+    if (!isLegal(grammar, model, action)) continue
     await planAction(model, action, { s: step })(modelOnly)
     checkpoints.set(step, model.observe())
   }
@@ -2646,7 +2646,7 @@ export async function modelCheckpoints(
 }
 
 function isLegal(
-  lane: SessionLane,
+  grammar: SessionGrammar,
   model: SessionModel,
   action: SessionAction,
 ): boolean {
@@ -2654,18 +2654,18 @@ function isLegal(
   if (model.awaitsAbandonment && action.type !== `release`) return false
   switch (action.type) {
     case `begin`:
-      return model.depth < lane.maxDepth
+      return model.depth < grammar.maxDepth
     case `hold`:
       return !model.isHolding
     case `release`:
       return model.isHolding
     case `abandon`:
-      return lane.readHold === true && model.canAbandon
+      return grammar.readHold === true && model.canAbandon
     case `seed`:
-      return lane.seeds
+      return grammar.seeds
     case `peer`:
       return (
-        lane.peers === true &&
+        grammar.peers === true &&
         !model.blocksPeerNotices &&
         (action.notice === `row` ||
           action.notice === `reload` ||
@@ -2674,7 +2674,7 @@ function isLegal(
       )
     case `insertOverSeed`:
       return (
-        (lane.seeds || lane.cached === true) &&
+        (grammar.seeds || grammar.cached === true) &&
         model.depth > 0 &&
         model.sourceRow(action.key).present &&
         !model.sourceWroteRow(action.key)

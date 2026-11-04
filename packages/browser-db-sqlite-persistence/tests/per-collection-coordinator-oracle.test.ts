@@ -185,7 +185,7 @@ Reach, challenge, replay, cleanup, and limits:
   checker rejects an unowned apply. Every production-path test records a
   reached checkpoint before comparing the independent ledger.
 - Each generated property uses the same generator, driver, observations, and
-  run budget in a retained fixed-seed lane and a seedless random lane. Replay
+  run budget in a retained fixed-seed campaign and a seedless random campaign. Replay
   registers only the requested property when
   TANSTACK_DB_COORDINATOR_ORACLE_{PROPERTY,SEED,PATH} are supplied together;
   RUNS may adjust the shared budget. The thrown report retains the first
@@ -643,7 +643,7 @@ describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
         ),
         acknowledgedAfterResponseDelivery: acknowledged,
       }
-      // D13 refinement: one comparator owns both the production verdict and hostile
+      // D13 refinement: one comparator owns both the production verdict and mutant
       // entry-only/false-success calibrations above.
       expect(subsetAckViolations(trace)).toEqual([])
     }, [
@@ -1209,24 +1209,24 @@ describe(`remote subset ownership lease oracle`, () => {
     expect(
       remoteLeaseTakeoverViolations(expectedRemoteLeaseTakeoverTrace),
     ).toEqual([])
-    const hostile: RemoteLeaseTakeoverTrace = structuredClone(
+    const mutant: RemoteLeaseTakeoverTrace = structuredClone(
       expectedRemoteLeaseTakeoverTrace,
     )
-    hostile.retiredOwnerAfterTakeover = {
+    mutant.retiredOwnerAfterTakeover = {
       loads: 1,
       unloads: 0,
       active: 1,
       exactUnloads: true,
     }
-    hostile.newOwnerAfterTakeover = {
+    mutant.newOwnerAfterTakeover = {
       loads: 0,
       unloads: 0,
       active: 0,
       exactUnloads: true,
     }
-    hostile.newOwnerAfterRelease.exactUnloads = false
+    mutant.newOwnerAfterRelease.exactUnloads = false
     expect(
-      remoteLeaseTakeoverViolations(hostile).map(
+      remoteLeaseTakeoverViolations(mutant).map(
         ({ checkpoint, field }) => `${checkpoint}:${field}`,
       ),
     ).toEqual([
@@ -1736,7 +1736,7 @@ describe(`per-collection adapter and SQLite-state oracle`, () => {
     ])
   })
 
-  it(`calibrates SQLite-state and fresh-registry checks against hostile results`, () => {
+  it(`calibrates SQLite-state and fresh-registry checks against mutant results`, () => {
     const expected: RawCollectionSnapshot = {
       registryRowCount: 1,
       schemaVersion: 11,
@@ -2725,11 +2725,11 @@ routes on-demand demand it cannot serve to the elected owner. Its load, and so
 its live query's first ready, settles only when the rows the owner fetched for
 it are visible in the follower; if applying the owner's commit fails here, the
 load rejects and the follower's source enters error. The single-runtime
-`persistence.follower-remote-demand` lane and the follower generation-notice
+`persistence.follower-remote-demand` property and the follower generation-notice
 cells in db-sqlite-persistence-core/tests/persisted-oracle.test.ts own the
 runtime mechanism with a coordinator double. The generation-notice cells are
-fixed histories: their rotation cell is pinned as failing under the known gap
-#2139, and the fix adds their generated campaign back. This lane is their
+fixed histories: their rotation cell is a fixed history that fails under the known limit
+#2139, and the fix adds their generated campaign back. This production path is their
 receiving witness
 across the real boundary: two tabs, each with its own real
 BrowserCollectionCoordinator over Node's real BroadcastChannel and Web Locks,
@@ -2751,7 +2751,7 @@ owner's row, and for the queued placement it holds the other subset's
 hydration read. It does not reorder the channel, which stays FIFO as in a
 browser. The custom source delivers each row once; a source that re-inserts
 an existing row on every ensure made the follower release and request its
-demand again without end, on main as well, and is outside this lane.
+demand again without end, on main as well, and is outside this production path.
 
 Checkpoint and observations: once the owner's reply has reached the follower
 and the apply is still outstanding, whether the consumer has settled. After
@@ -2769,7 +2769,7 @@ persistence.
 
 Rotation: when only the follower's claim expires, it rotates into a
 generation no other tab joins and becomes that generation's owner. The
-rotation cell pins that its rows stay visible and new demand settles from its
+rotation cell checks that its rows stay visible and new demand settles from its
 own source. Another tab never owns the rotated generation in this topology,
 so the elected-owner notice path has no receiving witness here.
 */

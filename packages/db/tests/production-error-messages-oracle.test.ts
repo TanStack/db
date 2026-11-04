@@ -509,7 +509,7 @@ describe(`production error messages`, () => {
     })
 
     // The census is the classifier these laws rest on, so its rules are
-    // pinned on hand-written cases: one per rule, in fixtures/census.
+    // fixed on hand-written cases: one per rule, in fixtures/census.
     it(`classifies guarded, unguarded, and coded census cases`, () => {
       const cases = findErrorSites(
         resolve(testsDirectory, `fixtures/census/src`),

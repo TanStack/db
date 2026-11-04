@@ -14,7 +14,7 @@ import {
 } from './harness'
 import { storedTransaction } from './leadership-replay-support'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
-import { oracleLaneOptions, readOfflineOracleConfig } from './oracle-config'
+import { oracleCampaignOptions, readOfflineOracleConfig } from './oracle-config'
 import type { OfflineTransaction } from '../src/types'
 
 /**
@@ -58,7 +58,7 @@ import type { OfflineTransaction } from '../src/types'
  * calls and idempotency keys, outbox contents, scheduler counts, leadership,
  * retry records, caller promise settlement, optimistic rows, and cleanup.
  *
- * Reach and controls: pinned histories force each lifecycle boundary and both
+ * Reach and controls: fixed histories force each lifecycle boundary and both
  * mixed-deletion positions. Fixed and random campaigns cover legal adjacent
  * histories and support seed/path replay. Delayed-read, stale-admission, and
  * mixed-removal witnesses reject the recorded pre-fix behaviors. The action
@@ -112,8 +112,8 @@ function foldReplayLedger(events: ReadonlyArray<ReplayLedgerEvent>): {
 // pnpm --dir packages/offline-transactions exec vitest run \
 // tests/leadership-replay-oracle.property.test.ts
 //
-// Grammar controls: each fixed lane enumerates the named causal boundary, and
-// the seedless lane samples adjacent values with the same property/checkpoint.
+// Grammar controls: each fixed campaign enumerates the named causal boundary, and
+// the random campaign samples adjacent values with the same property/checkpoint.
 // Startup count 1–4 distinguishes empty peer work from multiple retained IDs;
 // the four disposal cuts distinguish construction, election, read, and hook.
 // Serial count 2–5 supplies an issued call plus peers; loss/disposal and
@@ -121,11 +121,11 @@ function foldReplayLedger(events: ReadonlyArray<ReplayLedgerEvent>): {
 // the payload checks that a surviving row is replayed unchanged. Repeated
 // reports range 0–5 before and after settlement; separate turns and a false
 // then true report distinguish coalescing from leadership reacquisition. The
-// pinned one-report example reconstructs that overlap. Stale reads remove
-// 1–5 of 2–6 stored IDs (clamped to leave a peer); the pinned 3/1 example
+// fixed one-report example reconstructs that overlap. Stale reads remove
+// 1–5 of 2–6 stored IDs (clamped to leave a peer); the fixed 3/1 example
 // reconstructs durable removal after capture. Delayed reads vary 1–4 peers,
 // 1–3 scans, and removal before/after acknowledgment; both one-scan cuts are
-// pinned. Storage failure varies keys/get and 1–3 retained records. Removing
+// fixed. Storage failure varies keys/get and 1–3 retained records. Removing
 // any of these axes loses the stated cut, multiplicity, or preservation check.
 // Delivery before capture and acknowledgment before provider completion are
 // causally invalid histories, so neither is generated. Zero stored work and
@@ -162,7 +162,7 @@ const storageFailureOracle = readOfflineOracleConfig({
 })
 
 // The stale-read campaign compares each delivered read with the ledger fold,
-// the model. The append-only judgment pins the fold's own result.
+// the model. The append-only judgment fixes the fold's own result.
 declareOracle({ check: [checkStaleRead], model: [foldReplayLedger] })
 
 const startupCases = (seed: number | undefined) =>
@@ -173,8 +173,8 @@ const startupCases = (seed: number | undefined) =>
     }),
   )
 
-// The fixed lane stands aside during any path replay. The random lane runs in
-// ordinary and seed-only runs, and it is the replay of STARTUP_PROPERTY.
+// The fixed campaign stands aside during any path replay. The random campaign runs in
+// ordinary and reseeded campaigns, and it is the replay of STARTUP_PROPERTY.
 async function checkStartup({
   boundary,
   seed,
@@ -284,7 +284,7 @@ async function checkStartup({
         )
       }
     }),
-    oracleLaneOptions(startupOracle, seed),
+    oracleCampaignOptions(startupOracle, seed),
   )
 }
 
@@ -306,8 +306,8 @@ const serialWorkCases = (seed: number | undefined) =>
     })),
   )
 
-// The fixed lane stands aside during any path replay. The random lane runs in
-// ordinary and seed-only runs, and it is the replay of SERIAL_WORK_PROPERTY.
+// The fixed campaign stands aside during any path replay. The random campaign runs in
+// ordinary and reseeded campaigns, and it is the replay of SERIAL_WORK_PROPERTY.
 async function checkSerialWork({
   stop,
   boundary,
@@ -484,7 +484,7 @@ async function checkSerialWork({
         }
       },
     ),
-    oracleLaneOptions(serialWorkOracle, seed),
+    oracleCampaignOptions(serialWorkOracle, seed),
   )
 }
 
@@ -503,8 +503,8 @@ oracleReplayTest(it, SERIAL_WORK_PROPERTY).each(serialWorkCases(undefined))(
 const reportCases = (seed: number | undefined) =>
   [`provider`, `acknowledgment`].map((boundary) => ({ boundary, seed }))
 
-// The fixed lane stands aside during any path replay. The random lane runs in
-// ordinary and seed-only runs, and it is the replay of REPORT_PROPERTY.
+// The fixed campaign stands aside during any path replay. The random campaign runs in
+// ordinary and reseeded campaigns, and it is the replay of REPORT_PROPERTY.
 async function checkReport({
   boundary,
   seed,
@@ -673,7 +673,7 @@ async function checkReport({
       },
     ),
     {
-      ...oracleLaneOptions(leadershipReportOracle, seed),
+      ...oracleCampaignOptions(leadershipReportOracle, seed),
       examples: [
         [
           {
@@ -698,8 +698,8 @@ oracleReplayTest(it, REPORT_PROPERTY).each(reportCases(undefined))(
   checkReport,
 )
 
-// The fixed lane stands aside during any path replay. The random lane runs in
-// ordinary and seed-only runs, and it is the replay of STALE_READ_PROPERTY.
+// The fixed campaign stands aside during any path replay. The random campaign runs in
+// ordinary and reseeded campaigns, and it is the replay of STALE_READ_PROPERTY.
 async function checkStaleRead(seed: number | undefined): Promise<void> {
   await fc.assert(
     fc.asyncProperty(
@@ -775,7 +775,7 @@ async function checkStaleRead(seed: number | undefined): Promise<void> {
       },
     ),
     {
-      ...oracleLaneOptions(staleReadOracle, seed),
+      ...oracleCampaignOptions(staleReadOracle, seed),
       examples: [[{ count: 3, removedPrefix: 1 }]],
     },
   )
@@ -807,8 +807,8 @@ it(`append-only replay judgment rejects stale admission after durable removal`, 
 // A replay scan can capture A, then block on another storage read until A's
 // successful deletion. Pending-only dedupe no longer remembers A at admission.
 // Peers admitted only through this scan must still execute exactly once.
-// The fixed lane stands aside during any path replay. The random lane runs in
-// ordinary and seed-only runs, and it is the replay of DELAYED_READ_PROPERTY.
+// The fixed campaign stands aside during any path replay. The random campaign runs in
+// ordinary and reseeded campaigns, and it is the replay of DELAYED_READ_PROPERTY.
 async function checkDelayedRead(seed: number | undefined): Promise<void> {
   await fc.assert(
     fc.asyncProperty(
@@ -947,7 +947,7 @@ async function checkDelayedRead(seed: number | undefined): Promise<void> {
       },
     ),
     {
-      ...oracleLaneOptions(delayedReadOracle, seed),
+      ...oracleCampaignOptions(delayedReadOracle, seed),
       examples: [
         [
           {
@@ -982,8 +982,8 @@ oracleReplayTest(it, DELAYED_READ_PROPERTY).each([undefined])(
 const storageFailureCases = (seed: number | undefined) =>
   [`keys`, `get`].map((operation) => ({ operation, seed }))
 
-// The fixed lane stands aside during any path replay. The random lane runs in
-// ordinary and seed-only runs, and it is the replay of STORAGE_FAILURE_PROPERTY.
+// The fixed campaign stands aside during any path replay. The random campaign runs in
+// ordinary and reseeded campaigns, and it is the replay of STORAGE_FAILURE_PROPERTY.
 async function checkStorageFailure({
   operation,
   seed,
@@ -1037,7 +1037,7 @@ async function checkStorageFailure({
         )
       }
     }),
-    oracleLaneOptions(storageFailureOracle, seed),
+    oracleCampaignOptions(storageFailureOracle, seed),
   )
 }
 

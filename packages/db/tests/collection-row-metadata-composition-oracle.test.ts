@@ -11,7 +11,7 @@ import type { SyncConfig } from '../src/types.js'
  * through `metadata.row.set` and `metadata.row.delete`, through the `metadata`
  * field of a row message, and through `truncate`. Writes that carry metadata
  * replace earlier values, so the last such write wins. `collection.test.ts`
- * pins that rule. A maintainer decision on 2026-10-05 (recorded in
+ * covers that rule with fixed examples. A maintainer decision on 2026-10-05 (recorded in
  * `docs/contributing/oracle-reviews/2026-10-05-state-mutation-round-3.md`)
  * fixes the writes that carry none:
  *
@@ -26,7 +26,7 @@ import type { SyncConfig } from '../src/types.js'
  *   absent row.
  *
  * This oracle covers one key, one transaction of up to three writes, and four
- * lanes: immediate, held, rebuilt, and nested. The nested lane applies a
+ * variants: immediate, held, rebuilt, and nested. The nested variant applies a
  * nested transaction or a hydration seed before the open transaction. When a
  * rebuild changes an insert into an equal re-insert, or the reverse, the rule
  * follows the write that applies. The model judges the reclassified sequence.
@@ -47,11 +47,11 @@ import type { SyncConfig } from '../src/types.js'
  * `collection.base` is a different observation: it is the applied view and
  * excludes queued writes.
  *
- * The held-window lane checks this rule for `metadata.row.get`,
+ * The held-window variant checks this rule for `metadata.row.get`,
  * `metadata.collection.get`, and `metadata.collection.list`. The history's
  * explicit `set` and `unset` writes also write one collection key. A later
  * accepted transaction writes another key. A read sees both before and after
- * the hold ends. The lane does not judge a read between writes of one open
+ * the hold ends. The variant does not judge a read between writes of one open
  * transaction, nested transactions, or wrapper-deferred transactions.
  */
 
@@ -66,7 +66,7 @@ type Write =
       metadata: boolean
     }
 type Start = `absent` | `present-with-metadata` | `present-without-metadata`
-type Lane = `immediate` | `held` | `rebuilt`
+type ProductionPath = `immediate` | `held` | `rebuilt`
 
 const writes: ReadonlyArray<Write> = [
   { kind: `set` },
@@ -152,11 +152,11 @@ const histories = starts.flatMap((start) => {
 })
 
 /**
- * The rebuilt lane also varies the earlier held transaction. It either
+ * The rebuilt variant also varies the earlier held transaction. It either
  * updates key 2, or writes key 1 without metadata: an update or a delete when
  * key 1 is present, an insert when it is absent. A key-1 write changes the
  * projection that the open transaction rebuilds against, so its sequences are
- * legal after that write. Sequences stay at two writes to bound the lane.
+ * legal after that write. Sequences stay at two writes to bound the variant.
  */
 type EarlierWrite = { key: 1 | 2; kind: `insert` | `update` | `delete` }
 const shortSequences = writes.flatMap((first) => [
@@ -190,7 +190,7 @@ const rebuiltHistories = starts.flatMap((start) => {
 })
 
 /**
- * The nested lane opens a transaction, T1, and writes up to three writes to
+ * The nested variant opens a transaction, T1, and writes up to three writes to
  * key 1. Then a nested write applies before T1 commits:
  *
  * - `delete`: a transaction begun inside T1 deletes the present row.
@@ -208,7 +208,7 @@ const rebuiltHistories = starts.flatMap((start) => {
  * T1 applies after the nested write, so the Collection reclassifies each of
  * T1's inserts against the rows that the nested write leaves. An insert of a
  * present key is an equal re-insert, and an insert of an absent key is an
- * insert. Every row write in this lane writes one value, so a reclassified
+ * insert. Every row write in this variant writes one value, so a reclassified
  * insert is never a duplicate. The `held` variant holds both transactions
  * behind a persisting optimistic update until T1 commits; a hold delays
  * application but cannot change commit order, so it expects the same value.
@@ -326,7 +326,8 @@ const describeWrite = (write: Write) =>
 /**
  * The driver writes the history through a real Collection's sync API and reads
  * the result through `metadata.row.get` after the transaction applies. Each
- * lane reaches a different production path for the same rule:
+ * production path takes a different route through the Collection for the same
+ * rule:
  *
  * - `immediate`: the transaction applies at commit.
  * - `held`: a persisting optimistic request holds the transaction until it
@@ -335,10 +336,10 @@ const describeWrite = (write: Write) =>
  *   open, so the Collection rebuilds this transaction's automatic metadata
  *   writes before it commits.
  */
-// The model predicts a lane's row metadata. A write before the history (the
+// The model predicts a production path's row metadata. A write before the history (the
 // earlier write) applies first when it names the same key, and the history
 // then folds over that result.
-function expectedLaneMetadata(
+function expectedProductionPathMetadata(
   start: Start,
   sequence: ReadonlyArray<Write>,
   earlier: EarlierWrite | undefined,
@@ -367,14 +368,14 @@ declareOracle({
   model: [
     expectedMetadata,
     foldMetadata,
-    expectedLaneMetadata,
+    expectedProductionPathMetadata,
     expectedNestedMetadata,
   ],
   grammar: [histories, rebuiltHistories, nestedHistories],
 })
 
 async function observeMetadata(
-  lane: Lane,
+  productionPath: ProductionPath,
   start: Start,
   sequence: ReadonlyArray<Write>,
   id: string,
@@ -409,13 +410,13 @@ async function observeMetadata(
   try {
     await collection.stateWhenReady()
     const blocker =
-      lane === `immediate`
+      productionPath === `immediate`
         ? undefined
         : collection.update(2, (draft) => {
             draft.v = 9
           })
     let earlierReceipt: true | Promise<void> = true
-    if (lane === `rebuilt`) {
+    if (productionPath === `rebuilt`) {
       sync.begin()
       if (earlier.kind === `delete`) sync.write({ type: `delete`, key: 1 })
       else
@@ -427,7 +428,7 @@ async function observeMetadata(
     }
     // A re-insert writes the row exactly as the source holds it.
     let held: number | undefined = start === `absent` ? undefined : 0
-    if (lane === `rebuilt` && earlier.key === 1)
+    if (productionPath === `rebuilt` && earlier.key === 1)
       held = earlier.kind === `delete` ? undefined : 100
     sync.begin()
     sequence.forEach((write, step) => {
@@ -457,15 +458,15 @@ async function observeMetadata(
           ...(write.metadata ? { metadata } : {}),
         })
     })
-    if (lane === `rebuilt`) {
+    if (productionPath === `rebuilt`) {
       expect(earlierReceipt).not.toBe(true)
       release()
       await blocker!.when(`settled`)
       await earlierReceipt
     }
     const receipt = sync.commit()
-    if (lane === `immediate`) expect(receipt).toBe(true)
-    if (lane === `held`) {
+    if (productionPath === `immediate`) expect(receipt).toBe(true)
+    if (productionPath === `held`) {
       // A truncate applies at once; the request holds every other transaction.
       if (sequence.some((write) => write.kind === `truncate`))
         expect(receipt).toBe(true)
@@ -957,9 +958,9 @@ describe(`row metadata composition oracle`, () => {
   it.each([`immediate`, `held`, `rebuilt`] as const)(
     `matches last-write-wins metadata on the %s path`,
     { timeout: 120_000 },
-    async (lane) => {
+    async (productionPath) => {
       const cases =
-        lane === `rebuilt`
+        productionPath === `rebuilt`
           ? rebuiltHistories
           : histories.map((history) => ({ ...history, earlier: undefined }))
       const mismatches: Array<string> = []
@@ -968,10 +969,10 @@ describe(`row metadata composition oracle`, () => {
         let actual: unknown
         try {
           actual = await observeMetadata(
-            lane,
+            productionPath,
             start,
             sequence,
-            `row-metadata-composition-${lane}-${index}`,
+            `row-metadata-composition-${productionPath}-${index}`,
             earlier,
           )
         } catch (error) {
@@ -982,7 +983,7 @@ describe(`row metadata composition oracle`, () => {
           mismatches,
           label,
           actual,
-          expectedLaneMetadata(start, sequence, earlier),
+          expectedProductionPathMetadata(start, sequence, earlier),
         )
       }
       expect(mismatches).toEqual([])

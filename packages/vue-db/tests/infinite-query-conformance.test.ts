@@ -278,7 +278,7 @@ const vueInfiniteDriver: InfiniteQueryDriver = {
   mountCollectionControllable,
   mountConfigControllable,
   mountInputControllable,
-  knownGaps: [],
+  limits: [],
 }
 
 runInfiniteQuerySuite(vueInfiniteDriver, registerInfiniteQueryUnitScenarios)

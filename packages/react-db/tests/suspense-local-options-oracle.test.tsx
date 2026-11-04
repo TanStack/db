@@ -7,9 +7,9 @@
  * each committed mount and the first is checked again after its peer mounts.
  * These mounts create no reusable DbClient preload record. Cached-result
  * getKey/schema conflicts are judged by cache-options-oracle's warm driver.
- * A focused pending lane keeps delivery held until two separate boundaries
+ * A focused pending grammar keeps delivery held until two separate boundaries
  * show their fallbacks. Equal/different callback and scalar declarations then
- * use the same committed-output comparison as the ready lane. It checks no
+ * use the same committed-output comparison as the ready grammar. It checks no
  * abandoned render, rejection or cleanup race.
  * This receiver makes no server-render or hydration scheduling claim.
  */

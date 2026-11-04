@@ -3,7 +3,7 @@ import { declareOracle } from './oracle-declaration.js'
 import {
   compareSource,
   createSessionModel,
-  persistedPeerOnDemandLane,
+  persistedPeerOnDemandGrammar,
   planAction,
 } from './sync-metadata-session-oracle.js'
 import type {
@@ -78,13 +78,13 @@ export async function runRecoverySchedule(
   schedule: RecoverySchedule,
   createDriver: () => Promise<RecoveryDriver>,
 ) {
-  const lane = persistedPeerOnDemandLane
-  const model = createSessionModel(lane)
+  const grammar = persistedPeerOnDemandGrammar
+  const model = createSessionModel(grammar)
   const driver = await createDriver()
   let checkpoints = 0
   const checkSource = (cut: string, ended = false) => {
     const expected = ended
-      ? createSessionModel({ ...lane, cached: false }).observe()
+      ? createSessionModel({ ...grammar, cached: false }).observe()
       : model.observe()
     const mismatch = compareSource(
       checkpoints++,

@@ -561,7 +561,7 @@ export function assertRegisteredOracleProperty(property: string): void {
 }
 
 export type OracleReplayConfig = {
-  replaySeed: number | undefined
+  campaignSeed: number | undefined
   replayPath: string | undefined
   replayProperty: string | undefined
 }
@@ -709,14 +709,14 @@ export function readOracleRunConfig(
     }
     return {
       multiplier,
-      replaySeed: undefined,
+      campaignSeed: undefined,
       replayPath: undefined,
       replayProperty: undefined,
     }
   }
 
-  const replaySeed = Number(seedValue)
-  if (seedValue.trim() === `` || !Number.isSafeInteger(replaySeed)) {
+  const campaignSeed = Number(seedValue)
+  if (seedValue.trim() === `` || !Number.isSafeInteger(campaignSeed)) {
     throw new Error(`TANSTACK_DB_ORACLE_SEED must be an integer`)
   }
   if (replayPath === undefined) {
@@ -727,7 +727,7 @@ export function readOracleRunConfig(
     }
     return {
       multiplier,
-      replaySeed,
+      campaignSeed,
       replayPath: undefined,
       replayProperty: undefined,
     }
@@ -746,7 +746,7 @@ export function readOracleRunConfig(
     )
   }
   assertRegisteredOracleProperty(replayProperty)
-  return { multiplier, replaySeed, replayPath, replayProperty }
+  return { multiplier, campaignSeed, replayPath, replayProperty }
 }
 
 /**
@@ -802,21 +802,21 @@ function randomParameters<TExample>(
   examples: ReadonlyArray<TExample> | undefined,
 ): OracleRunParameters & { examples?: Array<TExample> } {
   if (property !== undefined) assertRegisteredOracleProperty(property)
-  const { replaySeed, replayPath, replayProperty } =
+  const { campaignSeed, replayPath, replayProperty } =
     typeof replay === `object`
       ? replay
       : {
-          replaySeed: replay,
+          campaignSeed: replay,
           replayPath: undefined,
           replayProperty: undefined,
         }
-  const selectedSeed = oracleCampaignSeed(replaySeed, property)
+  const selectedSeed = oracleCampaignSeed(campaignSeed, property)
   const parameters: OracleRunParameters =
-    replaySeed === undefined
+    campaignSeed === undefined
       ? { numRuns, seed: selectedSeed }
       : {
           numRuns,
-          seed: replaySeed,
+          seed: campaignSeed,
           // A path replays one recorded counterexample, so the replay runs
           // once. From a path with one segment, fast-check would otherwise
           // run `numRuns` histories that start at that index.
@@ -826,7 +826,7 @@ function randomParameters<TExample>(
             ? {
                 numRuns: 1,
                 path: replayPath,
-                ...oracleReplayReporter(property, replaySeed, replayPath),
+                ...oracleReplayReporter(property, campaignSeed, replayPath),
               }
             : {}),
         }
@@ -912,7 +912,7 @@ export function oracleReplayTest<TRegistration extends { skip: unknown }>(
 
 /**
  * The registration for a calibration witness. During a path replay of
- * `property`, TANSTACK_DB_ORACLE_CALIBRATION selects a hostile mutant that the
+ * `property`, TANSTACK_DB_ORACLE_CALIBRATION selects a mutant that the
  * main property runs against, and the witness for that `fault` checks the
  * failure. The witness runs in ordinary runs and in that calibration replay.
  * It stands aside during every other path replay, where it has nothing to
@@ -938,7 +938,7 @@ export function oracleRuns(baseRuns: number): number {
 }
 
 /**
- * Replays broad randomized properties when a campaign seed is supplied.
+ * Reseeds broad randomized properties when a campaign seed is supplied.
  * `examples` run first in every run, on top of the base runs. A site that
  * spreads these options and sets fast-check's `examples` itself runs them
  * inside the base runs instead, so they displace random histories.

@@ -71,7 +71,7 @@ const it = oracleReplayTest(vitestIt)
 declareOracle({ check: [expectArrayCall, expectTypedCall] })
 
 describe(`array methods behave like native arrays`, () => {
-  // The row of the original pinned table, for every method.
+  // The row of the original fixed table, for every method.
   it.each(arrayMethods)(`%s on a fixed row gives the native result`, (m) => {
     for (const k of [0, 1, 3])
       expectArrayCall([{ x: 1 }, 2, [{ x: 3 }], { x: 0 }], m, k)
@@ -94,7 +94,7 @@ describe(`array methods behave like native arrays`, () => {
   )(`matches native arrays across generated rows (random)`, expectArrayCall)
 })
 describe(`typed-array methods behave like native typed arrays`, () => {
-  // The row of the original pinned table, for every method.
+  // The row of the original fixed table, for every method.
   it.each(typedMethods)(`%s on a fixed row gives the native result`, (m) => {
     for (const write of [false, true]) expectTypedCall([3, 1, 2], m, 1, write)
   })

@@ -20,7 +20,7 @@ import type { FrozenRow, StoredRow } from './proxy-native-rows'
  * descriptors, keys, iteration, cycles, aliases, and revert-to-original rules.
  * The input object must remain unchanged.
  *
- * Pinned examples of individual language operations live in proxy.test.ts.
+ * Fixed examples of individual language operations live in proxy.test.ts.
  * The array callback oracle is differential: it runs the same callback history on a plain native row and
  * on a draft, then compares callback results, visit order, reconstructed rows,
  * change records, peers, and the untouched baseline. Generated two-step

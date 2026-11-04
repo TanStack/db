@@ -30,7 +30,7 @@ import type { TraceDriver, TraceProjection } from '../trace-runner.js'
  * law stronger.
  *
  * Stable campaigns preserve the histories that exposed these distinctions.
- * Fresh random campaigns vary their value domains. Pinned examples cover route
+ * Fresh random campaigns vary their value domains. Fixed histories cover route
  * movement and repeated retirement because those laws need ordered histories,
  * not more random scalar values.
  *
@@ -455,7 +455,7 @@ declareOracle({
 })
 
 function campaigns(fixedSeed: number, property: string) {
-  // Grammar controls: the pinned 1-child case reconstructs final retirement,
+  // Grammar controls: the fixed 1-child history reconstructs final retirement,
   // while counts 2–5 keep a surviving contributor. Equal route keys are the
   // control; distinct order and part IDs expose the wrong-alias result.
   // Removing null or route updates loses empty-value or reactivation behavior.

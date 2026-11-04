@@ -224,7 +224,7 @@ describe(`Svelte real SSR handoff`, () => {
 })
 
 /**
- * This receiving lane keeps one client's transport while native Svelte roots
+ * This receiving path keeps one client's transport while native Svelte roots
  * initialize at different times. It reuses the shared preparation judgment and
  * receiving-history grammar. Only initialization kind changes the initial-view
  * obligation: hydrate() must reproduce its server markup; mount() must read
@@ -364,7 +364,7 @@ async function checkReceivingHistory(
 
   try {
     // The real server fixture returns a JSON copy. A second copy here makes
-    // the transport boundary explicit for this receiving lane too.
+    // the transport boundary explicit for this receiving path too.
     client.hydrate(JSON.parse(JSON.stringify(rendered.state)))
     for (let index = 0; index < history.previousReaders; index++) {
       await initialize(`hydrate`, {

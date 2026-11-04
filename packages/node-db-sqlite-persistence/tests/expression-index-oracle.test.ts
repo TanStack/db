@@ -147,8 +147,8 @@ type GeneratedPropertyCampaign = {
   parameters: ReturnType<typeof oraclePropertyOptions>
 }
 
-// The fixed campaign pins its seed and stands aside on every path replay. The
-// random campaign runs in ordinary and seed-only runs, and as the replay of
+// The fixed campaign fixes its campaign seed and stands aside on every path replay. The
+// random campaign runs in ordinary and reseeded campaigns, and as the replay of
 // its property, where oraclePropertyOptions returns the recorded path.
 const fixedGeneratedCampaign: GeneratedPropertyCampaign = {
   name: `fixed`,

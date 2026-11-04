@@ -317,7 +317,7 @@ const reactDriver: LiveQueryDriver = {
   mountCollection,
   mountConfig,
   mountDisabled,
-  knownGaps: [],
+  limits: [],
   features: { serverSnapshot: true, suspense: true, pooledEqFilters: true },
 }
 

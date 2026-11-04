@@ -424,7 +424,7 @@ oracleProperty({
     fixedSeeds: [20260916],
     // A storage fault in the middle of the queue: the stop law needs a peer
     // behind the fault.
-    segments: [
+    constructed: [
       {
         name: `a phase write fault before a queued peer`,
         enters: [`phase write fault`, `fault before a queued peer`],
@@ -438,7 +438,7 @@ oracleProperty({
         }),
       },
     ],
-    pins: [
+    fixed: [
       {
         name: `a ready tail waits for a delayed head with the smallest delay`,
         history: { delay: 2, plans: [{ ...ok }, { ...ok }] },

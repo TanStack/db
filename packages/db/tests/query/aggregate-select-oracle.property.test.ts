@@ -1802,7 +1802,7 @@ describe(`aggregate select shapes`, () => {
     },
   )
 
-  // Pinned replay of a review counterexample: a grouped select value that
+  // Fixed regression of a review counterexample: a grouped select value that
   // holds the group key inside a function must read the group's key.
   oracleReplayTest(it)(`reads the group key inside a function`, async () => {
     await runHistory({
@@ -1814,7 +1814,7 @@ describe(`aggregate select shapes`, () => {
     })
   })
 
-  // Pinned replay: a published row keeps the select's field order, also
+  // Fixed regression: a published row keeps the select's field order, also
   // when a group key comes before a plain aggregate.
   oracleReplayTest(it)(`keeps the select's field order`, async () => {
     await runHistory({
@@ -1829,7 +1829,7 @@ describe(`aggregate select shapes`, () => {
     })
   })
 
-  // Pinned replay of a generated counterexample: an aggregate query without
+  // Fixed regression of a generated counterexample: an aggregate query without
   // groupBy whose select wraps its only aggregate still accepts HAVING.
   oracleReplayTest(it)(
     `accepts HAVING beside a wrapped aggregate without groupBy`,
@@ -1856,7 +1856,7 @@ describe(`aggregate select shapes`, () => {
     },
   )
 
-  // Pinned replay: a parent field stays legal when the include's source
+  // Fixed regression: a parent field stays legal when the include's source
   // shadows the parent alias.
   oracleReplayTest(it)(
     `reads a parent field under a shadowing child alias`,

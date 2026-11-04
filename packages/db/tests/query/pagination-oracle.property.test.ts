@@ -53,19 +53,19 @@ import type {
  * acquisition releases, visible rows, readiness, errors, and every
  * publication cut.
  *
- * Finite products pin boundary cells; fixed and random fast-check histories
+ * Finite products cover boundary cells; fixed and random fast-check histories
  * explore adjacent legal actions. Fault probes establish that wrong order,
  * false coverage, duplicate work, partial publication, and bad delete payloads
  * are observable. The model does not infer rows beyond provider evidence.
  *
- * The fixed C-01 through C-09 custom-collation lane declares an independent
+ * The fixed C-01 through C-09 custom-collation histories declare an independent
  * rank relation and literal public-key sequences. It crosses ascending and
  * descending order, scan and auto-index execution, inherited and per-order
  * configuration, bounded and unbounded queries, a later ordered source that
  * inherits the leading source's default, an output Collection with a different
  * downstream default, comparator-equal keys, and hostile provider order. It
- * also requires exactly one initial filtered full-source acquisition. This
- * lane establishes local custom ordering only; it does not authorize custom
+ * also requires exactly one initial filtered full-source acquisition. These
+ * histories establish local custom ordering only; it does not authorize custom
  * cursor pagination, comparator-aware range predicates, or backend collation
  * parity.
  */

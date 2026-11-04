@@ -83,7 +83,7 @@ import type {
  * imply one physical acquisition or one provider transport. The fast/late
  * phase is a fixture clock around source startup, not an ordered query window.
  * fast-check schedules current and obsolete completions in new orders, while
- * fixed scheduler orders pin both directions.
+ * fixed scheduler orders cover both directions.
  *
  * The production drivers use real Collections, compiled includes, applied
  * receipts, release callbacks, replay barriers, and source writes. They observe
@@ -486,7 +486,7 @@ function expectReleaseReentryObservation(
 // "the first query loads immediately (on-demand)" (TanStack DB 0.5 release
 // post). An eager source serves no subset demand, so its Collection readiness
 // is the only evidence. The architecture's initial-readiness law states this
-// rule; this lane is its executable owner.
+// rule; this oracle is its oracle owner.
 //
 // The law has three kinds of consumer. A live-query Collection becomes ready,
 // and its preload settles, at initial-query readiness. A one-shot read resolves
@@ -529,7 +529,7 @@ function expectReleaseReentryObservation(
 // The live-query shapes put the lagging source at a direct root, a
 // single-result root, an ordered root window, a correlated include child,
 // the lazy side of a join, an eager root that sets `syncMode: 'eager'`, and
-// an eager root that leaves `syncMode` at its default. The Effect lane uses
+// an eager root that leaves `syncMode` at its default. The Effect production path uses
 // the direct, lazy-join, and both eager-root shapes; Effects over an ordered
 // window or an include are not covered here. The eager roots are the nearby
 // witnesses: a design that ignores source readiness entirely completes them
@@ -552,7 +552,7 @@ function expectReleaseReentryObservation(
 // and controlled source writes. Each step is followed by a timer turn. Each
 // checkpoint compares the consumer's observation and the number of
 // acquisitions; the ordered shape records only that it acquired. A rejected acquisition, source error, and later demand changes
-// are outside this lane; Models A to C, the Effect disposal oracle, and the
+// are outside this grammar; Models A to C, the Effect disposal oracle, and the
 // subscription lifecycle oracle own them. The Electric live-query tests hold
 // the receiving witnesses for a real progressive source and for an on-demand
 // source that is ready before its subset loads.
@@ -1276,8 +1276,8 @@ async function expectLaggingSourceTraceMatches(
   })
 }
 
-// Each generated lane uses one grammar and one check in both campaigns. A
-// seed-and-path replay selects only its requested random lane.
+// Each generated campaign uses one grammar and one check in both campaigns. A
+// seed-and-path replay selects only its requested random campaign.
 function temporalCampaigns(property: string, fixedSeed: number) {
   return [
     {

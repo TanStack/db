@@ -25,7 +25,7 @@ import type {
  *
  * Scope: exact handler ASTs, one mutation, one edited key and an optional peer.
  * Complete ordinary fields, including Dates and own undefined, are observed.
- * Transport rejection and resolved HTTP 503 responses are separate lanes for
+ * Transport rejection and resolved HTTP 503 responses are separate grammars for
  * the fetch handler, with server-write fact varied independently. The HTTP
  * branch owes an Error with its declared message and exact error propagation.
  * Full schema/factory/query/component execution, awaitMatch, timeout guidance,

@@ -755,7 +755,7 @@ describe(`pooled live query cleanup admission`, () => {
   // A view read by a subscribed live query is cleaned up and rejects, then
   // its unobserved sibling is cleaned up; the reader ends and the view's
   // cleanup is retried.
-  const pinned: CleanupHistory = {
+  const fixedHistory: CleanupHistory = {
     views: [
       { g: `x`, observed: false, reader: true },
       { g: `y`, observed: false, reader: false },
@@ -768,7 +768,7 @@ describe(`pooled live query cleanup admission`, () => {
     ],
   }
   it(`keeps a view whose cleanup rejected in its partition`, async () => {
-    await expectPooledCleanupMatchesOrdinary(pinned)
+    await expectPooledCleanupMatchesOrdinary(fixedHistory)
   })
 
   for (const campaign of [`fixed`, `random`] as const) {

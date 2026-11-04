@@ -74,7 +74,7 @@ async function assertCursorProperty<Ts>(
 ): Promise<void> {
   if (replay.replayPath !== undefined && replay.replayProperty !== name) return
   const options = oraclePropertyOptions(runs, name)
-  if (replay.replaySeed === undefined) {
+  if (replay.campaignSeed === undefined) {
     await fc.assert(property, { ...options, seed: fixedSeed })
   }
   await fc.assert(property, options)
@@ -343,8 +343,8 @@ describe(`opaque cursor adapter`, () => {
 // one, and the page count from the backend's page sizes alone (the model
 // never sees tokens). That the count is the shortest covering prefix is not
 // one README sentence: it follows from its transport rules with the exact
-// counts the previous fixed tests pinned (three peer windows on pages of two
-// fetch 4 pages; a drained source fetches every page). Driver: the production pager over the opaque backend;
+// counts the previous fixed tests asserted (three peer windows on pages of two
+// fetch 4 pages; a drained source fetches every page). Production driver: the production pager over the opaque backend;
 // it records each read's rows or error name and the backend's call count
 // after each step. Limits: one scope per pager, no reset, faults, or
 // cancellation (the reset and failure properties below own those).
@@ -550,7 +550,7 @@ function checkReads(
   return pass
 }
 
-const pinned = (
+const fixedHistory = (
   name: string,
   pageSize: number,
   steps: ReadHistory[`steps`],
@@ -590,9 +590,9 @@ oracleProperty({
     ],
     runs: 100,
     fixedSeeds: [fixedSeed],
-    pins: [
+    fixed: [
       ...[1, 2, 5, 50].map((pageSize) =>
-        pinned(`windows across backend pages of ${pageSize}`, pageSize, [
+        fixedHistory(`windows across backend pages of ${pageSize}`, pageSize, [
           readsOf(
             { offset: 0, limit: 0 },
             { offset: 0, limit: 3 },
@@ -601,7 +601,7 @@ oracleProperty({
           readsOf({ offset: 0, limit: undefined }, { offset: 30, limit: 2 }),
         ]),
       ),
-      pinned(`unequal peer windows serialize without refetching`, 2, [
+      fixedHistory(`unequal peer windows serialize without refetching`, 2, [
         readsOf(
           { offset: 0, limit: 3 },
           { offset: 2, limit: 6 },
@@ -609,18 +609,18 @@ oracleProperty({
         ),
       ]),
       // Alone and first, so no peer's fetch hides a zero-limit fetch.
-      pinned(`a zero limit performs no transport work`, 2, [
+      fixedHistory(`a zero limit performs no transport work`, 2, [
         readsOf({ offset: 3, limit: 0 }),
         readsOf({ offset: 0, limit: 0 }),
       ]),
-      pinned(`the largest safe window end`, 2, [
+      fixedHistory(`the largest safe window end`, 2, [
         readsOf({ offset: Number.MAX_SAFE_INTEGER - 1, limit: 1 }),
       ]),
-      pinned(`a window changed after its call`, 2, [
+      fixedHistory(`a window changed after its call`, 2, [
         { reads: [{ window: { offset: 1, limit: 3 } }], changeAfterCall: true },
       ]),
       ...invalidWindows.map(({ offset, limit }, invalid) =>
-        pinned(
+        fixedHistory(
           `invalid window ${offset}/${limit} rejects before transport`,
           2,
           [

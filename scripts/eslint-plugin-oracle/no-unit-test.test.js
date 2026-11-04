@@ -92,10 +92,10 @@ it('retains a row after an update', async () => { await run([{ type: 'update' }]
     {
       code: `${header}const run = (h) => checkHistory(h)
 const replay = () => run([])
-it('replays the pinned history', replay)`,
+it('replays the fixed history', replay)`,
       filename,
     },
-    // A model pin reaches the declared model.
+    // A model-rule expectation reaches the declared model.
     {
       code: `${header}it('keeps an empty diff pending', () => { expect(modelHistory([])).toEqual([]) })`,
       filename,
@@ -110,7 +110,7 @@ it('replays the pinned history', replay)`,
       code: `import { declareOracle, oracleCalibrationTest } from './oracle-config.js'
 function checkHistory(history) { return history }
 declareOracle({ check: [checkHistory] })
-oracleCalibrationTest(it, 'p', 'fault')('rejects the hostile mutant', () => checkHistory(bad))`,
+oracleCalibrationTest(it, 'p', 'fault')('rejects the mutant', () => checkHistory(bad))`,
       filename,
     },
     // A class model.
@@ -132,7 +132,7 @@ it('checks a fixed history', () => runHistory([]))`,
     {
       code: `import { replayHistory, modelHistory } from './history-reexport.js'
 it('replays', () => replayHistory([]))
-it('pins the model', () => modelHistory([]))`,
+it('checks the model', () => modelHistory([]))`,
       filename,
     },
     // A private package's src/ is test code, so the rule follows it.

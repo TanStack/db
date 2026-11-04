@@ -49,7 +49,7 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  * through a local-only Collection, either in one same-turn batch or
  * sequentially. After all batched writes settle, or after each sequential
  * write settles, public rows and a change-message mirror must equal the
- * reference rows. An eager-index lane also builds an index before the history
+ * reference rows. An eager-index grammar also builds an index before the history
  * and compares both equality buckets after each settled prefix in sequential
  * histories. In batched histories it compares them after each synchronous
  * operation before settlement, then once after all writes settle. At the

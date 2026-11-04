@@ -217,7 +217,7 @@ export function checkBoundSchemaMutation(
   )
 }
 
-// Every lane is required separately in each native receiving driver. A held
+// Every production path is required separately in each native receiving driver. A held
 // observation counts only after immediate/public/handler comparisons succeed.
 export const boundSchemaCuts = [
   `initial-source-raw`,
@@ -233,11 +233,11 @@ export const boundSchemaCuts = [
   `rebound-followup-held`,
   `rebound-followup-settled`,
 ] as const
-export function boundSchemaLane(history: BoundSchemaHistory) {
+export function boundSchemaGrammar(history: BoundSchemaHistory) {
   return `${history.identity}/${history.firstSchema}->${history.nextSchema}/${history.changeKey ? `new-key` : `same-key`}/${history.input.word}`
 }
 export const boundSchemaReachStates = boundSchemaHistories.flatMap((history) =>
-  boundSchemaCuts.map((cut) => `${boundSchemaLane(history)}/${cut}`),
+  boundSchemaCuts.map((cut) => `${boundSchemaGrammar(history)}/${cut}`),
 )
 
 declareOracle({

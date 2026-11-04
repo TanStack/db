@@ -18,7 +18,7 @@ import type { Handlers, Orders } from './local-only-direct-write-fixture'
  * transaction, and runs the user's handler.
  *
  * The change-event history oracle drives this path through generated
- * histories and checks every publication. These witnesses pin the guard's
+ * histories and checks every publication. These witnesses fix the guard's
  * fallback cases, which that oracle does not generate: removing the guard
  * hides a direct write under a pending overlay and holds it behind a
  * persisting transaction, for every operation type.

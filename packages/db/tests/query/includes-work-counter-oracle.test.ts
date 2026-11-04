@@ -50,8 +50,8 @@ import type {
  * The input grammar varies an integer filler count from 1 through 24. Zero is
  * the ablated baseline; negative and fractional counts are invalid fixture
  * sizes. Joined queries vary unrelated links and join targets separately.
- * The join-free query grows every source together. Counts 1, 2, and 3 pin the
- * smallest valid boundary, 24 pins the upper bound, and fixed and random
+ * The join-free query grows every source together. Counts 1, 2, and 3 cover the
+ * smallest valid boundary, 24 covers the upper bound, and fixed and random
  * campaigns sample the range.
  *
  * The boundary conditions matter. Collections preload before they receive
@@ -159,17 +159,17 @@ describe(`includes deterministic work-counter oracle`, () => {
   })
 
   it.each([1, 2, 3])(
-    `pins the work bound at the small filler boundary (%i)`,
+    `checks the work bound at the small filler boundary (%i)`,
     expectCorrelatedJoinWorkBound,
   )
-  it(`pins the joined-link filler range endpoint`, () =>
+  it(`checks the joined-link filler range endpoint`, () =>
     expectCorrelatedJoinWorkBound(24))
   it.each([1, 24])(
-    `pins join-target growth at filler count %i`,
+    `checks join-target growth at filler count %i`,
     expectJoinTargetWorkBound,
   )
   it.each([1, 24])(
-    `pins join-free growth at filler count %i`,
+    `checks join-free growth at filler count %i`,
     expectJoinFreeWorkBound,
   )
 
@@ -276,8 +276,8 @@ describe(`includes deterministic work-counter oracle`, () => {
  * Collection delivers more change batches to the query than the initial load
  * at preload, or than the step's own parent write. The generated campaigns
  * skip only the work bound at refill checkpoints and still check the rows.
- * Replays pin every known trace and allow exactly the one extra child row
- * each shows, and pinned forward moves allow none. Each generated campaign
+ * Fixed regressions cover every known trace and allow exactly the one extra child row
+ * each shows, and fixed forward moves allow none. Each generated campaign
  * counts the forward moves its own runs check strictly and requires some.
  *
  * ## Histories
@@ -1061,12 +1061,12 @@ declareOracle({
 // reconstruction check below counts them.
 const WINDOW_RUNS = 60
 
-/** A pinned case: its strict forward-move tally is not reach evidence. */
+/** A fixed history: its strict forward-move tally is not reach evidence. */
 async function expectWindowedIncludeWork(testCase: WindowCase): Promise<void> {
   await checkWindowedIncludeWork(testCase)
 }
 
-const pinnedWindowCase: WindowCase = {
+const fixedWindowCase: WindowCase = {
   parents: 8,
   groups: 8,
   copies: [],
@@ -1087,7 +1087,7 @@ describe(`includes work under an ordered parent window`, () => {
     `loads children only for a late page's parents (distinct=%s)`,
     (distinct) =>
       expectWindowedIncludeWork({
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         parents: 40,
         groups: 40,
         childrenPerGroup: 3,
@@ -1102,7 +1102,7 @@ describe(`includes work under an ordered parent window`, () => {
     `moves the parent window, not the %s child's`,
     (childForm) =>
       expectWindowedIncludeWork({
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         childForm,
         history: [{ type: `move`, offset: 3, limit: 2 }],
       }),
@@ -1110,7 +1110,7 @@ describe(`includes work under an ordered parent window`, () => {
 
   it(`collapses parents whose selected values match under distinct`, () =>
     expectWindowedIncludeWork({
-      ...pinnedWindowCase,
+      ...fixedWindowCase,
       copies: [
         { pick: 1, group: true },
         { pick: 2, group: false },
@@ -1122,7 +1122,7 @@ describe(`includes work under an ordered parent window`, () => {
 
   it(`creates no static child demand from a static parent filter`, () =>
     expectWindowedIncludeWork({
-      ...pinnedWindowCase,
+      ...fixedWindowCase,
       childSource: `on-demand`,
       parentFilter: [0, 1, 2, 3, 4],
       offset: 3,
@@ -1133,7 +1133,7 @@ describe(`includes work under an ordered parent window`, () => {
   // parent past the narrowed window must not load them.
   it(`stops routing rows that setWindow drops from an orderBy-only parent`, () =>
     expectWindowedIncludeWork({
-      ...pinnedWindowCase,
+      ...fixedWindowCase,
       childrenPerGroup: 3,
       childSource: `on-demand`,
       parentForm: `orderOnly`,
@@ -1145,7 +1145,7 @@ describe(`includes work under an ordered parent window`, () => {
 
   it(`loads one page of children for a findOne parent`, () =>
     expectWindowedIncludeWork({
-      ...pinnedWindowCase,
+      ...fixedWindowCase,
       childForm: `findOne`,
       parentForm: `findOne`,
       offset: 5,
@@ -1155,7 +1155,7 @@ describe(`includes work under an ordered parent window`, () => {
   // so static child demand must not load their children.
   it(`creates no static child demand under a window requested before start`, () =>
     expectWindowedIncludeWork({
-      ...pinnedWindowCase,
+      ...fixedWindowCase,
       childForm: `ordered`,
       childSource: `on-demand`,
       parentForm: `orderOnly`,
@@ -1167,7 +1167,7 @@ describe(`includes work under an ordered parent window`, () => {
   // its grandchild demand must wait for the window too.
   it(`creates no static grandchild demand below a windowed parent`, () =>
     expectWindowedIncludeWork({
-      ...pinnedWindowCase,
+      ...fixedWindowCase,
       parents: 10,
       groups: 10,
       childrenPerGroup: 1,
@@ -1181,7 +1181,7 @@ describe(`includes work under an ordered parent window`, () => {
   // offset 0 drops nothing, so its static demand still starts at once.
   it(`creates no static child demand for a findOne moved past its named value before start`, () =>
     expectWindowedIncludeWork({
-      ...pinnedWindowCase,
+      ...fixedWindowCase,
       parents: 21,
       groups: 11,
       childrenPerGroup: 1,
@@ -1202,7 +1202,7 @@ describe(`includes work under an ordered parent window`, () => {
     `moves the window forward strictly (%s children, distinct=%s)`,
     (childSource, distinct) =>
       expectWindowedIncludeWork({
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         parents: 40,
         groups: 40,
         childrenPerGroup: 2,
@@ -1225,7 +1225,7 @@ describe(`includes work under an ordered parent window`, () => {
     [
       `a desc held row moved to the lowest rank`,
       {
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         parents: 24,
         groups: 12,
         childrenPerGroup: 1,
@@ -1238,7 +1238,7 @@ describe(`includes work under an ordered parent window`, () => {
     [
       `an asc held row moved to the highest rank`,
       {
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         parents: 36,
         groups: 18,
         childrenPerGroup: 1,
@@ -1250,7 +1250,7 @@ describe(`includes work under an ordered parent window`, () => {
     [
       `a tie at the window edge during preload (late page)`,
       {
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         parents: 38,
         groups: 19,
         copies: [{ pick: 735_689_178, group: false }],
@@ -1263,7 +1263,7 @@ describe(`includes work under an ordered parent window`, () => {
     [
       `ties at the window edge during preload (two rows)`,
       {
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         parents: 33,
         groups: 17,
         copies: [
@@ -1281,7 +1281,7 @@ describe(`includes work under an ordered parent window`, () => {
     [
       `ties at the window edge during preload (first row)`,
       {
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         parents: 11,
         groups: 6,
         copies: [
@@ -1298,7 +1298,7 @@ describe(`includes work under an ordered parent window`, () => {
     [
       `a window move while the loader refills`,
       {
-        ...pinnedWindowCase,
+        ...fixedWindowCase,
         parents: 33,
         groups: 17,
         childrenPerGroup: 1,

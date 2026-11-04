@@ -186,24 +186,24 @@
  * announced, and that each `status:change` is followed at once by
  * `health:change`. When the expected tree changed, the last event must show
  * the current tree. `findProblems` must list, in tree order, exactly the
- * expected nodes with a problem of their own. Request lanes check that a lazy load or a root Collection's
+ * expected nodes with a problem of their own. Request grammars check that a lazy load or a root Collection's
  * load that fails after initial-query readiness is a request error on the query's
- * node, and that it clears. Effect lanes check the Effect's gate, and that a
+ * node, and that it clears. Effect grammars check the Effect's gate, and that a
  * failed load after it still ends the Effect: an Effect has no request errors.
- * The on-demand reload lane checks that a reload of an on-demand Collection
+ * The on-demand reload grammar checks that a reload of an on-demand Collection
  * keeps a query's rows until the new run reloads its subset.
  *
  * ## Limits
  *
  * The main grammar's Collections are eager, so a live query cannot become
- * ready while a Collection is still loading; a focused lane enumerates an
+ * ready while a Collection is still loading; a focused grammar enumerates an
  * on-demand Collection that fails its first load after the query is ready.
  * The main grammar reaches a cleanup during a reload only from `health:change`
  * and only with `{ dependents: true }`; the lazy grammar's `ending` reaches
  * every notification and also a plain `cleanup()`, but only as a history's
  * last step, and it does not judge the query a plain cleanup leaves.
  * The window grammar settles all pending loads at once, and the lazy grammar
- * settles all, the oldest, or the newest (the overlapping-load lane owns
+ * settles all, the oldest, or the newest (the overlapping-load grammar owns
  * other orders). A demand parked behind a child whose first load failed makes
  * no request, so the model predicts it from law 10 (maintainer decision). Per-row child Collections are not
  * in the tree; an include's node shows its source. Pooled histories do not
@@ -216,7 +216,7 @@
  * it has no truncate, so a truncate replay that would wait for an aborted
  * load belongs to the subscription lifecycle oracle (its `manual`
  * cancellation). The shared demand model lets a held load's success clear
- * its keys' errors whenever it started; the overlapping-load lane owns the
+ * its keys' errors whenever it started; the overlapping-load grammar owns the
  * rule that a root Collection's request error clears only for a load
  * started after the failure.
  */
@@ -372,7 +372,7 @@ type Step =
 // The main grammar reaches the first two; the lazy grammar reaches all four.
 // Not reached: the retired run's adapter cleanup function and the new run's
 // `sync()` are adapter code, and a cleanup from them is a cleanup during sync
-// entry or adapter cleanup, which other lanes own.
+// entry or adapter cleanup, which other grammars own.
 type ReloadNotice =
   `source-health` | `query-health` | `loading-subset` | `subscription-status`
 
@@ -3402,7 +3402,7 @@ describe(`source failure and health oracle`, () => {
   // retain all six shapes and both direct-subscriber choices above.
   const requiredProperty = `source-health.required-history`
   const config = readOracleRunConfig()
-  for (const seed of config.replaySeed === undefined
+  for (const seed of config.campaignSeed === undefined
     ? [20261029, undefined]
     : [undefined]) {
     const requiredReach = createOracleReach(
@@ -3582,7 +3582,7 @@ describe(`overlapping root loads`, () => {
 })
 
 // ---------------------------------------------------------------------------
-// On-demand reload lane
+// On-demand reload grammar
 // ---------------------------------------------------------------------------
 
 /**
@@ -4471,7 +4471,7 @@ function expectHeldDemandCovered(
  * window. The query shows two rows ordered by id. Steps: `window` moves the
  * window two rows on; `settle-ok` settles every pending load, and any load
  * the query requests after it, until none is pending; `settle-fail` rejects
- * every pending load at once (the overlapping-load lane owns the order of
+ * every pending load at once (the overlapping-load grammar owns the order of
  * two loads); `settle-aborted-fail` rejects only the loads the query aborted,
  * with an `AbortError`, as an adapter that honours the signal does, and
  * `settle-aborted-ok` serves only those loads late, as an adapter whose
@@ -5545,7 +5545,7 @@ type LazyReach = ReturnType<
 // refuses while an Effect reads the child): the child ends `cleaned-up` with no sync
 // run live at its adapter and the reload settled; a cascade also ends the
 // query and the Effect. A plain cleanup under the query is a query failure
-// that this lane does not judge. Then a fresh start commits one row, and
+// that this grammar does not judge. Then a fresh start commits one row, and
 // that row is both the child's rows and its diff baseline: nothing of the
 // reload stayed armed.
 type LazyEnding = { at: ReloadNotice; dependents: boolean }
@@ -5567,7 +5567,7 @@ async function runLazyHistory(
     // The query orders parents by id and shows the first `window`.
     window?: number
     // By step index, the keys of each request the adapter receives in that
-    // step. A named history pins production's requests where a parked
+    // step. A fixed history asserts production's requests where a parked
     // prediction rests on them.
     requests?: Readonly<Record<number, ReadonlyArray<ReadonlyArray<number>>>>
     asyncChildReady?: boolean

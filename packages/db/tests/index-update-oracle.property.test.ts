@@ -41,11 +41,11 @@ import type { BaseIndex } from '../src/indexes/base-index.js'
  * concerns returned index results, not bucket identity or maintenance work.
  * A build is one of those direct actions even when a source value is
  * `undefined`: default nulls-first order must hold after build just as it
- * does after incremental add. The nullish lane below exercises both paths.
- * A separate mixed number/string lane checks key conservation only. A full
+ * does after incremental add. The nullish grammar below exercises both paths.
+ * A separate mixed number/string grammar checks key conservation only. A full
  * ordered read and an indexed public snapshot must contain each live source
  * key once, even when unlike values have no declared relative sort order.
- * A separate two-value callback lane checks legacy scalar input kinds for
+ * A separate two-value callback grammar checks legacy scalar input kinds for
  * immutable Date, Temporal.Instant, and byte values across both index types.
  */
 
@@ -88,7 +88,7 @@ const arbitraryAction: fc.Arbitrary<IndexAction> = fc.oneof(
  * model actions, not names for additional production index methods.
  *
  * Reconstruction: the fixed prefix reaches nonempty replacement, update,
- * delete, empty replacement, and continuation; the pinned tail reaches a new
+ * delete, empty replacement, and continuation; the fixed-history tail reaches a new
  * key after replacement. Generated put supplies duplicate values and same-key
  * updates, delete supplies retirement, and build supplies arbitrary replacement
  * sets. Removing any one action loses that transition. Removing the narrow
@@ -1689,14 +1689,14 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
 
   // Group grammar: 2..20 generated IDs in 0..4, with a forced duplicate first
   // group and a distinct group 5. The same bounded input is run in both index
-  // types. The exact-identity lane gives every row a fresh array, then retires
-  // and reuses handles. The custom-comparator lane additionally reverses
+  // types. The exact-identity grammar gives every row a fresh array, then retires
+  // and reuses handles. The custom-comparator grammar additionally reverses
   // insertion. Without the duplicate, representative retirement is absent;
   // without the distinct group, group order is unobservable; without reversed
   // insertion, insertion order can masquerade as lexical key order. Replacing
   // one value with a fresh value in the same group checks exact membership
   // independently of comparator position; a later update crosses groups.
-  // The pinned [0, 1] case reconstructs these distinctions. Invalid comparator
+  // The fixed [0, 1] history reconstructs these distinctions. Invalid comparator
   // results and inconsistent comparator order are outside these two grammars.
   test.each([20260930, undefined])(
     `preserves exact equality while ordered traversal retains every row (seed %s)`,
@@ -2001,7 +2001,7 @@ test(`retired-identity calibration shrinks and replays the same semantic failure
  * then deletes one Temporal owner. After each returned action, both full index
  * traversals must contain exactly the live source keys.
  *
- * In the public lane a ready Collection receives the same rows and deletes
+ * In the public production path a ready Collection receives the same rows and deletes
  * the number. A manual index serves a bounded `currentStateAsChanges` read
  * with room for one more row than the source contains. The returned change
  * messages must contain each live key once. `optimizedOnly` and the take spy

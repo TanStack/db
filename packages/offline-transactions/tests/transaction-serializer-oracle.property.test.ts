@@ -13,7 +13,7 @@ import {
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { cleanupOfflineOracle } from './oracle-lifecycle'
 import { FakeStorageAdapter } from './harness'
-import { oracleLaneOptions, readOfflineOracleConfig } from './oracle-config'
+import { oracleCampaignOptions, readOfflineOracleConfig } from './oracle-config'
 import type { OfflineTransaction } from '../src/types'
 
 /**
@@ -48,8 +48,8 @@ import type { OfflineTransaction } from '../src/types'
  * process or restarting an existing Collection's sync run. Seed/path replay is
  * oracle replay of a recorded failure.
  *
- * Reach and controls: pinned histories force every edit kind and hostile marker.
- * Fixed and random lanes support seed/path replay. Encoder and decoder faults
+ * Reach and controls: fixed histories force every edit kind and hostile marker.
+ * Fixed and random campaigns support seed/path replay. Encoder and decoder faults
  * inject Date/string confusion, wrong registry, omitted changes, and unknown
  * versions. Malformed generated markers are rejected before durable data can
  * be replaced; the single-case Temporal failure paths are unit tests.
@@ -467,7 +467,7 @@ it.each([`modified`, `original`, `changes`] as const)(
     }
   },
 )
-const pinned: Array<Edit> = [
+const fixedHistory: Array<Edit> = [
   { kind: `insert`, slot: 1, before: twin, after: { runtime: 0.5, wire: 0.5 } },
   { kind: `insert`, slot: 0, before: twin, after: datePair(1704067200000) },
   { kind: `update`, slot: 1, before: datePair(0), after: twin },
@@ -488,20 +488,20 @@ const pinned: Array<Edit> = [
     }
   }),
 ]
-// Grammar controls: the pinned history is a legal ten-edit reconstruction of
+// Grammar controls: the fixed history is a legal ten-edit reconstruction of
 // every edit kind, both registry slots, Date/string twins, marker escapes, and
 // an own __proto__ key. Dropping one of those axes loses a distinct wire or
 // application-restart observation. Generated trees add empty and nested arrays
 // and objects with depth two and at most three children or keys. Current records
 // admit zero edits, while compatibility records start at one. Cycles and malformed
 // markers are outside this valid-tree grammar and have rejection witnesses
-// above. The generated edit bound includes the complete pinned history. A
+// above. The generated edit bound includes the complete fixed history. A
 // never-escape rule fails its marker-shaped user object; an always-escape rule
 // fails its ordinary object with an own __proto__ key at the wire checkpoint.
-// This package's test root is separate from core's named replay portfolio.
+// This package's test root is separate from core's named fixed-history portfolio.
 // Keep a local replay entry point rather than importing files outside rootDir.
 // Each random campaign is its own replay property, because a recorded path
-// belongs to one generator. Its fixed lane and its random lane share one
+// belongs to one generator. Its fixed campaign and its random campaign share one
 // generator, budget, and assertion set.
 const MUTATION_WIRE_PROPERTY = `offline.serializer.mutation-wire`
 const DATE_MARKER_PROPERTY = `offline.serializer.date-marker`
@@ -526,7 +526,7 @@ const mutationEdits = fc.array(
     before: tree(2),
     after: tree(2),
   }),
-  { maxLength: pinned.length },
+  { maxLength: fixedHistory.length },
 )
 const mutationTime = fc.integer({
   min: -2000000000000,
@@ -539,8 +539,8 @@ const mutationMeaningProperty = (fault: Fault = `none`) =>
 
 const checkMutationWire = async (seed: number | undefined): Promise<void> => {
   await fc.assert(mutationMeaningProperty(), {
-    ...oracleLaneOptions(mutationWireOracle, seed),
-    examples: [[pinned, 1704067200000]],
+    ...oracleCampaignOptions(mutationWireOracle, seed),
+    examples: [[fixedHistory, 1704067200000]],
   })
 }
 
@@ -565,15 +565,15 @@ oracleReplayTest(it, MUTATION_WIRE_PROPERTY)(
     // TANSTACK_DB_ORACLE_PROPERTY=offline.serializer.mutation-wire
     const property = mutationMeaningProperty(`omit-changes`)
     const replay = mutationWireOracle.random
-    const { replaySeed } = readOracleRunConfig()
+    const { campaignSeed } = readOracleRunConfig()
     const captured = await fc.check(property, {
       ...replay,
-      seed: replaySeed ?? 20260914,
+      seed: campaignSeed ?? 20260914,
     })
     expect(captured.failed).toBe(true)
     expect(captured.errorInstance).toMatchObject({ name: `AssertionError` })
     expect(String(captured.errorInstance)).toContain(`mutation wire checkpoint`)
-    if (replaySeed !== undefined) return
+    if (campaignSeed !== undefined) return
 
     expect(captured.numShrinks).toBeGreaterThan(0)
     expect(captured.counterexamplePath).toMatch(/^\d+(?::\d+)*$/)
@@ -603,7 +603,7 @@ it(`retains the wire mismatch when cleanup also fails`, async () => {
   let failure: unknown
   try {
     await checkRoundtrip(
-      [pinned[0]!],
+      [fixedHistory[0]!],
       0,
       `omit-changes`,
       `encoder`,
@@ -633,7 +633,7 @@ const checkDateMarker = async (seed: number | undefined): Promise<void> => {
           before: leaf,
           after: leaf,
         }),
-        { minLength: 1, maxLength: pinned.length },
+        { minLength: 1, maxLength: fixedHistory.length },
       ),
       async (edits) => {
         // Old records had no object escape. Use only unambiguous legacy trees,
@@ -656,7 +656,7 @@ const checkDateMarker = async (seed: number | undefined): Promise<void> => {
       },
     ),
     {
-      ...oracleLaneOptions(dateMarkerOracle, seed),
+      ...oracleCampaignOptions(dateMarkerOracle, seed),
       examples: [
         [[{ kind: `update`, slot: 0, before: datePair(0), after: twin }]],
       ],
@@ -683,13 +683,13 @@ const checkVersionTwo = async (seed: number | undefined): Promise<void> => {
           before: tree(2),
           after: tree(2),
         }),
-        { minLength: 1, maxLength: pinned.length },
+        { minLength: 1, maxLength: fixedHistory.length },
       ),
       async (edits) => checkRoundtrip(edits, 0, `none`, `encoder`, false, true),
     ),
     {
-      ...oracleLaneOptions(versionTwoOracle, seed),
-      examples: [[pinned]],
+      ...oracleCampaignOptions(versionTwoOracle, seed),
+      examples: [[fixedHistory]],
     },
   )
 }
@@ -734,7 +734,7 @@ it.each(
                   : `Unsupported transaction value encoding: 5`,
             }
       await expect(
-        checkRoundtrip(pinned, 0, fault, boundary),
+        checkRoundtrip(fixedHistory, 0, fault, boundary),
       ).rejects.toMatchObject(expectedFailure)
       expect(decode).toHaveBeenCalledTimes(boundary === `encoder` ? 0 : 1)
     } finally {

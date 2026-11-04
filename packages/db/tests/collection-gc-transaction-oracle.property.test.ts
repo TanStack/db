@@ -401,7 +401,7 @@ const property = fc.asyncProperty(
 // Replay one history with TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH,
 // and TANSTACK_DB_ORACLE_PROPERTY=collection-lifecycle.gc-persisting-transaction.
 it.each(
-  runConfig.replaySeed === undefined ? [20261024, undefined] : [undefined],
+  runConfig.campaignSeed === undefined ? [20261024, undefined] : [undefined],
 )(
   `retires a Collection only after gcTime with no subscriber and no persisting transaction (seed %s)`,
   async (seed) => {

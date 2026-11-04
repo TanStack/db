@@ -70,8 +70,8 @@ import type {
 | handoff timing, on-demand subsets, streamed errors, consumption | | | | focused `live-query-observer.test.ts` hydration tests |
 
  * Keys are `a`..`c`, versions 0..3, histories of 1..10 steps, both modes.
- * Segments start a generated history with the steps that enter each declared
- * state, so every lane reaches every state. Rows are
+ * Constructed histories start a generated history with the steps that enter each declared
+ * state, so every grammar reaches every state. Rows are
  * compared as sets by key: this oracle makes no order claim. The source is a
  * plain controlled Collection, not a live-query Collection, so source health
  * propagation through a query graph belongs to `source-health-oracle.test.ts`.
@@ -103,7 +103,7 @@ type View = { status: CollectionStatus | `disabled`; rows: Array<VisibleRow> }
 const MAX_EVENTS = 10
 const key = fc.constantFrom<Key>(`a`, `b`, `c`)
 const version = fc.integer({ min: 0, max: 3 })
-// A record of constants, not `fc.constant(object)`, so that a pin or segment
+// A record of constants, not `fc.constant(object)`, so that a fixed or constructed history
 // built from a literal is a member of the language (fast-check compares a
 // constant by identity).
 const step = <Type extends Event[`type`]>(type: Type) =>
@@ -596,7 +596,7 @@ oracleProperty({
     states: reachStates,
     runs: 100,
     fixedSeeds: [20260, -88123],
-    segments: [
+    constructed: [
       {
         name: `crash while attached, then cleanup`,
         enters: [
@@ -644,7 +644,7 @@ oracleProperty({
         build: startWith(`attach`, `ready`),
       },
     ],
-    pins: [`granular`, `wholesale`].flatMap((mode) =>
+    fixed: [`granular`, `wholesale`].flatMap((mode) =>
       replays.map(([name, events]) => ({
         name: `${mode} observer ${name}`,
         history: {

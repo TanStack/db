@@ -2,7 +2,8 @@
  * A completed-history count is output data, not a generated-property budget.
  * The maintainer's 2026-10-28 decision permits the typed OracleReplayWitness
  * record in its shared writer only when every value use serializes that record.
- * AGENTS.md still requires one-run unpinned property options to be reported.
+ * AGENTS.md still requires one-run property options with no fixed history to
+ * be reported.
  * A type annotation cannot excuse an options alias, escape, mutation or second
  * use. The initializer must be a plain data record with witness fields; custom
  * serialization hooks can receive the record without a binding reference.
@@ -91,7 +92,7 @@ for (const program of [...programs])
       programs.push({ ...program, initializer })
 
 // Only a dedicated recording program emits a count observation. Every other
-// authored program has an unpinned literal count whose enforcement must remain.
+// authored program has a literal count with no fixed history, whose enforcement must remain.
 function expectedReports(program) {
   return program.location === 'writer' &&
     program.annotation === 'witness' &&

@@ -520,9 +520,9 @@ describe(`nested includes reachable-shape oracle`, () => {
     )
   })
 
-  it(`pins the reported 20-by-2-by-5-by-10 tree`, async () => {
+  it(`checks the reported 20-by-2-by-5-by-10 tree`, async () => {
     // These semantic counters do not claim to measure elapsed time or internal
-    // allocations. They pin source delivery at preload and reachable shape.
+    // allocations. They fix source delivery at preload and reachable shape.
     await checkNestedTreeShape(20, (observation) =>
       expectNestedTreeShape(observation, 20),
     )

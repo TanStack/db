@@ -247,7 +247,7 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
 // grammar; a negative elapsed advance is invalid for its monotonic elapsed
 // clock. The fixed seed and seedless campaigns use the same property and run
 // budget. The shared oracle config
-// accepts a seed and shrink path for direct replay of the seedless lane.
+// accepts a seed and shrink path for direct replay of the seedless grammar.
 it.each([20260913, undefined])(
   `obeys appointment histories (seed %s)`,
   async (seed) => {

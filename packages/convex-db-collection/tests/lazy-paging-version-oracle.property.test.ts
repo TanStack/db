@@ -84,7 +84,7 @@ async function runVersions(h: History, fault: Fault = `none`) {
   const publish = () => {
     const rows = [...f.source.base.values()].map((row) => ({ ...row }))
     compare(rows)
-    // Hostile publication controls run at the same observation boundary, then
+    // Mutant publication controls run at the same observation boundary, then
     // restore the correct final value. They test trace comparison, not a claim
     // that production itself emitted these deliberately injected observations.
     if (!injected && fault !== `none` && rows[0]?.text.endsWith(`revision-2`)) {

@@ -21,7 +21,7 @@ import { declareOracle } from '../../db/tests/oracle-declaration.js'
  * keep rare topology classes present even when random generation misses them.
  * The generated topology claim is limited to plain objects with numeric
  * labels and array edges, at most six nodes and three edges per node. Cycle
- * rejection through other containers is pinned by hash-graph.test.ts, an
+ * rejection through other containers is fixed by hash-graph.test.ts, an
  * ordinary test file. This file does not establish collision freedom or
  * complexity limits.
  */

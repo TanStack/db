@@ -43,7 +43,7 @@ import type { BrowserOPFSWorkerErrorCode } from '../src/opfs-worker-protocol'
  *
  * The real worker answers earlier requests before close; the request-order
  * oracle owns that law. This file's controlled worker can answer in any order,
- * so the close lane also checks that pending work settles when close settles
+ * so the close grammar also checks that pending work settles when close settles
  * first.
  *
  * Controlled page and worker objects implement only the browser event and
@@ -898,9 +898,9 @@ and termination count. Synthetic events and a fake worker do not prove real
 bfcache admission, durability, native handle release, or wa-sqlite #88. The
 Chromium Web Lock fixture checks native queued-lock release separately.
 Challenge/replay: fixed examples exhaust the cheap structural products. Each
-generated lane runs a fixed and an unseeded campaign with the same grammar and
+generated property runs a fixed and an unseeded campaign with the same grammar and
 run budget. Verbose FastCheck output retains original/reduced traces. A path
-replay selects only the direct replay of its lane's property, named by
+replay selects only the direct replay of its property, named by
 TANSTACK_DB_ORACLE_PROPERTY: opfs.page-lifecycle, opfs.mixed-execute,
 opfs.terminal-event, opfs.close, or opfs.failure-cleanup. A seed without a
 path reseeds the unseeded campaigns. Run it with this file's package-local

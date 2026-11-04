@@ -28,14 +28,14 @@
  * - Playwright's runtime `test.skip()` or `test.fixme()` inside a test,
  *   unless its condition is `browserName !== '<browser>'`: a control that
  *   only one browser supports.
- * - A generated property limited to one run that pins no history: a literal
- *   `numRuns` of 1 or 0, or a base of 1 passed to the run helpers. One random
- *   history is not a generated property. A witness pins its history with a
- *   recorded `path` (a literal, or a failure's `counterexamplePath`) or with
- *   a seed that is a number literal or a constant bound to one. A replay from
- *   configuration takes its options from `oraclePropertyOptions`, which
+ * - A generated property limited to one run that has no fixed history: a
+ *   literal `numRuns` of 1 or 0, or a base of 1 passed to the run helpers. One
+ *   random history is not a generated property. A witness fixes its history
+ *   with a recorded `path` (a literal, or a failure's `counterexamplePath`) or
+ *   with a seed that is a number literal or a constant bound to one. A replay
+ *   from configuration takes its options from `oraclePropertyOptions`, which
  *   returns one run for a path replay.
- * - A literal run count above 1 that pins no history. It does not scale with
+ * - A literal run count above 1 that has no fixed history. It does not scale with
  *   `TANSTACK_DB_ORACLE_RUNS_MULTIPLIER`, so `oracleRuns` must wrap it.
  * - A private replay variable: a `process.env` read whose name ends in
  *   `_SEED`, `_PATH`, `_PROPERTY`, or `_RUNS`, other than the shared
@@ -43,8 +43,8 @@
  *   `TANSTACK_DB_ORACLE_PROPERTY`. The replay manifest, the guarded replay
  *   runner, and the retired-variable check see only the shared variables.
  *
- * The rule has no inline exception. A known gap is pinned with `it.fails` on
- * a fixed seed, not skipped.
+ * The rule has no inline exception. A known counterexample is kept failing with
+ * `it.fails` on a fixed seed, not skipped.
  *
  * The rule cannot see a run count lowered to any value above 1, a run count
  * or seed held in a variable that is not a constant bound to a number, a call
@@ -388,11 +388,11 @@ function propertyName(property) {
 }
 
 /**
- * A one-run object pins its history when it replays a `path` or passes a
+ * A one-run object has a fixed history when it replays a `path` or passes a
  * fixed seed. An object that an `expect` matcher compares holds an observed
  * run count, and `fc.sample` draws examples without running a property.
  */
-function isPinnedOrObservation(object, sourceCode) {
+function isFixedOrObservation(object, sourceCode) {
   const option = (name) =>
     object.properties.find((property) => propertyName(property) === name)
   const path = option(`path`)
@@ -587,17 +587,17 @@ export default {
   meta: {
     type: `problem`,
     docs: {
-      description: `Report oracle tests that stop running: .only, a skipped body, a switch-off condition, or one unpinned run.`,
+      description: `Report oracle tests that stop running: .only, a skipped body, a switch-off condition, or one run with no fixed history.`,
     },
     schema: [],
     messages: {
       only: `\`.only\` runs only this test, so every other law in the file stops running. Remove it before committing.`,
-      skip: `\`.{{name}}\` stops this test from enforcing its law. Remove it. To keep a known gap visible, pin a failing history with \`it.fails\` and a fixed seed.`,
+      skip: `\`.{{name}}\` stops this test from enforcing its law. Remove it. To keep a known counterexample visible, write it as a failing fixed history with \`it.fails\` and a fixed seed.`,
       conditional: `\`.{{name}}\` can switch this test off in ordinary runs. Only \`.skipIf(oracleReplayRequested())\` or \`.skipIf(oracleReplaySkips(property))\` may switch an oracle test off, so that a replay can stand it aside. Remove the condition.`,
       alias: `\`.{{name}}\` is passed around as a value, so the rule cannot see what it switches off. Call it directly, or select a replay with \`oracleReplayTest(test, property)\` from oracle-config.`,
       aliasTest: `\`{{name}}\` is passed around as a value, so the rule cannot see what it registers or switches off. Call it directly, or select a replay with \`oracleReplayTest({{name}}, property)\` from oracle-config.`,
       guarded: `This test registers only under a condition, so it can stop running in ordinary runs. Register it unconditionally. A replay selection uses \`oracleReplayRequested()\` or \`oracleReplaySkips(property)\` from oracle-config, or \`oracleReplayTest(test, property)\`.`,
-      singleRun: `A generated property with one run that pins no history checks one random history. Pass a base run count to oracleRuns or oraclePropertyOptions, which also selects a replay. A witness passes a recorded \`path\` or a seed that is a number literal or a constant.`,
+      singleRun: `A generated property with one run that has no fixed history checks one random history. Pass a base run count to oracleRuns or oraclePropertyOptions, which also selects a replay. A witness passes a recorded \`path\` or a seed that is a number literal or a constant.`,
       replayVariable: `\`{{name}}\` selects a replay or a run count outside the shared variables, so the replay manifest, the guarded replay runner, and the retired-variable check cannot see it. Take the options from \`oraclePropertyOptions\` or \`oracleRandomParameters\` in oracle-config, which read TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and TANSTACK_DB_ORACLE_PROPERTY, and scale run counts with \`oracleRuns\`.`,
       literalRuns: `A literal run count does not scale with TANSTACK_DB_ORACLE_RUNS_MULTIPLIER. Wrap it in oracleRuns, or pass it to oraclePropertyOptions.`,
     },
@@ -605,14 +605,14 @@ export default {
   create(context) {
     const { sourceCode } = context
 
-    /** Whether `node` is the value of a `numRuns` option that a replay pins. */
-    function isPinnedRunCount(node) {
+    /** Whether `node` is the value of a `numRuns` option that a replay fixes. */
+    function isFixedRunCount(node) {
       const { parent } = node
       return (
         parent.type === `Property` &&
         propertyName(parent) === `numRuns` &&
         parent.parent.type === `ObjectExpression` &&
-        (isPinnedOrObservation(parent.parent, sourceCode) ||
+        (isFixedOrObservation(parent.parent, sourceCode) ||
           isSerializedReplayWitness(
             parent.parent,
             context.filename,
@@ -639,7 +639,7 @@ export default {
         if (runHelpers.has(root) && names.length === 0) {
           if (
             isSingleRunLiteral(constantNumber(node.arguments[0], sourceCode)) &&
-            !isPinnedRunCount(node)
+            !isFixedRunCount(node)
           ) {
             context.report({ node: node.arguments[0], messageId: `singleRun` })
           }
@@ -756,7 +756,7 @@ export default {
         }
         // A constant bound to a number literal counts as that literal.
         const count = constantNumber(node.value, sourceCode)
-        if (count === undefined || isPinnedRunCount(node.value)) return
+        if (count === undefined || isFixedRunCount(node.value)) return
         context.report({
           node,
           messageId: isSingleRunLiteral(count) ? `singleRun` : `literalRuns`,

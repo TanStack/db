@@ -14,7 +14,7 @@ import type { Message } from '@electric-sql/client'
  * and during the fetch. The retry-decision law in
  * `electric-oracle.property.test.ts` owns the outcomes of a stream error, an
  * `onError` decision, an Electric client give-up, an external abort, and
- * cleanup. This file pins two outcomes outside that grammar:
+ * cleanup. This file fixes two outcomes outside that grammar:
  *
  * - a must-refetch after the first full sync renews the wait, so a new load
  *   settles only with the replacement snapshot;

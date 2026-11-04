@@ -16,10 +16,10 @@ ruleTester.run(`replayable-seed`, replayableSeed, {
     `fc.assert(property, { seed: 42, numRuns: oracleRuns(10) })`,
     `const SEED = 7; fc.assert(property, { seed: SEED })`,
     `fc.assert(property, { seed: failure.seed, path: failure.counterexamplePath })`,
-    `it.each([1, 2])('lane %s', (seed) => fc.assert(property, { seed, numRuns: oracleRuns(5) }))`,
-    `it.each([1, undefined])('lane %s', (seed) => fc.assert(property, seed === undefined ? oraclePropertyOptions(5, 'id') : { seed, numRuns: oracleRuns(5) }))`,
-    `it.each([1, undefined])('lane %s', (seed) => fc.assert(property, { ...(seed !== undefined ? { seed, numRuns: oracleRuns(5) } : oraclePropertyOptions(5, 'id')) }))`,
-    `const lanes = [{ seed: oraclePropertyOptions(10, 'id').seed ?? Math.floor(Math.random() * 1000) }]`,
+    `it.each([1, 2])('campaign %s', (seed) => fc.assert(property, { seed, numRuns: oracleRuns(5) }))`,
+    `it.each([1, undefined])('campaign %s', (seed) => fc.assert(property, seed === undefined ? oraclePropertyOptions(5, 'id') : { seed, numRuns: oracleRuns(5) }))`,
+    `it.each([1, undefined])('campaign %s', (seed) => fc.assert(property, { ...(seed !== undefined ? { seed, numRuns: oracleRuns(5) } : oraclePropertyOptions(5, 'id')) }))`,
+    `const campaigns = [{ seed: oraclePropertyOptions(10, 'id').seed ?? Math.floor(Math.random() * 1000) }]`,
     {
       code: `const seed = replay ?? Date.now() % 2 ** 31; fc.assert(property, { seed })`,
       filename: `/repo/packages/db/tests/oracle-property.ts`,
@@ -27,11 +27,11 @@ ruleTester.run(`replayable-seed`, replayableSeed, {
   ],
   invalid: [
     {
-      code: `it.each([1, undefined])('lane %s', (seed) => fc.assert(property, { seed, numRuns: oracleRuns(5) }))`,
+      code: `it.each([1, undefined])('campaign %s', (seed) => fc.assert(property, { seed, numRuns: oracleRuns(5) }))`,
       errors: [{ messageId: `undefinedSeed` }],
     },
     {
-      code: `function lane(seed) { fc.assert(property, { seed, numRuns: oracleRuns(5) }) } it.each([1, undefined])('lane %s', lane)`,
+      code: `function campaign(seed) { fc.assert(property, { seed, numRuns: oracleRuns(5) }) } it.each([1, undefined])('campaign %s', campaign)`,
       errors: [{ messageId: `undefinedSeed` }],
     },
     {

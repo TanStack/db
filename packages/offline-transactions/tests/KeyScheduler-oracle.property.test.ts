@@ -97,15 +97,15 @@ type Snapshot = {
  * `ledger` (ordered pending records and counts), `serial` (the active count),
  * and `retirement` (what a removal or clear retires).
  *
- * Reach and controls: one pinned history reaches every transition. Two pinned
- * histories cross retry-deadline order, and two more pin an active removal
+ * Reach and controls: one fixed history reaches every transition. Two fixed
+ * histories cross retry-deadline order, and two more fix an active removal
  * with a waiting sibling and a blocked FIFO head at its retry deadline. Five
  * calibrations prove the comparison rejects bypass, double issue, stale
  * payload, stale clear, and failed selective retirement, and three more reject
  * a stale next payload, revoked work kept in the pending ledger, and a wrong
  * count. The property is `offline.key-scheduler-fifo-ledger` on
  * `oracleProperty`; a failure prints the seed, path, and property to set to
- * replay it, and a path replay runs only the random lane.
+ * replay it, and a path replay runs only the random campaign.
  *
  * Limits: persistence, caller promise settlement, leadership, and real timers
  * have separate owners. The model does not promise fairness beyond FIFO order.
@@ -286,7 +286,7 @@ function buildLegalHistory(tokens: Array<CommandToken>): Array<Command> {
 }
 
 // The tokens a command list came from, found by search and accepted only if
-// they rebuild that exact list. A pinned command list is then a member of the
+// they rebuild that exact list. A fixed command list is then a member of the
 // generated language, and fast-check can shrink it.
 function tokensOf(history: ReadonlyArray<Command>): Array<CommandToken> {
   const tokens: Array<CommandToken> = []
@@ -404,7 +404,7 @@ function expectedSnapshot(model: Model): Snapshot {
 // snapshot, the transaction a `start` is given, and the IDs a removal
 // retires (requested pending IDs other than the active one, once each). A
 // command the lifecycle does not allow is a setup error with its name: the
-// grammar never generates one, so a pin or a grammar change that does is
+// grammar never generates one, so a fixed history or a grammar change that does is
 // caught here.
 
 type Owed = {
@@ -729,7 +729,7 @@ oracleProperty({
     measured: commandTypes,
     runs: 150,
     fixedSeeds: [1815],
-    pins: [
+    fixed: [
       {
         name: `every modeled transition`,
         enters: [...commandTypes],

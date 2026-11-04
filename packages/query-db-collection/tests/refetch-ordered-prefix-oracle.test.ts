@@ -112,15 +112,15 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   that honors only `offset` already gets a wrong window at preload under a
  *   joined filter: the loader repeats a continuation offset capped at the
  *   window size. That loader defect is separate from #2136 and is recorded as
- *   open in the coverage map. The named replays still run both encodings.
+ *   open in the coverage map. The named fixed histories still run both encodings.
  * - It does not check the window after a marker flip, even when the provider
  *   is current. The loader used to stop refilling after a joined-side
- *   removal; a named replay now checks that trace, but the campaigns do not
+ *   removal; a named fixed history now checks that trace, but the campaigns do not
  *   check after flips.
  * - The generated campaigns use an uncapped provider. With a provider that
  *   caps pages, a row whose order changes can drop out of the window after a
  *   refetch even on main, through the loader's own repair. That defect is
- *   separate from #2136 and has an `it.fails` witness. The named replays run
+ *   separate from #2136 and has an `it.fails` witness. The named fixed histories run
  *   the issue trace with a page cap.
  * - The report laws bound when Query DB reports, not exactly when it must.
  *   Whether a missing report leaves a gap is judged through the window law.
@@ -132,7 +132,7 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   accepted, so a later successful retry still sees the change. No public
  *   history distinguishes that from recording earlier: the failed attempt
  *   reports on its own, and the repair it starts reads the provider again.
- *   The application-failure replay checks only the window around a failed
+ *   The application-failure fixed history checks only the window around a failed
  *   application.
  * - A Query refetch that joins a running `refetch: true` acquisition on the
  *   same Query hash does not report, because the guard cannot tell the two
@@ -252,7 +252,7 @@ function expectedCoverage(
 // write from its start, or from just before its refetch, and releases it
 // after the refetch. Ids come from a small space, so
 // inserts often land between served pages and upserts often move a served
-// row. Named replays use the same commands in other orders. With one order
+// row. Named fixed histories use the same commands in other orders. With one order
 // term, the fixture maps a generated rank to `rank * 100 + id`, so ranks stay
 // unique.
 type Command =
@@ -307,7 +307,7 @@ const caseArbitrary: fc.Arbitrary<Case> = fc.record({
     functionKey: fc.boolean(),
     terms: fc.constantFrom(1 as const, 2 as const),
     orderKey: fc.constantFrom(`rank` as const, `label` as const),
-    // Page caps run in named replays only; see the limits above.
+    // Page caps run in named fixed histories only; see the limits above.
     pageCap: fc.constant(undefined),
     limit: fc.integer({ min: 1, max: 3 }),
     offset: fc.integer({ min: 0, max: 1 }),

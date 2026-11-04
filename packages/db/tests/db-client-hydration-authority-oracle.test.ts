@@ -63,7 +63,7 @@ import type { ChangeMessage } from '../src/types'
  * mirror/public agreement. The change-message mirror carries no metadata, so
  * metadata is observed only through dehydration.
  *
- * Pinned reference cases (not run against production) cover the equal
+ * Fixed reference cases (not run against production) cover the equal
  * re-insert, clarification (b) in both arrival orders, a metadata-less latest
  * seed, and a metadata-only write held against a later seed. The reference
  * throws on an insert that differs from a row the source wrote; the grammar
@@ -72,7 +72,7 @@ import type { ChangeMessage } from '../src/types'
  * Limits: this owner covers one or two immediately applied adapter
  * transactions, all of them on the target key, three keys, and at most two
  * hydration chunks. A source insert over a source-written row appears only in
- * the pinned reference cases. `initialData` carries no metadata. The
+ * the fixed reference cases. `initialData` carries no metadata. The
  * state-retention oracle and focused DbClient tests own queued transactions and
  * cancellation. This test does not establish provider transport order or a
  * later authoritative hydration epoch.
@@ -529,7 +529,7 @@ describe(`DbClient hydration authority oracle`, () => {
     ])
   })
 
-  it(`reference folds the D5 rules over pinned histories`, () => {
+  it(`reference folds the D5 rules over fixed histories`, () => {
     const before = hydrate(hydrationRows(`before`))
     const after = hydrate(hydrationRows(`after`))
 

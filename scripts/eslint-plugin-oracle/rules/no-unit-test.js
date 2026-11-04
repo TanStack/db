@@ -26,8 +26,8 @@ import {
  * use. Every test in the file must reach a declared part:
  *
  * - A generated property or a fixed history reaches the check.
- * - A model pin reaches the model. It checks one model rule against its
- *   authority.
+ * - A model-rule expectation reaches the model. It checks one model rule
+ *   against its authority.
  * - A calibration reaches the check. It shows that the check rejects a
  *   wrong answer.
  * - A grammar calibration reaches the grammar. It shows that the generators
@@ -1270,7 +1270,7 @@ export default {
     },
     schema: [],
     messages: {
-      unitTest: `This test reaches no part that this file declares with declareOracle, so its expected result has no independent source. A unit test belongs in an ordinary test file: move it there. A fixed history runs through the declared check, a model pin uses the declared model, and a grammar calibration uses the declared grammar.`,
+      unitTest: `This test reaches no part that this file declares with declareOracle, so its expected result has no independent source. A unit test belongs in an ordinary test file: move it there. A fixed history runs through the declared check, a model-rule expectation uses the declared model, and a grammar calibration uses the declared grammar.`,
       unknownTypeModel: `This typeModel name is not a type alias or interface in this file. A type model is the expected type that type-level tests compare with, so it must be declared here.`,
       incompleteProperty: `This oracleProperty call does not pass an object literal with a check, so the rule cannot see that the property has one. Pass its options inline as \`oracleProperty({ id, law, histories, driver, model, check })\`.`,
       importedRegistration: `This oracle file calls a helper that registers tests. An oracle file registers only oracle tests, so register those tests from an ordinary test file and keep this file to its checks and model.`,
@@ -1324,7 +1324,7 @@ export default {
         const test = registeredTest(node, sourceCode)
         if (test === undefined || isPlaceholder(test.body)) return
         // An `.each(table)` row can carry a function that the test body calls,
-        // such as a hostile observation each check must reject. A function in
+        // such as a mutant observation each check must reject. A function in
         // the table that uses a declared part makes the test use it. Plain
         // data, such as the grammar's cells, does not: the body must use them.
         const table =

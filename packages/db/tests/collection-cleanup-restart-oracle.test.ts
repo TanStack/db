@@ -54,7 +54,7 @@ import type { Row } from './collection-cleanup-restart-support.js'
  * Errored eager and on-demand source histories clean up the dependent first,
  * then restart both Collections through live-query preload. They check the
  * same live-query object and subscriber after a later source update. These
- * pinned paths sit outside the three-cut model; they do not establish
+ * fixed histories sit outside the three-cut model; they do not establish
  * automatic recovery after source-only restart.
  * If adapter cleanup and local teardown both fail, the aggregate keeps the
  * adapter error primary and every local error as an ordered secondary
@@ -92,7 +92,7 @@ import type { Row } from './collection-cleanup-restart-support.js'
  * points. Refinement checks run before releasing the controlled adapter gate
  * and after the cleanup promise settles. Counts, exact errors, status, rows,
  * subscription and observer ownership, and settlement are observed. The alias
- * and late-registration cases are pinned refinements outside the three-cut
+ * and late-registration cases are fixed-history refinements outside the three-cut
  * model. This suite does not establish full demand/replay histories, transport
  * shutdown, persistence-wrapper behavior, or general row-publication laws.
  */

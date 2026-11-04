@@ -76,7 +76,7 @@ describe(`cursor adapter through production pagination`, () => {
   // cursor pager. Immediately after each direct write it compares public rows
   // and row-cache data with the fold, then checks that the page Query retains
   // its prior state and the pager retains its original rows. Fixed seed
-  // 20261012 and seedless campaigns use the same property and 50-run budget.
+  // 20261012 and random campaigns use the same property and 50-run budget.
   // Replay one shrink directly with TANSTACK_DB_ORACLE_SEED, _PATH, and
   // _PROPERTY=cursor-pagination.manual-write.
   it.each(

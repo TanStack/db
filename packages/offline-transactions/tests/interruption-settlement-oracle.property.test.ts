@@ -74,7 +74,7 @@ import type { TestItem } from './harness'
  * Reach: where the interruption landed for each transaction: before
  * admission (`refused`), after admission but before its provider call started
  * (`queued`), or after the call started (`issued`), whether or not the
- * provider has answered, per interruption. Pins enter every
+ * provider has answered, per interruption. Fixed histories enter every
  * reachable landing; going offline cannot refuse admission.
  *
  * Limits: disjoint keys only, so sibling rollback is the settlement oracle's;
@@ -455,7 +455,7 @@ function checkInterruption(
 // Fixed histories that reach each landing: a late interruption lands after
 // the provider call (`issued`), an early one before it (`queued`), and with
 // two transactions an immediate one stops the second admission (`refused`).
-const landingPin = (
+const fixedLanding = (
   name: string,
   interruption: Interruption,
   outcomes: Array<Outcome>,
@@ -481,15 +481,15 @@ oracleProperty({
     // each timing keeps the 60 runs the immediate-only oracle had.
     runs: 120,
     fixedSeeds: [20251103],
-    pins: [
-      landingPin(`leadership issued`, `leadership`, [`fulfil`], 40),
-      landingPin(`leadership queued`, `leadership`, [`fulfil`], 1),
-      landingPin(`leadership refused`, `leadership`, [`fulfil`, `reject`], 0),
-      landingPin(`offline issued`, `offline`, [`fulfil`], 40),
-      landingPin(`offline queued`, `offline`, [`fulfil`], 1),
-      landingPin(`dispose issued`, `dispose`, [`fulfil`], 40),
-      landingPin(`dispose queued`, `dispose`, [`fulfil`], 1),
-      landingPin(`dispose refused`, `dispose`, [`fulfil`, `reject`], 0),
+    fixed: [
+      fixedLanding(`leadership issued`, `leadership`, [`fulfil`], 40),
+      fixedLanding(`leadership queued`, `leadership`, [`fulfil`], 1),
+      fixedLanding(`leadership refused`, `leadership`, [`fulfil`, `reject`], 0),
+      fixedLanding(`offline issued`, `offline`, [`fulfil`], 40),
+      fixedLanding(`offline queued`, `offline`, [`fulfil`], 1),
+      fixedLanding(`dispose issued`, `dispose`, [`fulfil`], 40),
+      fixedLanding(`dispose queued`, `dispose`, [`fulfil`], 1),
+      fixedLanding(`dispose refused`, `dispose`, [`fulfil`, `reject`], 0),
     ],
   },
   model: interruptionModel,

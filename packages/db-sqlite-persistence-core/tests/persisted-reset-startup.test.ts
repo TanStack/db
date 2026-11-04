@@ -2184,7 +2184,7 @@ describe(`hydration routing probe calibration`, () => {
   })
 
   // The adapter contract requires call-local forwarding through wrappers. This
-  // positive/hostile pair reaches the real coordinator but lets the recorder
+  // positive/mutant pair reaches the real coordinator but lets the recorder
   // finish bad calls, so losing the loan is a routing assertion, not a timeout.
   it.each([true, false])(
     `detects a wrapper that forwards its loan=%s`,

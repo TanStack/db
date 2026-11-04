@@ -455,7 +455,7 @@ fcTest.prop(
   },
 )
 
-// The partial-update lane reuses those histories and marks source batches
+// The partial-update production path reuses those histories and marks source batches
 // partial from a separate stream, so the full-mode campaigns keep their
 // seeded histories. It runs with the default `partial` row update mode.
 const markPartial = (step: OptimisticStep, partial: boolean): OptimisticStep =>
@@ -474,7 +474,7 @@ const partialHistory = fc
     steps: history.steps.map((step, index) => markPartial(step, marks[index]!)),
   }))
 
-// These are replay programs for the same model and driver as randomized runs,
+// These are fixed histories for the same model and driver as randomized runs,
 // not separate assertions that only know the reported final state.
 it.each(
   [false, true].flatMap((acceptBeforeTruncate) =>
@@ -530,7 +530,7 @@ it.each(
   },
 )
 
-// Replays of review probes. A sync transaction still open when the mutation
+// Fixed histories from review probes. A sync transaction still open when the mutation
 // settles is not accepted, so it holds nothing and attributes nothing: after
 // it commits or aborts, a later remote write is remote. A completed key that
 // no queued sync touches stays remote while another key's sync is held.
@@ -594,7 +594,7 @@ it(`keeps an unrelated completed key remote while another key's sync is held`, a
     ],
   )
 })
-// Replays of random-campaign counterexamples. A rollback while a sync
+// Fixed regressions of random-campaign counterexamples. A rollback while a sync
 // transaction on its key is still open must publish the drop. When two
 // completed transactions are held on one key, the newer one's row shows.
 it(`publishes a rollback while a sync transaction on its key is open`, async () => {
@@ -672,7 +672,7 @@ it(`shows the newer of two held completed rows on one key`, async () => {
   )
 })
 
-// Replay of a random-campaign counterexample. A confirmed delete must clear the
+// Fixed regression of a random-campaign counterexample. A confirmed delete must clear the
 // key's local attribution, so a later source reinsert is remote.
 it(`attributes a source reinsert after a confirmed delete to the source`, async () => {
   const row = { id: 2, a: 0, b: 0, c: 0 }
@@ -742,12 +742,12 @@ it(`writes distinguishing partial updates in the fixed partial campaign`, async 
   expect(distinguishing).toBeGreaterThan(0)
 })
 
-// Pinned replays for a source delete of a key the source never held. The
+// Fixed histories for a source delete of a key the source never held. The
 // backend accepted an optimistic insert, then deleted the row before the
 // source streamed it. The model's drain applies the delete to the applied
 // synced rows, where it changes nothing, so the visible result follows from
 // the settlement-drop law alone. The driver compares every step with the
-// model; each count below proves the replay reached its premise.
+// model; each count below proves the fixed history reached its premise.
 function absentKeyDelete(truncate = false) {
   return {
     type: `sync` as const,

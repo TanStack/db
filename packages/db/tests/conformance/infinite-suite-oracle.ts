@@ -183,7 +183,7 @@ export function runInfiniteQuerySuite(
   rawDriver: InfiniteQueryDriver,
   registerUnitScenarios: (context: InfiniteQueryContext) => void,
 ): void {
-  const registry = scenarioRegistry(rawDriver.knownGaps)
+  const registry = scenarioRegistry(rawDriver.limits)
   const state = createScenarioState()
   const driver = wrapDriver(rawDriver, state)
   const lifetime = scenarioLifetime(state)

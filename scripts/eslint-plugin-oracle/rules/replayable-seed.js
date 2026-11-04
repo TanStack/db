@@ -1,26 +1,26 @@
 /**
  * A generated property's failure is reported as a seed and a shrink path,
  * and the shared variables TANSTACK_DB_ORACLE_SEED and
- * TANSTACK_DB_ORACLE_PATH replay it. That works only when every lane takes
+ * TANSTACK_DB_ORACLE_PATH replay it. That works only when every campaign takes
  * its seed from one of the places a replay can reach. This rule reports a
  * `seed` option that a replay cannot reach:
  *
  * - A seed that can be `undefined`: the literal `undefined`, or a parameter of
  *   an `.each(table)` callback whose table holds `undefined`, used where
- *   nothing routes the `undefined` lane elsewhere. fast-check then draws a
- *   fresh seed on every run, which the shared variables never select, and the
- *   explicit `undefined` also overrides a global seed. The accepted form
- *   routes that lane to the shared config:
+ *   nothing routes the `undefined`-seed campaign elsewhere. fast-check then
+ *   draws a fresh seed on every run, which the shared variables never select,
+ *   and the explicit `undefined` also overrides a global seed. The accepted
+ *   form routes that campaign to the shared config:
  *   `seed === undefined ? oraclePropertyOptions(runs, id) : { seed, ... }`.
  * - A seed computed from a clock or ambient randomness, such as `Date.now()`
  *   or `Math.random()`, unless it only fills in for the shared config's seed,
  *   as in `oraclePropertyOptions(runs, id).seed ?? Date.now()`: a replay
- *   supplies that seed, and the fallback is the random lane.
+ *   supplies that seed, and the fallback is the random campaign.
  *
  * A number literal, a constant, a recorded seed such as `failure.seed`, and a
  * parameter whose table holds only numbers are all replayable. oracle-config
  * and oracle-property implement the shared selection, so they may pick a
- * random lane's seed themselves.
+ * random campaign's seed themselves.
  *
  * The rule cannot see a seed passed through a helper's parameter from a call
  * elsewhere, a seed computed in a variable (such as
@@ -47,7 +47,7 @@ function propertyName(property) {
     : property.key.value
 }
 
-/** `oraclePropertyOptions(...).seed ?? fallback`: the fallback is a random lane. */
+/** `oraclePropertyOptions(...).seed ?? fallback`: the fallback is a random campaign. */
 function isSharedSeedFallback(node) {
   return (
     node.type === `LogicalExpression` &&
@@ -162,7 +162,7 @@ function guardedAgainstUndefined(node, name) {
     if (test.operator === `!==` || test.operator === `!=`) return true
     return undefined
   }
-  for (let child = node, parent = node.parent; parent; ) {
+  for (let child = node, parent = node.parent; parent;) {
     if (
       parent.type === `ConditionalExpression` ||
       parent.type === `IfStatement`
@@ -192,7 +192,7 @@ export default {
     },
     schema: [],
     messages: {
-      undefinedSeed: `This seed can be \`undefined\`, so fast-check draws a fresh seed that TANSTACK_DB_ORACLE_SEED and TANSTACK_DB_ORACLE_PATH cannot replay, and the explicit \`undefined\` overrides a global seed. Route that lane to the shared config: \`seed === undefined ? oraclePropertyOptions(runs, id) : { seed, ... }\`.`,
+      undefinedSeed: `This seed can be \`undefined\`, so fast-check draws a fresh seed that TANSTACK_DB_ORACLE_SEED and TANSTACK_DB_ORACLE_PATH cannot replay, and the explicit \`undefined\` overrides a global seed. Route that campaign to the shared config: \`seed === undefined ? oraclePropertyOptions(runs, id) : { seed, ... }\`.`,
       ambientSeed: `This seed comes from \`{{call}}\`, so the shared replay variables cannot select it and two runs draw different histories. Use a number literal or constant, a recorded seed, or \`oraclePropertyOptions(runs, id)\`.`,
     },
   },
@@ -203,7 +203,9 @@ export default {
       Property(node) {
         if (propertyName(node) !== `seed`) return
         const value = node.value
-        const call = isSharedSeedFallback(value) ? undefined : ambientCall(value)
+        const call = isSharedSeedFallback(value)
+          ? undefined
+          : ambientCall(value)
         if (call !== undefined) {
           context.report({ node, messageId: `ambientSeed`, data: { call } })
           return
@@ -217,7 +219,10 @@ export default {
           ?.defs[0]
         if (definition?.type !== `Parameter`) return
         const fn = definition.node
-        if (fn.params[0]?.type !== `Identifier` || fn.params[0].name !== value.name)
+        if (
+          fn.params[0]?.type !== `Identifier` ||
+          fn.params[0].name !== value.name
+        )
           return
         const table = arrayLiteral(eachTableOf(fn, sourceCode), sourceCode)
         if (

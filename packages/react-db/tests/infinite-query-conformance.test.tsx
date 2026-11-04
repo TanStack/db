@@ -325,7 +325,7 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
   mountCollectionControllable,
   mountConfigControllable,
   mountInputControllable,
-  knownGaps: [],
+  limits: [],
 }
 
 runInfiniteQuerySuite(reactInfiniteDriver, registerInfiniteQueryUnitScenarios)

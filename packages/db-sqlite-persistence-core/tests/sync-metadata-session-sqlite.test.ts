@@ -2,9 +2,9 @@
 import { it } from 'vitest'
 import {
   describeMismatch,
-  persistedPeerFullLane,
-  persistedPeerLane,
-  persistedPeerOnDemandLane,
+  persistedPeerFullGrammar,
+  persistedPeerGrammar,
+  persistedPeerOnDemandGrammar,
   runSessionHistory,
   seedReinsertReloadReplay,
 } from '../../db/tests/sync-metadata-session-oracle'
@@ -19,21 +19,26 @@ import {
 import { createSQLiteDriver } from './sync-metadata-session-sqlite-driver'
 import type {
   SessionAction,
-  SessionLane,
+  SessionGrammar,
 } from '../../db/tests/sync-metadata-session-oracle'
 
-const lanes = [
-  persistedPeerLane,
-  persistedPeerFullLane,
-  persistedPeerOnDemandLane,
+const productionPaths = [
+  persistedPeerGrammar,
+  persistedPeerFullGrammar,
+  persistedPeerOnDemandGrammar,
 ]
-async function check(history: ReadonlyArray<SessionAction>, lane: SessionLane) {
-  return runSessionHistory(lane, history, () => createSQLiteDriver(lane))
+async function check(
+  history: ReadonlyArray<SessionAction>,
+  productionPath: SessionGrammar,
+) {
+  return runSessionHistory(productionPath, history, () =>
+    createSQLiteDriver(productionPath),
+  )
 }
-oracleReplayTest(it).each(lanes)(
+oracleReplayTest(it).each(productionPaths)(
   `receives the seed/re-insert/reload replay through SQLite ($name)`,
-  async (lane) => {
-    const result = await check(seedReinsertReloadReplay, lane)
+  async (productionPath) => {
+    const result = await check(seedReinsertReloadReplay, productionPath)
     if (result.mismatch)
       throw new Error(
         describeMismatch(seedReinsertReloadReplay, result.mismatch),
@@ -78,8 +83,8 @@ for (const campaign of [`fixed`, `random`] as const) {
       campaign,
       runHistory: check,
       extraStates: [recoveryState],
-      extraReached: (lane, result) =>
-        lane.onDemand &&
+      extraReached: (productionPath, result) =>
+        productionPath.onDemand &&
         result.recoveryInputs.some(
           (input) => input.fromRowVersion === 0 && input.latestRowVersion >= 2,
         )

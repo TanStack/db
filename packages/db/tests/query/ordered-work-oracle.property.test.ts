@@ -78,7 +78,7 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * mutation or repair checkpoint. Adapter requests and work counts are separate
  * observations; they are not public rows or evidence of remote provider work.
  *
- * Counts are contract bounds, not timing benchmarks. They pin established
+ * Counts are contract bounds, not timing benchmarks. They check established
  * request and graph-scheduling behavior only where the test names that promise.
  * These scenarios exercise local evaluation; they do not model a remote adapter
  * applying a relation hint.
@@ -3609,8 +3609,8 @@ describe(`ordered source work oracle`, () => {
  * `offset + limit + 1` rows. Its rows law holds beside the first query's at
  * every checkpoint; the work laws count one consumer, so they do not apply
  * to those cases. A peer over a refetching provider with a joined filter is
- * excluded from the grammar until #2155 is fixed: an indexed trace is fixed
- * and pinned, but an unindexed peer still keeps a short joined window after
+ * excluded from the grammar until #2155 is fixed: an indexed trace is kept as a
+ * fixed history, but an unindexed peer still keeps a short joined window after
  * a refetch. A peer over a source filter stays in the grammar.
  *
  * `null` and `undefined` ranks are both nullish, so they tie: either may
@@ -3829,7 +3829,7 @@ const eagerCaseBase: fc.Arbitrary<EagerCase> = fc.record({
 })
 
 // A peer over a refetching on-demand provider can keep a short joined window
-// after a refetch (#2155). An indexed plan's trace is fixed and pinned below,
+// after a refetch (#2155). An indexed plan's trace is kept as a fixed history below,
 // but an unindexed one still fails (a peer shows [100] where the model shows
 // [100, 101]). Each campaign excludes only a joined, anti-joined, or full-joined
 // filter in that pairing, as its last map, until the fix; a source filter
@@ -4084,7 +4084,7 @@ const eagerHeldCase: fc.Arbitrary<EagerCase> = fc
     // A forwarding provider sends the delete, and an indexed source filter
     // or a joined filter refills from the provider, so the refill is a held
     // request. An unindexed source filter issues no held request. With the
-    // provider pinned, this campaign needs no peer exclusion (#2155 concerns
+    // provider fixed, this campaign needs no peer exclusion (#2155 concerns
     // only a refetching provider).
     provider: `forward` as const,
     filter:

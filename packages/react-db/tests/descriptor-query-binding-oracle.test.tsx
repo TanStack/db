@@ -40,7 +40,7 @@
  * claims its local source objects while the browser source is still loading;
  * a later same-hash preload over another object must reject. The model expects
  * the server row before browser readiness and the browser row after handoff.
- * A hostile observer that omits the committed claim fails at the conflicting
+ * A mutant observer that omits the committed claim fails at the conflicting
  * preload assertion while the source remains unready.
  * A Suspense read is itself a preload, even if React abandons its render. With
  * a pending hydrated stream, that first local preload starts the source and

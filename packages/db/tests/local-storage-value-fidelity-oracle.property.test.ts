@@ -381,10 +381,10 @@ declareOracle({
 
 describe(`LocalStorage value fidelity oracle`, () => {
   if (!oracleReplayRequested()) {
-    // Pinned witnesses. The first is the reported case: a function property in
+    // Fixed histories. The first is the reported case: a function property in
     // an inserted row. The others place each lost kind under an array or an
     // object, and check each documented normalization on every entry path.
-    const pinned: Array<Described> = [
+    const fixedPayloads: Array<Described> = [
       ...lostLeaves.map((make) => make()),
       lost(`nested function`, { a: { b: () => 1 } }),
       lost(`function in array`, [1, () => 1]),
@@ -422,7 +422,7 @@ describe(`LocalStorage value fidelity oracle`, () => {
     ] as const
     for (const entry of entries) {
       for (const handler of [true, false]) {
-        for (const payload of pinned) {
+        for (const payload of fixedPayloads) {
           if (!isLegal({ entry, handler, payload })) continue
           it(`${entry} ${handler ? `with` : `without`} a handler of ${payload.label} ${payload.restored === LOST ? `rejects` : `persists its JSON form`}`, () =>
             runHistory({ entry, handler, payload }))

@@ -2,7 +2,7 @@
  * Ordinary detachment regressions for draft values stored in a Collection.
  * The law and its independent model are owned by
  * proxy-detachment-contract-oracle.test.ts, which also runs the generated
- * descriptor-write property. These tests pin literal expectations and do not
+ * descriptor-write property. These tests fix literal expectations and do not
  * compare against a model.
  */
 

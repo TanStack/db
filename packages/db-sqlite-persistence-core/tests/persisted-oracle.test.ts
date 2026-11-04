@@ -3529,8 +3529,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * ensure log at quiescence. The coordinator is a controlled double of an
    * elected owner; it does not prove the browser transport.
    *
-   * Known gap (#2139): production does not end a rotated follower's scoped
-   * recovery, so this lane's cells are pinned as failing until it does.
+   * Known limit (#2139): production does not end a rotated follower's scoped
+   * recovery, so this production path's cells are fixed histories that fail until it does.
    */
   type FollowerGenerationNoticeHistory = {
     ownerCommit: `before-rotation` | `after-rotation`
@@ -3838,7 +3838,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   }
 
-  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // Known limit: see #2139. A rotated follower stays in scoped recovery, so
   // the owner's rows in the new generation never become visible.
   it.fails.each([
     { ownerCommit: `before-rotation`, later: `none` },
@@ -3851,7 +3851,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `ok` }),
   )
 
-  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // Known limit: see #2139. A rotated follower stays in scoped recovery, so
   // the owner's rows in the new generation never become visible.
   it.fails.each(
     ([`gap`, `reconciliation`] as const).flatMap((noticeShape) =>
@@ -3869,7 +3869,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `ok` }),
   )
 
-  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // Known limit: see #2139. A rotated follower stays in scoped recovery, so
   // the owner's rows in the new generation never become visible.
   it.fails.each([
     { ownerCommit: `before-rotation`, later: `owner` },
@@ -3880,7 +3880,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `fails` }),
   )
 
-  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // Known limit: see #2139. A rotated follower stays in scoped recovery, so
   // the owner's rows in the new generation never become visible.
   it.fails(
     `ignores a follower read failure when rotation starts while the read is in flight`,
@@ -3907,10 +3907,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       `fails`,
     ),
   })
-  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // Known limit: see #2139. A rotated follower stays in scoped recovery, so
   // the owner's rows in the new generation never become visible. Some
-  // generated histories pass today, so a random draw cannot be pinned as
-  // failing; this fixed seed pins the gap. The fix for #2139 adds the random
+  // generated histories pass today, so a random draw cannot be a fixed history that
+  // fails; this fixed seed records the limit. The fix for #2139 adds the random
   // and replayed campaign back.
   it.fails(
     `checks generated follower generation-notice histories (fixed)`,
@@ -4082,7 +4082,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     `settles a follower's remote demand with the owner's applied rows: $placement broadcast, apply $apply, $consumer`,
     assertFollowerRemoteDemandHistory,
   )
-  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // Known limit: see #2139. A rotated follower stays in scoped recovery, so
   // the owner's rows in the new generation never become visible.
   it.fails.each(
     followerRemoteDemandHistories.filter(
@@ -4136,9 +4136,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * recovery in place, and a newer rotation supersedes an older one's
    * reacquisition.
    *
-   * Known gap (#2139): production does not yet end scoped recovery after a
+   * Known limit (#2139): production does not yet end scoped recovery after a
    * rotation, so the histories in which recovery should end, or in which a
-   * new demand waits for it, are pinned as failing.
+   * new demand waits for it, are fixed histories that fail.
    *
    * Limits. A failed reacquisition is not retried; the follower stays in
    * scoped recovery until a later recovery rotates again.
@@ -4533,23 +4533,23 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       ),
     ),
   )
-  // Known gap: see #2139. Recovery never ends today, so the histories in
+  // Known limit: see #2139. Recovery never ends today, so the histories in
   // which it should end, or in which a new demand must wait for it, fail.
-  const reacquisitionGap = ({
+  const reacquisitionLimit = ({
     fails,
     newDemand,
   }: RotatedReacquisitionHistory) =>
     newDemand === true || fails === `none` || fails === `released`
   it.each(
     rotatedReacquisitionHistories.filter(
-      (history) => !reacquisitionGap(history),
+      (history) => !reacquisitionLimit(history),
     ),
   )(
     `ends a follower's scoped recovery only after every reacquisition succeeds: order $order, notice between $noticeBetween, fails $fails, new demand $newDemand`,
     assertRotatedReacquisition,
     10_000,
   )
-  it.fails.each(rotatedReacquisitionHistories.filter(reacquisitionGap))(
+  it.fails.each(rotatedReacquisitionHistories.filter(reacquisitionLimit))(
     `ends a follower's scoped recovery only after every reacquisition succeeds: order $order, notice between $noticeBetween, fails $fails, new demand $newDemand`,
     assertRotatedReacquisition,
     10_000,
@@ -4579,7 +4579,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }),
     10_000,
   )
-  // Known gap: see #2139. Recovery never ends, so the rows stay hidden.
+  // Known limit: see #2139. Recovery never ends, so the rows stay hidden.
   it.fails(
     `holds a rotated follower's notices when two reads find the claim lost: fails 'none'`,
     () =>
@@ -4593,7 +4593,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   )
 
   const followerRemoteDemandHistory = fc.record({
-    // Known gap: see #2139. The rotated placement is pinned above.
+    // Known limit: see #2139. The rotated placement is a fixed history above.
     placement: fc.constantFrom<FollowerRemoteDemandHistory[`placement`]>(
       `direct`,
       `queued`,
@@ -6787,7 +6787,7 @@ function expectedDurableHydrationTransactions(
 // replay from this shared file. These bounded cases exclude every explicit replay.
 // Terminal local persistence failures crash the Collection after readiness,
 // following the IndexedDB closure precedent. Upstream (wrapped sync adapter)
-// failures after readiness stay health metadata; this lane holds both.
+// failures after readiness stay health metadata; this block holds both.
 describeUnlessAnyOracleReplay(`hydration source durability routing`, () => {
   const first = { id: `shared`, title: `first source value` }
   const second = { id: `shared`, title: `last source value` }
