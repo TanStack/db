@@ -310,8 +310,8 @@ export function getLiveQueryHash(
   return getStableValueHash(identity, `queryKey`)
 }
 
-// Only adapter-owned Collections enter this table. Cache- and Suspense-owned
-// Collections retain their result identity and are never movable by a peer.
+// Each entry belongs to one framework binding or an unclaimed retry resource.
+// DbClient snapshots remain separate; peers never share a mutable window owner.
 const resolvedQueryValues = new WeakMap<
   object,
   { collection: object; config: NonNullable<ReturnType<typeof queryConfig>> }
@@ -430,7 +430,7 @@ export function resolveLiveQueryValue(
     // A pool here has passed `configPool`.
     pool?: PooledLiveQueries | false
     startSync?: boolean
-    /** @internal Previous adapter-owned result; absent for shared results. */
+    /** @internal undefined skips window tracking; null starts an owned result. */
     previousCollection?: Collection<object, string | number, {}> | null
     /** @internal Identity of one framework binding; never shared by peers. */
     windowOwner?: object

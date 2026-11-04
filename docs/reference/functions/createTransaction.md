@@ -7,7 +7,7 @@ title: createTransaction
 function createTransaction<T>(config): Transaction<T>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:319](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L319)
+Defined in: [packages/db/src/transactions.ts:320](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L320)
 
 Creates a new transaction for grouping multiple collection operations
 

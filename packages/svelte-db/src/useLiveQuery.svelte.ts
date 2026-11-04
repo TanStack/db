@@ -6,6 +6,7 @@ import {
   UnhashableQueryIRError,
   createLiveQueryObserver,
   createLiveQuerySourceIdClaims,
+  deepEquals,
   getLiveQueryHash,
   getPublicCollection,
   getStableValueHash,
@@ -334,7 +335,19 @@ export function useLiveQuery(
   // it unmounts.
   const sourceIdClaims = createLiveQuerySourceIdClaims()
 
-  let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
+  // A stable client key keeps the resolved binding; page changes keep only
+  // its Collection when the resolver confirms that the plan is unchanged.
+  let previous:
+    | {
+        collection: ReturnType<typeof resolveLiveQueryValue>
+        client?: DbClient
+        queryKey?: LiveQueryKey
+        queryHash?: string
+        move?: () => void
+        ownsCollection?: boolean
+        onPreload: () => void
+      }
+    | undefined
   const resolved = $derived.by(() => {
     let commitWindow: (() => void) | undefined
     // Try the getter form first; a query callback needs the builder supplied
@@ -354,7 +367,6 @@ export function useLiveQuery(
         contextDbClient)
 
     if (inputIsCollection) {
-      previousCollection = null
       // Warn when passing a collection directly with on-demand sync mode
       // In on-demand mode, data is only loaded when queries with predicates request it
       // Passing the collection directly doesn't provide any predicates, so no data loads
@@ -374,7 +386,7 @@ export function useLiveQuery(
       if (unwrappedParam.status === `idle`) {
         unwrappedParam.startSyncImmediate()
       }
-      return {
+      return (previous = {
         collection: unwrappedParam,
         client: dbClient,
         queryHash: getStableValueHash(
@@ -383,7 +395,7 @@ export function useLiveQuery(
         ),
         onPreload: () => {},
         move: undefined,
-      }
+      })
     }
 
     // Reference deps to make computed reactive to them
@@ -392,17 +404,25 @@ export function useLiveQuery(
     // The compile boundary: a query rejected anywhere after preparation
     // releases the sync starts it deferred, so a later reader can start them.
     try {
-      const preparedValue = prepareLiveQueryValue(
-        unwrappedParam,
-        dbClient,
-        deferredCollections,
-      )
       const configuredQueryKey = (
         unwrappedParam as { queryKey?: MaybeGetter<LiveQueryKey> } | null
       )?.queryKey
       const queryKey = configuredQueryKey
         ? toValue(configuredQueryKey)
         : undefined
+      if (
+        dbClient &&
+        queryKey?.length &&
+        previous?.collection &&
+        previous.client === dbClient &&
+        deepEquals(previous.queryKey, queryKey)
+      )
+        return previous
+      const preparedValue = prepareLiveQueryValue(
+        unwrappedParam,
+        dbClient,
+        deferredCollections,
+      )
 
       // A DbClient matches preloaded and hydrated queries by identity hash, so
       // a client-backed query without queryKey needs a stable IR identity and
@@ -442,26 +462,24 @@ export function useLiveQuery(
       }
 
       let collection: Collection<any, any, any> | null
-      if (preparedValue === undefined || preparedValue === null) {
-        collection = null
-      } else if (isCollection(preparedValue)) {
+      if (isCollection(preparedValue)) {
         collection = preparedValue
       } else {
-        // Hydration keys the live-query Collection by identity, so it never
-        // pools, even when the config passes a pool.
+        // Client observers consume page snapshots independently of the local
+        // Collection, so this path does not use equality-partition pooling.
         collection = resolveLiveQueryValue(preparedValue, {
           gcTime: DEFAULT_GC_TIME_MS,
           pool: dbClient ? false : undefined,
-          previousCollection: dbClient ? undefined : previousCollection,
+          previousCollection:
+            previous?.ownsCollection && previous.client === dbClient
+              ? previous.collection
+              : null,
           windowOwner: sourceIdClaims,
           onWindowChange: (move) => {
             commitWindow = move
           },
         })
       }
-
-      previousCollection =
-        dbClient || isCollection(preparedValue) ? null : collection
 
       // A setup that never subscribes releases its deferred sync starts when
       // garbage collection reclaims the live query it built. A Collection
@@ -470,8 +488,10 @@ export function useLiveQuery(
         collection && !isCollection(preparedValue)
           ? releaseDeferredOnReclaim(collection, deferredCollections)
           : undefined
-      return {
+      return (previous = {
         collection,
+        queryKey: queryKey && [...queryKey],
+        ownsCollection: !isCollection(preparedValue),
         move: commitWindow,
         client: dbClient,
         queryHash,
@@ -481,7 +501,7 @@ export function useLiveQuery(
           cancelReclaimRelease?.()
           resumeDeferredLiveQueryCollections(deferredCollections)
         },
-      }
+      })
     } catch (error) {
       return rejectLiveQueryInput(deferredCollections, error)
     }
@@ -538,7 +558,8 @@ export function useLiveQuery(
   }
 
   // Source notifications write Svelte state. Apply moves outside the derived
-  // input and retain the observer when only its window changes.
+  // input. Client-backed moves replace the observer for the new page hash;
+  // other window moves retain it.
   $effect.pre(() => {
     const next = resolved
     untrack(() => next.move?.())
@@ -547,7 +568,7 @@ export function useLiveQuery(
     const next = resolved
     return next.client ? next : next.collection
   })
-  // Watch for collection changes and subscribe to updates
+  // Subscribe when the Collection or client page identity changes.
   $effect(() => {
     observerInput
     const nextResolved = untrack(() => resolved)

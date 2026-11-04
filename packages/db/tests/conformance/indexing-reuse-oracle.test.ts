@@ -1,7 +1,7 @@
 /**
  * Calibrate the shared initial-binding identity comparison over its existing
  * finite grammar. Each pair of admitted declarations supplies the opposite of
- * the promised identity relation: an overshared or undershared output. Rejected
+ * the promised identity relation: a shared output despite independent bindings. Rejected
  * declarations supply no output and impose no output-identity comparison.
  * This tests checker sensitivity, not another production receiving path.
  */
@@ -9,9 +9,8 @@ import { expect, test } from 'vitest'
 import { BTreeIndex, BasicIndex } from '../../src'
 import { declareOracle } from '../oracle-declaration'
 import {
-  expectIndexingReuse,
+  expectIndependentIndexingOutputs,
   expectedIndexing,
-  expectedIndexingReuse,
   indexConfigurationLabel,
   indexConfigurationPairs,
   indexConfigurations,
@@ -24,25 +23,23 @@ const histories = indexConfigurationPairs(
 )
 declareOracle({
   grammar: [indexConfigurationPairs],
-  model: [expectedIndexing, expectedIndexingReuse],
-  check: [expectIndexingReuse],
+  model: [expectedIndexing],
+  check: [expectIndependentIndexingOutputs],
 })
 
 test.each(histories)(
   `identity comparison rejects the opposite relation: %j`,
-  ({ first, second, identity }) => {
+  ({ first, second }) => {
     const left = expectedIndexing(first).rejects ? undefined : {}
     const right = expectedIndexing(second).rejects ? undefined : {}
     if (!left || !right) {
       expect(() =>
-        expectIndexingReuse(left, right, first, second, identity),
+        expectIndependentIndexingOutputs(left, right, first, second),
       ).not.toThrow()
     } else {
-      const wrong = expectedIndexingReuse(first, second, identity)
-        ? right
-        : left
+      const wrong = left
       expect(() =>
-        expectIndexingReuse(left, wrong, first, second, identity),
+        expectIndependentIndexingOutputs(left, wrong, first, second),
       ).toThrow()
     }
   },

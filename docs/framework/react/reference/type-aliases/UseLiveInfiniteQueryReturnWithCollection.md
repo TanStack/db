@@ -7,7 +7,7 @@ title: UseLiveInfiniteQueryReturnWithCollection
 type UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils> = LiveQueryStatusFlags & object;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:70](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L70)
+Defined in: [useLiveInfiniteQuery.ts:71](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L71)
 
 ## Type Declaration
 

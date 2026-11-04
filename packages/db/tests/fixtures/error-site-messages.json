@@ -991,5 +991,12 @@
     "file": "query/validate-limit.ts",
     "template": "limit must be nonnegative",
     "literals": ["limit must be nonnegative"]
+  },
+  "262": {
+    "file": "live-query-observer.ts",
+    "template": "LiveQueryObserver requires finite Collection row and layout revision clocks",
+    "literals": [
+      "LiveQueryObserver requires finite Collection row and layout revision clocks"
+    ]
   }
 }

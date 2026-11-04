@@ -7,7 +7,7 @@ title: DehydratedLiveQuery
 type DehydratedLiveQuery = object;
 ```
 
-Defined in: [packages/db/src/client.ts:148](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L148)
+Defined in: [packages/db/src/client.ts:149](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L149)
 
 ## Properties
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/client.ts:148](https://github.com/TanStack/db/blob/
 dehydratedAt: number;
 ```
 
-Defined in: [packages/db/src/client.ts:150](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L150)
+Defined in: [packages/db/src/client.ts:151](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L151)
 
 ***
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/client.ts:150](https://github.com/TanStack/db/blob/
 optional initialSnapshot: DehydratedLiveQueryResult;
 ```
 
-Defined in: [packages/db/src/client.ts:152](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L152)
+Defined in: [packages/db/src/client.ts:153](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L153)
 
 Earlier ordinary markup may precede a shared Suspense result.
 
@@ -39,7 +39,7 @@ Earlier ordinary markup may precede a shared Suspense result.
 optional promise: Promise<DehydratedLiveQueryResult>;
 ```
 
-Defined in: [packages/db/src/client.ts:154](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L154)
+Defined in: [packages/db/src/client.ts:155](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L155)
 
 ***
 
@@ -49,7 +49,7 @@ Defined in: [packages/db/src/client.ts:154](https://github.com/TanStack/db/blob/
 queryHash: string;
 ```
 
-Defined in: [packages/db/src/client.ts:149](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L149)
+Defined in: [packages/db/src/client.ts:150](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L150)
 
 ***
 
@@ -59,4 +59,4 @@ Defined in: [packages/db/src/client.ts:149](https://github.com/TanStack/db/blob/
 optional snapshot: DehydratedLiveQueryResult;
 ```
 
-Defined in: [packages/db/src/client.ts:153](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L153)
+Defined in: [packages/db/src/client.ts:154](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L154)

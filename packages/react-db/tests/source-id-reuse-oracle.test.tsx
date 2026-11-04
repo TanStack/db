@@ -13,8 +13,8 @@
  * model; switching clients selects that client's remembered bindings.
  * A render that starts a live query claims its source before a descendant
  * suspends, because the live query may still own that source until cleanup.
- * Separate hooks can use same-ID objects: their client-scoped Suspense cache
- * entries must remain distinct, including before the first hook commits.
+ * Separate hooks can use same-ID objects. Their client-scoped Suspense preload
+ * resources must distinguish source objects, including before the first commit.
  * A rejected render must release any sync-start deferral it acquired for a
  * shared client descriptor, so a later direct reader can start that Collection.
  * The release history grammar crosses every rejection cause (a source ID

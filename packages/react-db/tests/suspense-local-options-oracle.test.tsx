@@ -26,8 +26,8 @@ import { afterAll, expect, test } from 'vitest'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import {
-  checkLocalOptionSharing,
-  compatibleLocalOptions,
+  checkLocalOutputOwnership,
+  equalLocalDeclarations,
   localOptionPairs,
 } from '../../db/tests/live-query-cache-options-oracle'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -39,8 +39,7 @@ import type { ReactNode } from 'react'
 
 declareOracle({
   grammar: [localOptionPairs],
-  model: [compatibleLocalOptions],
-  check: [checkLocalOptionSharing],
+  check: [checkLocalOutputOwnership],
 })
 const histories = localOptionPairs.flatMap((history, cell) =>
   // Callback/reference and scalar equality are distinct premises. Keep the
@@ -68,8 +67,8 @@ const pendingReaches = Object.fromEntries(
     scope,
     createOracleReach(`Suspense local options pending/${scope}`, [
       `both-suspended`,
-      `shared-output`,
-      `separate-outputs`,
+      `equal-options`,
+      `different-options`,
       `callback-options`,
       `scalar-options`,
     ]),
@@ -252,9 +251,9 @@ test.each(histories)(
       reach.reach(`first-output`)
       const second = await readSecond()
       reach.reach(`second-output`)
-      checkLocalOptionSharing(first, second, history)
+      checkLocalOutputOwnership(first, second, history)
       pendingReach?.reach(
-        compatibleLocalOptions(history) ? `shared-output` : `separate-outputs`,
+        equalLocalDeclarations(history) ? `equal-options` : `different-options`,
       )
       expect(first.config).toEqual(retainedOptions)
       reach.reach(`retained-first`)

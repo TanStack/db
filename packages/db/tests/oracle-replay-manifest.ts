@@ -36,49 +36,80 @@ const ownerGroups: ReadonlyArray<
         `db/tests/conformance/result-shape-oracle.ts`,
       ] as const,
   ),
+  ...[
+    [`react`, `react-db/tests/conformance.test.tsx`],
+    [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
+    [`react-DbClient`, `react-db/tests/conformance.test.tsx`],
+    [`react-Suspense`, `react-db/tests/conformance.test.tsx`],
+    [`react-Suspense-DbClient`, `react-db/tests/conformance.test.tsx`],
+    [`preact`, `preact-db/tests/conformance.test.ts`],
+    [`vue`, `vue-db/tests/conformance.test.ts`],
+    [`solid`, `solid-db/tests/conformance.test.tsx`],
+    [`angular`, `angular-db/tests/conformance.test.ts`],
+    [`svelte`, `svelte-db/tests/conformance.svelte.test.ts`],
+    [`svelte-DbClient`, `svelte-db/tests/conformance.svelte.test.ts`],
+  ].map(
+    ([driver, owner]) =>
+      [
+        owner!,
+        `framework.${driver}`,
+        `window-history pending-window-history publication-window-history peer-window-history`,
+        `db/tests/conformance/window-history-oracle.ts`,
+      ] as const,
+  ),
+  ...[
+    [`react`, `react-db/tests/conformance.test.tsx`],
+    [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
+    [`react-DbClient`, `react-db/tests/conformance.test.tsx`],
+    [`preact`, `preact-db/tests/conformance.test.ts`],
+    [`svelte-DbClient`, `svelte-db/tests/conformance.svelte.test.ts`],
+  ].map(
+    ([driver, owner]) =>
+      [
+        owner!,
+        `framework.${driver}`,
+        `keyed-admission`,
+        `db/tests/conformance/window-history-oracle.ts`,
+      ] as const,
+  ),
+  [`react-db/tests/client-window-oracle.test.tsx`, `react`, `client-window`],
+  ...[
+    [`react`, `react-db/tests/conformance.test.tsx`],
+    [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
+    [`react-DbClient`, `react-db/tests/conformance.test.tsx`],
+    [`react-Suspense`, `react-db/tests/conformance.test.tsx`],
+    [`react-Suspense-DbClient`, `react-db/tests/conformance.test.tsx`],
+    [`preact`, `preact-db/tests/conformance.test.ts`],
+    [`svelte-DbClient`, `svelte-db/tests/conformance.svelte.test.ts`],
+  ].map(
+    ([driver, owner]) =>
+      [
+        owner!,
+        `framework.${driver}`,
+        `immutable-key-history`,
+        `db/tests/conformance/window-history-oracle.ts`,
+      ] as const,
+  ),
   [
-    `react-db/tests/conformance.test.tsx`,
-    `framework.react`,
-    `window-history pending-window-history publication-window-history`,
-    `db/tests/conformance/window-history-oracle.ts`,
+    `svelte-db/tests/client-window-oracle.svelte.test.ts`,
+    `svelte`,
+    `client-window client-window-recovery`,
   ],
   [
-    `react-db/tests/conformance.test.tsx`,
-    `framework.react-dependency-list`,
-    `window-history pending-window-history publication-window-history`,
-    `db/tests/conformance/window-history-oracle.ts`,
+    `db/tests/live-query-observer-hydration-oracle.property.test.ts`,
+    `live-query-observer`,
+    `hydration-subset-handoff`,
   ],
   [
-    `preact-db/tests/conformance.test.ts`,
-    `framework.preact`,
-    `window-history pending-window-history publication-window-history`,
-    `db/tests/conformance/window-history-oracle.ts`,
+    `react-db/tests/window-render-oracle.test.tsx`,
+    `react`,
+    `window-render window-retry-ownership`,
   ],
   [
-    `vue-db/tests/conformance.test.ts`,
-    `framework.vue`,
-    `window-history pending-window-history publication-window-history`,
-    `db/tests/conformance/window-history-oracle.ts`,
+    `react-db/tests/suspense-lifecycle-oracle.test.tsx`,
+    `react`,
+    `suspense-retry-history suspense-replacement-history suspense-preload-restart-history suspense-siblings`,
   ],
-  [
-    `solid-db/tests/conformance.test.tsx`,
-    `framework.solid`,
-    `window-history pending-window-history publication-window-history`,
-    `db/tests/conformance/window-history-oracle.ts`,
-  ],
-  [
-    `angular-db/tests/conformance.test.ts`,
-    `framework.angular`,
-    `window-history pending-window-history publication-window-history`,
-    `db/tests/conformance/window-history-oracle.ts`,
-  ],
-  [
-    `svelte-db/tests/conformance.svelte.test.ts`,
-    `framework.svelte`,
-    `window-history pending-window-history publication-window-history`,
-    `db/tests/conformance/window-history-oracle.ts`,
-  ],
-  [`react-db/tests/window-render-oracle.test.tsx`, `react`, `window-render`],
   [`preact-db/tests/window-render-oracle.test.tsx`, `preact`, `window-render`],
   [
     `react-db/tests/ssr-effects-oracle.test.ts`,
@@ -164,7 +195,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/live-query-observer-snapshot-oracle.property.test.ts`,
     `live-query-observer`,
-    `retained-snapshot`,
+    `retained-snapshot row-container-sharing capture-paths record-shape sparse-array`,
   ],
   [
     `db/tests/cleanup-queue-oracle.property.test.ts`,
@@ -582,7 +613,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/proxy-revert-oracle.property.test.ts`,
     `proxy`,
-    `revert-history revert-nested-round-trips revert-class-writes revert-partial-reverts revert-native-histories`,
+    `revert-history revert-signed-zero revert-nested-round-trips revert-class-writes revert-partial-reverts revert-native-histories`,
   ],
   [
     `db/tests/proxy-native-methods-oracle.property.test.ts`,
@@ -930,6 +961,15 @@ const replayTestNames = new Map([
     `generated same-key page shifts.*replay campaign`,
   ],
   [`react.window-render`, `window changes at React commit.*fresh`],
+  [`react.window-retry-ownership`, `retry ownership/.*fresh`],
+  [`react.client-window`, `client page identity.*fresh`],
+  [`svelte.client-window`, `Svelte client page identity.*fresh`],
+  [`svelte.client-window-recovery`, `client key recovery/.*fresh`],
+  [`react.suspense-siblings`, `co-mounted siblings/.*fresh`],
+  [
+    `live-query-observer.hydration-subset-handoff`,
+    `seeded ready-subset handoff \\(fresh\\)`,
+  ],
   [`preact.window-render`, `window changes at Preact commit.*fresh`],
   [`ivm.topk-numeric-window`, `Numeric window oracle:.*random campaign`],
   [
@@ -992,6 +1032,22 @@ const replayTestNames = new Map([
   [
     `live-query-observer.retained-snapshot`,
     `first reads match the capture-time rows.*random`,
+  ],
+  [
+    `live-query-observer.row-container-sharing`,
+    `reuses rows across metadata changes.*random`,
+  ],
+  [
+    `live-query-observer.capture-paths`,
+    `checks query capture boundaries.*random`,
+  ],
+  [
+    `live-query-observer.record-shape`,
+    `compares authored shape at every read.*random`,
+  ],
+  [
+    `live-query-observer.sparse-array`,
+    `publishes changed array positions to every receiver.*random`,
   ],
   [`live-query.start-handoff`, `reports only its own thrown starts.*random`],
   [
@@ -1099,6 +1155,12 @@ function directReplayTestName(property: string): string | undefined {
         return `pending window histories \\(fresh\\)`
       case `publication-window-history`:
         return `publication callback window histories \\(fresh\\)`
+      case `peer-window-history`:
+        return `peer page histories \\(fresh\\)`
+      case `keyed-admission`:
+        return `initial disabled keyed admission \\(fresh\\)`
+      case `immutable-key-history`:
+        return `immutable query key histories \\(fresh\\)`
     }
   }
   if (property.startsWith(`react.ssr-effects-`)) {

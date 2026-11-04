@@ -1,0 +1,160 @@
+---
+id: SuspenseBinding
+title: SuspenseBinding
+---
+
+Defined in: [useLiveSuspenseQuery.ts:77](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L77)
+
+Uncommitted retries may adopt work; successful outputs have one owner.
+
+## Constructors
+
+### Constructor
+
+```ts
+new SuspenseBinding(): SuspenseBinding;
+```
+
+#### Returns
+
+`SuspenseBinding`
+
+## Properties
+
+### collection?
+
+```ts
+optional collection: Collection<any, any, any, StandardSchemaV1<unknown, unknown>, any>;
+```
+
+Defined in: [useLiveSuspenseQuery.ts:80](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L80)
+
+***
+
+### promise?
+
+```ts
+optional promise: Promise<void>;
+```
+
+Defined in: [useLiveSuspenseQuery.ts:81](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L81)
+
+***
+
+### ready
+
+```ts
+ready: boolean = false;
+```
+
+Defined in: [useLiveSuspenseQuery.ts:82](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L82)
+
+## Accessors
+
+### needsOwnCollection
+
+#### Get Signature
+
+```ts
+get needsOwnCollection(): boolean;
+```
+
+Defined in: [useLiveSuspenseQuery.ts:84](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L84)
+
+##### Returns
+
+`boolean`
+
+## Methods
+
+### claim()
+
+```ts
+claim(): () => void | undefined;
+```
+
+Defined in: [useLiveSuspenseQuery.ts:184](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L184)
+
+#### Returns
+
+() => `void` \| `undefined`
+
+***
+
+### forkReady()
+
+```ts
+forkReady(observer, compile): SuspenseCollection | undefined;
+```
+
+Defined in: [useLiveSuspenseQuery.ts:138](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L138)
+
+#### Parameters
+
+##### observer
+
+`LiveQueryObserver`\<`object`, `string` \| `number`\>
+
+##### compile
+
+(`owned`, `windowOwner`) => `SuspenseCollection` \| `null`
+
+#### Returns
+
+`SuspenseCollection` \| `undefined`
+
+***
+
+### read()
+
+```ts
+read(snapshot): LiveQuerySnapshot<object, string | number>;
+```
+
+Defined in: [useLiveSuspenseQuery.ts:166](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L166)
+
+#### Parameters
+
+##### snapshot
+
+`LiveQuerySnapshot`\<`object`, `string` \| `number`\>
+
+#### Returns
+
+`LiveQuerySnapshot`\<`object`, `string` \| `number`\>
+
+***
+
+### resolve()
+
+```ts
+resolve(
+   input, 
+   hash, 
+   client, 
+   compile): SuspenseCollection | null;
+```
+
+Defined in: [useLiveSuspenseQuery.ts:88](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L88)
+
+#### Parameters
+
+##### input
+
+`unknown`
+
+##### hash
+
+`string`
+
+##### client
+
+`DbClient` | `undefined`
+
+##### compile
+
+(`owned`, `windowOwner`) => `SuspenseCollection` \| `null`
+
+#### Returns
+
+`SuspenseCollection` \| `null`

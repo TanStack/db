@@ -3,7 +3,7 @@ id: UseConditionalLiveQueryResult
 title: UseConditionalLiveQueryResult
 ---
 
-Defined in: [useLiveQuery.ts:86](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L86)
+Defined in: [useLiveQuery.ts:87](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L87)
 
 The result of a live query whose callback can disable it.
 
@@ -37,7 +37,7 @@ The result of a live query whose callback can disable it.
 collection: TCollection | undefined;
 ```
 
-Defined in: [useLiveQuery.ts:94](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L94)
+Defined in: [useLiveQuery.ts:95](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L95)
 
 ***
 
@@ -47,7 +47,7 @@ Defined in: [useLiveQuery.ts:94](https://github.com/TanStack/db/blob/main/packag
 data: TData | undefined;
 ```
 
-Defined in: [useLiveQuery.ts:93](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L93)
+Defined in: [useLiveQuery.ts:94](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L94)
 
 ***
 
@@ -57,7 +57,7 @@ Defined in: [useLiveQuery.ts:93](https://github.com/TanStack/db/blob/main/packag
 isEnabled: boolean;
 ```
 
-Defined in: [useLiveQuery.ts:96](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L96)
+Defined in: [useLiveQuery.ts:97](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L97)
 
 ***
 
@@ -67,7 +67,7 @@ Defined in: [useLiveQuery.ts:96](https://github.com/TanStack/db/blob/main/packag
 state: ReadonlyMap<TKey, TResult> | undefined;
 ```
 
-Defined in: [useLiveQuery.ts:92](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L92)
+Defined in: [useLiveQuery.ts:93](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L93)
 
 ***
 
@@ -77,4 +77,4 @@ Defined in: [useLiveQuery.ts:92](https://github.com/TanStack/db/blob/main/packag
 status: UseLiveQueryStatus;
 ```
 
-Defined in: [useLiveQuery.ts:95](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L95)
+Defined in: [useLiveQuery.ts:96](https://github.com/TanStack/db/blob/main/packages/preact-db/src/useLiveQuery.ts#L96)

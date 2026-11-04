@@ -11,6 +11,8 @@
 import {
   BTreeIndex,
   BasicIndex,
+  DbClient,
+  Query,
   coalesce,
   count,
   createCollection,
@@ -22,13 +24,14 @@ import {
   sum,
 } from '@tanstack/db'
 import { flushSync } from 'svelte'
-import { expect, it } from 'vitest'
+import { afterAll, expect, it } from 'vitest'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { registerWindowHistoryOracle } from '../../db/tests/conformance/window-history-oracle'
 import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { makeSyncSource } from '../../db/tests/conformance/sync-source'
@@ -193,42 +196,68 @@ function mountDisabled() {
   return makeHandle(() => query, dispose)
 }
 
-function mountControllable<P>(
-  build: (q: any, param: P) => any,
-  initial: P,
-  opts?: { pool?: PooledLiveQueries },
-): ControllableHandle<P> {
-  let param = $state(initial)
-  let query: any
-  const published = createPublicationLog()
-  const dispose = $effect.root(() => {
-    query =
-      opts?.pool !== undefined
-        ? useLiveQuery(
-            { query: (q: any) => build(q, param), pool: opts.pool } as any,
-            [() => param],
-          )
-        : useLiveQuery((q: any) => build(q, param), [() => param])
-    // Svelte renders the value each pre-effect run reads.
-    $effect.pre(() => {
-      published.record(query.data, query.state)
+const mountControllableWith = (withClient: boolean | DbClient = false) =>
+  function mountControllable<P>(
+    build: (q: any, param: P) => any,
+    initial: P,
+    opts?: { pool?: PooledLiveQueries },
+  ): ControllableHandle<P> {
+    const client =
+      withClient instanceof DbClient
+        ? withClient
+        : withClient
+          ? new DbClient()
+          : undefined
+    let param = $state(initial)
+    let query: any
+    const published = createPublicationLog()
+    const dispose = $effect.root(() => {
+      query = client
+        ? useLiveQuery(() => {
+            const input = build(new Query(), param)
+            return input instanceof Query
+              ? { query: input, client }
+              : { ...input, client }
+          })
+        : opts?.pool !== undefined
+          ? useLiveQuery(
+              { query: (q: any) => build(q, param), pool: opts.pool } as any,
+              [() => param],
+            )
+          : useLiveQuery((q: any) => build(q, param), [() => param])
+      // Svelte renders the value each pre-effect run reads.
+      $effect.pre(() => {
+        published.record(query.data, query.state)
+      })
     })
-  })
-  const handle = makeHandle(() => query, dispose)
-  return {
-    ...handle,
-    publications: published.values,
-    statePublications: published.stateValues,
-    async setParam(next: P, observe?: () => void) {
-      param = next
-      // The first paint after the change: the framework has flushed its
-      // reactive work, but no later task has run.
-      flushSync()
-      observe?.()
-      published.record(query.data, query.state)
-      await settle()
-    },
+    const handle = makeHandle(() => query, dispose)
+    return {
+      ...handle,
+      publications: published.values,
+      statePublications: published.stateValues,
+      async setParam(next: P, observe?: () => void) {
+        param = next
+        // The first paint after the change: the framework has flushed its
+        // reactive work, but no later task has run.
+        flushSync()
+        observe?.()
+        published.record(query.data, query.state)
+        await settle()
+      },
+    }
   }
+
+const pageClient = new DbClient()
+afterAll(() => pageClient.cleanup())
+function mountKeyedControllable<P>(
+  build: (q: any, param: P) => any,
+  key: (param: P) => ReadonlyArray<unknown> | undefined,
+  initial: P,
+): ControllableHandle<P> {
+  return mountControllableWith(pageClient)(
+    (q, param: P) => ({ query: build(q, param), queryKey: key(param) }),
+    initial,
+  )
 }
 
 const svelteDriver: LiveQueryDriver = {
@@ -255,7 +284,7 @@ const svelteDriver: LiveQueryDriver = {
   makePrecreated,
   makeErrorSource,
   mount,
-  mountControllable,
+  mountControllable: mountControllableWith(),
   mountCollection,
   mountConfig,
   mountDisabled,
@@ -263,6 +292,13 @@ const svelteDriver: LiveQueryDriver = {
   features: { serverSnapshot: false, suspense: false, pooledEqFilters: true },
 }
 
+registerWindowHistoryOracle({
+  ...svelteDriver,
+  name: `svelte (DbClient)`,
+  comparesQueryIdentity: true,
+  mountControllable: mountControllableWith(pageClient),
+  mountKeyedControllable,
+})
 runSuite(svelteDriver)
 it(`preserves raw result types through the actual driver reader`, () => {
   const raw: Record<string, unknown> = {
