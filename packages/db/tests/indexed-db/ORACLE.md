@@ -42,12 +42,13 @@ membership. Empty-store delete first inserts. Import chooses empty or one-row
 replacement. Manual acceptance writes overlapping keys with distinct values in
 two stores. Every history ends with fresh restores.
 
-The authored reconstruction history visits every action in both stores.
-Fixed histories retain generated update/clear and repeated no-op histories.
-Matrices reconstruct CRUD × decision, persistence-entry × bad-row-position,
-and remote delete/clear × local rollback/commit. Transport cases retain the old
+The authored reconstruction history visits every action in both stores. Fixed
+histories retain generated update/clear and repeated no-op histories. Matrices
+reconstruct CRUD × decision, persistence-entry × bad-row-position, and remote
+delete/clear × local rollback/commit. Transport cases retain the old
 rapid/concurrent and routing coverage and add the twelve histories below.
-Missing-key updates and duplicate imported keys have explicit rejection witnesses.
+Missing-key updates and duplicate imported keys have explicit rejection
+witnesses.
 
 Each axis contributes independently:
 
@@ -204,12 +205,12 @@ introduced.
 
 ## Campaigns and direct replay
 
-The normal test command runs the same property, generator, recorder, production driver and
-30-run budget twice: fixed campaign seed 1179001, then no supplied campaign seed. Each campaign
-reports its actual campaign seed, run count and outcome. Fast-check reports counterexample
-and shrink path; verbose output retains failed histories. A reduced trace proves
-its reported checkpoint; do not label a reduction a reproduction of a different
-facet without replaying both.
+The normal test command runs the same property, generator, recorder, production
+driver and 30-run budget twice: fixed campaign seed 1179001, then no supplied
+campaign seed. Each campaign reports its actual campaign seed, run count and
+outcome. Fast-check reports counterexample and shrink path; verbose output
+retains failed histories. A reduced trace proves its reported checkpoint; do not
+label a reduction a reproduction of a different facet without replaying both.
 
 From this package directory:
 

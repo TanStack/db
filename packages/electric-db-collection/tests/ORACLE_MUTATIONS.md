@@ -138,8 +138,8 @@ accepted data-before-reset and reset-before-data in the protocol model.
 `electric-sdk-framing.test.ts` independently uses the real SDK with controlled
 HTTP responses. Both normal and stale-row-bearing 409 bodies produce singleton
 reset callbacks, as the generated protocol histories now require. This fixes the
-installed SDK's HTTP reset path, not an exhaustive specification of every possible
-server response or SSE path.
+installed SDK's HTTP reset path, not an exhaustive specification of every
+possible server response or SSE path.
 
 The synthetic partition property remains as extra adapter robustness coverage;
 it deliberately tests more callback shapes than the SDK-framed differential
@@ -160,10 +160,10 @@ contiguous callback partition is tested. Expected rows follow tag membership
 and ordinary row updates, without consulting adapter transaction state.
 
 The bug was RED in two progressive fixed histories and the random property (seed
-`-1632249566`, path `0:1`); seven fixed controls passed. Previous tag tests began
-after readiness, while the initial-sync generators lacked tag move-outs followed
-by later live work. This was also reproduced by the full service-backed Electric
-E2E suite, not only a synthetic callback driver.
+`-1632249566`, path `0:1`); seven fixed controls passed. Previous tag tests
+began after readiness, while the initial-sync generators lacked tag move-outs
+followed by later live work. This was also reproduced by the full service-backed
+Electric E2E suite, not only a synthetic callback driver.
 
 Use this focused form while iterating:
 
@@ -209,9 +209,10 @@ after user callbacks fence both the waiter loop and the remaining message batch.
 
 All three extensions have fixed-seed and random properties, with the shared
 oracle multiplier and seed/path replay controls. These are ordinary assertions,
-not expected-failure classifiers. At `049cc9a5d`, fixed campaign seeds `42711`, `42712`,
-and `42713` reproduce the three failures respectively. Binding and reentry use
-epoch/ownership guards; persisted membership uses the approved refetch contract.
+not expected-failure classifiers. At `049cc9a5d`, fixed campaign seeds `42711`,
+`42712`, and `42713` reproduce the three failures respectively. Binding and
+reentry use epoch/ownership guards; persisted membership uses the approved
+refetch contract.
 
 The separate mixed `[insert, must-refetch, up-to-date]` report exposed the
 protocol-model gap corrected in section 12. It remains outside the verified

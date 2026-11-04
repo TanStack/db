@@ -39,9 +39,9 @@ metadata withdrawal, acquisition/fallback failure and healthy peer recovery.
 ## What the failures taught us
 
 The first candidate used the latest response's `hasMore` for all consumers and
-treated missing metadata as false. It failed seven of nine tests. Campaign seed `863`
-shrunk one failure to two source rows, backend page size one, a one-row window,
-and missing metadata. It incorrectly announced the end.
+treated missing metadata as false. It failed seven of nine tests. Campaign seed
+`863` shrunk one failure to two source rows, backend page size one, a one-row
+window, and missing metadata. It incorrectly announced the end.
 
 The tested repair has four rules:
 
@@ -103,9 +103,9 @@ replacement for the production controller's lifecycle and error handling.
 ## Verification
 
 - First red: seven assertion failures, two passes; no setup failure or timeout.
-- Final fixed-seed campaign: all 66 tests across both experiments passed.
-  The new no-peek property ran 15,000 histories at multiplier 100, campaign seed `863`;
-  the preceding cursor experiment ran another 35,000 generated cases.
+- Final fixed-seed campaign: all 66 tests across both experiments passed. The
+  new no-peek property ran 15,000 histories at multiplier 100, campaign seed
+  `863`; the preceding cursor experiment ran another 35,000 generated cases.
 - A separate default random campaign covers the no-peek files.
 - Package TypeScript and lint on all experiment TypeScript passed.
 

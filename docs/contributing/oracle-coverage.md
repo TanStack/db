@@ -148,34 +148,40 @@ The Convex package has these independent judgments:
 
 Each owner runs matching fixed and random campaigns and accepts explicit
 seed/path replay through their CONVEX_*_ORACLE_SEED/PATH environment variables.
-Each normal campaign has a fresh reach ledger, fails if any declared state has fewer
-than one reached history, and prints its counts as `ORACLE_REACH` JSON. Explicit
-path replays run directly with one selected fast-check run and bypass campaign
-minima; shrink-path reconstruction can evaluate the callback more than once.
-Snapshot replay uses CONVEX_SNAPSHOT_ORACLE; pagination has separate CONVEX_PAGINATION_ROWS, CONVEX_PAGINATION_WORK, and CONVEX_PAGINATION_BOUND selectors;
-offline bridge replay uses CONVEX_OFFLINE_ORACLE; native value replay uses
-CONVEX_VALUES_ORACLE; ownership uses CONVEX_OWNERSHIP_ORACLE.
+Each normal campaign has a fresh reach ledger, fails if any declared state has
+fewer than one reached history, and prints its counts as `ORACLE_REACH` JSON.
+Explicit path replays run directly with one selected fast-check run and bypass
+campaign minima; shrink-path reconstruction can evaluate the callback more than
+once. Snapshot replay uses CONVEX_SNAPSHOT_ORACLE; pagination has separate
+CONVEX_PAGINATION_ROWS, CONVEX_PAGINATION_WORK, and CONVEX_PAGINATION_BOUND
+selectors; offline bridge replay uses CONVEX_OFFLINE_ORACLE; native value replay
+uses CONVEX_VALUES_ORACLE; ownership uses CONVEX_OWNERSHIP_ORACLE.
 
-`packages/convex-db-collection/e2e/backend-oracle.test.ts` receives these contracts
-at an actual isolated local Convex backend using both Convex 1.47.0 SDK clients.
-Its row-bound rejection is a fixed test in
-`packages/convex-db-collection/e2e/backend.test.ts` (fixed tests; no oracle owner
-(tracked in #2264)).
-It compares pagination with a separately evaluated unpaginated server query,
-including real server-generated split responses. Its durable driver runs fixed
-and random insert/update/delete histories through SIGKILL after disk admission and, optionally,
-a second SIGKILL after server acceptance but before recording outbox completion.
-It requires no offline provider call, restored Collection rows, and one server
-receipt after replay with the original key and the expected final server rows.
-Native payload variation covers inserts and updates. A separate non-idempotent application counter must equal one, and the receipt key must match the on-disk durable key. Restored Collections are compared on every application field, including native payloads. Atomic batches and multi-tab leadership
-remain outside this backend witness. Replay uses
-CONVEX_BACKEND_INSERT_ORACLE_SEED/PATH, CONVEX_BACKEND_UPDATE_ORACLE_SEED/PATH, or CONVEX_BACKEND_DELETE_ORACLE_SEED/PATH, with matching operation test selection. The command owns backend startup and shutdown.
-The offline engine's interruption, settlement, storage, and leadership owners
-remain primary for those laws; this is their Convex receiving witness.
-Generated bundles constructively cover known and uncertain acknowledgement for
-each native payload class while retaining six actual process histories per
-operation per campaign (36 total). Reach is credited at observed disk admission,
-server-acceptance and full replay comparisons, not from requested fixture inputs.
+`packages/convex-db-collection/e2e/backend-oracle.test.ts` receives these
+contracts at an actual isolated local Convex backend using both Convex 1.47.0
+SDK clients. Its row-bound rejection is a fixed test in
+`packages/convex-db-collection/e2e/backend.test.ts` (fixed tests; no oracle
+owner (tracked in #2264)). It compares pagination with a separately evaluated
+unpaginated server query, including real server-generated split responses. Its
+durable driver runs fixed and random insert/update/delete histories through
+SIGKILL after disk admission and, optionally, a second SIGKILL after server
+acceptance but before recording outbox completion. It requires no offline
+provider call, restored Collection rows, and one server receipt after replay
+with the original key and the expected final server rows. Native payload
+variation covers inserts and updates. A separate non-idempotent application
+counter must equal one, and the receipt key must match the on-disk durable key.
+Restored Collections are compared on every application field, including native
+payloads. Atomic batches and multi-tab leadership remain outside this backend
+witness. Replay uses CONVEX_BACKEND_INSERT_ORACLE_SEED/PATH,
+CONVEX_BACKEND_UPDATE_ORACLE_SEED/PATH, or
+CONVEX_BACKEND_DELETE_ORACLE_SEED/PATH, with matching operation test selection.
+The command owns backend startup and shutdown. The offline engine's
+interruption, settlement, storage, and leadership owners remain primary for
+those laws; this is their Convex receiving witness. Generated bundles
+constructively cover known and uncertain acknowledgement for each native payload
+class while retaining six actual process histories per operation per campaign
+(36 total). Reach is credited at observed disk admission, server-acceptance and
+full replay comparisons, not from requested fixture inputs.
 
 `packages/convex-db-collection/e2e/public-pagination-oracle.test.ts` receives the
 finite pagination contract through the actual public `get-convex/convex-demos`
@@ -312,15 +318,16 @@ the earlier injected-edge control is not claimed as a rejected waiting strategy.
 
 `lazy-paging-native-receipt-oracle.property.test.ts` feeds actual native batches
 and core receipts into that same scientific model. Independently authored
-required versions absent at acquisition have unique supplying batches, which
-can establish two callers. It covers cached zero new edges, a shallow cached
-caller behind a deeper held peer, canceled/successful shared callers, and explicit
+required versions absent at acquisition have unique supplying batches, which can
+establish two callers. It covers cached zero new edges, a shallow cached caller
+behind a deeper held peer, canceled/successful shared callers, and explicit
 cache revalidation to a new version. Early or delayed cached settlement is
 permitted; responsive post-drain completion is required. Its mutant native
-receiver returns the already applied startup receipt instead of the actual
-held receipt. Native attribution here excludes idempotent/superseding facts,
+receiver returns the already applied startup receipt instead of the actual held
+receipt. Native attribution here excludes idempotent/superseding facts,
 reentrant commit observations and cleanup abandonment; the older controlled
-receiver retains idempotent receipt coverage and its all-responses-first profile.
+receiver retains idempotent receipt coverage and its all-responses-first
+profile.
 
 `lazy-paging-version-model-oracle.ts` owns coherent authored revisions and their
 monotone public frontier. `lazy-paging-version-oracle.property.test.ts` checks
@@ -409,18 +416,18 @@ does not discharge an unobserved receipt. The shared `LazyTerminalGraphModel`
 supplies the old graph judgment to both controlled and backend receivers.
 
 Both new families run matching fixed/random campaigns, direct seed/path replay,
-and both SDKs in every history. Selectors are `CONVEX_REVALIDATION_ORACLE_SEED/PATH`
-and `CONVEX_BOUNDARY_ORACLE_SEED/PATH`; `CONVEX_LAZY_ORACLE_RUNS_MULTIPLIER`
-expands both campaign budgets equally. Standard package oracle scripts discover
-them; the existing browser CI lane runs the backend receiver via `test:e2e`.
-Calibration distinguishes unchanged-content application shortcuts, lost native
-deletions, and a separate stale-publication perturbation that ends with correct
-rows. Exact commands, source hashes and outcome classifications are in the
-record. This does not close arbitrary scheduling, rank ties in the new backend
-family, provider errors before acceptance, adversarial keys stale real-SDK callbacks,
-same-run authoritative truncate, or React rendering boundaries. Those retain
-their existing owners; the controlled failure family remains broader than its
-new backend receiving subset.
+and both SDKs in every history. Selectors are
+`CONVEX_REVALIDATION_ORACLE_SEED/PATH` and `CONVEX_BOUNDARY_ORACLE_SEED/PATH`;
+`CONVEX_LAZY_ORACLE_RUNS_MULTIPLIER` expands both campaign budgets equally.
+Standard package oracle scripts discover them; the existing browser CI lane runs
+the backend receiver via `test:e2e`. Calibration distinguishes unchanged-content
+application shortcuts, lost native deletions, and a separate stale-publication
+perturbation that ends with correct rows. Exact commands, source hashes and
+outcome classifications are in the record. This does not close arbitrary
+scheduling, rank ties in the new backend family, provider errors before
+acceptance, adversarial keys stale real-SDK callbacks, same-run authoritative
+truncate, or React rendering boundaries. Those retain their existing owners; the
+controlled failure family remains broader than its new backend receiving subset.
 
 The [application/cancellation follow-up](oracle-reviews/2026-10-27-convex-lazy-app-abort.md)
 adds three receiving families motivated by issue #2269. `LazyWriteModel` in
@@ -461,11 +468,12 @@ withheld delivery; no-demand delivery accepts no rows. Retired success/error
 callbacks after each successful replay cannot resurrect rows, poison current
 sync or read a retired React watch. Native Convex does not initiate these
 truncates; the driver supplies that core input. This is no claim about actual
-SDKs emitting adversarial keys stale callbacks or about bounded work during replay.
-The existing receipt model still owns accepted writes. This checkout's older
-core waits for uncancelable baselines; #2269's immediate-core-abort decision
-belongs to integration with unmerged #2168. The new family exercises their
-shared cancellable-adapter obligation without silently changing either law.
+SDKs emitting adversarial keys stale callbacks or about bounded work during
+replay. The existing receipt model still owns accepted writes. This checkout's
+older core waits for uncancelable baselines; #2269's immediate-core-abort
+decision belongs to integration with unmerged #2168. The new family exercises
+their shared cancellable-adapter obligation without silently changing either
+law.
 
 All three families run fixed/random campaigns with direct seed/path replay and
 declared reach. The follow-up records three rejected production decisions
@@ -616,28 +624,28 @@ records the rejection policy and exact calibration.
 The eight-item follow-up at reviewed head `16824f677` extends the same owners.
 The cleanup/restart owner adds six plain/live-query logical-demand cases at
 idle, ready, and cleaned-up cleanup start, plus six admission outcomes that
-distinguish a pending cleanup promise from an actual replacement sync run.
-The deferred-acquisition owner adds render-deferred eager/on-demand sources and
-explicit deferred subscription/resumption histories across both query shapes
-and one/two live-query levels. The React descriptor driver receives resumption
-after a real abandoned suspended render through the existing startup judgment.
-The observer-history owner adds eight failed-setup histories, with both modes,
+distinguish a pending cleanup promise from an actual replacement sync run. The
+deferred-acquisition owner adds render-deferred eager/on-demand sources and
+explicit deferred subscription/resumption histories across both query shapes and
+one/two live-query levels. The React descriptor driver receives resumption after
+a real abandoned suspended render through the existing startup judgment. The
+observer-history owner adds eight failed-setup histories, with both modes,
 one/two failures, cleanup rejection or real sync-start failure. Client, status,
 and layout leases are checked immediately, then retry, publication and release.
 Two late-listener seed failures retain a healthy peer and exclude the failed
 listener from later publications. Eight stream-preload histories cross pending
 or successful streams, both source modes and a render deferral. The real React
 streaming test receives the on-demand premise while retaining server rows until
-browser acquisition completes.
-The pooled release owner adds twelve new/retained/released partition histories
-through held loading/ready cleanup and two startup-cleanup reentry histories.
-The subscription boundary owner adds 28 resumption/retirement histories crossing
-loading, ready and acquiring notifications, cleanup, source mode and render gate.
-The shared token-count model forbids restoring a retired owner. Deferred-demand
-cancellation fixtures now create logical demand before explicit resumption;
-render-owned queued loads remain covered by the DbClient fixture. These finite
-extensions do not establish arbitrary async/provider schedules or new framework
-error policy. The [follow-up audit](oracle-reviews/2026-10-22-dbclient-migration-feedback.md)
+browser acquisition completes. The pooled release owner adds twelve
+new/retained/released partition histories through held loading/ready cleanup and
+two startup-cleanup reentry histories. The subscription boundary owner adds 28
+resumption/retirement histories crossing loading, ready and acquiring
+notifications, cleanup, source mode and render gate. The shared token-count
+model forbids restoring a retired owner. Deferred-demand cancellation fixtures
+now create logical demand before explicit resumption; render-owned queued loads
+remain covered by the DbClient fixture. These finite extensions do not establish
+arbitrary async/provider schedules or new framework error policy. The
+[follow-up audit](oracle-reviews/2026-10-22-dbclient-migration-feedback.md)
 records original RED, mutant controls, and the unchanged rejection decision.
 
 A subsequent current-head summary exposed cleanup during ownership transfer.
@@ -795,16 +803,17 @@ active-interval model: retained routes share one ready facade, retired handles
 stay ready/empty, and a new interval gets a new handle. This assumes no
 facade-local optimistic mutations. Every shape declares active empty readiness
 and nonempty child receiving cuts. Six lifetime and four inline-value mutant
-controls reject wrong observations. See [chunk 5](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md).
-Functional callback-input observations have a separate receiving boundary in
+controls reject wrong observations. See
+[chunk 5](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md). Functional
+callback-input observations have a separate receiving boundary in
 `virtual-row-fields-input-oracle.test.ts`, sharing the existing source metadata
 judgment. The maintainer extended O12 on 2026-10-30 from fn.select to fn.where
 and fn.having while preserving authored inline output. Thirty-three authoring
-descriptions cross seven QueryRef/join/union paths, five callback forms
-(select, where, having, where-select, having-select), and root, wrapped child,
-direct child and real Effect receivers. Flat union children require a named
-QueryRef for include correlation; direct flat union children remain inadmissible.
-The finite grammar has 4,290 receiving histories and 20 direct-source controls.
+descriptions cross seven QueryRef/join/union paths, five callback forms (select,
+where, having, where-select, having-select), and root, wrapped child, direct
+child and real Effect receivers. Flat union children require a named QueryRef
+for include correlation; direct flat union children remain inadmissible. The
+finite grammar has 4,290 receiving histories and 20 direct-source controls.
 
 Each receiver checks immutable callback captures and complete derived or
 predicate-filtered output at initial readiness, held mutation, settlement and
@@ -926,26 +935,27 @@ The versioned audit records the user decision, original overwrite RED, GREEN,
 and guards that check only own/truthy properties or omit a reserved name.
 
 Other existing fixed type checks cover adjacent compile-time boundaries:
-`packages/db/tests/mutation-handler-type.test-d.ts` (fixed tests; no oracle owner (tracked in #2264)) checks sibling
-Collection/key/utilities in mutation handlers; and
+`packages/db/tests/mutation-handler-type.test-d.ts` (fixed tests; no oracle
+owner (tracked in #2264)) checks sibling Collection/key/utilities in mutation
+handlers; and
 `packages/db/tests/query/virtual-row-fields-reference-types.test-d.ts` retains
 concrete helper examples. The generated public type owner is
 `packages/db/tests/query/virtual-row-fields-types-oracle.test.ts`. Its 24 finite
 row descriptions vary key domain, scalar type, nested optionality and
 discriminated union membership. Shared runtime/type authoring dimensions cross
-five projection shapes and eight compositions; seven child shapes cross
-the legal facade/toArray/materialize/findOne forms; array/Date facades are
-rejected inputs. Each generated body also runs public query/index construction,
-with an explicit index type and failure-preserving cleanup. Two admission
-controls reject opaque facades and optionless indexes at their actual boundary.
-A reusable recursive type signature checks
-values, exact keys, required/optional and readonly modifiers per union member,
-without rejecting duplicate equivalent union members. Public-source imports
-compile through the actual TypeScript compiler; all diagnostics retain their
-file, span and code. Seven mutant controls challenge value enrichment,
-nullability, one-branch readonly loss, nested any/metadata/modifiers and Date
-metadata any. Their rejection requires failed type-law constraints, not syntax
-or setup errors. The normal test:oracles command selects this owner.
+five projection shapes and eight compositions; seven child shapes cross the
+legal facade/toArray/materialize/findOne forms; array/Date facades are rejected
+inputs. Each generated body also runs public query/index construction, with an
+explicit index type and failure-preserving cleanup. Two admission controls
+reject opaque facades and optionless indexes at their actual boundary. A
+reusable recursive type signature checks values, exact keys, required/optional
+and readonly modifiers per union member, without rejecting duplicate equivalent
+union members. Public-source imports compile through the actual TypeScript
+compiler; all diagnostics retain their file, span and code. Seven mutant
+controls challenge value enrichment, nullability, one-branch readonly loss,
+nested any/metadata/modifiers and Date metadata any. Their rejection requires
+failed type-law constraints, not syntax or setup errors. The normal test:oracles
+command selects this owner.
 
 Chunk 24 extends this same owner with `virtual-row-fields-receiver-types-oracle.ts`
 and the native compiler support `virtual-row-fields-receiver-types-support.ts`.
@@ -1053,42 +1063,45 @@ delete, and move parents, insert and delete children, and move the window, with
 executed fixed cases for each premise, and every checkpoint asserts
 `getWindow()`. A `findOne` keeps its compiled limit (1, or 0 for
 `.limit(0).findOne()`); an ordered `findOne` has a movable window, and an
-unordered one is a fixed one-row result that accepts only its compiled limit
-at offset 0. Rows must equal
-a relational model. Preload may load only the children of the shown rows'
-groups, and a step only those of rows that entered the window and were not
-shown before it. A static filter creates static child demand before the
-query runs only when no enclosing query is windowed or a `findOne`, and either the query is neither windowed nor a `findOne`, or it is a `findOne` that shows one row for one named correlation value, with no `offset`, and offset 0 at start if a window was requested before start. Fixed histories show each case
-the rule closes: a window requested before start (12 child rows for a bound of
-2 before the rule), grandchild demand below a windowed parent, a `findOne` with
+unordered one is a fixed one-row result that accepts only its compiled limit at
+offset 0. Rows must equal a relational model. Preload may load only the children
+of the shown rows' groups, and a step only those of rows that entered the window
+and were not shown before it. A static filter creates static child demand before
+the query runs only when no enclosing query is windowed or a `findOne`, and
+either the query is neither windowed nor a `findOne`, or it is a `findOne` that
+shows one row for one named correlation value, with no `offset`, and offset 0 at
+start if a window was requested before start. Fixed histories show each case the
+rule closes: a window requested before start (12 child rows for a bound of 2
+before the rule), grandchild demand below a windowed parent, a `findOne` with
 `limit(0)`, and a `findOne` moved past its one named value before start; a
 detail page whose window before start is at offset 0 still starts its child
 acquisition attempt at once. A focused test requires `setWindow` to throw
 `SetWindowFindOneLimitError` for any other `findOne` limit and
-`SetWindowRequiresOrderByError` for an offset move on an unordered `findOne`. A `findOne` detail page with on-demand parent and child starts
-its child acquisition attempt beside its parent's. On main, a late page
-delivered 120 child rows for a bound of 9. Routers that add the row after the
-window fail the generated campaigns; routers that add every row in an edge tie
-group fail a fixed collapse and the detail page; a child that takes over
-`setWindow` fails the rows law. Focused tests require a window inside a `from`
-or joined subquery not to answer `setWindow`.
+`SetWindowRequiresOrderByError` for an offset move on an unordered `findOne`. A
+`findOne` detail page with on-demand parent and child starts its child
+acquisition attempt beside its parent's. On main, a late page delivered 120
+child rows for a bound of 9. Routers that add the row after the window fail the
+generated campaigns; routers that add every row in an edge tie group fail a
+fixed collapse and the detail page; a child that takes over `setWindow` fails
+the rows law. Focused tests require a window inside a `from` or joined subquery
+not to answer `setWindow`.
 
 Recorded limit (#2151): while an index-backed parent top-K refills within one
 graph run (a held row moved out, a tie group loaded at the window edge, a
-forward window move), it can briefly hold a row outside the window it shows
-once its ordered acquisition completes, and load that row's children; the
-public snapshot stays correct. A refill checkpoint is a model observation that
-combines an ordered acquisition and whether it completed: the parent Collection
-delivers more change batches than the initial load or the step's own parent
-write. The generated campaigns skip only its work bound. In the fixed campaign
-(60 runs, seed 2137), the work bound checks 285 of 290 checkpoints strictly:
-preload 60 of 60, parent inserts 45 of 45, parent deletes 34 of 35, rank moves
-43 of 43, child inserts 36 of 36, child deletes 37 of 37, backward window moves
-18 of 18, and forward window moves 12 of 16. Six fixed histories cover the known traces
-and allow exactly the one extra child row each shows; with no overshoot
-allowed, each fails. Four fixed forward moves (local and on-demand children,
-with and without `distinct`) allow none. Each generated campaign counts the
-forward moves its own runs check strictly and fails if it counts none.
+forward window move), it can briefly hold a row outside the window it shows once
+its ordered acquisition completes, and load that row's children; the public
+snapshot stays correct. A refill checkpoint is a model observation that combines
+an ordered acquisition and whether it completed: the parent Collection delivers
+more change batches than the initial load or the step's own parent write. The
+generated campaigns skip only its work bound. In the fixed campaign (60 runs,
+seed 2137), the work bound checks 285 of 290 checkpoints strictly: preload 60 of
+60, parent inserts 45 of 45, parent deletes 34 of 35, rank moves 43 of 43, child
+inserts 36 of 36, child deletes 37 of 37, backward window moves 18 of 18, and
+forward window moves 12 of 16. Six fixed histories cover the known traces and
+allow exactly the one extra child row each shows; with no overshoot allowed,
+each fails. Four fixed forward moves (local and on-demand children, with and
+without `distinct`) allow none. Each generated campaign counts the forward moves
+its own runs check strictly and fails if it counts none.
 
 Open in-scope paths, all owned by this includes-work owner unless noted:
 refill checkpoints need the #2151 fix (holding include demand until the
@@ -1270,51 +1283,51 @@ accepting, rejecting, and absent outer predicates; a materialized-Collection
 formulation supplies matching and nonmatching controls. Other `singleResult`
 forms, join forms, and scheduling cuts remain outside these owners.
 
-The offline scheduler owner (`packages/offline-transactions/tests/KeyScheduler-oracle.property.test.ts`)
+The offline scheduler owner
+(`packages/offline-transactions/tests/KeyScheduler-oracle.property.test.ts`)
 checks FIFO eligibility and retry order at the scheduler boundary, as the
 `oracleProperty` `offline.key-scheduler-fifo-ledger`. Before its port the
 generator drew histories of at most 12 commands (fast-check's default array
 size) with a biased selector, so 4 of 150 histories per campaign started any
-transaction and 1 retried; generation now draws 1 to 50 unbiased commands,
-and about a quarter of histories start work and a tenth retry. It does not
-observe the executor's awaited outbox update between `updateTransaction` and
+transaction and 1 retried; generation now draws 1 to 50 unbiased commands, and
+about a quarter of histories start work and a tenth retry. It does not observe
+the executor's awaited outbox update between `updateTransaction` and
 `markFailed`, or public caller settlement. Those receiving cuts belong with
 `packages/offline-transactions/tests/transaction-settlement-oracle.property.test.ts`.
 The transaction serializer owner uses controlled Temporal constructors and fake
 storage; a claim about native Temporal or browser storage needs a receiving
-witness in those runtimes.
-The offline settlement owner follows the README's success boundary: the
-configured `mutationFn` has returned and the storage adapter has acknowledged
-outbox deletion. Its controlled storage histories hold and fail deletion,
-stop the executor and queued peers on a storage failure, reject new admission,
-and restart after a persisted `deletion-pending` phase. A marked row skips provider replay
-even when `beforeRetry` filters all ordinary pending work; an old unmarked row
-still replays. Adapter tests prove that IndexedDB transaction failure and
-localStorage `removeItem` failure reject rather than masquerade as deletion.
-When a caller removes an active row with `removeFromOutbox` or `clearOutbox`
-while its provider is held, the caller remains pending until that provider
-returns. The controlled witness then checks provider calls, public settlement,
-and the empty outbox. The leadership owner checks that an earlier
-`deletion-pending` row with the same persisted timestamp is deleted before its
-later peer reaches the provider. This restart witness uses storage insertion
-order to distinguish creation order; independent storage writers and native
-browser hosts remain outside its claim.
-These witnesses do not establish physical power-loss durability, a real
-provider's idempotency, or the crash window between provider completion and
-the phase write. The provider must honor the supplied idempotency key in that
-window. Older application versions that do not understand the phase can also
-replay a marked row. Native browser restart and multi-owner handoff of the
-marked phase remain receiving witnesses for this owner.
+witness in those runtimes. The offline settlement owner follows the README's
+success boundary: the configured `mutationFn` has returned and the storage
+adapter has acknowledged outbox deletion. Its controlled storage histories hold
+and fail deletion, stop the executor and queued peers on a storage failure,
+reject new admission, and restart after a persisted `deletion-pending` phase. A
+marked row skips provider replay even when `beforeRetry` filters all ordinary
+pending work; an old unmarked row still replays. Adapter tests prove that
+IndexedDB transaction failure and localStorage `removeItem` failure reject
+rather than masquerade as deletion. When a caller removes an active row with
+`removeFromOutbox` or `clearOutbox` while its provider is held, the caller
+remains pending until that provider returns. The controlled witness then checks
+provider calls, public settlement, and the empty outbox. The leadership owner
+checks that an earlier `deletion-pending` row with the same persisted timestamp
+is deleted before its later peer reaches the provider. This restart witness uses
+storage insertion order to distinguish creation order; independent storage
+writers and native browser hosts remain outside its claim. These witnesses do
+not establish physical power-loss durability, a real provider's idempotency, or
+the crash window between provider completion and the phase write. The provider
+must honor the supplied idempotency key in that window. Older application
+versions that do not understand the phase can also replay a marked row. Native
+browser restart and multi-owner handoff of the marked phase remain receiving
+witnesses for this owner.
 
-The same owner also needs a captured failing seed-and-shrink-path replay for
-its generated settlement property. The
+The same owner also needs a captured failing seed-and-shrink-path replay for its
+generated settlement property. The
 [deletion-settlement review record](oracle-reviews/2026-09-30-offline-deletion-settlement.md)
 preserves its earlier executable revision. The
 [fail-stop follow-up](oracle-reviews/2026-09-30-offline-fail-stop-followup.md)
-records the revised storage-failure law, RED/GREEN witnesses, and limits.
-The guarded replay owner (`packages/db/tests/oracle-replay.test.ts`) now checks
-that named pagination and index campaigns execute only the requested replay
-campaign. An unrelated failing fixed campaign no longer runs first. The
+records the revised storage-failure law, RED/GREEN witnesses, and limits. The
+guarded replay owner (`packages/db/tests/oracle-replay.test.ts`) now checks that
+named pagination and index campaigns execute only the requested replay campaign.
+An unrelated failing fixed campaign no longer runs first. The
 [prep-PR review record](oracle-reviews/2026-09-30-prep-pr-followup.md) records
 these four review repairs at their exact executable revision.
 
@@ -1454,7 +1467,8 @@ is not browser evidence. `hydration.svelte.test.ts` separately receives
 normalized transport and normal warm-browser initialization through its native
 scheduler.
 
-The [React SSR diagnostic receiver](../../packages/react-db/tests/ssr-effects-oracle.test.ts)
+The
+[React SSR diagnostic receiver](../../packages/react-db/tests/ssr-effects-oracle.test.ts)
 extends that preparation grammar and judgment with real matched React/ReactDOM
 18.3.1 and 19.2.4 development server renderers. Separate paths cover provider
 and explicit-client ordinary hooks, completed non-streaming Suspense through
@@ -1466,8 +1480,9 @@ prepared Suspense compares rows. Standalone/supplied paths make no hydration
 claim. Fixed/fresh campaigns retain per-runtime/path reach and direct replay;
 this does not establish streaming Suspense, actual browser hydration, arbitrary
 provider delivery or every React version. Client commit and abandonment remain
-with the window receiving owner. [SSR effect evidence](oracle-reviews/2026-10-30-react-ssr-effects.md)
-records pre-edit RED, repaired GREEN and mutant rejection.
+with the window receiving owner.
+[SSR effect evidence](oracle-reviews/2026-10-30-react-ssr-effects.md) records
+pre-edit RED, repaired GREEN and mutant rejection.
 
 The shared admission owner also defines runtime ready/error outcomes, browser
 explicit preparation and defined/undefined causes. Its receiving drivers are
@@ -1749,9 +1764,9 @@ React's 12; six mutant in-place mutations are rejected. Svelte's actual
 client-backed effect receives all 144 cached-option histories. All three native
 selectors pass. Portable first claims/failure/consumption are no longer merely
 proposed coverage. Remaining cache limits at that chunk were first registration
-without an existing stream, arbitrary transport schedules, schema transforms
-and native partial-construction cleanup. Svelte SSR/hydrateRoot/continuing publications are
-not supplied by its browser admission receiver.
+without an existing stream, arbitrary transport schedules, schema transforms and
+native partial-construction cleanup. Svelte SSR/hydrateRoot/continuing
+publications are not supplied by its browser admission receiver.
 
 Chunk 12 adds first registration without a transported query result. Core runs
 4,320 histories: explicit preload, streaming observer preload and server read
@@ -1775,65 +1790,63 @@ concurrent schedules and other framework first-registration receivers remain
 outside this bounded evidence. Native partial-construction evidence is recorded
 separately in chunk 11.
 
-`packages/db/tests/live-query-deferred-acquisition-oracle.test.ts` also checks
-a two-source descriptor union when the first sync start fails: the second source
+`packages/db/tests/live-query-deferred-acquisition-oracle.test.ts` also checks a
+two-source descriptor union when the first sync start fails: the second source
 still starts and reaches ready on direct preload, and a preparation error stays
 primary if a deferred source also throws during release. The controlled sources
 start synchronously. At the synchronous preload error cut, even a caller that
 opts to stream pending queries cannot dehydrate the failed query; a later
 same-hash preload over a healthy replacement publishes its own row. Asynchronous
 failure is also exercised with a later controlled `markError`: the pending
-stream rejects and disappears from dehydration, the peer source is ready, and
-a healthy same-hash replacement publishes its row. A mutant that dehydrates
+stream rejects and disappears from dehydration, the peer source is ready, and a
+healthy same-hash replacement publishes its row. A mutant that dehydrates
 errored records fails at that cut. Other asynchronous schedules and larger
-source sets remain open. Retrying the same options after the
-source entered terminal error reports that source error instead of reusing the
-failed query's pending stream; it does not restart the source.
-A replacement observer subscribed after the controlled asynchronous failure
-can attach under the same hash and reads the healthy replacement row as ready,
-without a stale stream error, before a new client preload. The prior
-source-mismatch check fails that attachment assertion. The same history rejects
-a different-source preload while its original stream is still pending. A second
-fixed history crosses a synchronous source throw and then attaches a healthy
-replacement observer before a new client preload; its settled snapshot contains
-only the replacement row. Removing the failed-record source-claim guard fails
-that observer attachment, while ignoring every existing stream's claim fails
-the pending-stream rejection. The preload-identity owner also checks active
-streams. These histories do not enumerate concurrent replacement observers,
-other failure schedules, or later conflicting preloads while an observer has no
-reusable client stream.
-An observer preload over a config-free pooled view is also explicit demand: it
+source sets remain open. Retrying the same options after the source entered
+terminal error reports that source error instead of reusing the failed query's
+pending stream; it does not restart the source. A replacement observer
+subscribed after the controlled asynchronous failure can attach under the same
+hash and reads the healthy replacement row as ready, without a stale stream
+error, before a new client preload. The prior source-mismatch check fails that
+attachment assertion. The same history rejects a different-source preload while
+its original stream is still pending. A second fixed history crosses a
+synchronous source throw and then attaches a healthy replacement observer before
+a new client preload; its settled snapshot contains only the replacement row.
+Removing the failed-record source-claim guard fails that observer attachment,
+while ignoring every existing stream's claim fails the pending-stream rejection.
+The preload-identity owner also checks active streams. These histories do not
+enumerate concurrent replacement observers, other failure schedules, or later
+conflicting preloads while an observer has no reusable client stream. An
+observer preload over a config-free pooled view is also explicit demand: it
 starts an idle eager source once, does not restart a running source, and reaches
 a ready public snapshot in both cases, with or without an SSR cleanup client.
 This bounded witness does not claim the same path for on-demand or asynchronous
-sources.
-`packages/svelte-db/tests/descriptor-query-release.svelte.test.ts` (fixed tests; no oracle owner (tracked in #2264))
-checks Svelte's two-source release after a first startup error and a direct
-reader after a second descriptor factory fails. It observes source start counts,
-ready status, and failed-hook subscription release. A fresh effect root after
-the failed root is retired consumes an independent healthy query and its row.
-A controlled Svelte runtime probe showed that an uncaught effect error does not
-rerun the same effect when its reactive query changes; in-place recovery after
-that error is not promised. This owner does not establish two-client Svelte
-provider binding or ordinary reactive query replacement. Concrete-
-config descriptors, on-demand acquisition, and those Svelte paths remain open
-for this binding law; a
-receiving oracle needs the relevant public observation for each. Vue, Solid,
-and Angular have no DbClient descriptor-binding contract in this work. Their
-query callers use concrete Collections.
-`packages/db/tests/live-query-options.test.ts` checks that a client-aware
-consumer binds nested, union-branch, and include-child descriptors during final
-preparation. Construction retains descriptor refs in those positions, including
-direct, nested, materialized, and conditional includes. A prepared builder is a
-bound snapshot; a later descriptor join remains unbound until another
-client-aware consumption. The focused core tests check source materialization
-and sync starts before and after release of a render deferral set, plus the
-missing-client error for direct consumption. The React descriptor oracle checks
-public rows after a committed hook consumes such a continuation and zero source
-starts when a render containing one never commits. These bounded checks do not
-compare union or include rows under separate clients, or concurrent render
-schedules. The original standalone Query remains the reusable two-client plan;
-rebinding a previously prepared snapshot to a different client is not claimed.
+sources. `packages/svelte-db/tests/descriptor-query-release.svelte.test.ts`
+(fixed tests; no oracle owner (tracked in #2264)) checks Svelte's two-source
+release after a first startup error and a direct reader after a second
+descriptor factory fails. It observes source start counts, ready status, and
+failed-hook subscription release. A fresh effect root after the failed root is
+retired consumes an independent healthy query and its row. A controlled Svelte
+runtime probe showed that an uncaught effect error does not rerun the same
+effect when its reactive query changes; in-place recovery after that error is
+not promised. This owner does not establish two-client Svelte provider binding
+or ordinary reactive query replacement. Concrete- config descriptors, on-demand
+acquisition, and those Svelte paths remain open for this binding law; a
+receiving oracle needs the relevant public observation for each. Vue, Solid, and
+Angular have no DbClient descriptor-binding contract in this work. Their query
+callers use concrete Collections. `packages/db/tests/live-query-options.test.ts`
+checks that a client-aware consumer binds nested, union-branch, and
+include-child descriptors during final preparation. Construction retains
+descriptor refs in those positions, including direct, nested, materialized, and
+conditional includes. A prepared builder is a bound snapshot; a later descriptor
+join remains unbound until another client-aware consumption. The focused core
+tests check source materialization and sync starts before and after release of a
+render deferral set, plus the missing-client error for direct consumption. The
+React descriptor oracle checks public rows after a committed hook consumes such
+a continuation and zero source starts when a render containing one never
+commits. These bounded checks do not compare union or include rows under
+separate clients, or concurrent render schedules. The original standalone Query
+remains the reusable two-client plan; rebinding a previously prepared snapshot
+to a different client is not claimed.
 `packages/db/tests/query/collection-ref-compatibility.test.ts` fixes the
 exported `IR.CollectionRef` shape for concrete Collections: `collection` is an
 enumerable, writable own field that a spread copies. It also checks that an
@@ -1905,50 +1918,52 @@ acquisitions and warning text, not later window moves or real-provider cost.
 
 ## Unit-test retirement transfers in PR #2116
 
-The [direct index refinement oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/index-update-oracle.property.test.ts)
-owns the seven behaviors moved from index unit tests: an absent lower bound
-with an exclusive flag; exact membership through comparator-equal updates;
-`null` and `undefined` exact and `IN` membership, including repeated owners;
-undefined endpoint and cursor traversal; and explicit, omitted, and
-double-undefined range bounds. A source Map predicts exact key sets and
-ordered reads after bounded direct actions on BasicIndex and BTreeIndex. A
-full-build witness catches native `Array.sort` moving raw `undefined` last.
-The [round 1](oracle-reviews/index-unit-retirement-round-1.md),
+The
+[direct index refinement oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/index-update-oracle.property.test.ts)
+owns the seven behaviors moved from index unit tests: an absent lower bound with
+an exclusive flag; exact membership through comparator-equal updates; `null` and
+`undefined` exact and `IN` membership, including repeated owners; undefined
+endpoint and cursor traversal; and explicit, omitted, and double-undefined range
+bounds. A source Map predicts exact key sets and ordered reads after bounded
+direct actions on BasicIndex and BTreeIndex. A full-build witness catches native
+`Array.sort` moving raw `undefined` last. The
+[round 1](oracle-reviews/index-unit-retirement-round-1.md),
 [round 2](oracle-reviews/index-unit-retirement-round-2.md),
 [round 3](oracle-reviews/index-unit-retirement-round-3.md), and
 [round 4](oracle-reviews/index-unit-retirement-round-4.md) ledgers retain each
-retired assertion. The [build review](oracle-reviews/basic-index-nullish-build.md)
-records the direct RED/GREEN repair. A separate mixed number/string grammar
-checks that full direct traversals and one indexed, bounded public Collection
-snapshot return each live source key once after deletion and after a direct
-delete/update/re-add history. Two more direct histories keep an ordinary string
-beside ordered ZonedDateTime or Duration keys and verify key conservation after
-one Temporal deletion. An en-US locale and a custom string-collation cell compare
-the first bounded public row through a scan and each index when an ordinary
-string begins the internal encoding prefix. An `origin/main` probe failed the
-default-locale public prefix case. The pre-classifier PR comparator failed all
-four public prefix cases and both BTree Temporal-deletion histories. This owner
-also compares complete forward and reverse reads through `IndexInterface`,
-without prescribing index buckets or a BTree representative. A fixed churn
-witness holds one live row while 16, 64, or 256 earlier distinct values are
-added and removed; its public `takeFromStart(1)` result and comparator-call
-growth reject retained empty buckets that add comparator work. This is a bounded
-read-work check, not a memory bound or a general complexity proof. A deliberate
-empty-bucket mutant failed at the intended comparator-count comparison.
-The invalid-comparator owner checks rejection exactly when a comparison
-returns a non-number or `NaN` and checks rejected removal atomicity; it does
-not require a comparison merely because one comparator-equal row is removed.
-The binary grammar checks fresh equal-content removal, re-addition, and
-replacement beside another byte value. It compares complete forward and
-reverse key reads to a source Map. Separate short and 8193-byte pairs check
-exact membership and complete forward and reverse key conservation when only
-the last byte differs. An intermediate PR BTree rewrite lost a surviving key
-after one equal-content owner left; the expanded grammar rejected that result.
-A separate two-value Date, Temporal.Instant, and Uint8Array callback grammar
-checks legacy scalar input kinds on direct add only. Arbitrary callbacks and
-update, build, and range paths are outside that grammar.
-This owner does not prescribe mixed-kind order or cover binary range ordering,
-all JavaScript value kinds, or general Collection publication histories.
+retired assertion. The
+[build review](oracle-reviews/basic-index-nullish-build.md) records the direct
+RED/GREEN repair. A separate mixed number/string grammar checks that full direct
+traversals and one indexed, bounded public Collection snapshot return each live
+source key once after deletion and after a direct delete/update/re-add history.
+Two more direct histories keep an ordinary string beside ordered ZonedDateTime
+or Duration keys and verify key conservation after one Temporal deletion. An
+en-US locale and a custom string-collation cell compare the first bounded public
+row through a scan and each index when an ordinary string begins the internal
+encoding prefix. An `origin/main` probe failed the default-locale public prefix
+case. The pre-classifier PR comparator failed all four public prefix cases and
+both BTree Temporal-deletion histories. This owner also compares complete
+forward and reverse reads through `IndexInterface`, without prescribing index
+buckets or a BTree representative. A fixed churn witness holds one live row
+while 16, 64, or 256 earlier distinct values are added and removed; its public
+`takeFromStart(1)` result and comparator-call growth reject retained empty
+buckets that add comparator work. This is a bounded read-work check, not a
+memory bound or a general complexity proof. A deliberate empty-bucket mutant
+failed at the intended comparator-count comparison. The invalid-comparator owner
+checks rejection exactly when a comparison returns a non-number or `NaN` and
+checks rejected removal atomicity; it does not require a comparison merely
+because one comparator-equal row is removed. The binary grammar checks fresh
+equal-content removal, re-addition, and replacement beside another byte value.
+It compares complete forward and reverse key reads to a source Map. Separate
+short and 8193-byte pairs check exact membership and complete forward and
+reverse key conservation when only the last byte differs. An intermediate PR
+BTree rewrite lost a surviving key after one equal-content owner left; the
+expanded grammar rejected that result. A separate two-value Date,
+Temporal.Instant, and Uint8Array callback grammar checks legacy scalar input
+kinds on direct add only. Arbitrary callbacks and update, build, and range paths
+are outside that grammar. This owner does not prescribe mixed-kind order or
+cover binary range ordering, all JavaScript value kinds, or general Collection
+publication histories.
 
 The [comparison oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/comparison-oracle.property.test.ts)
 owns the transferred same-realm NaN and invalid-Date default-order cases,
@@ -1987,17 +2002,19 @@ The deep-equality and Collection change-event history owners check a Duration
 field replacement and its subscriber mirror. These fixed histories do not
 establish arbitrary multirow Duration updates or live-query publication.
 
-The [Temporal index order tests](https://github.com/TanStack/db/blob/main/packages/db/tests/temporal-index-order.test.ts)
-(fixed tests; no oracle owner (tracked in #2264)) covers ZonedDateTime instant ordering and time-only Duration ordering for direct
-BasicIndex/BTreeIndex reads and bounded public first-row reads. It separates
-exact Duration fields from order ties, including exclusive cursor behavior.
-An extended-year PlainDate grammar checks calendar order under lexical string
-collation through ready scan and direct indexed snapshots, with eager live-query
-preload as parity evidence. The old indexed direct path chose the wrong year.
-An exception grammar requires ready scan, BasicIndex, and BTreeIndex direct reads
-and eager live-query preloads to reject mixed PlainDate/PlainDateTime values and
-distinct PlainMonthDays, as changelog #1519 specifies. The old indexed direct
-path returned a row instead. Calendar-unit Duration order, other extended-year
+The
+[Temporal index order tests](https://github.com/TanStack/db/blob/main/packages/db/tests/temporal-index-order.test.ts)
+(fixed tests; no oracle owner (tracked in #2264)) covers ZonedDateTime instant
+ordering and time-only Duration ordering for direct BasicIndex/BTreeIndex reads
+and bounded public first-row reads. It separates exact Duration fields from
+order ties, including exclusive cursor behavior. An extended-year PlainDate
+grammar checks calendar order under lexical string collation through ready scan
+and direct indexed snapshots, with eager live-query preload as parity evidence.
+The old indexed direct path chose the wrong year. An exception grammar requires
+ready scan, BasicIndex, and BTreeIndex direct reads and eager live-query
+preloads to reject mixed PlainDate/PlainDateTime values and distinct
+PlainMonthDays, as changelog #1519 specifies. The old indexed direct path
+returned a row instead. Calendar-unit Duration order, other extended-year
 histories, on-demand exception publication, arbitrary updates, and custom index
 callbacks remain outside this owner.
 
@@ -2102,10 +2119,11 @@ eligibility as row kinds change, without warranting a duplicate auto-index.
 
 The [PR #2116 confirmed-fixes review](oracle-reviews/pr-2116-confirmed-fixes.md)
 records baseline failures, mutant controls, and the bounded scope of these
-repairs. The [deferred findings record](oracle-reviews/pr-2116-deferred-findings.md)
-tracks remaining design and coverage questions, including valid Temporal kinds
-without public order and mixed-kind query order. Earlier PR-branch
-counterexamples do not by themselves establish an `origin/main` failure.
+repairs. The
+[deferred findings record](oracle-reviews/pr-2116-deferred-findings.md) tracks
+remaining design and coverage questions, including valid Temporal kinds without
+public order and mixed-kind query order. Earlier PR-branch counterexamples do
+not by themselves establish an `origin/main` failure.
 
 The Query DB ownership oracle also owns the explicit mutation-handler refresh
 contract ([evidence](oracle-reviews/pr-2171-explicit-query-refresh.md)). Its 18-history table crosses insert, update, and delete with no
@@ -2239,24 +2257,24 @@ behavior.
 A caller using direct writes must accept the
 scoped-cache limits or request an explicit refetch.
 
-The ownership oracle also checks five later boundaries from PR #2065 review:
-a derived `select` still applies a held fetch's rows and settles eager
-readiness after a direct insert; overlapping explicit refetch callers follow
-the replacement request after a silent cancellation; a fetched result queued
-behind a persisted-baseline scan cannot overwrite a later accepted write; a
-zero-lease subset observer retained by a listener receives a direct cache
-patch before reacquisition; and eight retired on-demand subsets leave no
-fetch-start positions (removing the retirement call fails at eight retained
-entries). The Query error, invalidation, and staleness checks now cover both
-eager and on-demand modes. These are controlled Query Core and persistence
-seams. They do not establish every derived response shape, arbitrary
-overlapping refetch schedule, native SQLite timing for the queued-result cut,
-or unbounded cache-memory growth. This owner retains those boundaries; the
-persisted direct-write oracle owns native durable-order receiving cases.
-The retained-Query witness holds an empty-cache fetch across subset unload and
+The ownership oracle also checks five later boundaries from PR #2065 review: a
+derived `select` still applies a held fetch's rows and settles eager readiness
+after a direct insert; overlapping explicit refetch callers follow the
+replacement request after a silent cancellation; a fetched result queued behind
+a persisted-baseline scan cannot overwrite a later accepted write; a zero-lease
+subset observer retained by a listener receives a direct cache patch before
+reacquisition; and eight retired on-demand subsets leave no fetch-start
+positions (removing the retirement call fails at eight retained entries). The
+Query error, invalidation, and staleness checks now cover both eager and
+on-demand modes. These are controlled Query Core and persistence seams. They do
+not establish every derived response shape, arbitrary overlapping refetch
+schedule, native SQLite timing for the queued-result cut, or unbounded
+cache-memory growth. This owner retains those boundaries; the persisted
+direct-write oracle owns native durable-order receiving cases. The
+retained-Query witness holds an empty-cache fetch across subset unload and
 reacquisition. A direct delete then requires an explicit refetch to start a
-post-write request and preserve the deleted public row at settlement; without
-a later write, the same refetch may reuse the in-flight request. A separate
+post-write request and preserve the deleted public row at settlement; without a
+later write, the same refetch may reuse the in-flight request. A separate
 checkpoint keeps the detached fetch-start position until that request settles
 and retires it afterward. Two further shared-Query histories add A's sync
 restart after a direct insert/delete while B's pre-write request remains in
@@ -2264,15 +2282,15 @@ flight. Without an explicit refetch, the old result must preserve the delete;
 with one, A must start a post-write request. Both were RED before physical
 fetch-start positions survived the restart and are GREEN afterward. These
 controlled histories do not establish every persisted adapter or Query
-cache-removal schedule.
-The [intermediate review at 74e399150](oracle-reviews/pr-2065-74e399-review.md)
-adds ordinary-unload and unobserved-fetch histories to that request-order law.
-The [final direct-write authority review](oracle-reviews/2026-10-12-query-direct-write-authority.md)
-records the later law decisions, RED/GREEN evidence, and ten-item audit.
-The [four-review follow-up](oracle-reviews/2026-10-12-query-authority-oracle-followup.md)
+cache-removal schedule. The
+[intermediate review at 74e399150](oracle-reviews/pr-2065-74e399-review.md) adds
+ordinary-unload and unobserved-fetch histories to that request-order law. The
+[final direct-write authority review](oracle-reviews/2026-10-12-query-direct-write-authority.md)
+records the later law decisions, RED/GREEN evidence, and ten-item audit. The
+[four-review follow-up](oracle-reviews/2026-10-12-query-authority-oracle-followup.md)
 audits legal subset predicates, cache-projection boundaries, scoped omissions,
-and the generated cursor manual-write campaign against its repaired commit.
-The ownership oracle also checks derived-select reacquisition and eager restart,
+and the generated cursor manual-write campaign against its repaired commit. The
+ownership oracle also checks derived-select reacquisition and eager restart,
 explicit subset refetch, a derived result held behind `deferDataRefresh`, a
 provisional cache row awaiting persisted application, aliased physical Queries,
 and the boundary between an in-flight pending Query and an idle empty cache
@@ -2282,20 +2300,19 @@ patch, resets the physical Query so the next fetch repeats the patch's numeric
 update count, and requires B's load to settle on the new provider row. It runs
 with a new response array and with the patch's exact array reference. This
 checks the authority boundary at fetch settlement, but does not model every
-Query Core reset schedule or custom-hash collision.
-An outside-prefix custom-hash collision remains in Query Core's cache after a
-direct write. The disabled reacquisition witness requires the load to wait for
-an explicit provider result, then checks that result and ownerless-row
-retirement. It covers one physical alias and an unbounded scope, not arbitrary
-hash functions or windowed scopes.
-The ordinary-unload, provisional-row, and alias tests reject their respective
-mutant classifiers at public-row or cache checkpoints. These finite histories
-do not establish every persistence schedule, every Query hash collision, or a
-full offline replay; those remain owned by the Query DB ownership and offline
-receiving oracles. Query Core 5.90.15 is the lowest version on which the full
-Query DB suite passed; 5.90.14 failed error-recovery witnesses, and 5.85.2
-failed the post-write refetch witness. Older versions are excluded by the peer
-minimum.
+Query Core reset schedule or custom-hash collision. An outside-prefix
+custom-hash collision remains in Query Core's cache after a direct write. The
+disabled reacquisition witness requires the load to wait for an explicit
+provider result, then checks that result and ownerless-row retirement. It covers
+one physical alias and an unbounded scope, not arbitrary hash functions or
+windowed scopes. The ordinary-unload, provisional-row, and alias tests reject
+their respective mutant classifiers at public-row or cache checkpoints. These
+finite histories do not establish every persistence schedule, every Query hash
+collision, or a full offline replay; those remain owned by the Query DB
+ownership and offline receiving oracles. Query Core 5.90.15 is the lowest
+version on which the full Query DB suite passed; 5.90.14 failed error-recovery
+witnesses, and 5.85.2 failed the post-write refetch witness. Older versions are
+excluded by the peer minimum.
 
 The ownership oracle now checks a direct row's ownership lifetime across one
 and two subset claims, with and without Collection row metadata. A direct
@@ -2607,16 +2624,17 @@ remain current. Custom parsers still read back. These finite witnesses do not
 establish recovery of an invalid writer key extractor or manual acceptance
 without a mutation Collection owner.
 
-The [follow-up oracle review](oracle-reviews/2026-10-08-localstorage-final-review.md)
+The
+[follow-up oracle review](oracle-reviews/2026-10-08-localstorage-final-review.md)
 adds direct-owner idle, ready, and cleaned-up histories for module-level
 acceptance into a DbClient materialization. It checks the manual receipt,
 durable snapshot, active public snapshots, and fresh restore. A mutant subject
 that drops transaction commit work fails the held-receipt checkpoint. The peer
 owner checks a peer write admitted by a restore subscriber, custom-parser
 normalization of an authored insert and update without a version-token change,
-invalid events followed by same-token repair, and malformed stored row shape
-or key identity before startup opens a sync transaction. The order owner checks
-a handler-free direct write at method return immediately after a synchronous
+invalid events followed by same-token repair, and malformed stored row shape or
+key identity before startup opens a sync transaction. The order owner checks a
+handler-free direct write at method return immediately after a synchronous
 handler failure. These finite witnesses do not prove arbitrary reentrant
 subscriber histories or cross-tab atomicity. Default JSON intentionally keeps
 the writer's authored rich value until restore; a Date witness records the
@@ -3038,20 +3056,21 @@ esbuild, an open from inside a worker, a Vite client injected without a script
 [PR #2103 review record](oracle-reviews/pr-2103-separate-wasm.md) classifies
 each calibration control and records every applicable requirement.
 
-The [browser OPFS lifecycle owner](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts)
+The
+[browser OPFS lifecycle owner](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts)
 also generates explicit close histories: zero to three pending executes, how
 many answer while close is in flight and in which order, a successful close and
 every worker error classification, a concurrent close, an execute submitted
-during close, and pagehide or a Worker terminal event before the close
-response, which then rejects close and pending siblings with its own failure. At close settlement, answered executes keep their rows and the
-rest reject with `AbortError`. Every close call shares the first close's
-outcome. The worker receives exactly one close request, and work submitted
-after close starts never reaches it. Rejecting at close start, posting a second
-close, admitting work during close, deferring rejection past close settlement,
-and the pre-fix hang each fail this grammar, as does ignoring pagehide or a Worker
-error while close is in flight. The controlled worker
-answers in any order, so these histories also cover a close response that
-overtakes pending work.
+during close, and pagehide or a Worker terminal event before the close response,
+which then rejects close and pending siblings with its own failure. At close
+settlement, answered executes keep their rows and the rest reject with
+`AbortError`. Every close call shares the first close's outcome. The worker
+receives exactly one close request, and work submitted after close starts never
+reaches it. Rejecting at close start, posting a second close, admitting work
+during close, deferring rejection past close settlement, and the pre-fix hang
+each fail this grammar, as does ignoring pagehide or a Worker error while close
+is in flight. The controlled worker answers in any order, so these histories
+also cover a close response that overtakes pending work.
 
 The [OPFS request-order oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-request-order-oracle.ts)
 states that a connection settles requests in acceptance order with sequential
@@ -3078,31 +3097,31 @@ than one other handle holder. The review record is
 The ordered-work owner also checks that an Effect with `skipInitial` waits for
 joined demand before ending initial callback suppression. A deterministic work
 counter rejects an extra joined-filter graph schedule on root readiness while
-preserving the joined-source wake-up. Nonterminal per-demand failure recovery
-is outside this owner: `failDemand` enters terminal live-query error while its
-plan record remains unsettled until sync teardown. A future recovery contract
-must reconcile plan and subscription pending state before reopening publication.
-Its startup witness covers one synchronous rank update after an indexed page
-load and before the last source subscription returns. It does not cover every
-source ordering, multiple buffered mutations, or asynchronous startup changes.
-The [ordered Effect startup review](oracle-reviews/gap-06-ordered-effect-startup.md)
+preserving the joined-source wake-up. Nonterminal per-demand failure recovery is
+outside this owner: `failDemand` enters terminal live-query error while its plan
+record remains unsettled until sync teardown. A future recovery contract must
+reconcile plan and subscription pending state before reopening publication. Its
+startup witness covers one synchronous rank update after an indexed page load
+and before the last source subscription returns. It does not cover every source
+ordering, multiple buffered mutations, or asynchronous startup changes. The
+[ordered Effect startup review](oracle-reviews/gap-06-ordered-effect-startup.md)
 records its baseline and mutant-mutant observations.
 
 The Collection lifecycle change-event history owner also checks eager auto-index
-equality buckets and fresh indexed `eq` live queries against its independent
-row Map. Its required same-turn delete/reinsert prefix reaches an already-built
-index for both BasicIndex and BTreeIndex. In the batched grammar, public rows and
-equality buckets are checked after each mutation returns, before any transaction
-is awaited; the batched final state and each sequential settled prefix are also
-checked. Fresh indexed queries are checked at the final checkpoint.
-Fixed and random tails check nearby legal histories. One temporary mutant that
-skipped index updates failed the fixed batched final count: one indexed key
-versus two model rows. Another fault that preserved the final keys failed the
-new returned-mutation check. The direct index refinement owner does not prove
-this Collection mutation path. Callback-time index agreement,
-the reported insert-seeded string-key setup, adapter cancellation, and
-non-local-only persistence remain outside this grammar.
-The [issue #1912 review record](oracle-reviews/issue-1912-eager-index-history.md)
+equality buckets and fresh indexed `eq` live queries against its independent row
+Map. Its required same-turn delete/reinsert prefix reaches an already-built
+index for both BasicIndex and BTreeIndex. In the batched grammar, public rows
+and equality buckets are checked after each mutation returns, before any
+transaction is awaited; the batched final state and each sequential settled
+prefix are also checked. Fresh indexed queries are checked at the final
+checkpoint. Fixed and random tails check nearby legal histories. One temporary
+mutant that skipped index updates failed the fixed batched final count: one
+indexed key versus two model rows. Another fault that preserved the final keys
+failed the new returned-mutation check. The direct index refinement owner does
+not prove this Collection mutation path. Callback-time index agreement, the
+reported insert-seeded string-key setup, adapter cancellation, and
+non-local-only persistence remain outside this grammar. The
+[issue #1912 review record](oracle-reviews/issue-1912-eager-index-history.md)
 records the grammar controls, exact reviewed commit, and ORC audit.
 
 The [live Electric immediate-reload witness](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/electric-immediate-reload.opfs.spec.ts)
@@ -3117,55 +3136,52 @@ pre-publication tick. This bounded history does not prove Windows/Edge behavior,
 offline recovery, arbitrary later re-inserts, or a durable-acknowledgment
 contract for `awaitTxId`.
 
-The [optimistic-history oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-oracle.ts)
+The
+[optimistic-history oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-oracle.ts)
 now owns the held-row law for sync transactions deferred behind a wrapping
-sync's durable step, and checks that every optimistic mutation is visible in
-the tick that makes it. Its
+sync's durable step, and checks that every optimistic mutation is visible in the
+tick that makes it. Its
 [persisted production path](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-optimistic-history-oracle.property.test.ts)
-runs the shared grammar through `persistedCollectionOptions` with
-`hold-store` and `release-store` steps and a handler that commits its own
-server row. It was RED before the wrapper reported deferred sync keys to
-core: when an earlier source transaction's store was held, a settled row
-dropped to an older synced row before its deferred server row applied
-(insert-then-update and insert-then-delete histories). It is green now, and
-mutants that drop deferred keys from the hold, drop the held row at a drain,
-or skip the held overlay after a drain each fail it. The grammar also
-aborts a deferred transaction before its turn, and ends every history with a
-source transaction on every key, so a stale hold or leaked local attribution
-shows. That step was RED on the first fix: the wrapper marked an aborted
-transaction as handed to the Collection, so its hold never ended, and a
-non-optimistic write kept local attribution for a dropped transaction. A
-campaign check requires each run to reach a hold across a drain and a hold
-released by an abort. Open: wrapper cleanup or source restart while a
-transaction is deferred has no grammar step, and a held-row release filtered
-as a recent sync echo was not reproduced. The production path uses an in-memory
-adapter.
-Several tabs on one durable store each run their own source and store
-every source transaction they receive. DB promises only eventual
-consistency between them: while their streams interleave, a lagging tab's
-copy of an older transaction can be stored and announced after a newer one,
-so a tab can briefly show an older server state. Every tab delivers the
-same log in order, so durable state and every tab converge once the streams
-catch up. No production path checks this yet.
-A counterexample bounds that convergence claim
-([#2209](https://github.com/TanStack/db/issues/2209)). Two Browser tabs
-share one SQLite file through the real coordinator, with a controlled
-Electric stream per tab. Tab A's stream applies v1 then v2 at `30_0`. Tab B's
-lagging stream applies v1 at `20_0`, and tab B closes before it reaches v2.
-Tab A then shows v1, and the durable `electric:resume` offset is back at
-`20_0`. Nothing redelivers v2 to tab A while it stays open, because its
-stream is already past it. A tab that opens later resumes from `20_0` and
-repairs the cache in that history. Restart formerly failed when a later commit advanced the resume position
-over stale rows (#2281). The eager SQLite bridge now records source
-continuity atomically and requires a fresh snapshot on reopen after a gap;
-see the [repair evidence](oracle-reviews/issue-2281-investigation.md).
-This preserves temporary arrival-order regressions and leaves #2209 open. The
-multi-tab Electric oracle in `browser-db-sqlite-persistence` fixes this
-history with `it.fails` beside a passing control in which the lagging tab
-catches up. Ordering the copies would need a generic
-source position on sync commits; Electric already stores `{ handle, offset }`
-with each commit, PowerSync does not use this wrapper, and persisted Query
-collections have no log position.
+runs the shared grammar through `persistedCollectionOptions` with `hold-store`
+and `release-store` steps and a handler that commits its own server row. It was
+RED before the wrapper reported deferred sync keys to core: when an earlier
+source transaction's store was held, a settled row dropped to an older synced
+row before its deferred server row applied (insert-then-update and
+insert-then-delete histories). It is green now, and mutants that drop deferred
+keys from the hold, drop the held row at a drain, or skip the held overlay after
+a drain each fail it. The grammar also aborts a deferred transaction before its
+turn, and ends every history with a source transaction on every key, so a stale
+hold or leaked local attribution shows. That step was RED on the first fix: the
+wrapper marked an aborted transaction as handed to the Collection, so its hold
+never ended, and a non-optimistic write kept local attribution for a dropped
+transaction. A campaign check requires each run to reach a hold across a drain
+and a hold released by an abort. Open: wrapper cleanup or source restart while a
+transaction is deferred has no grammar step, and a held-row release filtered as
+a recent sync echo was not reproduced. The production path uses an in-memory
+adapter. Several tabs on one durable store each run their own source and store
+every source transaction they receive. DB promises only eventual consistency
+between them: while their streams interleave, a lagging tab's copy of an older
+transaction can be stored and announced after a newer one, so a tab can briefly
+show an older server state. Every tab delivers the same log in order, so durable
+state and every tab converge once the streams catch up. No production path
+checks this yet. A counterexample bounds that convergence claim
+([#2209](https://github.com/TanStack/db/issues/2209)). Two Browser tabs share
+one SQLite file through the real coordinator, with a controlled Electric stream
+per tab. Tab A's stream applies v1 then v2 at `30_0`. Tab B's lagging stream
+applies v1 at `20_0`, and tab B closes before it reaches v2. Tab A then shows
+v1, and the durable `electric:resume` offset is back at `20_0`. Nothing
+redelivers v2 to tab A while it stays open, because its stream is already past
+it. A tab that opens later resumes from `20_0` and repairs the cache in that
+history. Restart formerly failed when a later commit advanced the resume
+position over stale rows (#2281). The eager SQLite bridge now records source
+continuity atomically and requires a fresh snapshot on reopen after a gap; see
+the [repair evidence](oracle-reviews/issue-2281-investigation.md). This
+preserves temporary arrival-order regressions and leaves #2209 open. The
+multi-tab Electric oracle in `browser-db-sqlite-persistence` fixes this history
+with `it.fails` beside a passing control in which the lagging tab catches up.
+Ordering the copies would need a generic source position on sync commits;
+Electric already stores `{ handle, offset }` with each commit, PowerSync does
+not use this wrapper, and persisted Query collections have no log position.
 
 The [PR #1914 follow-up review record](oracle-reviews/pr-1914-immediate-reload-follow-up.md)
 preserves the held-checkpoint and extra-POST mutant results at the exact
@@ -3553,20 +3569,20 @@ to the supplied live scope and its erroneous scheduled call; temporal overlap
 alone is insufficient. Captured primary evidence survives cleanup failures.
 
 The default coordinator now uses the supplied scoped adapter for that call,
-without caching it. The initial repair receipt on main at `a37e69ab` records
-48 core routing assertion failures and eight real scheduler-cycle assertion
+without caching it. The initial repair receipt on main at `a37e69ab` records 48
+core routing assertion failures and eight real scheduler-cycle assertion
 failures for the original production code. The latest review follow-up passes
-640 persisted-oracle checks (with one existing todo) and 25 Chromium OPFS checks.
-The original eight mutant repairs cover premature receipts, cached loans,
-omitted data, reverse FIFO and suppressed/misclassified failure. New calibration
-shows the old browser checks accepting cached loans and ordinary scheduling
-bypass; the strengthened receiver rejects them at tail routing and the complete
-scope boundary. A no-scope error-identity mutant is rejected by the restored
-failure paths. The
+640 persisted-oracle checks (with one existing todo) and 25 Chromium OPFS
+checks. The original eight mutant repairs cover premature receipts, cached
+loans, omitted data, reverse FIFO and suppressed/misclassified failure. New
+calibration shows the old browser checks accepting cached loans and ordinary
+scheduling bypass; the strengthened receiver rejects them at tail routing and
+the complete scope boundary. A no-scope error-identity mutant is rejected by the
+restored failure paths. The
 [loss audit and exact content bindings](oracle-reviews/issue-2046-hydration-loss-audit.md)
-preserve all source recoveries, decisions, commands, calibration and limits;
-the [initial review](oracle-reviews/issue-2046-hydration-commit-deadlock.md)
-retains the original issue ledger.
+preserve all source recoveries, decisions, commands, calibration and limits; the
+[initial review](oracle-reviews/issue-2046-hydration-commit-deadlock.md) retains
+the original issue ledger.
 
 - [ ] **Scoped lifecycle compositions.** The persisted-history owner needs
       distinct-scope witnesses for dependent and post-publication aborts,
@@ -3699,50 +3715,50 @@ The post-merge review added three missing domains to existing owners:
   This is distinct from exactly-once execution across independent owners.
 - Settlement-time drop of optimistic state is owned by the
   [optimistic history model](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-oracle.ts)
-  and [state retention](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-state-retention-oracle.property.test.ts).
+  and
+  [state retention](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-state-retention-oracle.property.test.ts).
   A transaction's optimistic state drops when its mutation function settles.
-  Sync transactions committed while it persisted are held and publish with
-  that drop; `when('settled')` settles after that publication. Handler sync writes
+  Sync transactions committed while it persisted are held and publish with that
+  drop; `when('settled')` settles after that publication. Handler sync writes
   are generated at every cut, with and without awaiting their acceptance.
   Receipts stay pending until visible. With one persisting local mutation and no
   truncate, the first queued same-key source transaction consumes local
   attribution at settlement if that mutation succeeds. An absent-key delete
   consumes it without leaving a row. Repeated same-key writes in that first
-  atomic source transaction keep its attribution. Later source transactions
-  are `'remote'` without another local owner. A truncate can publish while the
+  atomic source transaction keep its attribution. Later source transactions are
+  `'remote'` without another local owner. A truncate can publish while the
   mutation remains active and label its same-key row `'local'` even if that
-  mutation later fails. Attribution uses key and timing; `SyncConfig.write`
-  has no causal client identity. A pending manual mutation does not hold source
-  writes; a same-key source row can retain local attribution after rollback.
-  A subscriber can commit a truncate and a later same-key transaction during
+  mutation later fails. Attribution uses key and timing; `SyncConfig.write` has
+  no causal client identity. A pending manual mutation does not hold source
+  writes; a same-key source row can retain local attribution after rollback. A
+  subscriber can commit a truncate and a later same-key transaction during
   another drain. The suffix truncate can use the still-active mutation's
-  attribution. The later same-key transaction in that suffix drain is remote.
-  An active mutation on a key the
-  truncate does not write still attributes that key's first later transaction
-  in the same drain. Bounded histories also cross two
-  persisting same-key mutations, one or two source batches, both settlement
-  orders, and success/failure combinations. The first source batch is local
-  when at least one mutation succeeds; two failures leave it remote. A mutant
+  attribution. The later same-key transaction in that suffix drain is remote. An
+  active mutation on a key the truncate does not write still attributes that
+  key's first later transaction in the same drain. Bounded histories also cross
+  two persisting same-key mutations, one or two source batches, both settlement
+  orders, and success/failure combinations. The first source batch is local when
+  at least one mutation succeeds; two failures leave it remote. A mutant
   failed-sibling mutant fails the one-success cases at settlement. The pending
   grammar rejects a mutant that ignores pending mutations at its source or
   settlement publication. Bounded manual histories now cross success, direct
-  rollback, and handler rejection with both optimistic visibility settings.
-  A later disjoint edit cannot supply the earlier manual request's handler
-  outcome. The original harness left rejected manual requests pending; the
-  new settlement check rejects that harness and a shared-handler variant.
-  Six pending-peer histories distinguish same-key rollback cascades from
-  secondary rollback and different-key controls, through public settlement
-  and publication. Longer manual interleavings and larger same-key cascades
-  remain outside these fixed histories. The original truncate implementation
-  failed the reentrant history at failed-mutation settlement. The earlier
-  accepted-snapshot retention law
-  and its truncate-capture ownership refinement were retired with this
-  contract. The
+  rollback, and handler rejection with both optimistic visibility settings. A
+  later disjoint edit cannot supply the earlier manual request's handler
+  outcome. The original harness left rejected manual requests pending; the new
+  settlement check rejects that harness and a shared-handler variant. Six
+  pending-peer histories distinguish same-key rollback cascades from secondary
+  rollback and different-key controls, through public settlement and
+  publication. Longer manual interleavings and larger same-key cascades remain
+  outside these fixed histories. The original truncate implementation failed the
+  reentrant history at failed-mutation settlement. The earlier accepted-snapshot
+  retention law and its truncate-capture ownership refinement were retired with
+  this contract. The
   [PR #1907 review record](oracle-reviews/pr-1907-accepted-delete-ownership.md)
-  is historical. The [settlement-drop review record](oracle-reviews/2026-10-03-settlement-drop.md)
-  holds the RED/GREEN and mutant evidence. A handler that awaits a visibility receipt held by its own
-  transaction, such as an on-demand load of its own Collection, waits for
-  itself; that history is outside the generated grammar.
+  is historical. The
+  [settlement-drop review record](oracle-reviews/2026-10-03-settlement-drop.md)
+  holds the RED/GREEN and mutant evidence. A handler that awaits a visibility
+  receipt held by its own transaction, such as an on-demand load of its own
+  Collection, waits for itself; that history is outside the generated grammar.
 
 Issue #2071 adds two focused checks to this acceptance map:
 
@@ -3761,28 +3777,28 @@ Issue #2071 adds two focused checks to this acceptance map:
   restart. The persisted wrapper owner needs the bridge callback and write
   sequence to reach that path.
 
-- The [optimistic publication owner](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-publication-oracle.test.ts)
+- The
+  [optimistic publication owner](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-publication-oracle.test.ts)
   distinguishes one and two queued same-key source transactions during a
   successful local mutation, two same-key writes inside one atomic transaction,
   an absent-key delete before a source insert, a delete and reinsert in one
-  atomic source transaction, a truncate published before
-  a mutation fails, pending manual mutations, two overlapping same-key
-  mutations, a truncate followed by another same-key transaction, and a
-  truncate followed by a different-key transaction with an active mutation in
-  one reentrant drain. The persisted wrapper receives the one/two transaction
-  pair. The source grammar can now preserve mixed write order inside one
-  transaction; its atomic delete/reinsert witness is distinguished from a
-  later same-key transaction. These histories establish bounded key-and-timing
-  attribution; they do not establish every mixed operation sequence, causal
-  authorship, or every overlapping mutation schedule. A
-  causal `$origin` guarantee would require an explicit source signal and a new
-  core-owner model and provider receiving witness. The
-  [PR #2078 review](oracle-reviews/pr-2078-origin-attribution.md) records the
-  original same-drain RED, the repair, and mutant controls. The optimistic
-  history owner still needs controlled pending-plus-persisting same-key
-  histories, truncate with two active owners, and longer reentrant or mixed
-  source suffixes if those broader schedules are claimed. Such a witness must
-  compare origin and complete publication cuts, not only the final row. The
+  atomic source transaction, a truncate published before a mutation fails,
+  pending manual mutations, two overlapping same-key mutations, a truncate
+  followed by another same-key transaction, and a truncate followed by a
+  different-key transaction with an active mutation in one reentrant drain. The
+  persisted wrapper receives the one/two transaction pair. The source grammar
+  can now preserve mixed write order inside one transaction; its atomic
+  delete/reinsert witness is distinguished from a later same-key transaction.
+  These histories establish bounded key-and-timing attribution; they do not
+  establish every mixed operation sequence, causal authorship, or every
+  overlapping mutation schedule. A causal `$origin` guarantee would require an
+  explicit source signal and a new core-owner model and provider receiving
+  witness. The [PR #2078 review](oracle-reviews/pr-2078-origin-attribution.md)
+  records the original same-drain RED, the repair, and mutant controls. The
+  optimistic history owner still needs controlled pending-plus-persisting
+  same-key histories, truncate with two active owners, and longer reentrant or
+  mixed source suffixes if those broader schedules are claimed. Such a witness
+  must compare origin and complete publication cuts, not only the final row. The
   persisted wrapper owner still needs the private bridge callback and write
   sequence before claiming that reported path.
 
@@ -4780,15 +4796,15 @@ reload after a named notice keeps a seed's metadata (decision 18).
 | [Query ownership lifecycle](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts) receiving witnesses | Query DB claims, releases, and retention cleanup over core and `persistedCollectionOptions` | published owners and non-owner row metadata |
 | receiving expectations in the [persisted oracle](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts), the Electric oracle, the Browser coordinator oracle, and the Electron IPC tests | persisted source inserts over a hydrated baseline; the durable mutation a source insert writes | public and durable rows; persisted mutation types |
 
-On `30175be48`, 51 of 186 tests fail in the session, composition, and
-retention files: held reads, commit order and outer writes after a held inner
-commit, every seed rule, and the paired properties. The persisted production path fails
-the held reads through core, reads of an enclosing open transaction, an
-insert's implicit clear, equal re-inserts, inserts over seeds and cached rows
-under partial row updates, and late seeds beside a store-held transaction.
-Six Query witnesses fail, including two that only dropping Query's `??`
-metadata fallback repairs. The review record's evidence block lists reach
-counts, mutants, and GREEN runs.
+On `30175be48`, 51 of 186 tests fail in the session, composition, and retention
+files: held reads, commit order and outer writes after a held inner commit,
+every seed rule, and the paired properties. The persisted production path fails
+the held reads through core, reads of an enclosing open transaction, an insert's
+implicit clear, equal re-inserts, inserts over seeds and cached rows under
+partial row updates, and late seeds beside a store-held transaction. Six Query
+witnesses fail, including two that only dropping Query's `??` metadata fallback
+repairs. The review record's evidence block lists reach counts, mutants, and
+GREEN runs.
 
 Two comparisons are narrowed on purpose, each recorded with its authority in
 the review record:
@@ -4804,35 +4820,36 @@ the review record:
 
 The `persisted-peers` production path plays a second tab's source through the
 persistence coordinator: named row, metadata-only, delete, full-reload, and
-reset notices, crossed with seeds, the cached row, nesting, and holds. A
-reload that a notice causes is a storage read: its truncate replaces rows
-without truncating source authority or row metadata, an unchanged row keeps
-its status, and a seed's metadata survives a reload after a named notice
-(decisions 9, 11, and 15 to 18). A reset is a source truncate, and every
-later notice in its term reloads storage; on demand the reset keeps the
-seeds this tab holds (decisions 19 and 20). After settlement the stored rows
-must equal the model's, which a restart would read.
-`persisted-peers-full` repeats the production path under full row updates, where an
-update replaces its row in storage too; `persisted-peers-on-demand` repeats
-it on demand with a demand for every row. A reset over metadata of a missing
-row is too rare in generated histories to declare; a fixed history covers it.
+reset notices, crossed with seeds, the cached row, nesting, and holds. A reload
+that a notice causes is a storage read: its truncate replaces rows without
+truncating source authority or row metadata, an unchanged row keeps its status,
+and a seed's metadata survives a reload after a named notice (decisions 9, 11,
+and 15 to 18). A reset is a source truncate, and every later notice in its term
+reloads storage; on demand the reset keeps the seeds this tab holds (decisions
+19 and 20). After settlement the stored rows must equal the model's, which a
+restart would read. `persisted-peers-full` repeats the production path under
+full row updates, where an update replaces its row in storage too;
+`persisted-peers-on-demand` repeats it on demand with a demand for every row. A
+reset over metadata of a missing row is too rare in generated histories to
+declare; a fixed history covers it.
 
 An equal source re-insert keeps metadata without writing it (decisions 9 and
 14). As with an update, that keep neither makes a DbClient seed durable nor
 sends it to peers (decision 18). Direct durable metadata is compared separately
 from this tab's source reads. The constructive durability grammar includes all
 36 update/equal-reinsert/inner-reinsert × bare/non-bare seed × implicit/explicit
-metadata × no-notice/named-notice/full-reload cases in each generated batch. Its partial/full/on-demand grammar run
-through both the controlled persisted adapter and the real SQLite/coordinator
-receiver, with 108 declared case/production path/notice states per host, each reached eight times
-in both fixed and random campaigns. Seed row shape, seed timing and repeat
-count vary; no campaign can omit the full reload. Explicit metadata writes are the
-neighboring control. The original seed/re-insert/reload grammar, fixed/random
-40 budgets and its completed fixed-branch guards remain; the new constructive
-batch supplies guaranteed bare-key-1 implicit histories independently of seed.
-Both hosts share the 40-run sibling and 8-run durability campaign mechanics in
-`sync-metadata-session-campaign.ts`; production setup, recovery observations
-and direct replay selection remain in their receiving files.
+metadata × no-notice/named-notice/full-reload cases in each generated batch. Its
+partial/full/on-demand grammar run through both the controlled persisted adapter
+and the real SQLite/coordinator receiver, with 108 declared case/production
+path/notice states per host, each reached eight times in both fixed and random
+campaigns. Seed row shape, seed timing and repeat count vary; no campaign can
+omit the full reload. Explicit metadata writes are the neighboring control. The
+original seed/re-insert/reload grammar, fixed/random 40 budgets and its
+completed fixed-branch guards remain; the new constructive batch supplies
+guaranteed bare-key-1 implicit histories independently of seed. Both hosts share
+the 40-run sibling and 8-run durability campaign mechanics in
+`sync-metadata-session-campaign.ts`; production setup, recovery observations and
+direct replay selection remain in their receiving files.
 
 The native on-demand path can receive a successful recovery response that
 crosses an earlier cache version without transaction replay details. The shared
@@ -4911,35 +4928,36 @@ remains separate and open under this owner, with P8 investigating: property
 controlled-notice witness or the broader #2281 persistence reports.
 
 Remaining observation work under this owner: the read-hold and abandonment
-production paths retain source-facing comparisons but do not provide the peer production paths'
-direct durable transaction trace. A receiving witness must stage a wrong
-durable write followed by repair while a read hold buffers a commit, including
-abandonment, and reject it at the appropriate durable boundary. These additions
-do not retire that obligation. Cross-host recovery schedules still need actual
-Chromium OPFS and Electron IPC receiving witnesses; their owner remains this
-session oracle with the broader receiving work tracked by #2272.
+production paths retain source-facing comparisons but do not provide the peer
+production paths' direct durable transaction trace. A receiving witness must
+stage a wrong durable write followed by repair while a read hold buffers a
+commit, including abandonment, and reject it at the appropriate durable
+boundary. These additions do not retire that obligation. Cross-host recovery
+schedules still need actual Chromium OPFS and Electron IPC receiving witnesses;
+their owner remains this session oracle with the broader receiving work tracked
+by #2272.
 
 Repaired counterexample, **META-CI-051-S001**: an enclosing update reads a
 cached row, an inner transaction deletes that row and sets its metadata while
 missing, then both commit. A named peer notice for another key drops the
-retained metadata in the on-demand receiver, with and without a core hold.
-Both the controlled adapter and native SQLite reproduce this source-read
-failure under D16 before the production repair. The model correction separates
-this run-only metadata from durable metadata when the outer update recreates the
-row; the old model's false durable expectation masks the later source failure.
-Owner: this session oracle. The generated
-`sync-metadata-session.{persisted,sqlite}-missing-row-metadata` campaigns
-cover twelve cases in all three peer production paths: implicit/explicit metadata,
+retained metadata in the on-demand receiver, with and without a core hold. Both
+the controlled adapter and native SQLite reproduce this source-read failure
+under D16 before the production repair. The model correction separates this
+run-only metadata from durable metadata when the outer update recreates the row;
+the old model's false durable expectation masks the later source failure. Owner:
+this session oracle. The generated
+`sync-metadata-session.{persisted,sqlite}-missing-row-metadata` campaigns cover
+twelve cases in all three peer production paths: implicit/explicit metadata,
 immediate/core-held application, a prior source truncate, same-key peer row or
 metadata replacement, unknown-write reloads, peer/source delete and source
-truncate. All 36 case/production path states reach eight times in each fixed/random campaign
-on both hosts. The wrapper distinguishes local metadata from a named peer
-replacement, preserving D16 without defeating D11 or D15. Three wrong retention
-policies fail the same source-read comparisons. The
-[CI investigation](oracle-reviews/2026-11-02-p6-ci-missing-row.md)
-records the pre-edit receiving RED, repaired GREEN, controls and bounded class
-claim. This does not determine that the separate #2317/P8 witness has the same
-cause or close its broader scope.
+truncate. All 36 case/production path states reach eight times in each
+fixed/random campaign on both hosts. The wrapper distinguishes local metadata
+from a named peer replacement, preserving D16 without defeating D11 or D15.
+Three wrong retention policies fail the same source-read comparisons. The
+[CI investigation](oracle-reviews/2026-11-02-p6-ci-missing-row.md) records the
+pre-edit receiving RED, repaired GREEN, controls and bounded class claim. This
+does not determine that the separate #2317/P8 witness has the same cause or
+close its broader scope.
 
 `persisted-reads-seeds` crosses read holds with seeds and the cached row and
 aborts a buffered commit's signal, which abandons it at the read's end
@@ -5520,31 +5538,34 @@ The [sighted donor survey](oracle-reviews/2026-10-06-indexeddb-donor-survey.md)
 now has these receiving owners. The [port audit](oracle-reviews/2026-10-06-indexeddb-donor-port.md)
 records calibration, validation and the remaining limits.
 
-- DP08: `compatibility.test.ts` (fixed tests; no oracle owner (tracked in #2264)) starts two/three native opens against
-  absent same/independent names, with identical complete declarations. It checks
-  schema, held restore/readiness, disjoint writes, convergence, restore and a later
-  upgrade with no orphan blocker.
-  `packages/db/e2e/indexed-db/value-oracle.spec.ts` receives three-open
-  histories in all engines. These histories settle all opens before writing;
-  they do not impose an order on open callbacks or union conflicting declarations.
+- DP08: `compatibility.test.ts` (fixed tests; no oracle owner (tracked in
+  #2264)) starts two/three native opens against absent same/independent names,
+  with identical complete declarations. It checks schema, held
+  restore/readiness, disjoint writes, convergence, restore and a later upgrade
+  with no orphan blocker. `packages/db/e2e/indexed-db/value-oracle.spec.ts`
+  receives three-open histories in all engines. These histories settle all opens
+  before writing; they do not impose an order on open callbacks or union
+  conflicting declarations.
 - DP09: `persistence-values-oracle.test.ts` extends the persistence owner with
   independent tagged descriptions in `structured-clone-oracle.ts`. Seven value
   shapes cross scalar updates, peer delivery, export/import, first/middle/last
-  nested clone rejection, metadata rollback and fresh descriptor restore.
-  Type, offsets, backing bytes, dates and Blob content are observed inside the
+  nested clone rejection, metadata rollback and fresh descriptor restore. Type,
+  offsets, backing bytes, dates and Blob content are observed inside the
   receiving realm. Native receiving is in
   `packages/db/e2e/indexed-db/value-oracle.spec.ts`.
 - DP10: the compatibility owner substitutes six legal database/store names into
-  the same authored multi-store history. Prefix neighbors, typed keys in separate
-  transactions, version values, peers and restore distinguish routing mistakes.
-  `packages/db/e2e/indexed-db/host.spec.ts` (fixed tests; no oracle owner (tracked in #2264)) receives all six names
-  through single-transaction typed-key insertion, peer update, import, clear, export and fresh restore.
+  the same authored multi-store history. Prefix neighbors, typed keys in
+  separate transactions, version values, peers and restore distinguish routing
+  mistakes. `packages/db/e2e/indexed-db/host.spec.ts` (fixed tests; no oracle
+  owner (tracked in #2264)) receives all six names through single-transaction
+  typed-key insertion, peer update, import, clear, export and fresh restore.
   Prefix-neighbor and anchor snapshots must remain unchanged.
 - DP17: `packed-consumer.test.ts` supplements declaration tests with installed
   tarball ESM/CJS consumers and broken-export controls. The browser spec builds
   the same consumer without source aliases and executes it in all three engines.
-  Tarball overrides fix the installed dependency closure; registry range selection,
-  older Node/tool versions and every public export remain outside this smoke test.
+  Tarball overrides fix the installed dependency closure; registry range
+  selection, older Node/tool versions and every public export remain outside
+  this smoke test.
 
 The ordinary local Playwright WebKit profile rejects Blob preparation with
 `UnknownError`; its two Blob-containing cells require exact rejection and a
@@ -5913,16 +5934,19 @@ scheduling and a live Electric service rather than controlled HTTP remain
 separate unproved cuts; these
 fixed receivers do not close every cache-eviction interleaving.
 
-The [cache-generation oracle audit](oracle-reviews/issue-2069-cache-generation-oracle-audit-53ded62d8.md)
-records the generated grammar controls, killed mutants, direct replays, and
-the remaining handoff limits for code commit `53ded62d8ef70ccd63b75d0e6dbc0a964f14b17c`.
-The [cache-claim gap audit](oracle-reviews/issue-2069-cache-claim-gap-audit-575fb9473.md)
+The
+[cache-generation oracle audit](oracle-reviews/issue-2069-cache-generation-oracle-audit-53ded62d8.md)
+records the generated grammar controls, killed mutants, direct replays, and the
+remaining handoff limits for code commit
+`53ded62d8ef70ccd63b75d0e6dbc0a964f14b17c`. The
+[cache-claim gap audit](oracle-reviews/issue-2069-cache-claim-gap-audit-575fb9473.md)
 records the added receiving witnesses, mutant checks, direct replay, and
-remaining limits for code commit `575fb9473dd7d8eccbe469d0831dc9f71cffddd4`.
-The [native SQLite index receiving audit](oracle-reviews/issue-2069-native-ddl-receiver-b4d57ced6.md)
+remaining limits for code commit `575fb9473dd7d8eccbe469d0831dc9f71cffddd4`. The
+[native SQLite index receiving audit](oracle-reviews/issue-2069-native-ddl-receiver-b4d57ced6.md)
 records the two reverse-order DDL witnesses, mutant checks, and remaining
 host-specific limit for code commit `b4d57ced63d513dd0dcb794b8e8bb2a840577758`.
-The [follow-up review audit](oracle-reviews/issue-2069-native-ddl-review-followup-b42b94b73.md)
+The
+[follow-up review audit](oracle-reviews/issue-2069-native-ddl-review-followup-b42b94b73.md)
 records the exact recovery-settlement and target-table assertion repairs for
 code commit `b42b94b73ddba79a6a87fa93e71787dd126ea1bd`.
 
@@ -5997,49 +6021,49 @@ and a demand started in that interval settles after its replacement subset
 applies. The ShapeStream callback schedule is controlled. An installed-SDK HTTP delivery
 at this exact intermediate cut and native-host execution are not established.
 
-Applied-settlement owner: `packages/electric-db-collection/tests/electric-oracle.property.test.ts`.
-Held optimistic application distinguishes readiness from subset completion for
-demand both before and after readiness. A later same-run reset distinguishes a
-current replacement obligation from a permanently fulfilled startup gate.
-Concurrent initial-error and cleanup cuts observe settlement and lifecycle
-authority; cleanup quietly settles in-flight adapter loads. A sibling-demand
-abort cut requires one canceled demand to reject promptly while its sibling
-and a replacement of the canceled demand wait for the full source snapshot and
-succeed after its row applies. A separate external stream abort rejects its
-current full-log demand and never certifies an identical later demand as loaded.
-These full-log wait obligations still apply when scoped recovery is unavailable;
-the scoped path uses SDK snapshots and applied receipts.
-The changes-only path has the same refusal both when a subset transport returns
-after stream retirement and when an applied receipt is held across that
-retirement.
-The full-mode retry histories now reject their pre-error demand, then require a
-new demand to succeed after a same-run recovered snapshot, both with and
-without a held applied receipt. An installed-SDK controlled-HTTP receiver
-exhausts 503 backoff, invokes the user's retry
-handler, and acquires a new demand while the retry HTTP request is open. It
-requires that demand to wait, then succeed after the new full-log up-to-date.
-A missing-header response checks that the SDK's refusal to retry rejects later
-demands rather than leaving a renewed gate pending. The
+Applied-settlement owner:
+`packages/electric-db-collection/tests/electric-oracle.property.test.ts`. Held
+optimistic application distinguishes readiness from subset completion for demand
+both before and after readiness. A later same-run reset distinguishes a current
+replacement obligation from a permanently fulfilled startup gate. Concurrent
+initial-error and cleanup cuts observe settlement and lifecycle authority;
+cleanup quietly settles in-flight adapter loads. A sibling-demand abort cut
+requires one canceled demand to reject promptly while its sibling and a
+replacement of the canceled demand wait for the full source snapshot and succeed
+after its row applies. A separate external stream abort rejects its current
+full-log demand and never certifies an identical later demand as loaded. These
+full-log wait obligations still apply when scoped recovery is unavailable; the
+scoped path uses SDK snapshots and applied receipts. The changes-only path has
+the same refusal both when a subset transport returns after stream retirement
+and when an applied receipt is held across that retirement. The full-mode retry
+histories now reject their pre-error demand, then require a new demand to
+succeed after a same-run recovered snapshot, both with and without a held
+applied receipt. An installed-SDK controlled-HTTP receiver exhausts 503 backoff,
+invokes the user's retry handler, and acquires a new demand while the retry HTTP
+request is open. It requires that demand to wait, then succeed after the new
+full-log up-to-date. A missing-header response checks that the SDK's refusal to
+retry rejects later demands rather than leaving a renewed gate pending. The
 scoped reset history acquires a snapshot before must-refetch, then requires
 subset-end to apply its row before demand success without waiting for a full
 up-to-date. The neighboring full-mode reset retains that stronger wait. The
-Electric durable fixture has an adversarial keys insert check that rejects retained
-old columns or tag metadata; it is driver validation, not a new model owner.
-The Electric adapter owner now holds an asynchronous user retry decision and
-checks that a new full-recovery demand remains pending until source replacement,
-while the pre-error demand rejects. It also checks caller abort before subset
-transport settlement, while a request is queued behind the SDK cursor, and
-while an applied receipt is held. Each original behavior failed at the caller
-settlement cut; the fixed driver requires prompt `AbortError` without certifying
-that demand. The explicit-resume neighbor keeps malformed durable metadata
-untouched until source evidence arrives. The persistence owner now invokes a
-retired scoped-recovery capability after cleanup and restart; the original
-cleared the replacement Collection, and the lifecycle guard preserves its row.
-These fixed schedules do not prove arbitrary overlapping retry decisions or
-all failure paths through `startScopedRecovery`. A valid scoped-clear commit
-failure with an exact public sync-error observation still needs a witness;
-an attempted subscriber-throw fixture did not reach that callback during the
-local clear and supplies no evidence for the review's error-report claim.
+Electric durable fixture has an adversarial keys insert check that rejects
+retained old columns or tag metadata; it is driver validation, not a new model
+owner. The Electric adapter owner now holds an asynchronous user retry decision
+and checks that a new full-recovery demand remains pending until source
+replacement, while the pre-error demand rejects. It also checks caller abort
+before subset transport settlement, while a request is queued behind the SDK
+cursor, and while an applied receipt is held. Each original behavior failed at
+the caller settlement cut; the fixed driver requires prompt `AbortError` without
+certifying that demand. The explicit-resume neighbor keeps malformed durable
+metadata untouched until source evidence arrives. The persistence owner now
+invokes a retired scoped-recovery capability after cleanup and restart; the
+original cleared the replacement Collection, and the lifecycle guard preserves
+its row. These fixed schedules do not prove arbitrary overlapping retry
+decisions or all failure paths through `startScopedRecovery`. A valid
+scoped-clear commit failure with an exact public sync-error observation still
+needs a witness; an attempted subscriber-throw fixture did not reach that
+callback during the local clear and supplies no evidence for the review's
+error-report claim.
 
 Remaining witnesses before broader closure:
 
@@ -6261,28 +6285,29 @@ broad oracle assertion, not a production repair.
 
 ### RC Effect explicit source metadata (2026-10-28)
 
-Owner: `packages/db/tests/query/virtual-row-fields-effect-oracle.test.ts`, sharing
-the small `virtual-row-fields-source-oracle.ts` source judgment with the root
-metadata owner. It recomputes explicitly selected ordinary metadata fields and
-full before/after deltas independently, then receives actual Effect onBatch and
-named callbacks across 200 finite single-source, LEFT-join and populated-union
-histories. It preserves previous values, multiplicity, field absence/undefined,
-typed source keys, and opaque event-key continuity only within active intervals.
-Held mutations, independent confirmations/outcomes, both settlement orders,
-remote updates, peer exit/reentry and next-use reach 5,512 production path/channel/cut cells
-exactly once. No implicit Effect-root metadata or output Collection ID is claimed.
+Owner: `packages/db/tests/query/virtual-row-fields-effect-oracle.test.ts`,
+sharing the small `virtual-row-fields-source-oracle.ts` source judgment with the
+root metadata owner. It recomputes explicitly selected ordinary metadata fields
+and full before/after deltas independently, then receives actual Effect onBatch
+and named callbacks across 200 finite single-source, LEFT-join and
+populated-union histories. It preserves previous values, multiplicity, field
+absence/undefined, typed source keys, and opaque event-key continuity only
+within active intervals. Held mutations, independent confirmations/outcomes,
+both settlement orders, remote updates, peer exit/reentry and next-use reach
+5,512 production path/channel/cut cells exactly once. No implicit Effect-root
+metadata or output Collection ID is claimed.
 
-Original P09 evidence: all 64 LEFT-join histories emitted a startup update for
-a never-entered unmatched occurrence after its load finished. Those initial
+Original P09 evidence: all 64 LEFT-join histories emitted a startup update for a
+never-entered unmatched occurrence after its load finished. Those initial
 comparisons were RED on unchanged `858b174a6`; histories continued and all later
-comparisons passed.
-The other 136 native histories and 16 controls pass. Independent mutant
-overlays reject dispatch, previous-value, duplication, colliding-key and extra
-undefined defects; lawful key renaming, fresh reentry and empty partitions retain
-the baseline. Per-campaign omissions and seeded partial selections now fail reach.
-The finite owner explicitly disables the irrelevant shared replay exemption;
-O26 retains a broader campaign inventory for that harness class. See chunk 16
-in the RC chunk record for exact fingerprints, evidence and review.
+comparisons passed. The other 136 native histories and 16 controls pass.
+Independent mutant overlays reject dispatch, previous-value, duplication,
+colliding-key and extra undefined defects; lawful key renaming, fresh reentry
+and empty partitions retain the baseline. Per-campaign omissions and seeded
+partial selections now fail reach. The finite owner explicitly disables the
+irrelevant shared replay exemption; O26 retains a broader campaign inventory for
+that harness class. See chunk 16 in the RC chunk record for exact fingerprints,
+evidence and review.
 
 Limits: eager controlled core sources, scalar rows, one mutation per source,
 and these named paths. No real provider/framework, arbitrary scheduling,
@@ -6641,12 +6666,13 @@ configurable/nonconfigurable source data. Authored nested objects replace their
 field; dotted aliases preserve siblings without writing through source objects.
 The four Core paths supply 120 path histories and 360 result cuts. Fourteen real
 framework groups supply another 336 histories and 1,008 result cuts. All compare
-current and retained source rows and require the actual source descriptor at
-all three stages. Existing 819 and 1,200 observations and the earlier receiving
+current and retained source rows and require the actual source descriptor at all
+three stages. Existing 819 and 1,200 observations and the earlier receiving
 histories remain. Unkeyed functional projections are not legal derived-identity
-framework inputs, so they receive no framework handoff credit. Legal fresh-object
-expression controls provide those neighboring receiving comparisons instead.
-See the [second review record](oracle-reviews/2026-10-30-solid-oracle-review-round-two.md)
+framework inputs, so they receive no framework handoff credit. Legal
+fresh-object expression controls provide those neighboring receiving comparisons
+instead. See the
+[second review record](oracle-reviews/2026-10-30-solid-oracle-review-round-two.md)
 for complete intake, RED gates, GREEN, mutant variants, and bounded closure.
 
 The same review adds six ordinary/subclass-array overlap cells. Dotted writes
@@ -6717,17 +6743,17 @@ unequal payloads. A last-input retraction mutant and a reused negative-key
 mutant fail the wider check while passing the prior two-member owner.
 
 `includes-oracle.property.test.ts` extends its existing full-tree recompute
-owner with colliding numeric-group route strings and the shared distinct
-support history grammar. Inline arrays and Collection facades each run
-fixed/random 100-history campaigns and compare public rows after each applied
-source transaction. The original operator fails Collection facade membership
-at checkpoint 2. Inline arrays pass: `createActiveBuckets` is used only for
+owner with colliding numeric-group route strings and the shared distinct support
+history grammar. Inline arrays and Collection facades each run fixed/random
+100-history campaigns and compare public rows after each applied source
+transaction. The original operator fails Collection facade membership at
+checkpoint 2. Inline arrays pass: `createActiveBuckets` is used only for
 Collection-valued includes. This is a receiving witness for route coexistence,
 shared support, partial/last removal and reactivation, not a claim about every
 facade lifecycle observation. Four-member buckets are exercised at D2; the
-public includes witness has two colliding routes and one anchor. Neither production path
-claims mutable values, arbitrary payload kinds, framework scheduling or
-intermediate source-transaction publication cuts.
+public includes witness has two colliding routes and one anchor. Neither
+production path claims mutable values, arbitrary payload kinds, framework
+scheduling or intermediate source-transaction publication cuts.
 
 Implicit distinct keys across separate builds remain unspecified (maintainer
 decision in the 2026-10-30 review); applications needing stable keys supply
@@ -6780,7 +6806,26 @@ See the appended [review evidence](oracle-reviews/2026-10-30-distinct-collisions
 
 ### Adapter-owned page windows
 
-The framework owner includes [window-history-oracle.ts](../../packages/db/tests/conformance/window-history-oracle.ts), registered through the shared conformance suite in React, Preact, Vue, Solid, Angular and Svelte. Maintainer decision 2026-10-30 for #2291: changing only `.limit()`/`.offset()` moves the existing outer window; it adds no hook option. The independent sort/filter/slice model checks ordered selected rows and keyed-map values after each framework flush, Collection retention for page moves, replacement for source/filter/order/projection/nested-window changes, and retained upstream ownership. Direct and nested paths have separate reach, as do changing/stable/opaque keys where the driver supports keys. Keyed source swaps include distinct source objects under one Collection ID. Generated source updates check liveness after reuse. The bare-callback grammar also vary a Collection option together with a page change and check its applied value. The pending grammar observes a move during initial loading, oldest settlement while the latest remains pending, initial readiness, overlapping held acquisitions, final latest rows, and unmount before settlement. The publication-callback grammar changes offset, limit or both from a public change callback, then checks the retained Collection after the host settles. It controls demand settlement over already installed source rows; the core pagination owner continues to own source delivery, failures and ordered repair.
+The framework owner includes
+[window-history-oracle.ts](../../packages/db/tests/conformance/window-history-oracle.ts),
+registered through the shared conformance suite in React, Preact, Vue, Solid,
+Angular and Svelte. Maintainer decision 2026-10-30 for #2291: changing only
+`.limit()`/`.offset()` moves the existing outer window; it adds no hook option.
+The independent sort/filter/slice model checks ordered selected rows and
+keyed-map values after each framework flush, Collection retention for page
+moves, replacement for source/filter/order/projection/nested-window changes, and
+retained upstream ownership. Direct and nested paths have separate reach, as do
+changing/stable/opaque keys where the driver supports keys. Keyed source swaps
+include distinct source objects under one Collection ID. Generated source
+updates check liveness after reuse. The bare-callback grammar also vary a
+Collection option together with a page change and check its applied value. The
+pending grammar observes a move during initial loading, oldest settlement while
+the latest remains pending, initial readiness, overlapping held acquisitions,
+final latest rows, and unmount before settlement. The publication-callback
+grammar changes offset, limit or both from a public change callback, then checks
+the retained Collection after the host settles. It controls demand settlement
+over already installed source rows; the core pagination owner continues to own
+source delivery, failures and ordered repair.
 
 The [React receiving witness](../../packages/react-db/tests/window-render-oracle.test.tsx) reuses this model/checker at suspended, cancelled and committed render cuts for eager and finite on-demand sources, with derived and explicit keys. It checks the captured committed Collection and provider acquisition count while a render is abandoned. The [Preact receiving witness](../../packages/preact-db/tests/window-render-oracle.test.tsx) checks an aborted render under a real error boundary while a public subscription keeps the committed Collection active. Both run separate offset-only, limit-only and combined-move campaigns with declared reach per category. These do not establish arbitrary concurrent framework schedules. The retained-work observation checks continuous upstream ownership and every public subscription-count transition during a retained move; add-before-remove replacement fails, while retired Collections may complete GC. This is not a bound on CPU time or every possible internal compilation strategy. DbClient/hydration and Suspense shared-result caches, supplied Collections, opaque-plan optimization, queries without an outer limit and findOne retain their existing contracts and paths; this fix does not retarget their shared Collections. The generated retention guarantee covers finite bounds. An explicit Infinity limit can also move to a finite target under the resolver guard, but this evidence does not establish that additional domain or promise replacement outside the finite domain. The existing identity, deferred-acquisition, window-controller and includes owners remain authoritative for their neighboring laws.
 
@@ -6788,7 +6833,15 @@ Evidence, per-path reach counts, reviewer reconciliation and mutation outcomes a
 
 The [fresh independent review](oracle-reviews/2026-10-30-adapter-page-windows-round-2.md) records observation and failure-fidelity repairs. Shared and receiving campaigns preserve the first violated law, checkpoint and input trace through shrinking. Later action and cleanup failures remain distinguishable; non-reproducing shrink candidates supply no successful product evidence. The original late-coverage process gap remains documented.
 
-The existing [top-K support-window owner](../../packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts) also has a numeric-window grammar for safe-integer maximum offsets and widths, exact omitted-bound inheritance on partial moves, and required demand messages when installed ranges are empty. It permits additional messages. It observes one-group settled operator rows, size and demand signals; real framework source growth belongs to the shared receiving owner above. [Numeric evidence](oracle-reviews/2026-10-30-topk-numeric-windows.md) records RED, GREEN, reach, replay and mutants.
+The existing
+[top-K support-window owner](../../packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts)
+also has a numeric-window grammar for safe-integer maximum offsets and widths,
+exact omitted-bound inheritance on partial moves, and required demand messages
+when installed ranges are empty. It permits additional messages. It observes
+one-group settled operator rows, size and demand signals; real framework source
+growth belongs to the shared receiving owner above.
+[Numeric evidence](oracle-reviews/2026-10-30-topk-numeric-windows.md) records
+RED, GREEN, reach, replay and mutants.
 
 ### Projection and negative-window gaps from removal review (2026-11-02)
 
@@ -6803,12 +6856,13 @@ identical offset/limit across projection changes, including positive offsets.
 Native cuts require raw shape; settled cuts also compare selected values and
 keyed state. It is one `oracleProperty` definition, registered by each
 framework's conformance suite with that framework's driver as
-`framework.<driver>.result-shape`; two constructed histories enter its twelve required
-states on every production path, the former fixed examples are fixed histories, and the previous-mode
-projection and stale rows are calibrations. Reintroducing the Angular defect
-below fails 32 of its tests, each at law `current query projection`. This does not promise synchronous row freshness or identical host
-scheduling. Disabled inputs, errors, supplied Collections, DbClient and broad
-host/AOT behavior remain outside this grammar.
+`framework.<driver>.result-shape`; two constructed histories enter its twelve
+required states on every production path, the former fixed examples are fixed
+histories, and the previous-mode projection and stale rows are calibrations.
+Reintroducing the Angular defect below fails 32 of its tests, each at law
+`current query projection`. This does not promise synchronous row freshness or
+identical host scheduling. Disabled inputs, errors, supplied Collections,
+DbClient and broad host/AOT behavior remain outside this grammar.
 
 **Repaired receiving defect:** Angular previously returned the old query's raw
 projection at its synchronous Signal read before effects. Both directions
@@ -6975,8 +7029,9 @@ premise and one had it (81 initiated/80 accepted histories). Earlier final
 "lagging rewrite" counts are historical divergence evidence. A fourth terminal
 regime constructs the actual overwrite. Original arbitrary/reset/stop regimes,
 24-step prefix, 8–24-step arbitrary tail, models, comparisons, known limits,
-80-run budgets and minima remain. New lagging suffix length is 12/15 for two/three
-tabs. Final commit omission fails the ordinary durable/public comparison.
+80-run budgets and minima remain. New lagging suffix length is 12/15 for
+two/three tabs. Final commit omission fails the ordinary durable/public
+comparison.
 
 The deferred-acquisition owner adds 32 finite histories over a real same-source
 LEFT self-join, crossing subscriber/preload, one/two rows, literal/Promise

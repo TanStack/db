@@ -101,8 +101,8 @@ observe production publications, not manufacture them in the fixture.
   retaining old rows. The Query-owned cache with shared-prefix invalidation
   passes backend growth, shrink, empty and regrowth plus later page expansion.
 - The frozen candidate passed 87 tests across five files with multiplier 100,
-  campaign seed 863: 35,000 cursor histories, 10,000 cache histories and 15,000 no-peek
-  experiment histories. The latter are retained experiments, not shipped
+  campaign seed 863: 35,000 cursor histories, 10,000 cache histories and 15,000
+  no-peek experiment histories. The latter are retained experiments, not shipped
   metadata behavior. A loss audit and final package gates follow.
 
 The cache oracle uses a full source snapshot plus a freshness deadline, not a
@@ -212,11 +212,11 @@ safety of removing peek-ahead or adding a public metadata API.
   unlimited read: the reader returned only the first row.
 - Negative control: removing the post-response cancellation/generation check
   failed both held-response abort and reset cases. The rejection control still
-  passed. Restoring the check restored green; these were assertion failures,
-  not timeouts.
-- Final green: 48 tests, including 32 backend/UI page-size integration cells
-  and a held-response shared-consumer case. Four generated properties ran
-  35,000 cases in total at multiplier 100 with campaign seed `863`. A separate normal
+  passed. Restoring the check restored green; these were assertion failures, not
+  timeouts.
+- Final green: 48 tests, including 32 backend/UI page-size integration cells and
+  a held-response shared-consumer case. Four generated properties ran 35,000
+  cases in total at multiplier 100 with campaign seed `863`. A separate normal
   random campaign also passed.
 - Package TypeScript check and lint on all changed TypeScript files passed.
 

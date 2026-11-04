@@ -97,23 +97,22 @@ is not ready:
 - **Production first:** a production change in an oracle-owned area without a
   RED result from the extended oracle on the code before the change.
 - **Model hacking:** a model rule changed to match production output without a
-  stated authority (a contract document and section, or a maintainer
-  decision). Production output is evidence. It is not authority.
+  stated authority (a contract document and section, or a maintainer decision).
+  Production output is evidence. It is not authority.
 - **Unreachable claims:** a closure claim for a state that generated histories
   do not reach, or a reach that nobody measured.
 - **Quiet exclusions:** a skipped, narrowed, or relaxed comparison without an
   entry in the [coverage map](docs/contributing/oracle-coverage.md) that names
   the oracle owner and the maintainer decision.
-- **Fixed-history-only coverage:** a named fixed history where the law needs a generator
-  dimension.
+- **Fixed-history-only coverage:** a named fixed history where the law needs a
+  generator dimension.
 - **Unit tests inside oracles:** ordinary examples or concrete type assertions
-  placed in an oracle file. A fixed regression must run through the shared model,
-  production driver, and comparison without its own expected answer.
+  placed in an oracle file. A fixed regression must run through the shared
+  model, production driver, and comparison without its own expected answer.
 - **"Pre-existing" as a dismissal:** a reachable counterexample that an agent
-  labels as older than the change, but does not fix, record in the coverage
-  map with its trace, or bring to the maintainer for a decision.
-- **No mutant:** a closure claim without a mutant that fails the
-  oracle.
+  labels as older than the change, but does not fix, record in the coverage map
+  with its trace, or bring to the maintainer for a decision.
+- **No mutant:** a closure claim without a mutant that fails the oracle.
 
 ### The evidence block
 
@@ -169,8 +168,8 @@ that combines, splits, or does not correspond to production concepts.
 
 Some oracle files are also the shortest documentation for their subsystem.
 Before changing a covered contract or its machinery, use
-`docs/contributing/oracle-coverage.md` to find the primary executable oracle owner and
-read its stated limits. Do not infer authority from a filename alone.
+`docs/contributing/oracle-coverage.md` to find the primary executable oracle
+owner and read its stated limits. Do not infer authority from a filename alone.
 
 Read these stable entry points before the narrower oracle owner:
 
@@ -186,8 +185,8 @@ Read these stable entry points before the narrower oracle owner:
 - For TrailBase lifecycle work, read
   `packages/trailbase-db-collection/tests/ORACLE.md`.
 - For cross-framework behavior, read the shared contract under
-  `packages/db/tests/conformance/` and the receiving framework's production driver. One
-  framework's scheduling cut does not prove another's.
+  `packages/db/tests/conformance/` and the receiving framework's production
+  driver. One framework's scheduling cut does not prove another's.
 
 The opening prose states the contract. The small model states the expected
 behavior. The production driver and comparison check whether the implementation
@@ -557,9 +556,9 @@ const dependentBuilders = [] // Accurately describes dependents
 ### Required reading: oracle tests
 
 Before designing, changing, or reviewing an oracle or generated-history test,
-read [Oracle Testing Rubric](docs/contributing/oracle-rubric.md).
-Use the [coverage map](docs/contributing/oracle-coverage.md) to find an existing
-oracle owner and its limits before adding another model. The guide explains testing
+read [Oracle Testing Rubric](docs/contributing/oracle-rubric.md). Use the
+[coverage map](docs/contributing/oracle-coverage.md) to find an existing oracle
+owner and its limits before adding another model. The guide explains testing
 methods; it does not authorize new product behavior or retire existing laws.
 
 ### Write Oracle Tests as Literate Programs
@@ -635,10 +634,10 @@ separate oracle owner when another boundary needs a different model. Show that
 the check fails on the original implementation or a mutant at the
 intended checkpoint, then passes with the fix.
 
-At closeout, state what the evidence covers. Record remaining in-scope
-histories or paths in the oracle coverage map with an oracle owner and needed witness.
-A reachable in-scope counterexample keeps the class open. Passing random runs
-is not a universal proof. A bug-fix pull request is not ready while a known
+At closeout, state what the evidence covers. Record remaining in-scope histories
+or paths in the oracle coverage map with an oracle owner and needed witness. A
+reachable in-scope counterexample keeps the class open. Passing random runs is
+not a universal proof. A bug-fix pull request is not ready while a known
 in-scope part of the declared bug class remains open.
 
 Every bug-fix pull request must show how it evaluated and closed the declared
@@ -658,18 +657,19 @@ that an oracle. Both copies can encode the same wrong assumption.
 - Derive expected behavior from public contracts, documented prior behavior,
   mathematical laws, or a separately specified reference model.
 - Keep the reference model structurally different from production. Do not import
-  the production helper or reuse its classifications to compute expected results.
-- Preserve existing contract tests unless a product or design decision explicitly
-  changes the contract. Rewriting a passing expectation to match new production
-  behavior is a design review, not routine test maintenance.
+  the production helper or reuse its classifications to compute expected
+  results.
+- Preserve existing contract tests unless a product or design decision
+  explicitly changes the contract. Rewriting a passing expectation to match new
+  production behavior is a design review, not routine test maintenance.
 - When production work suggests an oracle change, compare the old and new
   semantics with counterexamples before editing the oracle.
-- Use mutants to prove the oracle rejects plausible wrong designs,
-  including the mistake production currently makes. A green oracle without a
-  demonstrated kill is weak evidence.
-- Use process grammar to explore lifecycle paths, and design grammar to challenge
-  the oracle's reference semantics. More generated traces cannot repair a wrong
-  reference model.
+- Use mutants to prove the oracle rejects plausible wrong designs, including the
+  mistake production currently makes. A green oracle without a demonstrated kill
+  is weak evidence.
+- Use process grammar to explore lifecycle paths, and design grammar to
+  challenge the oracle's reference semantics. More generated traces cannot
+  repair a wrong reference model.
 
 ### Require Applicable Oracle Coverage
 
@@ -684,12 +684,12 @@ oracle. An internal refactor does not require new oracle coverage when existing
 applicable oracles already exercise the unchanged contract.
 
 Applicability follows the contract ownership recorded in
-`docs/contributing/oracle-coverage.md`, not the limits of the oracle owner's current
-histories, production paths, or observations. A missing history, path, or
-observation is a coverage gap in the primary oracle owner. Add a separate oracle owner
-only when the boundary requires a different independent judgment. Add a
-receiving witness when a claim crosses an adapter, framework, provider, or other
-integration boundary.
+`docs/contributing/oracle-coverage.md`, not the limits of the oracle owner's
+current histories, production paths, or observations. A missing history, path,
+or observation is a coverage gap in the primary oracle owner. Add a separate
+oracle owner only when the boundary requires a different independent judgment.
+Add a receiving witness when a claim crosses an adapter, framework, provider, or
+other integration boundary.
 
 For a bug fix, use a focused regression to isolate and shrink the failure, then
 keep it as a fixed regression for the broader oracle. Verify that the expanded
@@ -699,9 +699,10 @@ oracle coverage. If no existing oracle applies, create one when the behavior
 admits a practical independent model. For a change that is not a bug fix, a
 focused test alone is acceptable only when an oracle is not practical for the
 behavior. The pull request must identify the relevant coverage-map entry and
-explain why extending its oracle owner, creating a new independent oracle, or adding a
-receiving witness is not practical. Bug fixes cannot use this focused-test-only
-exception. They must provide evidence that closes the entire declared bug class.
+explain why extending its oracle owner, creating a new independent oracle, or
+adding a receiving witness is not practical. Bug fixes cannot use this
+focused-test-only exception. They must provide evidence that closes the entire
+declared bug class.
 
 ### Keep Unit Tests Out of Oracles
 
@@ -730,14 +731,14 @@ Modules that define the model, checker, or its history grammar also qualify.
 Identify the actual mechanism before renaming a file. A coverage-map entry,
 contract comment, or collection of fixed assertions is not sufficient evidence.
 
-An oracle file holds only oracle tests. It declares its check, model, and history
-grammar with `declareOracle` from `packages/db/tests/oracle-declaration.ts`. A
-type-level oracle names its model types in `typeModel`. Each
-part is optional. Every test in the file must use a declared part, directly
-or through a production driver, or run a generated property that states its law inline.
-A test that compares production with a hand-written value is a unit test:
-put it in an ordinary test file. The `oracle/no-unit-test` lint rule reports
-a test that does neither.
+An oracle file holds only oracle tests. It declares its check, model, and
+history grammar with `declareOracle` from
+`packages/db/tests/oracle-declaration.ts`. A type-level oracle names its model
+types in `typeModel`. Each part is optional. Every test in the file must use a
+declared part, directly or through a production driver, or run a generated
+property that states its law inline. A test that compares production with a
+hand-written value is a unit test: put it in an ordinary test file. The
+`oracle/no-unit-test` lint rule reports a test that does neither.
 
 Ordinary example tests, type assertions, fixtures, registration wrappers, and
 runner utilities keep their ordinary names. A module that only drives production

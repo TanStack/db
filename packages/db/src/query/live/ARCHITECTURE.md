@@ -430,8 +430,8 @@ produce. The exported `compileQuery` receiver checks both compilation orders
 through FROM, JOIN and union placement at initial graph drain. Its raw output
 comparison is differential and supplies no independent Effect-root attribution
 policy. Optimizer cloning can prevent an original raw-key cache hit in union
-placement; that path checks propagation and transparency instead.
-Separate static receiving-type limits remain in the
+placement; that path checks propagation and transparency instead. Separate
+static receiving-type limits remain in the
 [deferred oracle record](../../../../../docs/contributing/oracle-reviews/2026-10-29-pr-2171-deferred-oracles.md).
 
 D2 hashes enumerable symbol keys and uses exact local-symbol identity plus

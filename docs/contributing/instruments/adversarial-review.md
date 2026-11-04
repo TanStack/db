@@ -52,12 +52,12 @@ the evidence that could decide between them, and a possible repair condition.
 Check that the attack is within scope and that its standard actually applies.
 An outside-domain case may motivate a scope change; label that proposal.
 
-When execution is authorized and practical, run the discriminating experiment.
-A wrong-result control must reach the intended comparison to demonstrate rejection.
-Use the oracle guide's calibration and mutant-outcome rules. A source-level
-argument can remain useful when execution is unavailable; label it accurately.
-For a systematic search across plausible wrong implementations, use the
-[mutant gap hunt](mutant-gap-hunt.md) to design semantic edits and classify
+When execution is authorized and practical, run the discriminating experiment. A
+wrong-result control must reach the intended comparison to demonstrate
+rejection. Use the oracle guide's calibration and mutant-outcome rules. A
+source-level argument can remain useful when execution is unavailable; label it
+accurately. For a systematic search across plausible wrong implementations, use
+the [mutant gap hunt](mutant-gap-hunt.md) to design semantic edits and classify
 survivors.
 
 **Return:** supported defects, design objections, and untested hypotheses as

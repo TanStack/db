@@ -157,8 +157,8 @@ presence of a preferred heading, class, comment template, or helper.
 
 - **Trigger:** An important generated property.
 - **Obligation:** The package's oracle campaign MUST execute the same property,
-  generators, observation recorder, refinement check, and run budget twice:
-  once with a documented campaign seed and once without a seed. A replay interface
+  generators, observation recorder, refinement check, and run budget twice: once
+  with a documented campaign seed and once without a seed. A replay interface
   MUST accept both the seed and shrink path and MUST run the requested replay
   directly. When the property uses `fc.commands`, the interface MUST also accept
   the commands arbitrary's reported `replayPath` and pass it back to
@@ -227,21 +227,21 @@ presence of a preferred heading, class, comment template, or helper.
 
 ### ORC-012: Review evidence
 
-- **Trigger:** A change claims that an oracle is new, repaired, or comprehensively
-  audited against this guide.
+- **Trigger:** A change claims that an oracle is new, repaired, or
+  comprehensively audited against this guide.
 - **Obligation:** The review evidence MUST record the outcome of every other
-  applicable numbered requirement and MUST identify the requirements that do
-  not apply.
+  applicable numbered requirement and MUST identify the requirements that do not
+  apply.
 - **Acceptance evidence:** Each applicable requirement has concrete evidence or
-  an explicit unresolved limit. Each non-applicable requirement has a reason tied
-  to its trigger.
+  an explicit unresolved limit. Each non-applicable requirement has a reason
+  tied to its trigger.
 - **Conditional bug-class closure:** When a change claims to eliminate a bug
   class, the review evidence MUST name its contract × history × production-path
   × observation boundary, identify the original and adjacent distinguishing
   witnesses, show a relevant wrong design rejected at the intended checkpoint,
-  and list unresolved in-scope cells with their coverage-map oracle owner. A known
-  reachable counterexample prevents a closure claim. One oracle need not own
-  every boundary.
+  and list unresolved in-scope cells with their coverage-map oracle owner. A
+  known reachable counterexample prevents a closure claim. One oracle need not
+  own every boundary.
 - **Evidence location:** At closeout, verdict-critical evidence outside the
   executable oracle MUST live in a versioned review record tied to the exact
   reviewed head. An editable pull-request description alone does not satisfy
@@ -257,8 +257,9 @@ presence of a preferred heading, class, comment template, or helper.
 - **Obligation:** The evidence MUST show a legal witness that reaches the law's
   premise and a nearby in-domain witness whose observation at the claimed
   checkpoint distinguishes the stated law from a plausible wrong boundary or
-  consequence. If those witnesses are unavailable, the claim MUST be limited
-  to the tested cases, and the reusable-law limit and its oracle owner MUST be recorded.
+  consequence. If those witnesses are unavailable, the claim MUST be limited to
+  the tested cases, and the reusable-law limit and its oracle owner MUST be
+  recorded.
 - **Acceptance evidence:** The test or review record names the wrong rule and
   shows which existing case rejects it. For a numeric threshold, cases on
   opposite sides are insufficient if a plausible misplaced threshold still
@@ -312,15 +313,15 @@ presence of a preferred heading, class, comment template, or helper.
 
 - **Trigger:** A file defines an oracle, its input grammar, or a generated
   campaign, including a compile-time type oracle.
-- **Obligation:** The file MUST NOT contain ordinary example-based unit tests
-  or standalone concrete type assertions. Fixed regressions MUST be inputs to
-  the same independent model, production driver, and comparison used by the
-  broader campaign. They MUST NOT restate their expected answers. A type
-  oracle MUST apply a reusable independent type law to generated legal inputs.
+- **Obligation:** The file MUST NOT contain ordinary example-based unit tests or
+  standalone concrete type assertions. Fixed regressions MUST be inputs to the
+  same independent model, production driver, and comparison used by the broader
+  campaign. They MUST NOT restate their expected answers. A type oracle MUST
+  apply a reusable independent type law to generated legal inputs.
 - **Acceptance evidence:** A reviewer can vary the input without adding an
-  expectation. Every retained regression and receiving production driver uses the shared
-  judgment. Checker calibration supplies deliberately wrong observations to
-  that judgment.
+  expectation. Every retained regression and receiving production driver uses
+  the shared judgment. Checker calibration supplies deliberately wrong
+  observations to that judgment.
 - **Does not satisfy:** Renaming a unit test, adding contract prose, enumerating
   fixtures with separate assertions, or wrapping fixed expectations in a
   property runner.
@@ -347,7 +348,10 @@ Before writing the loop, answer six questions:
 | What will we compare, and when?  | Rows, order, events or other promised behavior, at a named checkpoint.                                 |
 | Why should we trust this check?  | Evidence the path ran, the comparison rejects the relevant wrong answer, and failures can be replayed. |
 
-These are responsibilities, not six required classes. A small property may answer them in a comment and twenty lines of code. A lifecycle suite may need a separate model and production driver. Do not build a framework just to fill the table.
+These are responsibilities, not six required classes. A small property may
+answer them in a comment and twenty lines of code. A lifecycle suite may need a
+separate model and production driver. Do not build a framework just to fill the
+table.
 
 An evidence card is an optional way to collect this information; it is not a
 required file format:
@@ -430,21 +434,23 @@ module is linted on its own, so the rule does not report a call to it. An
 rule judges a call to its helpers as it judges an ordinary module's.
 
 ORC-016 keeps ordinary unit tests and concrete type assertions out of oracle
-files. Fixed regressions run through the shared law; supplemental examples live in
-ordinary test files.
+files. Fixed regressions run through the shared law; supplemental examples live
+in ordinary test files.
 
 An ordinary example or regression does not need this suffix merely because it
 asserts a contract. The same applies to concrete type assertions, fixtures,
-registration wrappers, and generic runner utilities. A production driver that only invokes
-production or records observations remains support. Coverage-map inclusion,
-parameterization, and contract prose alone do not establish oracle ownership.
+registration wrappers, and generic runner utilities. A production driver that
+only invokes production or records observations remains support. Coverage-map
+inclusion, parameterization, and contract prose alone do not establish oracle
+ownership.
 
-Count oracle owners, model/checker definitions, production drivers, and other support separately.
-Several files may execute one shared oracle, and one file may contain several
-oracle mechanisms. A filename is a discovery aid, not evidence of guide
-conformance. Preserve runner suffixes such as `.property.test.ts`, `.test-d.ts`,
-and `.spec.ts`. Update imports, test commands, replay selectors, and current
-coverage links whenever an oracle file moves.
+Count oracle owners, model/checker definitions, production drivers, and other
+support separately. Several files may execute one shared oracle, and one file
+may contain several oracle mechanisms. A filename is a discovery aid, not
+evidence of guide conformance. Preserve runner suffixes such as
+`.property.test.ts`, `.test-d.ts`, and `.spec.ts`. Update imports, test
+commands, replay selectors, and current coverage links whenever an oracle file
+moves.
 
 ### Keep five responsibilities distinguishable
 
@@ -615,12 +621,13 @@ Treat the layers as separate claims. Compare each pair during review:
 1. Does every promise in the prose have a model rule?
 2. Does the model retain every distinction that a legal next action can expose?
 3. Can the history grammar reach each modeled transition?
-4. Does the production driver exercise the named production path and event boundary?
+4. Does the production driver exercise the named production path and event
+   boundary?
 5. Does each modeled output reach an assertion at the promised checkpoint?
 6. Can the recorder represent duplicate, missing, reordered, or partial output?
 7. Does any assertion impose behavior that the contract and model do not state?
-8. Do prose, model, production driver, and production use the glossary's canonical term
-   and transition grammar for each shared concept?
+8. Do prose, model, production driver, and production use the glossary's
+   canonical term and transition grammar for each shared concept?
 9. Does every model-only term declare how it maps to production, or that it has
    no production counterpart?
 
@@ -628,8 +635,8 @@ This comparison is a useful audit instrument. ORC-012 requires outcomes for the
 applicable numbered requirements, not these questions or their answers in the
 test file. If the prose cannot explain an assertion through the model, the model
 may be incomplete. If the model predicts a fact that the test never observes,
-the test may be false green. If the production driver cannot create a named phase, the
-prose claims more reach than the test has.
+the test may be false green. If the production driver cannot create a named
+phase, the prose claims more reach than the test has.
 
 ### Keep the prose proportional
 
@@ -699,7 +706,8 @@ Take two rows: `(id: 1, rank: 2)` and `(id: 2, rank: 1)`, with width two. The ex
 
 That is a history: a starting state followed by actions. The generator can produce many such histories while the same reference computes each answer.
 
-The integration loop below is pseudocode; the named production driver operations are not TanStack APIs:
+The integration loop below is pseudocode; the named production driver operations
+are not TanStack APIs:
 
 ```text
 create independent model and production fixture
@@ -727,7 +735,11 @@ After choosing an action kind, choose its key from the applicable set. This is c
 
 Shrinking means reducing a failing input or action list while keeping its failure. Design action dependencies so the smaller histories remain meaningful; don't disable shrinking merely because the test is stateful. The [fast-check model guide](https://fast-check.dev/docs/advanced/model-based-testing/) describes commands and replay; check the installed version before copying an API recipe.
 
-Include fixed histories for the structural cases that matter: no rows, width zero, a boundary tie, and repeated changes to one key. Exhaust a small domain where that is cheap. Then randomize values and longer legal histories. Fixed cases, bounded enumeration and random exploration do different jobs; overlap between them is not a defect.
+Include fixed histories for the structural cases that matter: no rows, width
+zero, a boundary tie, and repeated changes to one key. Exhaust a small domain
+where that is cheap. Then randomize values and longer legal histories. Fixed
+cases, bounded enumeration and random exploration do different jobs; overlap
+between them is not a defect.
 
 ### Run fixed and random campaigns with direct replay
 
@@ -761,13 +773,14 @@ may differ. This keeps a random failure eligible for promotion into a fixed
 history or the fixed-seed campaign.
 
 [`fifo-retry-oracle.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry-oracle.property.test.ts)
-shows this shape. Its fixed-seed campaign preserves one scheduler campaign. Its second
-campaign uses a random campaign seed by default. To replay its recorded failure, set
-`TANSTACK_DB_ORACLE_PROPERTY=offline.fifo-retry` with
-`TANSTACK_DB_ORACLE_SEED` and `TANSTACK_DB_ORACLE_PATH`. The fixed-seed campaign stands
-aside, and the random campaign runs the recorded path once. The offline
-oracle owners' other properties use the same variables and name their own properties,
-such as `offline.leadership.stale-read` and `offline.settlement.retry-decision`.
+shows this shape. Its fixed-seed campaign preserves one scheduler campaign. Its
+second campaign uses a random campaign seed by default. To replay its recorded
+failure, set `TANSTACK_DB_ORACLE_PROPERTY=offline.fifo-retry` with
+`TANSTACK_DB_ORACLE_SEED` and `TANSTACK_DB_ORACLE_PATH`. The fixed-seed campaign
+stands aside, and the random campaign runs the recorded path once. The offline
+oracle owners' other properties use the same variables and name their own
+properties, such as `offline.leadership.stale-read` and
+`offline.settlement.retry-decision`.
 
 Do not use a larger random run count as a substitute for structural reach.
 Fixed histories force rare boundaries. Bounded enumeration proves small finite
@@ -874,7 +887,15 @@ test releases write delivery and lets production apply it
 test records the visible state at the promised applied checkpoint
 ```
 
-The fixture must really hold write delivery. If it delivers the writes and only delays returning from its load function, it controls a different event. Whether the returned Promise settles before or after application is a separate contract question. Record publications during the held interval if the promise concerns what users can see then. A scheduler is helpful only within the boundaries it controls; a campaign seed cannot schedule arbitrary external I/O. The [fast-check scheduler documentation](https://fast-check.dev/docs/advanced/race-conditions/) explains the distinction between an operation's lifecycle and delivery of its result.
+The fixture must really hold write delivery. If it delivers the writes and only
+delays returning from its load function, it controls a different event. Whether
+the returned Promise settles before or after application is a separate contract
+question. Record publications during the held interval if the promise concerns
+what users can see then. A scheduler is helpful only within the boundaries it
+controls; a campaign seed cannot schedule arbitrary external I/O. The
+[fast-check scheduler documentation](https://fast-check.dev/docs/advanced/race-conditions/)
+explains the distinction between an operation's lifecycle and delivery of its
+result.
 
 ### Treat production driver timing helpers as premises
 
@@ -883,13 +904,13 @@ blocked" or "let the message reach the worker". Each helper establishes a
 premise. If a helper does less than its name says, every production driver
 that uses it can go green without reaching the history.
 
-In one [recorded case](oracle-reviews/pr-2213-opfs-close.md), a production driver loop
-shared by the Node and Chromium production drivers gave back a lock in the same
-turn in which it submitted close. The close message was still crossing a task
-boundary, so the earlier request finished first. Close never ran during the
-wait, and both worker mutants passed both production drivers. The loop had a
-premise check for "a request waits for the lock", but it had none for "close
-arrives during that wait".
+In one [recorded case](oracle-reviews/pr-2213-opfs-close.md), a production
+driver loop shared by the Node and Chromium production drivers gave back a lock
+in the same turn in which it submitted close. The close message was still
+crossing a task boundary, so the earlier request finished first. Close never ran
+during the wait, and both worker mutants passed both production drivers. The
+loop had a premise check for "a request waits for the lock", but it had none for
+"close arrives during that wait".
 
 For each timing helper, do one of these:
 
@@ -953,19 +974,19 @@ restate the expected results.
 
 The OPFS request-order oracle shows the layout.
 [`opfs-request-order-oracle.ts`](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-request-order-oracle.ts)
-owns the law, the model, the fixed histories, the production driver loop, and the
-comparison. The
+owns the law, the model, the fixed histories, the production driver loop, and
+the comparison. The
 [Node driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-request-order-oracle.test.ts)
 and the
 [Chromium page driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-request-order.opfs.ts)
 supply the entry point, access-handle control, database names, and result
 reporting. The Node driver also generates random histories from the same
-grammar. Neither production driver states expected results, and both feed the same
-comparison. The
+grammar. Neither production driver states expected results, and both feed the
+same comparison. The
 [Chromium spec](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-request-order-oracle.opfs.spec.ts)
 checks for page errors, a completed run, one result per example, and no
-violations. It states no expected results either. A witness
-that restates expected results needs the record that ORC-014 describes.
+violations. It states no expected results either. A witness that restates
+expected results needs the record that ORC-014 describes.
 
 ## Observe what the contract promises
 
@@ -1054,7 +1075,10 @@ Original trace; reduced trace; reproduction result
 Primary failure; separate cleanup diagnostics
 ```
 
-Check replay commands against the installed tool. A campaign seed is not a recording of the network, operating system or every Promise. If a challenge influenced the design, keep it as a regression or tuning case; it is no longer a held-out test of that design.
+Check replay commands against the installed tool. A campaign seed is not a
+recording of the network, operating system or every Promise. If a challenge
+influenced the design, keep it as a regression or tuning case; it is no longer a
+held-out test of that design.
 
 ## Review and maintain the portfolio
 
@@ -1141,8 +1165,8 @@ or a claimed repair, ask:
 
 Adapter and lifecycle oracles should consider these laws when the contract has
 the corresponding boundary. They are prompts, not universal requirements. State
-why an inapplicable law does not belong to the oracle owner instead of adding a vacuous
-case.
+why an inapplicable law does not belong to the oracle owner instead of adding a
+vacuous case.
 
 - **Real-provider conformance:** freeze representative values from each
   supported provider version. Prove the fixture accepts those values before it

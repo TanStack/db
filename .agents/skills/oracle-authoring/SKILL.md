@@ -51,11 +51,11 @@ concepts. Delegated agents must do the reading relevant to their own scope.
 Follow the subsystem reading requirements in AGENTS.md.
 
 Keep unit tests and standalone concrete type assertions out of oracle files
-(ORC-016). Fixed regressions are inputs to the same model, production driver, and
-comparison as the broader campaign, without their own expected answers.
-Compile-time oracles generate legal TypeScript inputs and compare public
-types with a reusable independent law; a matrix of fixed assertions does not
-satisfy this requirement. Supplemental examples belong in ordinary test files.
+(ORC-016). Fixed regressions are inputs to the same model, production driver,
+and comparison as the broader campaign, without their own expected answers.
+Compile-time oracles generate legal TypeScript inputs and compare public types
+with a reusable independent law; a matrix of fixed assertions does not satisfy
+this requirement. Supplemental examples belong in ordinary test files.
 
 Use the [instrument library](../../../docs/contributing/instruments/index.md)
 when there is a material uncertainty. Select cards within the authorized task;
@@ -90,9 +90,9 @@ when requested by the task. A proposal with unresolved authority can be explored
 in a scratch model; do not silently make it a product expectation.
 
 At closeout, write the evidence block from AGENTS.md (law, reach, RED, GREEN,
-mutant, limits). Connect the law to the evidence actually obtained: which histories
-and paths ran, which wrong behavior was rejected, and what remains untested.
-Use concise prose suited to the change; no particular report template is
-required. When changing repository coverage, update the existing oracle owner and
-coverage map to reflect the changed scope. A scratch law-design experiment
+mutant, limits). Connect the law to the evidence actually obtained: which
+histories and paths ran, which wrong behavior was rejected, and what remains
+untested. Use concise prose suited to the change; no particular report template
+is required. When changing repository coverage, update the existing oracle owner
+and coverage map to reflect the changed scope. A scratch law-design experiment
 retains its proposals and limits without claiming new repository coverage.
