@@ -50,6 +50,7 @@ import { createRxDatabase, prepareQuery } from 'rxdb/plugins/core'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import { rxdbCollectionOptions } from '../src/rxdb'
 import {
+  acceptAtOnce,
   conformanceKey,
   observedView,
   rewriteRow,
@@ -87,13 +88,6 @@ const schema = {
   required: [`id`, `title`],
 } as const
 
-const acceptAtOnce: WritePlan = {
-  outcome: `accept`,
-  held: false,
-  echoHeld: false,
-  rewrite: `none`,
-  error: new Error(`unplanned write`),
-}
 
 /**
  * An RxDB document as a conformance row: key `"n"` is row id `n`. Other

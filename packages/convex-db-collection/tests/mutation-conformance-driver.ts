@@ -37,7 +37,12 @@ import { ConvexClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
 import { convexToJson, jsonToConvex } from 'convex/values'
 import { convexCollectionOptions } from '../src/index'
-import { observedView, rewriteRow } from '../../db-adapter-conformance/src'
+import {
+  acceptAtOnce,
+  observedView,
+  rewriteRow,
+  settleWhenQuiet,
+} from '../../db-adapter-conformance/src'
 import type { JSONValue, Value } from 'convex/values'
 import type {
   ConformanceRow,
@@ -45,6 +50,7 @@ import type {
   MutationFixture,
   MutationProvider,
   ProviderChange,
+  SettleCut,
   WritePlan,
   WriteRequest,
 } from '../../db-adapter-conformance/src'
@@ -60,19 +66,6 @@ const writeMutation = makeFunctionReference<
   { request: WriteRequest },
   null
 >(`rows:write`)
-
-const acceptAtOnce: WritePlan = {
-  outcome: `accept`,
-  held: false,
-  echoHeld: false,
-  rewrite: `none`,
-  error: new Error(`unplanned write`),
-}
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-const clientTimeoutMs = 2_000
-// How long nothing must change before a cut with a held request or echo.
-const quietMs = 25
 
 function timestamp(value: number): string {
   const bytes = Buffer.alloc(8)
@@ -133,7 +126,6 @@ class ConvexMutationProvider implements MutationProvider {
   private querySet = 0
   private requestedQuerySet = 0
   private queryId: number | undefined
-  private unsettled = 0
   private activity = 0
 
   constructor(seed: ReadonlyArray<ConformanceRow>) {
@@ -292,19 +284,6 @@ class ConvexMutationProvider implements MutationProvider {
     }
   }
 
-  /** Counts a write's receipt until it settles. */
-  track<T extends { when: (state: `settled`) => Promise<unknown> }>(
-    receipt: T,
-  ): T {
-    this.unsettled++
-    const settled = () => {
-      this.unsettled--
-      this.activity++
-    }
-    receipt.when(`settled`).then(settled, settled)
-    return receipt
-  }
-
   // The oracle's side.
 
   plan(plan: WritePlan): void {
@@ -350,22 +329,12 @@ class ConvexMutationProvider implements MutationProvider {
    * an echo is held, until the requests, transitions, and receipts are
    * quiet. The client applies a transition within a few turns.
    */
-  settle = async () => {
-    const deadline = Date.now() + clientTimeoutMs
-    let last = this.activity
-    let quietSince = Date.now()
-    while (Date.now() < deadline) {
-      if (this.unsettled === 0) break
-      const blocked = this.held.length > 0 || this.stalled.length > 0
-      if (blocked && Date.now() - quietSince >= quietMs) break
-      await sleep(2)
-      if (this.activity !== last) {
-        last = this.activity
-        quietSince = Date.now()
-      }
-    }
-    for (let turn = 0; turn < 3; turn++) await sleep(0)
-  }
+  settle = ({ unsettled }: SettleCut) =>
+    settleWhenQuiet({
+      done: () => unsettled() === 0,
+      blocked: () => this.held.length > 0 || this.stalled.length > 0,
+      activity: () => `${this.activity} ${unsettled()}`,
+    })
 
   dispose = () => this.client.close()
 }
@@ -438,17 +407,15 @@ export function convexMutationDriver(): MutationDriver {
         }),
         base: () => collection.base.values(),
         writer: {
-          insert: (row) => provider.track(collection.insert(row)),
+          insert: (row) => collection.insert(row),
           update: (row) =>
-            provider.track(
-              collection.update(row.id, (draft) => {
-                draft.title = row.title
-                if (Object.hasOwn(row, `note`)) draft.note = row.note
-                // Only a held note value is removed.
-                else if (typeof draft.note === `string`) delete draft.note
-              }),
-            ),
-          delete: (id) => provider.track(collection.delete(id)),
+            collection.update(row.id, (draft) => {
+              draft.title = row.title
+              if (Object.hasOwn(row, `note`)) draft.note = row.note
+              // Only a held note value is removed.
+              else if (typeof draft.note === `string`) delete draft.note
+            }),
+          delete: (id) => collection.delete(id),
         },
         provider,
         settle: provider.settle,

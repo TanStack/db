@@ -46,6 +46,7 @@ import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
 import { createCollection } from '@tanstack/db'
 import { powerSyncCollectionOptions } from '../src'
 import {
+  acceptAtOnce,
   conformanceKey,
   fromSqlRow,
   observedView,
@@ -59,6 +60,7 @@ import type {
   MutationFixture,
   MutationProvider,
   ProviderChange,
+  SettleCut,
   WritePlan,
   WriteRequest,
 } from '../../db-adapter-conformance/src'
@@ -71,14 +73,6 @@ const SCHEMA = new Schema({
 })
 
 type Record = { id: string; title: string | null; note: string | null }
-
-const acceptAtOnce: WritePlan = {
-  outcome: `accept`,
-  held: false,
-  echoHeld: false,
-  rewrite: `none`,
-  error: new Error(`unplanned write`),
-}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const drainTimeoutMs = 5_000
@@ -245,21 +239,6 @@ class PowerSyncMutationProvider implements MutationProvider {
     if (changed) this.expectDrain()
   }
 
-  /** Writes made through the Collection whose receipts have not settled. */
-  private unsettled = 0
-
-  /** Counts a write's receipt until it settles. */
-  track<T extends { when: (state: `settled`) => Promise<unknown> }>(
-    receipt: T,
-  ): T {
-    this.unsettled++
-    receipt.when(`settled`).then(
-      () => this.unsettled--,
-      () => this.unsettled--,
-    )
-    return receipt
-  }
-
   async seed(rows: ReadonlyArray<ConformanceRow>): Promise<void> {
     for (const row of rows) await this.write({ type: `upsert`, row })
     this.drainTarget = undefined
@@ -268,9 +247,6 @@ class PowerSyncMutationProvider implements MutationProvider {
   plan(plan: WritePlan): void {
     this.plans.push(plan)
   }
-
-  /** No request is held: the driver does not declare `held-writes`. */
-  release(): void {}
 
   foreignCommit(change: ProviderChange): Promise<void> {
     return this.write(change)
@@ -293,13 +269,13 @@ class PowerSyncMutationProvider implements MutationProvider {
    * and the watcher runs at most every 30 ms, so the step waits until every
    * write's receipt has settled and the watcher has drained every commit.
    */
-  settle = async () => {
+  settle = async ({ unsettled }: SettleCut) => {
     const deadline = Date.now() + drainTimeoutMs
     while (Date.now() < deadline) {
       const drainedAll =
         (this.drainTarget === undefined || this.drained >= this.drainTarget) &&
         this.running === 0
-      if (this.unsettled === 0 && drainedAll) {
+      if (unsettled() === 0 && drainedAll) {
         this.drainTarget = undefined
         return
       }
@@ -347,21 +323,17 @@ export function powerSyncMutationDriver(): MutationDriver {
         writer: {
           insert: (row) => {
             const { id, title, note } = toSqlRow(row)
-            return provider.track(
-              collection.insert({ id: String(id), title, note }),
-            )
+            return collection.insert({ id: String(id), title, note })
           },
           update: (row) =>
-            provider.track(
-              collection.update(String(row.id), (draft) => {
-                draft.title = row.title
-                if (Object.hasOwn(row, `note`)) draft.note = row.note ?? null
-                // A `NULL` note is already absent; only a held one is removed.
-                else if (typeof draft.note === `string`)
-                  (draft as { note?: string | null }).note = undefined
-              }),
-            ),
-          delete: (id) => provider.track(collection.delete(String(id))),
+            collection.update(String(row.id), (draft) => {
+              draft.title = row.title
+              if (Object.hasOwn(row, `note`)) draft.note = row.note!
+              // A `NULL` note is already absent; only a held one is removed.
+              else if (typeof draft.note === `string`)
+                (draft as { note?: string | null }).note = undefined
+            }),
+          delete: (id) => collection.delete(String(id)),
         },
         provider,
         settle: provider.settle,

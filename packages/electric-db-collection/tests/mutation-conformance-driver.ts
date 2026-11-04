@@ -34,9 +34,11 @@
 import { createCollection } from '@tanstack/db'
 import { electricCollectionOptions } from '../src/electric'
 import {
+  acceptAtOnce,
   fromSqlRow,
   observedView,
   rewriteRow,
+  settleWhenQuiet,
   toSqlRow,
 } from '../../db-adapter-conformance/src'
 import type {
@@ -45,6 +47,7 @@ import type {
   MutationFixture,
   MutationProvider,
   ProviderChange,
+  SettleCut,
   WritePlan,
   WriteRequest,
 } from '../../db-adapter-conformance/src'
@@ -58,19 +61,6 @@ const SCHEMA = JSON.stringify({
 type ElectricRow = { id: number; title: string | null; note: string | null }
 type Wire = Record<string, string | null>
 type Batch = Array<Record<string, unknown>>
-
-const acceptAtOnce: WritePlan = {
-  outcome: `accept`,
-  held: false,
-  echoHeld: false,
-  rewrite: `none`,
-  error: new Error(`unplanned write`),
-}
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-const clientTimeoutMs = 2_000
-// How long nothing must change before a cut with a held request or echo.
-const quietMs = 25
 
 /** A row as Electric sends it: every column as text, `NULL` as null. */
 function wire(row: ConformanceRow): Wire {
@@ -96,7 +86,6 @@ class ElectricMutationProvider implements MutationProvider {
   private waiting: Request | undefined
   private txid = 100
   private offset = 0
-  private unsettled = 0
   /** Cleanup aborted the client's request: nothing more will arrive. */
   private closed = false
 
@@ -165,13 +154,9 @@ class ElectricMutationProvider implements MutationProvider {
   /** Sends the next unsent batch to the client's waiting live request. */
   private flush(): void {
     const request = this.waiting
-    const batch = this.outbox.shift()
-    if (!request || !batch) {
-      if (batch) this.outbox.unshift(batch)
-      return
-    }
+    if (!request || this.outbox.length === 0) return
     this.waiting = undefined
-    this.respond(request, batch)
+    this.respond(request, this.outbox.shift()!)
   }
 
   /** Commits a change in a new transaction and queues its batch. */
@@ -238,16 +223,6 @@ class ElectricMutationProvider implements MutationProvider {
     })
   }
 
-  /** Counts a write's receipt until it settles. */
-  track<T extends { when: (state: `settled`) => Promise<unknown> }>(
-    receipt: T,
-  ): T {
-    this.unsettled++
-    const settled = () => this.unsettled--
-    receipt.when(`settled`).then(settled, settled)
-    return receipt
-  }
-
   // The oracle's side.
 
   plan(plan: WritePlan): void {
@@ -291,26 +266,17 @@ class ElectricMutationProvider implements MutationProvider {
    * and every write's receipt settled; while a request or an echo is held,
    * until the request log, the sent batches, and the receipts are quiet.
    */
-  settle = async () => {
-    const deadline = Date.now() + clientTimeoutMs
-    const state = () =>
-      `${this.log.length} ${this.offset} ${this.unsettled} ${this.outbox.length}`
-    let last = state()
-    let quietSince = Date.now()
-    while (Date.now() < deadline && !this.closed) {
-      const delivered = this.outbox.length === 0 && this.waiting !== undefined
-      if (delivered && this.unsettled === 0) break
-      const blocked = this.held.length > 0 || this.stalled.length > 0
-      if (blocked && delivered && Date.now() - quietSince >= quietMs) break
-      await sleep(2)
-      const now = state()
-      if (now !== last) {
-        last = now
-        quietSince = Date.now()
-      }
-    }
-    // The client applies a batch just before it asks again.
-    for (let turn = 0; turn < 3; turn++) await sleep(0)
+  settle = ({ unsettled }: SettleCut) => {
+    const delivered = () =>
+      this.outbox.length === 0 && this.waiting !== undefined
+    return settleWhenQuiet({
+      done: () => delivered() && unsettled() === 0,
+      blocked: () =>
+        delivered() && (this.held.length > 0 || this.stalled.length > 0),
+      activity: () =>
+        `${this.log.length} ${this.offset} ${unsettled()} ${this.outbox.length}`,
+      stopped: () => this.closed,
+    })
   }
 }
 
@@ -398,19 +364,17 @@ export function electricMutationDriver(): MutationDriver {
         writer: {
           insert: (row) => {
             const { id, title, note } = toSqlRow(row)
-            return provider.track(collection.insert({ id, title, note }))
+            return collection.insert({ id, title, note })
           },
           update: (row) =>
-            provider.track(
-              collection.update(row.id, (draft) => {
-                draft.title = row.title
-                if (Object.hasOwn(row, `note`)) draft.note = row.note ?? null
-                // A `NULL` note is already absent; only a held one is removed.
-                else if (typeof draft.note === `string`)
-                  (draft as { note?: string | null }).note = undefined
-              }),
-            ),
-          delete: (id) => provider.track(collection.delete(id)),
+            collection.update(row.id, (draft) => {
+              draft.title = row.title
+              if (Object.hasOwn(row, `note`)) draft.note = row.note!
+              // A `NULL` note is already absent; only a held one is removed.
+              else if (typeof draft.note === `string`)
+                (draft as { note?: string | null }).note = undefined
+            }),
+          delete: (id) => collection.delete(id),
         },
         provider,
         settle: provider.settle,

@@ -201,6 +201,15 @@ export function rewriteRow(
 }
 
 /** The provider's answer to the next write request. */
+/** The plan for a request the check did not plan: accept it at once. */
+export const acceptAtOnce: WritePlan = {
+  outcome: `accept`,
+  held: false,
+  echoHeld: false,
+  rewrite: `none`,
+  error: new Error(`unplanned write`),
+}
+
 export interface WritePlan {
   readonly outcome: `accept` | `reject`
   /**
@@ -234,8 +243,8 @@ export interface WritePlan {
 export interface MutationProvider {
   /** Queue the answer to the next write request that arrives. */
   plan: (plan: WritePlan) => void
-  /** Answer the oldest held request by its plan. */
-  release: () => void | Promise<void>
+  /** Answer the oldest held request by its plan (`held-writes`). */
+  release?: () => void | Promise<void>
   /** Deliver the oldest withheld copy through the change feed (`held-echoes`). */
   deliver?: () => void | Promise<void>
   /** Commit a change made by another client (`foreign-commits`). */
@@ -245,6 +254,12 @@ export interface MutationProvider {
     ReadonlyArray<ConformanceRow> | Promise<ReadonlyArray<ConformanceRow>>
   /** Every write request so far, in arrival order. */
   requests: () => ReadonlyArray<WriteRequest>
+}
+
+/** What the check tells a fixture's propagation step. */
+export interface SettleCut {
+  /** How many writes' `when('settled')` receipts have not settled yet. */
+  unsettled: () => number
 }
 
 export interface MutationFixture {
@@ -260,7 +275,7 @@ export interface MutationFixture {
    */
   drain?: () => void | Promise<void>
   /** The adapter's propagation step, awaited before every comparison. */
-  settle?: () => Promise<void>
+  settle?: (cut: SettleCut) => Promise<void>
   dispose?: () => void | Promise<void>
 }
 
@@ -351,6 +366,9 @@ export type MutationStep =
   | { readonly kind: `deliver` }
   | { readonly kind: `foreign`; readonly change: ProviderChange }
 
+/** A write step. */
+export type WriteStep = Extract<MutationStep, { kind: `write` }>
+
 export interface MutationHistory {
   readonly seed: ReadonlyArray<ConformanceRow>
   readonly steps: ReadonlyArray<MutationStep>
@@ -414,7 +432,7 @@ export function mutationHistoryArb(
         echoHeld,
         rewrite,
         rejectionKind,
-      }): MutationStep => ({
+      }): WriteStep => ({
         kind: `write`,
         type,
         id: row.id,
@@ -437,23 +455,10 @@ export function mutationHistoryArb(
     // An update without `note`: it removes the field when the row holds one.
     {
       weight: 2,
-      arbitrary: write.map((step): MutationStep =>
-        step.kind === `write`
-          ? {
-              kind: `write`,
-              type: `update`,
-              id: step.id,
-              title: step.title,
-              outcome: step.outcome,
-              held: step.held,
-              echoHeld: step.echoHeld,
-              rewrite: step.rewrite,
-              ...(step.rejectionKind === undefined
-                ? {}
-                : { rejectionKind: step.rejectionKind }),
-            }
-          : step,
-      ),
+      arbitrary: write.map(({ note: _note, ...step }): WriteStep => ({
+        ...step,
+        type: `update`,
+      })),
     },
   ]
   if (capabilities.has(`held-writes`)) {
@@ -487,11 +492,10 @@ export function mutationHistoryArb(
   // on its key.
   const sameKeyPair = fc
     .tuple(write, write)
-    .map(([first, second]): Array<MutationStep> =>
-      first.kind === `write` && second.kind === `write`
-        ? [first, { ...second, id: first.id }]
-        : [first, second],
-    )
+    .map(([first, second]): Array<MutationStep> => [
+      first,
+      { ...second, id: first.id },
+    ])
   // A held write the provider stores with a field the client has not seen,
   // then an update of that key that does not name it: a merged update keeps
   // the field, a complete-row one drops it.
@@ -503,8 +507,6 @@ export function mutationHistoryArb(
             arbitrary: fc
               .tuple(write, write)
               .map(([first, second]): Array<MutationStep> => {
-                if (first.kind !== `write` || second.kind !== `write`)
-                  return [first, second]
                 const { note: _note, ...update } = second
                 return [
                   {
@@ -619,8 +621,6 @@ interface PendingWrite {
   requested: boolean
   /** Accepted, with its copy not yet delivered by the change feed. */
   answered: boolean
-  /** Its own plan withheld its copy (`held-echoes`). */
-  withheld: boolean
 }
 
 type ExpectedSettlement = `pending` | `fulfilled` | { rejected: Error }
@@ -721,16 +721,16 @@ function initialModel(
  * maintainer decision 2026-11-03).
  */
 function authoredRow(
-  step: Extract<MutationStep, { kind: `write` }>,
-  held: string | undefined,
+  step: WriteStep,
+  over: string | undefined,
 ): ConformanceRow {
-  // A held `note` stays an own `undefined`: removed when it held a value,
-  // kept when it already was one.
+  // The row's `note` stays an own `undefined`: removed when it held a
+  // value, kept when it already was one.
   const removesNote =
     step.type === `update` &&
     step.note === undefined &&
-    held !== undefined &&
-    (JSON.parse(held) as [string, Array<unknown>])[1].length > 0
+    over !== undefined &&
+    (JSON.parse(over) as [string, Array<unknown>])[1].length > 0
   return {
     id: step.id,
     title: step.title,
@@ -863,7 +863,6 @@ function decide(state: MutationModel, write: PendingWrite): void {
     state.echoes.some((earlier) => blocks(state, earlier, write))
   ) {
     write.answered = true
-    write.withheld = write.plan.echoHeld
     state.echoes.push(write)
   } else confirm(state, write)
 }
@@ -878,7 +877,7 @@ function deliverEchoes(state: MutationModel): Array<RowState> {
   for (;;) {
     const next = state.echoes.find(
       (write, index) =>
-        !write.withheld &&
+        !write.plan.echoHeld &&
         state.echoes
           .slice(0, index)
           .every((earlier) => !blocks(state, earlier, write)),
@@ -997,11 +996,12 @@ type StepDone =
 function stepModel(
   state: MutationModel,
   step: MutationStep,
-  plan: (step: Extract<MutationStep, { kind: `write` }>) => WritePlan,
+  plan: (step: WriteStep) => WritePlan,
 ): { done: StepDone; published: Array<RowState> } | undefined {
   switch (step.kind) {
     case `write`: {
-      const held = new Map(visible(state))
+      // The public rows the write is authored over.
+      const rows = new Map(visible(state))
       // A write may follow a pending one on the same key: core layers their
       // optimistic states in author order.
       const sameKey = state.pending.filter((write) => write.id === step.id)
@@ -1021,8 +1021,8 @@ function stepModel(
       )
         return undefined
       const legal =
-        step.type === `insert` ? !held.has(step.id) : held.has(step.id)
-      const over = held.get(step.id)
+        step.type === `insert` ? !rows.has(step.id) : rows.has(step.id)
+      const over = rows.get(step.id)
       const row = step.type === `delete` ? undefined : authoredRow(step, over)
       const value = row && rowValue(row)
       // An update that changes no field records no mutation in core; no law
@@ -1043,13 +1043,12 @@ function stepModel(
         type: step.type,
         id: step.id,
         ...(row && {
-          value: rowValue(row),
+          value,
           sent: sentFields(fields!, state.undefinedField, fields === row),
         }),
         plan: plan(step),
         requested: false,
         answered: false,
-        withheld: false,
       }
       state.settlements.push(`pending`)
       state.pending.push(write)
@@ -1209,51 +1208,53 @@ export const mutationReachStates = [
 export type MutationReachState =
   (typeof mutationReachStates)[number] | `rejected-as-${string}`
 
-const capabilityOfState: Partial<
-  Record<MutationReachState, MutationCapability>
+/**
+ * The capabilities a declared state needs: every one in `all`, at least one
+ * in `any`, and none in `none`. A state with no entry needs none.
+ */
+const stateNeeds: Partial<
+  Record<
+    MutationReachState,
+    {
+      all?: ReadonlyArray<MutationCapability>
+      any?: ReadonlyArray<MutationCapability>
+      none?: ReadonlyArray<MutationCapability>
+    }
+  >
 > = {
-  'write-rejected': `write-rejection`,
-  'held-write-pending': `held-writes`,
-  'write-queued-behind-held': `held-writes`,
-  'held-write-rejected': `held-writes`,
-  'foreign-commit': `foreign-commits`,
-  'held-optimistic-row': `held-writes`,
-  'server-rewrote-copy': `server-rewrites`,
-  'echo-held': `held-echoes`,
-  'merge-kept-field': `merged-updates`,
-  'echo-queued-behind-withheld': `held-echoes`,
+  'write-rejected': { all: [`write-rejection`] },
+  'held-write-pending': { all: [`held-writes`] },
+  // Only an adapter that orders writes holds one back (MUT-10).
+  'write-queued-behind-held': {
+    all: [`held-writes`],
+    none: [`application-handlers`],
+  },
+  'held-write-rejected': { all: [`held-writes`, `write-rejection`] },
+  'foreign-commit': { all: [`foreign-commits`] },
+  'held-optimistic-row': { all: [`held-writes`] },
+  'server-rewrote-copy': { all: [`server-rewrites`] },
+  'echo-held': { all: [`held-echoes`] },
+  'merge-kept-field': { all: [`merged-updates`] },
+  'echo-queued-behind-withheld': { all: [`held-echoes`] },
+  // A write stays pending past its step only when held or confirmed late.
+  'same-key-pending': { any: [`held-writes`, `held-echoes`] },
 }
 
 /** The declared states a driver's capabilities let histories reach. */
 export function mutationReachStatesFor(
   domain: Pick<MutationDriver, `capabilities` | `rejectionKinds`>,
 ): Array<MutationReachState> {
-  const kinds = domain.capabilities.has(`write-rejection`)
+  const has = (capability: MutationCapability) =>
+    domain.capabilities.has(capability)
+  const kinds = has(`write-rejection`)
     ? (domain.rejectionKinds ?? []).map(
         (kind): MutationReachState => `rejected-as-${kind}`,
       )
     : []
   return [
     ...mutationReachStates.filter((state) => {
-      const capability = capabilityOfState[state]
-      if (state === `held-write-rejected`)
-        return (
-          domain.capabilities.has(`held-writes`) &&
-          domain.capabilities.has(`write-rejection`)
-        )
-      // Only an adapter that orders writes holds one back (MUT-10).
-      if (state === `write-queued-behind-held`)
-        return (
-          domain.capabilities.has(`held-writes`) &&
-          !domain.capabilities.has(`application-handlers`)
-        )
-      // A write stays pending past its step only when held or confirmed late.
-      if (state === `same-key-pending`)
-        return (
-          domain.capabilities.has(`held-writes`) ||
-          domain.capabilities.has(`held-echoes`)
-        )
-      return capability === undefined || domain.capabilities.has(capability)
+      const { all = [], any, none = [] } = stateNeeds[state] ?? {}
+      return all.every(has) && (any?.some(has) ?? true) && !none.some(has)
     }),
     ...kinds,
   ]
@@ -1282,9 +1283,9 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
  * propagation step its fixture declares. A slower adapter shows as a
  * mismatch at this cut, not as a pass.
  */
-async function settle(fixture: MutationFixture): Promise<void> {
+async function settle(fixture: MutationFixture, cut: SettleCut): Promise<void> {
   for (let turn = 0; turn < 3; turn++) await sleep(0)
-  await fixture.settle?.()
+  await fixture.settle?.(cut)
 }
 
 /**
@@ -1387,10 +1388,12 @@ export async function checkMutationHistory(
   const { collection, provider, writer } = fixture
   const state = initialModel(history.seed, driver)
   const receipts: Array<{ current: Settlement }> = []
-  const failures: Array<Error> = []
+  const cut: SettleCut = {
+    unsettled: () =>
+      receipts.filter((receipt) => receipt.current === `pending`).length,
+  }
   let accepted = 0
   let skipped = 0
-  let wrote = 0
   let primary: unknown
   let publications: ReturnType<typeof recordPublications> | undefined
 
@@ -1404,7 +1407,7 @@ export async function checkMutationHistory(
 
   /** MUT-1, MUT-2, MUT-8, MUT-10, MUT-13, FID-5, HEALTH-5 at one cut. */
   const compare = async (stepIndex: number) => {
-    await settle(fixture)
+    await settle(fixture, cut)
     const found = detached.found()
     if (found.length > 0)
       throw violation(`HEALTH-5`, stepIndex, `no detached failure`, found)
@@ -1471,7 +1474,7 @@ export async function checkMutationHistory(
         rowState(state.provider),
         providerRows,
       )
-    if (wrote > 0) reach(`quiescent-after-writes`)
+    if (receipts.length > 0) reach(`quiescent-after-writes`)
   }
 
   let published = visible(state)
@@ -1518,13 +1521,22 @@ export async function checkMutationHistory(
   }
 
   let rewritten = 0
+  /** The declared states the model's state shows after a step. */
+  const reachModelStates = () => {
+    if (state.heldRows.length > 0) reach(`held-optimistic-row`)
+    if (state.rewritten > rewritten) reach(`server-rewrote-copy`)
+    if (state.mergeKept > 0) reach(`merge-kept-field`)
+    if (state.pending.some((write) => write.answered)) reach(`echo-held`)
+    if (state.echoes.some((write) => !write.plan.echoHeld))
+      reach(`echo-queued-behind-withheld`)
+    rewritten = state.rewritten
+  }
   // The plan the model decided the last write by; the provider gets it too.
   let lastPlan: WritePlan | undefined
-  const planFor = (
-    step: Extract<MutationStep, { kind: `write` }>,
-  ): WritePlan => {
-    const error = new Error(`conformance write rejected ${failures.length}`)
-    failures.push(error)
+  const planFor = (step: WriteStep): WritePlan => {
+    // Indexed by write, so a driver's `matchesFailure` can name it; the write
+    // records its receipt after its plan.
+    const error = new Error(`conformance write rejected ${receipts.length}`)
     lastPlan = {
       outcome: step.outcome,
       held: step.held,
@@ -1555,7 +1567,7 @@ export async function checkMutationHistory(
       let law = `MUT-1`
       switch (done.kind) {
         case `write`: {
-          const write = step as Extract<MutationStep, { kind: `write` }>
+          const write = step as WriteStep
           provider.plan(lastPlan!)
           const row: ConformanceRow = {
             id: write.id,
@@ -1569,7 +1581,6 @@ export async function checkMutationHistory(
                 ? writer.update(row)
                 : writer.delete(write.id)
           receipts.push(recordSettlement(receipt.when(`settled`)))
-          wrote++
           if (write.held) reach(`held-write-pending`)
           if (done.queued) reach(`write-queued-behind-held`)
           if (write.outcome === `reject`) {
@@ -1584,7 +1595,7 @@ export async function checkMutationHistory(
           break
         }
         case `release`:
-          await provider.release()
+          await provider.release!()
           if (done.outcome === `reject`) {
             reach(`held-write-rejected`)
             law = `MUT-2`
@@ -1600,13 +1611,7 @@ export async function checkMutationHistory(
           reach(`foreign-commit`)
           break
       }
-      if (state.heldRows.length > 0) reach(`held-optimistic-row`)
-      if (state.rewritten > rewritten) reach(`server-rewrote-copy`)
-      if (state.mergeKept > 0) reach(`merge-kept-field`)
-      if (state.pending.some((write) => write.answered)) reach(`echo-held`)
-      if (state.echoes.some((write) => !write.withheld))
-        reach(`echo-queued-behind-withheld`)
-      rewritten = state.rewritten
+      reachModelStates()
       await compare(index)
       checkPublications(
         index,
@@ -1625,15 +1630,9 @@ export async function checkMutationHistory(
         : { kind: `deliver` }
       const result = stepModel(state, step, planFor)
       if (result === undefined) break
-      if (state.heldRows.length > 0) reach(`held-optimistic-row`)
-      if (state.rewritten > rewritten) reach(`server-rewrote-copy`)
-      if (state.mergeKept > 0) reach(`merge-kept-field`)
-      if (state.pending.some((write) => write.answered)) reach(`echo-held`)
-      if (state.echoes.some((write) => !write.withheld))
-        reach(`echo-queued-behind-withheld`)
-      rewritten = state.rewritten
+      reachModelStates()
       if (step.kind === `deliver`) await provider.deliver!()
-      else await provider.release()
+      else await provider.release!()
       await compare(steps.length)
       checkPublications(
         steps.length,
@@ -1651,7 +1650,7 @@ export async function checkMutationHistory(
     publications?.stop()
     await fixture.drain?.()
     await collection.cleanup()
-    await settle(fixture)
+    await settle(fixture, cut)
     if (primary === undefined && detached.found().length > 0) {
       primary = violation(
         `HEALTH-5`,

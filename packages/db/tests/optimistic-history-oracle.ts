@@ -1521,13 +1521,14 @@ export async function runOptimisticHistory(
           if (index === undefined) continue
           const intent = model.transactions[index]!
           const was = before.find((row) => row.id === step.key)
-          if (
+          // The edit removes a `d` the row holds (the documented own
+          // `undefined` in `changes`).
+          const removesHeldD =
             step.type === `edit` &&
-            step.removesD &&
+            step.removesD === true &&
             was !== undefined &&
             Object.hasOwn(was, `d`)
-          )
-            counts.removedFieldEdits++
+          if (removesHeldD) counts.removedFieldEdits++
           const now = model.visible().get(step.key)
           if (
             inFlight &&
@@ -1638,13 +1639,7 @@ export async function runOptimisticHistory(
                             value,
                           ),
                       ),
-                      ...(step.removesD &&
-                      before.some(
-                        (row) =>
-                          row.id === intent.key && Object.hasOwn(row, `d`),
-                      )
-                        ? [[`d`, undefined]]
-                        : []),
+                      ...(removesHeldD ? [[`d`, undefined]] : []),
                     ]),
           }
           operations.push(operation)

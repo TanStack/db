@@ -42,7 +42,10 @@ export {
   mutationReachStates,
   mutationReachStatesFor,
   rewriteRow,
+  acceptAtOnce,
 } from './mutation-oracle'
+export { settleWhenQuiet } from './driver-support'
+export type { QuietSettleOptions } from './driver-support'
 export type {
   MutationCapability,
   MutationCheckOptions,
@@ -56,6 +59,7 @@ export type {
   MutationStep,
   MutationWriter,
   ServerRewrite,
+  SettleCut,
   WritePlan,
   WriteRequest,
 } from './mutation-oracle'
