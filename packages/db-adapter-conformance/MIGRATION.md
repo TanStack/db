@@ -71,10 +71,12 @@ state (MUT-5) stay with `packages/db/tests/optimistic-history-oracle.ts`.
 - **Model:** the synced rows, the backend rows, and the pending writes in
   author order with their outcome. Visible rows are the synced rows with the
   pending writes folded on; a settled write leaves the fold.
-- **Grammar:** inserts, updates, and deletes through the Collection,
-  single or in one manual transaction; the backend accepts or rejects a held
-  write; the backend's own changes arrive through sync (confirming a pending
-  write or not); an external change to another row or the same key.
+- **Grammar:** single-row inserts, updates, and deletes through the
+  Collection; the backend accepts or rejects a write, at once or held; the
+  backend's copy arrives through sync, at once or withheld; a commit by
+  another client while no write is pending. Manual and multi-mutation
+  transactions, and commits by another client while a write is pending
+  (MUT-11), are planned grammar extensions, not generated yet.
 - **Observations:** visible rows and change events, each transaction's state
   and settlement, the backend rows and the order of backend operations,
   handler calls.
@@ -599,7 +601,12 @@ error/sync-give-up, accept]`). Fix: remember that give-up and fail the
   - **Fix:** a removed field is sent as `null`; writes run in author order;
     a write is confirmed only by an event after it began, recorded only
     while a write is admitted, which removes the periodic cleanup timer.
-    A mutant with the old confirmation fails MUT-1.
+    A mutant with the old confirmation fails MUT-1. Refined on 2026-11-04:
+    same-key histories showed that an earlier write's late event could
+    still confirm a later write on the key, so the adapter now counts
+    events per key and confirms the n-th answered write on a key by the
+    n-th event on it; a late event from an earlier write does not confirm
+    a later one.
   - **Size:** trailbase-db-collection −46 gzip bytes.
 - **2026-11-03, PowerSync, mutations.** Both campaigns are GREEN after an
   adapter fix, with every declared reach state met.
