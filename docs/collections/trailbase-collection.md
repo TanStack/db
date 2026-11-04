@@ -52,7 +52,7 @@ The `trailBaseCollectionOptions` function accepts the following options:
 
 - `schema`: [Standard Schema](https://standardschema.dev) compatible schema (e.g., Zod, Effect) for client-side validation
 - `parse`: Object mapping field names to parsing functions that transform data coming from TrailBase
-- `serialize`: Object mapping field names to serialization functions that transform data going to TrailBase
+- `serialize`: Object mapping field names to serialization functions that transform data going to TrailBase. An update that removes a field (for example `draft.tags = undefined`) sends `null`, which clears the column, without calling that field's function. A `NOT NULL` column rejects such an update.
 - `onInsert`: Handler function called when items are inserted
 - `onUpdate`: Handler function called when items are updated
 - `onDelete`: Handler function called when items are deleted

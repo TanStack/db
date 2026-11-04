@@ -116,6 +116,11 @@ export interface TrailBaseCollectionConfig<
   syncMode?: TrailBaseSyncMode
 
   parse: Conversions<TRecord, TItem>
+  /**
+   * Per-field conversions for values sent to TrailBase. An update that
+   * removes a field sends `null`, which clears the column, without calling
+   * that field's conversion.
+   */
   serialize: Conversions<TItem, TRecord>
 }
 
