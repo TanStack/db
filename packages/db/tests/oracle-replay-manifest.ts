@@ -14,6 +14,11 @@ const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
   [
+    `angular-db/tests/snapshot-conformance-oracle.test.ts`,
+    `angular`,
+    `current-snapshot`,
+  ],
+  [
     `db/tests/query/pagination-oracle.property.test.ts`,
     `pagination`,
     `limit-admission-replay-pending-negative limit-admission-replay-pending-valid limit-admission-builder-negative limit-admission-builder-valid limit-admission-unstarted-negative limit-admission-unstarted-valid limit-admission-ready-negative limit-admission-ready-valid limit-admission-initial-pending-negative limit-admission-initial-pending-valid limit-admission-move-pending-negative limit-admission-move-pending-valid`,
@@ -853,6 +858,10 @@ owners.set(
   `collection-lifecycle.gc-retention-boundaries`,
   `packages/db/tests/collection-gc-retention-oracle.property.test.ts`,
 )
+owners.set(
+  `collection-lifecycle.gc-retention-boundaries.direct-start`,
+  `packages/db/tests/collection-gc-retention-oracle.property.test.ts`,
+)
 
 for (const property of registeredOracleProperties) {
   if (property.startsWith(`includes.matrix.`)) {
@@ -982,6 +991,10 @@ const replayTestNames = new Map([
   ],
   [
     `collection-lifecycle.gc-retention-boundaries`,
+    `preserves retention across transaction phases.*seed undefined`,
+  ],
+  [
+    `collection-lifecycle.gc-retention-boundaries.direct-start`,
     `preserves retention across transaction phases.*seed undefined`,
   ],
   [

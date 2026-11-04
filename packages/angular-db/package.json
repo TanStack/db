@@ -49,7 +49,7 @@
     "@tanstack/db": "workspace:*"
   },
   "peerDependencies": {
-    "@angular/core": ">=16.0.0",
+    "@angular/core": ">=20.0.0",
     "rxjs": ">=6.0.0"
   },
   "devDependencies": {

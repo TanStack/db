@@ -110,6 +110,16 @@ describe(`guarded oracle replay`, () => {
 
   it.each([
     [
+      `collection-lifecycle.gc-retention-boundaries.direct-start`,
+      `tests/collection-gc-retention-oracle.property.test.ts`,
+      1,
+    ],
+    [
+      `collection-lifecycle.gc-retention-boundaries`,
+      `tests/collection-gc-retention-oracle.property.test.ts`,
+      1,
+    ],
+    [
       `index-update.reference-model`,
       `tests/index-update-oracle.property.test.ts`,
       2,

@@ -5,6 +5,7 @@ export { recordOracleReplay } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `angular.current-snapshot`,
   `pagination.limit-admission-replay-pending-negative`,
   `pagination.limit-admission-replay-pending-valid`,
   `pagination.limit-admission-builder-negative`,
@@ -294,6 +295,7 @@ const staticOracleProperties = [
   `collection-sync.reentrant-drain`,
   `collection-lifecycle.gc-persisting-transaction`,
   `collection-lifecycle.gc-retention-boundaries`,
+  `collection-lifecycle.gc-retention-boundaries.direct-start`,
   `collection-lifecycle.gc-mutation-shapes`,
   `collection-state.retention`,
   `collection-state.accepted-snapshot.before-delete`,
