@@ -613,21 +613,32 @@ export function mutationHistoryArb(
         rejects: capabilities.has(`write-rejection`)
           ? fc.boolean()
           : fc.constant(false),
+        rejectionKind:
+          kinds.length > 0
+            ? fc.constantFrom(...kinds)
+            : fc.constant<string | undefined>(undefined),
         rejectAt: fc.integer({ min: 0, max: 2 }),
       })
-      .map(({ type, rows, plan, rejects, rejectAt }): MutationStep => ({
-        kind: `transaction`,
-        type,
-        rows,
-        outcome: rejects ? `reject` : `accept`,
-        held: plan.held,
-        echoHeld: !rejects && plan.echoHeld,
-        rewrite: type === `delete` ? `none` : plan.rewrite,
-        ...(plan.rejectionKind === undefined
-          ? {}
-          : { rejectionKind: plan.rejectionKind }),
-        rejectAt,
-      })),
+      .map(
+        ({
+          type,
+          rows,
+          plan,
+          rejects,
+          rejectionKind,
+          rejectAt,
+        }): MutationStep => ({
+          kind: `transaction`,
+          type,
+          rows,
+          outcome: rejects ? `reject` : `accept`,
+          held: plan.held,
+          echoHeld: !rejects && plan.echoHeld,
+          rewrite: type === `delete` ? `none` : plan.rewrite,
+          ...(rejects && rejectionKind !== undefined ? { rejectionKind } : {}),
+          rejectAt,
+        }),
+      ),
   })
   if (capabilities.has(`reloads`)) {
     steps.push({
@@ -1699,11 +1710,17 @@ function stepModel(
         return undefined
       // Atomic, one plan answers the transaction; otherwise each request
       // up to the rejection has its own, and only the first can be held.
+      // The rejecting plan carries the step's rejection kind.
+      const kind =
+        step.rejectionKind === undefined
+          ? {}
+          : { rejectionKind: step.rejectionKind }
       const plans = state.atomic
-        ? [plan(mutations[0]!.single)]
+        ? [plan({ ...mutations[0]!.single, ...kind })]
         : mutations.slice(0, rejectAt + 1).map(({ single }, at) =>
             plan({
               ...single,
+              ...(at === rejectAt ? kind : {}),
               outcome: at === rejectAt ? `reject` : `accept`,
               held: at === 0 && step.held,
               echoHeld: at !== rejectAt && step.echoHeld,

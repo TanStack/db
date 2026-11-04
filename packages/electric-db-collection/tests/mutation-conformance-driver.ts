@@ -102,6 +102,8 @@ class ElectricMutationProvider implements MutationProvider {
 
   readonly fetchClient: typeof fetch = (input, init) =>
     new Promise<Response>((resolve, reject) => {
+      // A request from a reload's new run: only its own abort stops it.
+      this.closed = false
       const url = new URL(String(input))
       const signal = init?.signal ?? undefined
       const request: Request = { url, respond: resolve }

@@ -7453,10 +7453,11 @@ restarted run empty. A fixed-seed campaign runs the React client
 Owner: `packages/db-adapter-conformance/src/mutation-oracle.ts`, run against
 the reference adapter in
 `packages/db-adapter-conformance/tests/reference-mutation-oracle.property.test.ts`
-(`adapter-conformance.mutations.reference`, with five provider
+(`adapter-conformance.mutations.reference`, with six provider
 configurations: structured clone, JSON, SQL, an Electric-like log with
-application handlers, and a Convex-like in-order log; each runs a fixed and a
-random campaign under its own property), against RxDB in
+application handlers, a Convex-like in-order log, and a TrailBase-like feed
+confirmed by counted copies; each runs a fixed and a random campaign under its
+own property), against RxDB in
 `packages/rxdb-db-collection/tests/mutation-conformance-oracle.property.test.ts`
 (`adapter-conformance.mutations.rxdb`), against TrailBase in
 `packages/trailbase-db-collection/tests/mutation-conformance-oracle.property.test.ts`
