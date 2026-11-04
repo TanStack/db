@@ -370,7 +370,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/includes-oracle.property.test.ts`,
     `includes`,
-    `scenario-statistics incremental-history nested-scalar-materialization alpha-renaming scoped-alpha-renaming optimistic-convergence bucket-collisions`,
+    `scenario-statistics incremental-history nested-scalar-materialization alpha-renaming scoped-alpha-renaming scoped-distinct optimistic-convergence bucket-collisions`,
   ],
   [
     `db/tests/query/includes-query-shape-oracle.test.ts`,
@@ -955,6 +955,10 @@ const replayTestNames = new Map([
   [
     `includes.bucket-collisions`,
     `preserves colliding active buckets.*(random|replay)`,
+  ],
+  [
+    `includes.scoped-distinct`,
+    `keeps include DISTINCT within each parent's relation.*(random|replay)`,
   ],
   [
     `query.distinct-collisions`,
