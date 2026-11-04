@@ -88,7 +88,6 @@ const schema = {
   required: [`id`, `title`],
 } as const
 
-
 /**
  * An RxDB document as a conformance row: key `"n"` is row id `n`. Other
  * fields pass through, so an optimistic row's own `undefined` stays, and
