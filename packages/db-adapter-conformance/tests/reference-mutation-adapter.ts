@@ -30,11 +30,7 @@
  *   (MUT-10).
  */
 import { createCollection } from '@tanstack/db'
-import {
-  acceptAtOnce,
-  observedView,
-  rewriteRow,
-} from '../src'
+import { acceptAtOnce, observedView, rewriteRow } from '../src'
 import type {
   ConformanceRow,
   MutationCapability,
@@ -114,7 +110,6 @@ export interface ReferenceMutationOptions {
   /** The provider answers requests in arrival order. */
   inOrder?: boolean
 }
-
 
 const jsonClone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 

@@ -67,7 +67,6 @@ type ConformanceRecord = {
   note: string | null | undefined
 }
 
-
 /** A value as the SDK sends it: JSON, so an `undefined` field is absent. */
 const asSent = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
