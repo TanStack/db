@@ -342,8 +342,11 @@ export function rxdbCollectionOptions(
     onInsert: (params) =>
       inTurn(async () => {
         debug(`insert`, params)
-        const newItems = params.transaction.mutations.map((m) => m.modified)
-        throwWriteError(await rxCollection.bulkUpsert(newItems))
+        // RxDB has no transaction over several documents: each insert goes
+        // out in mutation order, and the first rejection ends the
+        // transaction.
+        for (const mutation of params.transaction.mutations)
+          throwWriteError(await rxCollection.bulkUpsert([mutation.modified]))
       }),
     onUpdate: (params) =>
       inTurn(async () => {

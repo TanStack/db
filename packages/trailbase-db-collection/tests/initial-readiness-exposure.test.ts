@@ -31,6 +31,7 @@ function rowsAtFirstReady(query: Collection<any, any, any>) {
 function createSource(recordApi: MockRecordApi<Data>, onDemand = true) {
   const source = createCollection(
     trailBaseCollectionOptions({
+      client: recordApi.client,
       recordApi,
       getKey: (item: Data) => item.id ?? -1,
       startSync: true,

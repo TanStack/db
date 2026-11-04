@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import type {
+  Client,
   CreateOperation,
   DeleteOperation,
   Event,
@@ -55,23 +56,48 @@ export class MockRecordApi<T> implements RecordApi<T> {
   createBulk = vi.fn((_records: Array<T>): Promise<Array<string | number>> => {
     throw `createBulk`
   })
-  createOp = vi.fn((_record: T): CreateOperation<T> => {
-    throw `createOp`
-  })
+  createOp = vi.fn(
+    (record: T): CreateOperation<T> =>
+      ({ kind: `create`, record }) as unknown as CreateOperation<T>,
+  )
 
   update = vi.fn((_id: string | number, _record: Partial<T>): Promise<void> => {
     throw `update`
   })
-  updateOp = vi.fn((_id: RecordId, _record: Partial<T>): UpdateOperation => {
-    throw `updateOp`
-  })
+  updateOp = vi.fn(
+    (id: RecordId, record: Partial<T>): UpdateOperation =>
+      ({ kind: `update`, id, record }) as unknown as UpdateOperation,
+  )
 
   delete = vi.fn((_id: string | number): Promise<void> => {
     throw `delete`
   })
-  deleteOp = vi.fn((_id: RecordId): DeleteOperation => {
-    throw `deleteOp`
-  })
+  deleteOp = vi.fn(
+    (id: RecordId): DeleteOperation =>
+      ({ kind: `delete`, id }) as unknown as DeleteOperation,
+  )
+
+  /**
+   * A client whose `execute` runs this API's operations through its
+   * `createBulk`, `update`, and `delete`, so a test mocks those calls.
+   */
+  readonly client = {
+    execute: vi.fn(async (operations: Array<unknown>) => {
+      const ops = operations as Array<
+        | { kind: `create`; record: T }
+        | { kind: `update`; id: RecordId; record: Partial<T> }
+        | { kind: `delete`; id: RecordId }
+      >
+      const records = ops.flatMap((op) =>
+        op.kind === `create` ? [op.record] : [],
+      )
+      if (records.length > 0) return this.createBulk(records)
+      for (const op of ops)
+        if (op.kind === `update`) await this.update(op.id, op.record)
+        else if (op.kind === `delete`) await this.delete(op.id)
+      return []
+    }),
+  } as unknown as Client
 
   subscribe = vi.fn((_id: string | number): Promise<ReadableStream<Event>> => {
     return Promise.resolve(

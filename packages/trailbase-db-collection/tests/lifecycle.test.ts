@@ -41,6 +41,7 @@ it.each([`resolve`, `reject`] as const)(
     api.list.mockImplementation(() => active.list.promise)
     const collection = createCollection(
       trailBaseCollectionOptions({
+        client: api.client,
         recordApi: api,
         getKey: (row: Row) => row.id,
         syncMode: `eager`,
@@ -136,6 +137,7 @@ it.each([`listens`, `rejects`] as const)(
     const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
     const collection = createCollection(
       trailBaseCollectionOptions({
+        client: api.client,
         recordApi: api,
         getKey: (row: RaceRow) => row.id,
         startSync: true,
@@ -220,6 +222,7 @@ it.each(
     })
     const collection = createCollection(
       trailBaseCollectionOptions({
+        client: api.client,
         recordApi: api,
         getKey: (row: RaceRow) => row.id,
         startSync: true,
@@ -305,6 +308,7 @@ it(`an unchanged row survives an on-demand reload`, async () => {
   })
   const collection = createCollection(
     trailBaseCollectionOptions({
+      client: api.client,
       recordApi: api,
       getKey: (row: RaceRow) => row.id,
       syncMode: `on-demand`,
@@ -357,6 +361,7 @@ it(`an aborted load writes no rows and its late result changes nothing`, async (
     .mockImplementation(() => Promise.resolve({ records: service }))
   const collection = createCollection(
     trailBaseCollectionOptions({
+      client: api.client,
       recordApi: api,
       getKey: (row: RaceRow) => row.id,
       syncMode: `on-demand`,

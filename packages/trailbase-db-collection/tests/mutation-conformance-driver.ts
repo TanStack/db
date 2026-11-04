@@ -13,10 +13,12 @@
  *   TrailBase application must (its record type has every column), and
  *   removes a held `note` by assigning `undefined`, the update API's
  *   removed field. Removing it by assigning `null` is not generated;
- * - a write request is one record of a `createBulk` call, one `update` call,
- *   which carries only the changed fields and which the service merges into
- *   its row (`field-updates`), or one `delete` call. Each request is
- *   recorded as JSON, as the SDK sends it;
+ * - the adapter sends each transaction as one `client.execute(operations,
+ *   true)`, one TrailBase transaction (`atomic-transactions`). A write
+ *   request is one of its operations: a create, an update, which carries
+ *   only the changed fields and which the service merges into its row
+ *   (`field-updates`), or a delete. Each is recorded as JSON, as the SDK
+ *   sends it, and the next plan answers the call, committing all or none;
  * - a plan answers the next request: a rejection rejects the call with the
  *   plan's error, and a held request waits until `release`. An accepted
  *   write commits and sends its change event at once, or, with a held echo,
@@ -51,7 +53,7 @@ import {
   toSqlRow,
 } from '../../db-adapter-conformance/src'
 import { MockRecordApi } from './mock-record-api'
-import type { Event } from 'trailbase'
+import type { Client, Event, RecordId } from 'trailbase'
 import type {
   ConformanceRow,
   MutationDriver,
@@ -67,6 +69,12 @@ import type {
  * writes an absent `note` as `null`, and removes one by assigning
  * `undefined`, the update API's removed field (an own `undefined`).
  */
+/** An operation from the mock record API's `createOp`, `updateOp`, or `deleteOp`. */
+type Operation =
+  | { kind: `create`; record: ConformanceRecord }
+  | { kind: `update`; id: RecordId; record: Partial<ConformanceRecord> }
+  | { kind: `delete`; id: RecordId }
+
 type ConformanceRecord = {
   id: number
   title: string
@@ -114,42 +122,51 @@ class TrailBaseMutationProvider implements MutationProvider {
     this.api.list.mockImplementation(() =>
       Promise.resolve({ records: [...this.table.values()].map(asSent) }),
     )
-    this.api.createBulk.mockImplementation((records) =>
-      Promise.all(
-        records.map((record) =>
-          this.request({ type: `insert`, id: record.id, row: sentRow(record) }),
-        ),
-      ).then(() => records.map((record) => record.id)),
-    )
-    this.api.update.mockImplementation((id, record) =>
-      this.request({
-        type: `update`,
-        id: Number(id),
-        row: { id: Number(id), ...sentRow(record) },
-      }),
-    )
-    this.api.delete.mockImplementation((id) =>
-      this.request({ type: `delete`, id: Number(id) }),
-    )
   }
 
-  /** One write request: recorded, then answered by the next plan. */
-  private request(request: WriteRequest): Promise<void> {
-    this.log.push(request)
-    const plan = this.plans.shift() ?? acceptAtOnce
-    return new Promise<void>((resolve, reject) => {
-      const answer = () => {
-        if (plan.outcome === `reject`) {
-          reject(plan.error)
-          return
+  /**
+   * The client's `execute(operations, true)`: one TrailBase transaction.
+   * Each operation is a request, recorded as JSON as the SDK sends it; the
+   * next plan answers them together, committing all or none, and their
+   * events go out together.
+   */
+  readonly client = {
+    execute: (operations: Array<unknown>): Promise<Array<number>> => {
+      const requests = (operations as Array<Operation>).map(
+        (op): WriteRequest =>
+          op.kind === `create`
+            ? { type: `insert`, id: op.record.id, row: sentRow(op.record) }
+            : op.kind === `update`
+              ? {
+                  type: `update`,
+                  id: Number(op.id),
+                  row: { id: Number(op.id), ...sentRow(op.record) },
+                }
+              : { type: `delete`, id: Number(op.id) },
+      )
+      this.log.push(...requests)
+      const plan = this.plans.shift() ?? acceptAtOnce
+      return new Promise((resolve, reject) => {
+        const answer = () => {
+          if (plan.outcome === `reject`) {
+            reject(plan.error)
+            return
+          }
+          // The first event is held with the plan's echo; the others queue
+          // behind it, so the transaction's events arrive together.
+          requests.forEach((request, at) =>
+            this.commit(
+              this.change(request, plan),
+              at === 0 && plan.echoHeld && !this.draining,
+            ),
+          )
+          resolve(requests.map((request) => request.id))
         }
-        this.commit(this.change(request, plan), plan.echoHeld && !this.draining)
-        resolve()
-      }
-      if (plan.held && !this.draining) this.held.push(answer)
-      else answer()
-    })
-  }
+        if (plan.held && !this.draining) this.held.push(answer)
+        else answer()
+      })
+    },
+  } as unknown as Client
 
   /** The change an accepted request makes to the service's table. */
   private change(request: WriteRequest, plan: WritePlan): ProviderChange {
@@ -230,6 +247,16 @@ class TrailBaseMutationProvider implements MutationProvider {
   }
 }
 
+/**
+ * Replaces a held record's fields; a `NULL` note is already absent, so only
+ * a held one is removed.
+ */
+function edit(draft: ConformanceRecord, row: ConformanceRow): void {
+  draft.title = row.title
+  if (Object.hasOwn(row, `note`)) draft.note = row.note
+  else if (typeof draft.note === `string`) draft.note = undefined
+}
+
 export function trailBaseMutationDriver(): MutationDriver {
   return {
     adapter: `@tanstack/trailbase-db-collection (eager)`,
@@ -243,12 +270,15 @@ export function trailBaseMutationDriver(): MutationDriver {
       `log-ordered-echoes`,
       `counted-echoes`,
       `reloads`,
+      // Each transaction is one `client.execute(operations, true)`.
+      `atomic-transactions`,
     ]),
     undefinedField: `null`,
     create(seed): MutationFixture {
       const provider = new TrailBaseMutationProvider(seed)
       const collection = createCollection(
         trailBaseCollectionOptions({
+          client: provider.client,
           recordApi: provider.api,
           getKey: (row: ConformanceRecord) => row.id,
           syncMode: `eager`,
@@ -265,13 +295,18 @@ export function trailBaseMutationDriver(): MutationDriver {
         writer: {
           insert: (row) => collection.insert(toSqlRow(row)),
           update: (row) =>
-            collection.update(row.id, (draft) => {
-              draft.title = row.title
-              if (Object.hasOwn(row, `note`)) draft.note = row.note
-              // A `NULL` note is already absent; only a held one is removed.
-              else if (typeof draft.note === `string`) draft.note = undefined
-            }),
+            collection.update(row.id, (draft) => edit(draft, row)),
           delete: (id) => collection.delete(id),
+          batch: (type, rows) => {
+            const ids = rows.map((row) => row.id)
+            return type === `insert`
+              ? collection.insert(rows.map(toSqlRow))
+              : type === `update`
+                ? collection.update(ids, (drafts) =>
+                    drafts.forEach((draft, at) => edit(draft, rows[at]!)),
+                  )
+                : collection.delete(ids)
+          },
         },
         provider,
         drain: () => provider.drain(),

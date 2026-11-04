@@ -32,6 +32,7 @@ const trailBaseClient = initClient(`https://your-trailbase-instance.com`)
 const todosCollection = createCollection(
   trailBaseCollectionOptions({
     id: 'todos',
+    client: trailBaseClient,
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
   })
@@ -45,6 +46,7 @@ The `trailBaseCollectionOptions` function accepts the following options:
 ### Required Options
 
 - `id`: Unique identifier for the collection
+- `client`: The TrailBase client the record API comes from. Each transaction's writes go through its `execute` as one TrailBase transaction, so they commit together or not at all.
 - `recordApi`: TrailBase Record API instance created via `trailBaseClient.records()`
 - `getKey`: Function to extract the unique key from an item
 
@@ -79,6 +81,7 @@ type Todo = {
 const todosCollection = createCollection<SelectTodo, Todo>(
   trailBaseCollectionOptions({
     id: 'todos',
+    client: trailBaseClient,
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
     schema: todoSchema,
@@ -102,6 +105,7 @@ TrailBase supports real-time subscriptions when enabled on the server. The colle
 const todosCollection = createCollection(
   trailBaseCollectionOptions({
     id: 'todos',
+    client: trailBaseClient,
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
     // Real-time updates work automatically when
@@ -121,6 +125,7 @@ Handle inserts, updates, and deletes by providing mutation handlers:
 const todosCollection = createCollection(
   trailBaseCollectionOptions({
     id: 'todos',
+    client: trailBaseClient,
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
     onInsert: async ({ transaction }) => {
@@ -174,6 +179,7 @@ type Todo = z.infer<typeof todoSchema>
 export const todosCollection = createCollection<SelectTodo, Todo>(
   trailBaseCollectionOptions({
     id: 'todos',
+    client: trailBaseClient,
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
     schema: todoSchema,

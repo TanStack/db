@@ -11,7 +11,16 @@ import {
   TimeoutWaitingForIdsError,
 } from './errors'
 import type { OrderByClause } from '../../db/dist/esm/query/ir'
-import type { CompareOp, Event, FilterOrComposite, RecordApi } from 'trailbase'
+import type {
+  Client,
+  CompareOp,
+  CreateOperation,
+  DeleteOperation,
+  Event,
+  FilterOrComposite,
+  RecordApi,
+  UpdateOperation,
+} from 'trailbase'
 
 import type {
   BaseCollectionConfig,
@@ -105,6 +114,13 @@ export interface TrailBaseCollectionConfig<
   `onInsert` | `onUpdate` | `onDelete` | `syncMode`
 > {
   /**
+   * The TrailBase client the record API belongs to. Each transaction's
+   * writes go through its `execute` as one TrailBase transaction, so they
+   * commit together or not at all.
+   */
+  client: Client
+
+  /**
    * Record API name
    */
   recordApi: RecordApi<TRecord>
@@ -165,9 +181,7 @@ export function trailBaseCollectionOptions<
   const internalSyncMode = config.syncMode ?? `eager`
   let fullSyncCompleted = false
 
-  // Numbers an answered write on a key as soon as TrailBase answers it, also
-  // when a later request of its transaction is then rejected, so its event
-  // is never taken for a later write's.
+  // Numbers an answered write on a key as soon as TrailBase answers it.
   const ticket = (id: string): readonly [string, number] => {
     const number = (answeredIds.get(id) ?? 0) + 1
     answeredIds.set(id, number)
@@ -618,7 +632,12 @@ export function trailBaseCollectionOptions<
       }) as const,
   }
 
+  const execute = (
+    operations: Array<CreateOperation | UpdateOperation | DeleteOperation>,
+  ) => config.client.execute(operations, true)
+
   const {
+    client: _client,
     recordApi: _recordApi,
     parse: _parse,
     serialize: _serialize,
@@ -631,41 +650,39 @@ export function trailBaseCollectionOptions<
     getKey,
     // The optimistic mutation overlay is removed when a handler returns, so
     // each one waits until the subscription has applied what it wrote.
+    // A transaction is one TrailBase transaction: its writes commit
+    // together or not at all, and a rejection rejects it whole.
     onInsert: (params: InsertMutationFnParams<TItem, TKey>) =>
       persist(async () => {
-        const ids = await config.recordApi.createBulk(
-          params.transaction.mutations.map((tx) => {
-            const { type, modified } = tx
-            if (type !== `insert`) {
-              throw new ExpectedInsertTypeError(type)
-            }
-            return serialIns(modified)
+        const ids = await execute(
+          params.transaction.mutations.map(({ type, modified }) => {
+            if (type !== `insert`) throw new ExpectedInsertTypeError(type)
+            return config.recordApi.createOp(serialIns(modified))
           }),
         )
         return ids.map((id) => ticket(String(id)))
       }),
-    // A transaction's requests go out one at a time in mutation order, so the
-    // next write starts only after each of them is answered (MUT-8, MUT-10);
-    // a rejection ends the transaction there.
     onUpdate: (params: UpdateMutationFnParams<TItem, TKey>) =>
       persist(async () => {
-        const tickets = []
-        for (const { type, changes, key } of params.transaction.mutations) {
-          if (type !== `update`) throw new ExpectedUpdateTypeError(type)
-          await config.recordApi.update(key, serialUpd(changes))
-          tickets.push(ticket(String(key)))
-        }
-        return tickets
+        const { mutations } = params.transaction
+        await execute(
+          mutations.map(({ type, changes, key }) => {
+            if (type !== `update`) throw new ExpectedUpdateTypeError(type)
+            return config.recordApi.updateOp(key, serialUpd(changes))
+          }),
+        )
+        return mutations.map(({ key }) => ticket(String(key)))
       }),
     onDelete: (params: DeleteMutationFnParams<TItem, TKey>) =>
       persist(async () => {
-        const tickets = []
-        for (const { type, key } of params.transaction.mutations) {
-          if (type !== `delete`) throw new ExpectedDeleteTypeError(type)
-          await config.recordApi.delete(key)
-          tickets.push(ticket(String(key)))
-        }
-        return tickets
+        const { mutations } = params.transaction
+        await execute(
+          mutations.map(({ type, key }) => {
+            if (type !== `delete`) throw new ExpectedDeleteTypeError(type)
+            return config.recordApi.deleteOp(key)
+          }),
+        )
+        return mutations.map(({ key }) => ticket(String(key)))
       }),
     utils: {
       cancel: cancelEventReader,
