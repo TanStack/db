@@ -76,6 +76,13 @@ export type ScopedInclude = {
   source: `refs` | `notes`
   clientFilter: boolean
   outerSelect: `spread` | `fields`
+  /**
+   * What each parent's include relation holds: every member row; the
+   * DISTINCT client ids of its members; or the first of those by client id
+   * (ordered, limit 1). Client ids repeat across parts, so the DISTINCT
+   * variants place equal child values under different parents.
+   */
+  members: `rows` | `distinctClients` | `firstDistinctClient`
 }
 
 export type ScopedShape =
@@ -259,6 +266,11 @@ const includeArbitrary: fc.Arbitrary<ScopedInclude> = fc.record({
   source: fc.constantFrom(`refs` as const, `notes` as const),
   clientFilter: fc.boolean(),
   outerSelect: fc.constantFrom(`spread` as const, `fields` as const),
+  members: fc.constantFrom(
+    `rows` as const,
+    `distinctClients` as const,
+    `firstDistinctClient` as const,
+  ),
 })
 
 export const scopedShapeArbitrary: fc.Arbitrary<ScopedShape> = fc.oneof(
@@ -299,30 +311,42 @@ const writeArbitrary: fc.Arbitrary<ScopedWrite> = fc.oneof(
   }),
 )
 
-const scenarioCandidateArbitrary = scopedShapeArbitrary.chain((shape) =>
-  fc.record({
-    shape: fc.constant(shape),
-    mode: fc.constantFrom(`eager` as const, `onDemand` as const),
-    aliases: fc.record(
-      Object.fromEntries(
-        scopedSlots(shape).map((slot) => [slot, fc.constantFrom(...aliasPool)]),
-      ) as Record<string, fc.Arbitrary<string>>,
-    ),
-    parts: fc.uniqueArray(partArbitrary, {
-      selector: (row) => row.id,
-      maxLength: 3,
+const scenarioCandidates = (
+  shapes: fc.Arbitrary<ScopedShape>,
+  minRows: number,
+): fc.Arbitrary<ScopedScenario> =>
+  shapes.chain((shape) =>
+    fc.record({
+      shape: fc.constant(shape),
+      mode: fc.constantFrom(`eager` as const, `onDemand` as const),
+      aliases: fc.record(
+        Object.fromEntries(
+          scopedSlots(shape).map((slot) => [
+            slot,
+            fc.constantFrom(...aliasPool),
+          ]),
+        ) as Record<string, fc.Arbitrary<string>>,
+      ),
+      parts: fc.uniqueArray(partArbitrary, {
+        selector: (row) => row.id,
+        minLength: minRows,
+        maxLength: 3,
+      }),
+      refs: fc.uniqueArray(refArbitrary, {
+        selector: (row) => row.id,
+        minLength: minRows,
+        maxLength: 4,
+      }),
+      notes: fc.uniqueArray(refArbitrary, {
+        selector: (row) => row.id,
+        minLength: minRows,
+        maxLength: 4,
+      }),
+      writes: fc.array(writeArbitrary, { maxLength: 4 }),
     }),
-    refs: fc.uniqueArray(refArbitrary, {
-      selector: (row) => row.id,
-      maxLength: 4,
-    }),
-    notes: fc.uniqueArray(refArbitrary, {
-      selector: (row) => row.id,
-      maxLength: 4,
-    }),
-    writes: fc.array(writeArbitrary, { maxLength: 4 }),
-  }),
-)
+  )
+
+const scenarioCandidateArbitrary = scenarioCandidates(scopedShapeArbitrary, 0)
 
 /**
  * Three in four scenarios use a legal naming and check the law. The rest use
@@ -338,9 +362,26 @@ export const scopedScenarioArbitrary: fc.Arbitrary<ScopedScenario> = fc.oneof(
   { arbitrary: scenarioCandidateArbitrary, weight: 1 },
 )
 
+/**
+ * The include DISTINCT campaign: the same grammar, restricted to shapes whose
+ * include holds DISTINCT client ids and to legal namings, with at least two
+ * parts and two rows per member source. Small generated sources rarely put
+ * one client id under two parents, the state that law is about.
+ */
+export const scopedDistinctScenarioArbitrary: fc.Arbitrary<ScopedScenario> =
+  scenarioCandidates(
+    scopedShapeArbitrary.filter(
+      (shape) =>
+        (shape.topology === `fromSubquery` ||
+          shape.topology === `unionBranch`) &&
+        shape.include.members !== `rows`,
+    ),
+    2,
+  ).filter(({ shape, aliases }) => isLegalScopedNaming(shape, aliases))
+
 // ## Reference model
 
-type ModelState = {
+export type ScopedModelState = {
   parts: Map<number, ScopedPart>
   refs: Map<number, ScopedRef>
   notes: Map<number, ScopedRef>
@@ -357,10 +398,14 @@ export type ScopedResultRow = Record<string, unknown>
  * combination, and duplicates remain. An absent LEFT match is `undefined`,
  * and `eq()` on it is unknown, which a WHERE clause rejects. `orderedLimit`
  * keeps the first row by part id; tied rows carry identical part fields.
+ *
+ * An include yields one relation per parent row (ARCHITECTURE.md, include
+ * routes), so DISTINCT, ORDER BY, and LIMIT inside it apply to that parent's
+ * members alone: an equal value under another parent is a different row.
  */
 export function recomputeScopedRows(
   shape: ScopedShape,
-  state: ModelState,
+  state: ScopedModelState,
 ): Array<ScopedResultRow> {
   const parts = [...state.parts.values()]
   const refs = [...state.refs.values()]
@@ -447,18 +492,95 @@ export function recomputeScopedRows(
         ]
       : subRows
 
-  const includeRows = include.source === `refs` ? refs : notes
   return outerRows.map((row) => ({
     id: row.id,
     active: row.active,
-    members: includeRows
-      .filter(
-        (member) =>
-          member.partId === row.id &&
-          (!include.clientFilter || member.clientId === 1),
-      )
-      .map((member) => ({ id: member.id, clientId: member.clientId })),
+    members: includedMembers(include, state, row.id),
   }))
+}
+
+function includeSourceMembers(
+  include: ScopedInclude,
+  state: ScopedModelState,
+  partId: number,
+): Array<ScopedRef> {
+  return [...state[include.source].values()].filter(
+    (member) =>
+      member.partId === partId &&
+      (!include.clientFilter || member.clientId === 1),
+  )
+}
+
+function includedMembers(
+  include: ScopedInclude,
+  state: ScopedModelState,
+  partId: number,
+): Array<ScopedResultRow> {
+  const members = includeSourceMembers(include, state, partId)
+  if (include.members === `rows`) {
+    return members.map((member) => ({
+      id: member.id,
+      clientId: member.clientId,
+    }))
+  }
+  const clientIds = [...new Set(members.map((member) => member.clientId))]
+  clientIds.sort((left, right) => left - right)
+  return (
+    include.members === `firstDistinctClient`
+      ? clientIds.slice(0, 1)
+      : clientIds
+  ).map((clientId) => ({ clientId }))
+}
+
+export const SCOPED_DISTINCT_REACH_STATES = [
+  `equal child value under two parents`,
+  `equal child value twice under one parent`,
+  `windowed equal child value under two parents`,
+] as const
+
+export type ScopedDistinctReachState =
+  (typeof SCOPED_DISTINCT_REACH_STATES)[number]
+
+/**
+ * The states where the include DISTINCT law can fail, read from the model
+ * before DISTINCT applies: each parent row the model yields, with its
+ * members' client ids. Joined subqueries can yield one part twice; those are
+ * two parent rows, and each holds its own relation.
+ */
+export function scopedDistinctReachStates(
+  shape: ScopedShape,
+  state: ScopedModelState,
+): Array<ScopedDistinctReachState> {
+  if (
+    (shape.topology !== `fromSubquery` && shape.topology !== `unionBranch`) ||
+    shape.include.members === `rows`
+  ) {
+    return []
+  }
+  const include = shape.include
+  const reached = new Set<ScopedDistinctReachState>()
+  const parentsByClient = new Map<number, number>()
+  for (const parent of recomputeScopedRows(shape, state)) {
+    const clientIds = includeSourceMembers(
+      include,
+      state,
+      parent.id as number,
+    ).map((member) => member.clientId)
+    if (new Set(clientIds).size < clientIds.length) {
+      reached.add(`equal child value twice under one parent`)
+    }
+    for (const clientId of new Set(clientIds)) {
+      parentsByClient.set(clientId, (parentsByClient.get(clientId) ?? 0) + 1)
+    }
+  }
+  if ([...parentsByClient.values()].some((parents) => parents > 1)) {
+    reached.add(
+      include.members === `firstDistinctClient`
+        ? `windowed equal child value under two parents`
+        : `equal child value under two parents`,
+    )
+  }
+  return [...reached]
 }
 
 // ## Production driver
@@ -740,10 +862,7 @@ export function createScopedQuery(
               clientOne(cc[n.includeAnchor!]),
             )
           }
-          child = child.select((cc: Context) => ({
-            id: cc[n.includeAnchor!].id,
-            clientId: cc[n.includeAnchor!].clientId,
-          }))
+          child = selectMembers(child, include, (cc) => cc[n.includeAnchor!])
         } else {
           // `member` is the alias whose row the include selects.
           const member =
@@ -772,10 +891,7 @@ export function createScopedQuery(
           if (include.clientFilter) {
             child = child.where((cc: Context) => clientOne(cc[member]))
           }
-          child = child.select((cc: Context) => ({
-            id: cc[member].id,
-            clientId: cc[member].clientId,
-          }))
+          child = selectMembers(child, include, (cc) => cc[member])
         }
         const members =
           include.form === `toArray` ? toArray(child) : materialize(child)
@@ -785,6 +901,29 @@ export function createScopedQuery(
       },
     )
   })
+}
+
+/** Applies the include's `members` clauses to the row it selects. */
+function selectMembers(
+  child: any,
+  include: ScopedInclude,
+  memberOf: (c: Context) => any,
+): any {
+  if (include.members === `rows`) {
+    return child.select((cc: Context) => ({
+      id: memberOf(cc).id,
+      clientId: memberOf(cc).clientId,
+    }))
+  }
+  let distinctChild = child
+    .select((cc: Context) => ({ clientId: memberOf(cc).clientId }))
+    .distinct()
+  if (include.members === `firstDistinctClient`) {
+    distinctChild = distinctChild
+      .orderBy((cc: Context) => memberOf(cc).clientId)
+      .limit(1)
+  }
+  return distinctChild
 }
 
 // ## Observation
@@ -817,7 +956,7 @@ export function createScopedSources(scenario: ScopedScenario): ScopedSources {
   }
 }
 
-export function createModelState(scenario: ScopedScenario): ModelState {
+export function createModelState(scenario: ScopedScenario): ScopedModelState {
   return {
     parts: new Map(scenario.parts.map((row) => [row.id, { ...row }])),
     refs: new Map(scenario.refs.map((row) => [row.id, { ...row }])),
@@ -827,7 +966,7 @@ export function createModelState(scenario: ScopedScenario): ModelState {
 
 export function applyScopedWrite(
   sourceSets: Array<ScopedSources>,
-  state: ModelState,
+  state: ScopedModelState,
   write: ScopedWrite,
 ): void {
   if (write.type === `delete`) {

@@ -8571,3 +8571,166 @@ describe(`include() argument`, () => {
     ).toThrow(`include() must wrap a subquery builder`)
   })
 })
+
+describe(`distinct in child queries`, () => {
+  type Task = { id: number; boardId: number; title: string }
+  type Tagging = { id: number; taskId: number; tagId: number }
+  type Tag = { id: number; name: string }
+
+  // Task 1 reaches Delivery twice (a direct and a cascaded tagging) and also
+  // has Needs Crane; task 2 reaches Delivery once; task 3 has no taggings.
+  function createSources() {
+    const tasks = createCollection(
+      localOnlyCollectionOptions<Task>({
+        getKey: (task) => task.id,
+        initialData: [
+          { id: 1, boardId: 1, title: `Pour slab` },
+          { id: 2, boardId: 1, title: `Frame walls` },
+          { id: 3, boardId: 2, title: `Paint` },
+        ],
+      }),
+    )
+    const taggings = createCollection(
+      localOnlyCollectionOptions<Tagging>({
+        getKey: (tagging) => tagging.id,
+        initialData: [
+          { id: 1, taskId: 1, tagId: 10 },
+          { id: 2, taskId: 1, tagId: 10 },
+          { id: 3, taskId: 1, tagId: 20 },
+          { id: 4, taskId: 2, tagId: 10 },
+        ],
+      }),
+    )
+    const tags = createCollection(
+      localOnlyCollectionOptions<Tag>({
+        getKey: (tag) => tag.id,
+        initialData: [
+          { id: 10, name: `Delivery` },
+          { id: 20, name: `Needs Crane` },
+        ],
+      }),
+    )
+    return { tasks, taggings, tags }
+  }
+
+  type Sources = ReturnType<typeof createSources>
+
+  function taskTags(
+    q: any,
+    { taggings, tags }: Sources,
+    task: any,
+    limit?: number,
+  ) {
+    let child = q
+      .from({ tagging: taggings })
+      .where(({ tagging }: any) => eq(tagging.taskId, task.id))
+      .innerJoin({ tag: tags }, ({ tagging, tag }: any) =>
+        eq(tagging.tagId, tag.id),
+      )
+      .select(({ tag }: any) => ({ id: tag.id, name: tag.name }))
+      .distinct()
+    if (limit !== undefined)
+      child = child.orderBy(({ tag }: any) => tag.id).limit(limit)
+    return child
+  }
+
+  const expectedTags = {
+    1: [
+      { id: 10, name: `Delivery` },
+      { id: 20, name: `Needs Crane` },
+    ],
+    2: [{ id: 10, name: `Delivery` }],
+    3: [],
+  }
+
+  function tagsByTask(rows: Array<any>) {
+    return Object.fromEntries(
+      rows.map((row) => [row.id, sortedPlainRows(row.tags)]),
+    )
+  }
+
+  for (const form of [`toArray`, `materialize`, `include`] as const) {
+    it(`keeps each parent's distinct child rows [${form}]`, async () => {
+      const sources = createSources()
+      const wrap = { toArray, materialize, include }[form] as any
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ task: sources.tasks }).select(({ task }) => ({
+          id: task.id,
+          tags: wrap(taskTags(q, sources, task)),
+        })),
+      )
+      await collection.preload()
+
+      expect(tagsByTask(collection.toArray)).toEqual(expectedTags)
+
+      // One of task 1's two Delivery taggings leaves; the other still holds it.
+      sources.taggings.delete(1)
+      await flushPromises()
+      expect(tagsByTask(collection.toArray)).toEqual(expectedTags)
+
+      // Task 2's only Delivery tagging leaves; task 1 keeps Delivery.
+      sources.taggings.delete(4)
+      await flushPromises()
+      expect(tagsByTask(collection.toArray)).toEqual({
+        ...expectedTags,
+        2: [],
+      })
+
+      // Task 3 gains Delivery while task 1 already shows it.
+      sources.taggings.insert({ id: 5, taskId: 3, tagId: 10 })
+      await flushPromises()
+      expect(tagsByTask(collection.toArray)).toEqual({
+        ...expectedTags,
+        2: [],
+        3: [{ id: 10, name: `Delivery` }],
+      })
+    })
+  }
+
+  it(`limits each parent's distinct child rows separately`, async () => {
+    const sources = createSources()
+    const collection = createLiveQueryCollection((q) =>
+      q.from({ task: sources.tasks }).select(({ task }) => ({
+        id: task.id,
+        tags: toArray(taskTags(q, sources, task, 1)),
+      })),
+    )
+    await collection.preload()
+
+    expect(tagsByTask(collection.toArray)).toEqual({
+      1: [{ id: 10, name: `Delivery` }],
+      2: [{ id: 10, name: `Delivery` }],
+      3: [],
+    })
+  })
+
+  it(`keeps each nested parent's distinct child rows`, async () => {
+    type Board = { id: number }
+    const sources = createSources()
+    const boards = createCollection(
+      localOnlyCollectionOptions<Board>({
+        getKey: (board) => board.id,
+        initialData: [{ id: 1 }, { id: 2 }],
+      }),
+    )
+    const collection = createLiveQueryCollection((q) =>
+      q.from({ board: boards }).select(({ board }) => ({
+        id: board.id,
+        tasks: toArray(
+          q
+            .from({ task: sources.tasks })
+            .where(({ task }) => eq(task.boardId, board.id))
+            .select(({ task }) => ({
+              id: task.id,
+              tags: toArray(taskTags(q, sources, task)),
+            })),
+        ),
+      })),
+    )
+    await collection.preload()
+
+    expect(
+      tagsByTask(collection.toArray.flatMap((board) => board.tasks)),
+    ).toEqual(expectedTags)
+  })
+})
