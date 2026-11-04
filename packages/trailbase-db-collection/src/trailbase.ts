@@ -149,9 +149,10 @@ export function trailBaseCollectionOptions<
     convert<TItem, TRecord>(config.serialize, item)
 
   // Change events per key, and this client's answered writes per key,
-  // counted while a write is admitted. Each answered write on a key produces
-  // one event there, in order, so a write is confirmed by the event its
-  // answer is numbered for, not by an earlier write's late one (MUT-7).
+  // counted while a write is admitted or an answered write's event is still
+  // to come. Each answered write on a key produces one event there, in
+  // order, so a write is confirmed by the event its answer is numbered for,
+  // not by an earlier write's late one (MUT-7).
   const seenIds = new Store(new Map<string, number>())
   const answeredIds = new Map<string, number>()
   let eventSequence = 0
@@ -161,15 +162,19 @@ export function trailBaseCollectionOptions<
   const internalSyncMode = config.syncMode ?? `eager`
   let fullSyncCompleted = false
 
+  // Numbers an answered write on a key as soon as TrailBase answers it, also
+  // when a later request of its transaction is then rejected, so its event
+  // is never taken for a later write's.
+  const ticket = (id: string): readonly [string, number] => {
+    const number = (answeredIds.get(id) ?? 0) + 1
+    answeredIds.set(id, number)
+    return [id, number]
+  }
+
   const awaitIds = (
-    ids: Array<string>,
+    tickets: Array<readonly [string, number]>,
     timeout: number = 120 * 1000,
   ): Promise<void> => {
-    const tickets = ids.map((id) => {
-      const ticket = (answeredIds.get(id) ?? 0) + 1
-      answeredIds.set(id, ticket)
-      return [id, ticket] as const
-    })
     const completed = (value: Map<string, number>) =>
       tickets.every(([id, ticket]) => (value.get(id) ?? 0) >= ticket)
     if (completed(seenIds.state)) {
@@ -179,7 +184,9 @@ export function trailBaseCollectionOptions<
     return new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         sub.unsubscribe()
-        reject(new TimeoutWaitingForIdsError(ids.toString()))
+        reject(
+          new TimeoutWaitingForIdsError(tickets.map(([id]) => id).toString()),
+        )
       }, timeout)
 
       const sub = seenIds.subscribe((value) => {
@@ -195,11 +202,13 @@ export function trailBaseCollectionOptions<
   // Writes reach TrailBase in author order: a write starts at once when no
   // other is being sent, and otherwise after the earlier one's response
   // (MUT-10). It does not wait for the earlier one's change event. A write
-  // returns the ids it wrote and settles once the change stream carries each
-  // of them (MUT-7).
+  // returns a ticket per request TrailBase answered and settles once the
+  // change stream carries each of them (MUT-7).
   let sending = 0
   let turn: Promise<unknown> = Promise.resolve()
-  const persist = async (write: () => Promise<Array<string>>) => {
+  const persist = async (
+    write: () => Promise<Array<readonly [string, number]>>,
+  ) => {
     writes++
     try {
       const sent = (sending++ === 0 ? write() : turn.then(write)).finally(
@@ -210,10 +219,22 @@ export function trailBaseCollectionOptions<
       turn = sent.catch(() => {})
       await awaitIds(await sent)
     } finally {
-      if (--writes === 0) {
-        seenIds.setState(() => new Map())
-        answeredIds.clear()
-      }
+      writes--
+      forgetSeenIds()
+    }
+  }
+
+  // The counts are kept while a write is admitted or an answered request's
+  // event is still to come, and cleared once neither holds.
+  const forgetSeenIds = () => {
+    if (
+      writes === 0 &&
+      [...answeredIds].every(
+        ([id, number]) => (seenIds.state.get(id) ?? 0) >= number,
+      )
+    ) {
+      seenIds.setState(() => new Map())
+      answeredIds.clear()
     }
   }
 
@@ -447,11 +468,12 @@ export function trailBaseCollectionOptions<
             const sequence = ++eventSequence
             if (loadsInFlight > 0)
               eventSequenceByKey.set(getKey(value), sequence)
-            if (writes > 0) {
+            if (writes > 0 || answeredIds.size > 0) {
               const id = String(getKey(value))
               seenIds.setState((curr: Map<string, number>) =>
                 new Map(curr).set(id, (curr.get(id) ?? 0) + 1),
               )
+              forgetSeenIds()
             }
           }
         }
@@ -572,30 +594,30 @@ export function trailBaseCollectionOptions<
             return serialIns(modified)
           }),
         )
-        return ids.map((id) => String(id))
+        return ids.map((id) => ticket(String(id)))
       }),
     // A transaction's requests go out one at a time in mutation order, so the
     // next write starts only after each of them is answered (MUT-8, MUT-10);
     // a rejection ends the transaction there.
     onUpdate: (params: UpdateMutationFnParams<TItem, TKey>) =>
       persist(async () => {
-        const ids: Array<string> = []
+        const tickets = []
         for (const { type, changes, key } of params.transaction.mutations) {
           if (type !== `update`) throw new ExpectedUpdateTypeError(type)
           await config.recordApi.update(key, serialUpd(changes))
-          ids.push(String(key))
+          tickets.push(ticket(String(key)))
         }
-        return ids
+        return tickets
       }),
     onDelete: (params: DeleteMutationFnParams<TItem, TKey>) =>
       persist(async () => {
-        const ids: Array<string> = []
+        const tickets = []
         for (const { type, key } of params.transaction.mutations) {
           if (type !== `delete`) throw new ExpectedDeleteTypeError(type)
           await config.recordApi.delete(key)
-          ids.push(String(key))
+          tickets.push(ticket(String(key)))
         }
-        return ids
+        return tickets
       }),
     utils: {
       cancel: cancelEventReader,

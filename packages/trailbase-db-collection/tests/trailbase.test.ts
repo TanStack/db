@@ -894,6 +894,50 @@ describe(`TrailBase Integration`, () => {
     }
   })
 
+  it(`confirms a write only by its own event after a rejected transaction on its row`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    const rows = [1, 2].map((id) => ({ id, updated: 0, data: `row-${id}` }))
+    recordApi.list.mockResolvedValue({ records: rows })
+    let controller!: ReadableStreamDefaultController<Event>
+    recordApi.subscribe.mockResolvedValue(
+      new ReadableStream<Event>({
+        start(value) {
+          controller = value
+        },
+      }),
+    )
+    // TrailBase accepts row 1 and rejects row 2; events arrive only when the
+    // test sends them.
+    recordApi.update.mockImplementation((id) =>
+      id === 2 ? Promise.reject(new Error(`rejected`)) : Promise.resolve(),
+    )
+    const collection = createCollection(setUp(recordApi))
+    try {
+      await collection.preload()
+      const failed = collection.update([1, 2], (drafts) => {
+        for (const draft of drafts) draft.updated = 1
+      })
+      await failed.when(`settled`).catch(() => {})
+      const later = collection.update(1, (draft) => {
+        draft.updated = 2
+      })
+      void later.when(`settled`).catch(() => {})
+      for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+      // Row 1's event from the failed transaction, which TrailBase kept.
+      controller.enqueue({ Update: { id: 1, updated: 1, data: `row-1` } })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      // It is not the later write's event, so the later write still waits
+      // and shows its own value (MUT-1, MUT-7).
+      expect(later.state).toBe(`persisting`)
+      expect(stripVirtualProps(collection.get(1))).toMatchObject({ updated: 2 })
+      controller.enqueue({ Update: { id: 1, updated: 2, data: `row-1` } })
+      await later.when(`settled`)
+      expect(later.state).toBe(`completed`)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`local inserts, updates and deletes`, async () => {
     // Prepare mock API.
     const recordApi = new MockRecordApi<Data>()
