@@ -11,6 +11,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  BTreeIndex,
+  BasicIndex,
   coalesce,
   count,
   createCollection,
@@ -19,6 +21,7 @@ import {
   eq,
   groupKeys,
   gt,
+  localOnlyCollectionOptions,
   sum,
 } from '@tanstack/db'
 import {
@@ -27,18 +30,23 @@ import {
   createSignal,
   onCleanup,
 } from 'solid-js'
+import { createStore } from 'solid-js/store'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { runRowSnapshotHistories } from '../../db/tests/conformance/row-snapshot-oracle'
 import { createPublicationLog } from '../../db/tests/conformance/publication-log'
 import { expectPublishedRows } from '../../db/tests/conformance/publication-laws-oracle'
 import { makeLaggingSource } from '../../db/tests/conformance/lagging-source'
 import { makeSyncSource } from '../../db/tests/conformance/sync-source'
 import { makeErrorSource as makeSharedErrorSource } from '../../db/tests/conformance/error-source'
-import { expectResultSurface } from '../../db/tests/conformance/result-laws'
+import {
+  expectResultSurface,
+  selectedRowKeys,
+} from '../../db/tests/conformance/result-laws'
 import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
 import type { PooledLiveQueries } from '@tanstack/db'
 import type {
@@ -64,12 +72,14 @@ function writer<T extends { id: string }>(collection: any) {
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
   collectionId?: string,
+  options?: { rowUpdateMode?: `full` },
 ): SourceHandle<T> {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       id: collectionId ?? `conformance-solid-${sourceSeq++}`,
       getKey: (r) => r.id,
       initialData: [...initialData],
+      rowUpdateMode: options?.rowUpdateMode,
     }),
   )
   const write = writer<T>(collection)
@@ -202,7 +212,7 @@ function mountCollection(collection: any) {
 
 function mountConfig(
   build: QueryBuild,
-  opts?: { gcTime?: number; pool?: PooledLiveQueries },
+  opts?: Parameters<LiveQueryDriver[`mountConfig`]>[1],
 ) {
   // Solid accepts the config-object form via an accessor.
   const { getResult, dispose } = inRoot(() =>
@@ -243,8 +253,9 @@ function mountControllable<P>(
     ...handle,
     publications: published.values,
     statePublications: published.stateValues,
-    async setParam(next: P) {
+    async setParam(next: P, observe?: () => void) {
       setParam(() => next)
+      observe?.()
       // The first paint after the change: the framework ran its reactive
       // work synchronously, but no later task has run.
       published.record(getResult()(), getResult().state)
@@ -255,11 +266,14 @@ function mountControllable<P>(
 
 const solidDriver: LiveQueryDriver = {
   name: `solid`,
+  parameterObservationCut: `synchronous reactive propagation`,
   // Reactive reads decide when the query compiles again.
   comparesQueryIdentity: false,
   disabledRepresentation: `empty-reactive`,
   ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
+  indexTypes: { basic: BasicIndex, btree: BTreeIndex },
   makeSource,
+  wrapSnapshotValue: <T extends object>(value: T) => createStore(value)[0],
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>
     makeLaggingSource<T>(
@@ -331,6 +345,57 @@ describe(`owned native scope setup`, () => {
 })
 
 runSuite(solidDriver)
+
+// The reported source is local-only. Keep that receiving path on the same
+// snapshot law and histories as the adapter suite's controlled sync source.
+it.each([`callback`, `config`, `collection`] as const)(
+  `preserves local-only row snapshots through the %s input`,
+  async (input) => {
+    await runRowSnapshotHistories(
+      {
+        ...solidDriver,
+        name: `solid-local-only`,
+        snapshotSourceUsesDraft: true,
+        makeSource<T extends { id: string }>(
+          initialData: ReadonlyArray<T>,
+          collectionId?: string,
+          options?: { rowUpdateMode?: `full` },
+        ) {
+          const collection = createCollection(
+            localOnlyCollectionOptions<T>({
+              id: collectionId,
+              getKey: (row) => row.id,
+              initialData: [...initialData],
+            }),
+          )
+          return {
+            collection,
+            insert: (row: T) => {
+              collection.insert(row)
+            },
+            update: (row: T) => {
+              return collection.update(row.id, (draft) => {
+                // Local-only sync already replaces full rows. Remove omitted
+                // keys from the draft when the shared history requests it.
+                if (options?.rowUpdateMode === `full`)
+                  for (const key of selectedRowKeys(draft))
+                    if (!Object.hasOwn(row, key))
+                      Reflect.deleteProperty(draft, key)
+                Object.assign(draft, row)
+              })
+            },
+            remove: (row: T) => {
+              collection.delete(row.id)
+            },
+          }
+        },
+      },
+      input,
+      `sync`,
+    )
+  },
+)
+
 it(`preserves raw result types through the actual driver reader`, () => {
   const rawData = [{ id: `a`, value: undefined }]
   const raw = Object.assign(() => rawData, {

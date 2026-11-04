@@ -10,10 +10,10 @@ it(`does not let fixed campaign reach conceal an unreached random state`, async 
   vi.spyOn(console, `info`).mockImplementation(() => {})
   let campaigns = 0
   await expect(
-    runOracleCampaign(`TEST_ORACLE`, [`required`], (reach, parameters) => {
+    runOracleCampaign(`TEST_ORACLE`, [`required`], (reach) => {
       campaigns++
       reach.beginHistory()
-      if (parameters.seed !== undefined) reach.reach(`required`)
+      if (campaigns === 1) reach.reach(`required`)
     }),
   ).rejects.toThrow(/required \(0\)/)
   expect(campaigns).toBe(2)

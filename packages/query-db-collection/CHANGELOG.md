@@ -1,5 +1,11 @@
 # @tanstack/query-db-collection
 
+## 1.5.1
+
+### Patch Changes
+
+- Keep ordered source prefixes complete after a refetch moves a page boundary during an optimistic transaction. ([#2332](https://github.com/TanStack/db/pull/2332))
+
 ## 1.5.0
 
 ### Minor Changes

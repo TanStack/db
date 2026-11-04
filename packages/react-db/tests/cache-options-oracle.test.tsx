@@ -11,10 +11,12 @@
  */
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { renderToString } from 'react-dom/server'
+import { Suspense } from 'react'
 import { DbClient, Query, collectionOptions } from '@tanstack/db'
 import { afterAll, expect, test, vi } from 'vitest'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveQuery } from '../src/useLiveQuery'
+import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import {
   cacheOptionDeclarations,
   cacheOptionHistories,
@@ -34,7 +36,7 @@ declareOracle({
   model: [conflictingCacheOptions],
   grammar: [cacheOptionHistories],
 })
-const paths = [`client-render`, `server-render`] as const
+const paths = [`client-render`, `suspense-render`, `server-render`] as const
 const reaches = Object.fromEntries(
   paths.map((path) => [
     path,
@@ -42,7 +44,7 @@ const reaches = Object.fromEntries(
       `admission`,
       `retry`,
       `original-reuse`,
-      ...(path === `client-render` ? [`settled-client-rows`] : []),
+      ...(path !== `server-render` ? [`settled-client-rows`] : []),
       ...cacheOptionReachStates,
     ]),
   ]),
@@ -126,9 +128,14 @@ test.each(
       )
       expect(html).toContain(`first,peer`)
     } else {
-      const result = renderHook(() => useLiveQuery(options), {
+      const useQuery = path.startsWith(`suspense`)
+        ? useLiveSuspenseQuery
+        : useLiveQuery
+      const result = renderHook(() => useQuery(options), {
         wrapper: ({ children }) => (
-          <DbProvider client={client}>{children}</DbProvider>
+          <DbProvider client={client}>
+            <Suspense fallback={null}>{children}</Suspense>
+          </DbProvider>
         ),
       })
       unmounts.push(result.unmount)
@@ -156,7 +163,7 @@ test.each(
     }
     render(first, 0)
     reach.reach(`original-reuse`)
-    if (path === `client-render`) {
+    if (path !== `server-render`) {
       // Admission stays synchronous. The receiving row law also applies after
       // React commits the cached seed-to-live handoff in its native scheduler.
       await act(async () => {})

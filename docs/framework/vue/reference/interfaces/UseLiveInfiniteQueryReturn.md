@@ -109,7 +109,7 @@ Defined in: [useLiveInfiniteQuery.ts:38](https://github.com/TanStack/db/blob/mai
 status: ComputedRef<CollectionStatus>;
 ```
 
-Defined in: [useLiveQuery.ts:60](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L60)
+Defined in: [useLiveQuery.ts:50](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L50)
 
 #### Inherited from
 

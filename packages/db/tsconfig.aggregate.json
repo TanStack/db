@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": {
+    "incremental": false,
+    "noEmit": true,
+    "paths": {
+      "@tanstack/db": ["./src/index.ts"],
+      "@tanstack/db-ivm": ["../db-ivm/src/index.ts"],
+      "@tanstack/store": ["../store/src/index.ts"]
+    }
+  },
+  "include": [
+    "tests/query/aggregate-select-oracle.property.test.ts",
+    "tests/declared-reach-oracle.property.test.ts",
+    "tests/oracle-campaign.test.ts",
+    "tests/oracle-reach.test.ts",
+    "tests/oracle-replay.test.ts",
+    "tests/query/includes-publication-oracle.test.ts",
+    "../db-ivm/tests/structural-identity-oracle.property.test.ts",
+    "../offline-transactions/tests/transaction-serializer-oracle.property.test.ts"
+  ]
+}

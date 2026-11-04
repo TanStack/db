@@ -57,7 +57,6 @@
   "pendingSyncedProjection": "a7",
   "orderedLoadFailed": "ba",
   "syncStartDeferred": "bb",
-  "getCollectionLayoutRevision": "bc",
   "leaseGeneration": "bd",
   "syncEntryActive": "bg",
   "builderDependencies": "bh",
@@ -191,7 +190,6 @@
   "handoffScheduled": "dO",
   "requestPageCount": "dP",
   "createLiveQueryRecord": "dQ",
-  "getCollectionRevision": "dR",
   "materializeCollection": "dS",
   "resetSnapshotTracking": "dU",
   "sendChangesToPipeline": "dV",
@@ -210,7 +208,6 @@
   "restoreInitialWindow": "d9",
   "settleTruncateReplay": "ea",
   "takeInternal": "eb",
-  "_createRefForSource": "ee",
   "compileBasePipeline": "ef",
   "scheduleIdleCleanup": "eg",
   "scheduleRepairRetry": "eh",
@@ -248,7 +245,6 @@
   "cleanupRetiredEntries": "eR",
   "comparisonOpts": "eS",
   "createSyncMetadataApi": "eT",
-  "lastLayoutKeys": "eU",
   "pendingSourceRecovery": "eV",
   "composeBatchedChange": "eW",
   "ensureStandardSchema": "eX",
@@ -291,7 +287,6 @@
   "getSyncConfig": "fE",
   "prepareChange": "fF",
   "applyChanges": "fG",
-  "entriesEqual": "fH",
   "leaseVersion": "fI",
   "loadBoundary": "fJ",
   "loadPage": "fK",
@@ -435,5 +430,6 @@
   "awaitsSiblingReplays": "gN",
   "grownPrefixRows": "gZ",
   "ownPrefixEnd": "he",
-  "sourceListenerCleanups": "cb"
+  "sourceListenerCleanups": "cb",
+  "cachedRows": "dB"
 }

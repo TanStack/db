@@ -1687,9 +1687,10 @@ class PersistedCollectionRuntime<
   // until this tab's source writes the key; a storage read records each row
   // it finds changed as a source's write.
   private runWrittenKeys = new Set<TKey>()
-  // Row metadata is a separate object (D5): keys whose metadata a source
-  // wrote in this run, a delete included.
-  private runWrittenMetadataKeys = new Set<TKey>()
+  // Row metadata is a separate object (D5). Its latest writer distinguishes
+  // local metadata, which can exist only in this run for a missing row (D16),
+  // from a peer's named replacement that a storage read must receive (D11).
+  private runMetadataWriters = new Map<TKey, `local` | `peer`>()
   private runWritesUnknown = false
   private peerWritesUnknown = false
   private keysKnownSincePeerWrites = new Set<TKey>()
@@ -2330,7 +2331,7 @@ class PersistedCollectionRuntime<
     const previousControls = this.syncControls
     this.setSyncControls(syncControls)
     this.runWrittenKeys.clear()
-    this.runWrittenMetadataKeys.clear()
+    this.runMetadataWriters.clear()
     this.runWritesUnknown = false
     this.peerWritesUnknown = false
     this.keysKnownSincePeerWrites.clear()
@@ -3665,7 +3666,7 @@ class PersistedCollectionRuntime<
       this.keysKnownSincePeerWrites.add(key)
     }
     for (const key of metadataKeys) {
-      this.runWrittenMetadataKeys.add(key)
+      this.runMetadataWriters.set(key, `local`)
       this.keysKnownSincePeerWrites.add(key)
     }
   }
@@ -3708,7 +3709,7 @@ class PersistedCollectionRuntime<
         state.getAcceptedSyncedRow(row.key),
         row.value,
       ) &&
-      (this.keepsSeedMetadata(row.key) ||
+      (this.keepsMetadata(row.key) ||
         equalPersistedSnapshotValues(
           this.syncControls.metadata?.row.get(row.key),
           row.metadata,
@@ -3750,29 +3751,33 @@ class PersistedCollectionRuntime<
   /**
    * Writes a stored row over the row this tab holds. A stored row is whole,
    * so it replaces that row. Its metadata replaces this tab's unless this
-   * tab held the row and keeps its metadata as a seed's (decision 18).
+   * tab held the row and retains seed or local source metadata (D18/D16).
    */
   private writeStoredRow(
     row: { key: TKey; value: T; metadata?: unknown },
-    keepsSeedMetadata: boolean,
+    keepsMetadata: boolean,
   ): void {
     this.syncControls.write?.({
       type: `update`,
       value: row.value,
       [syncWriteNamesWholeRow]: true,
     } as { type: `update`; value: T })
-    if (!keepsSeedMetadata || !this.keepsSeedMetadata(row.key))
+    if (!keepsMetadata || !this.keepsMetadata(row.key))
       this.writeStoredMetadata(row.key, row.metadata)
   }
 
   /**
-   * Whether a reload keeps this tab's metadata for the key: no source wrote
-   * it in this run, so it is a seed's (decision 18). When this run's writes
-   * are unknown, stored metadata that differs is a source write instead
-   * (decision 15).
+   * A known storage read keeps seed metadata (D18) and local source metadata
+   * (D16), including a value that was never durable. A named peer replacement
+   * supplies its own metadata (D11); unknown peer writes are judged by D15.
+   * A local truncate removes old seeds, but does not make later local writes
+   * unknown. Local writes after an unknown notice establish their key again.
    */
-  private keepsSeedMetadata(key: TKey): boolean {
-    return !this.writesUnknown(key) && !this.runWrittenMetadataKeys.has(key)
+  private keepsMetadata(key: TKey): boolean {
+    const writer = this.runMetadataWriters.get(key)
+    if (writer === `local`)
+      return !this.peerWritesUnknown || this.keysKnownSincePeerWrites.has(key)
+    return writer === undefined && !this.writesUnknown(key)
   }
 
   private writeStoredMetadata(key: TKey, metadata: unknown): void {
@@ -4194,7 +4199,7 @@ class PersistedCollectionRuntime<
           if (!durable) this.syncControls.write?.({ type: `delete`, key })
           else if (!equalPersistedSnapshotValues(base?.get(key), durable.value))
             this.writeStoredRow(durable, true)
-          else if (!this.keepsSeedMetadata(key))
+          else if (!this.keepsMetadata(key))
             this.writeStoredMetadata(key, durable.metadata)
         }
       }
@@ -5621,7 +5626,7 @@ class PersistedCollectionRuntime<
           (mutation) => mutation.key,
         ),
       ])
-        this.runWrittenMetadataKeys.add(key as TKey)
+        this.runMetadataWriters.set(key as TKey, `peer`)
     }
     if (this.scopedRecovery) {
       if (txCommitted.requiresFullReload) this.runWritesUnknown = true

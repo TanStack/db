@@ -6,7 +6,6 @@ import {
   untracked,
 } from '@angular/core'
 import {
-  BaseQueryBuilder,
   configPool,
   createLiveQueryObserver,
   isCollection,
@@ -145,54 +144,58 @@ export function injectLiveQuery<
 export function injectLiveQuery(opts: any) {
   assertInInjectionContext(injectLiveQuery)
 
-  const collection = computed(() => {
+  let pendingWindow: (() => void) | undefined
+  let previousCollection: ReturnType<typeof resolveLiveQueryValue> = null
+  const resolveNext = (value: unknown, pool?: PooledLiveQueries) =>
+    (previousCollection = resolveLiveQueryValue(value, {
+      gcTime: DEFAULT_GC_TIME_MS,
+      pool,
+      previousCollection,
+      windowOwner: resolveNext,
+      onWindowChange: (move) => {
+        pendingWindow = move
+      },
+    }))
+  const resolveInput = () => {
     // Check if it's an existing collection
     if (isCollection(opts)) {
+      previousCollection = null
       return opts
     }
 
     if (typeof opts === `function`) {
-      // Check if query function returns null/undefined (disabled query)
-      const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
-      const result = opts(queryBuilder)
-
-      if (result === undefined || result === null) {
-        // Disabled query - return null
-        return null
-      }
-
-      return resolveLiveQueryValue(result, { gcTime: DEFAULT_GC_TIME_MS })
-    }
-
-    // Check if it's reactive query options
-    const isReactiveQueryOptions =
-      opts &&
-      typeof opts === `object` &&
-      typeof opts.query === `function` &&
-      typeof opts.params === `function`
-
-    if (isReactiveQueryOptions) {
-      // The pool is checked first, so a disabled query rejects it too.
-      const pool = configPool(opts)
-      // A query function returning null or undefined disables the query.
-      const result = opts.query({
-        params: opts.params(),
-        q: new BaseQueryBuilder() as InitialQueryBuilder,
-      })
-      return resolveLiveQueryValue(result, {
-        gcTime: DEFAULT_GC_TIME_MS,
-        pool,
-      })
+      return resolveNext(opts)
     }
 
     // Handle LiveQueryCollectionConfig objects. Default startSync/gcTime to
     // match the query-fn and reactive-options paths, but let an explicit value
     // in the config win — otherwise a bare `{ query }` never syncs.
     if (opts && typeof opts === `object` && typeof opts.query === `function`) {
-      return resolveLiveQueryValue(opts, { gcTime: DEFAULT_GC_TIME_MS })
+      if (typeof opts.params === `function`) {
+        // The pool is checked first, so a disabled query rejects it too.
+        const pool = configPool(opts)
+        return resolveNext(
+          (q: InitialQueryBuilder) => opts.query({ params: opts.params(), q }),
+          pool,
+        )
+      }
+      return resolveNext(opts)
     }
 
     throw new Error(`Invalid options provided to injectLiveQuery`)
+  }
+  const resolved = computed<{
+    collection: ReturnType<typeof resolveLiveQueryValue>
+    move: (() => void) | undefined
+  }>(() => {
+    pendingWindow = undefined
+    const collection = resolveInput()
+    return { collection, move: pendingWindow }
+  })
+  const collection = computed(() => resolved().collection)
+  effect(() => {
+    const { move } = resolved()
+    untracked(() => move?.())
   })
 
   // Observers are inert until subscribed. A read can therefore follow the

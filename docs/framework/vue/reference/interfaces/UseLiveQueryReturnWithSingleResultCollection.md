@@ -3,7 +3,7 @@ id: UseLiveQueryReturnWithSingleResultCollection
 title: UseLiveQueryReturnWithSingleResultCollection
 ---
 
-Defined in: [useLiveQuery.ts:101](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L101)
+Defined in: [useLiveQuery.ts:91](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L91)
 
 The status and flag refs every `useLiveQuery` result has.
 
@@ -33,7 +33,7 @@ The status and flag refs every `useLiveQuery` result has.
 collection: ComputedRef<Collection<T, TKey, TUtils, StandardSchemaV1<unknown, unknown>, T> & SingleResult>;
 ```
 
-Defined in: [useLiveQuery.ts:108](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L108)
+Defined in: [useLiveQuery.ts:98](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L98)
 
 ***
 
@@ -43,7 +43,7 @@ Defined in: [useLiveQuery.ts:108](https://github.com/TanStack/db/blob/main/packa
 data: ComputedRef<T | undefined>;
 ```
 
-Defined in: [useLiveQuery.ts:107](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L107)
+Defined in: [useLiveQuery.ts:97](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L97)
 
 ***
 
@@ -53,7 +53,7 @@ Defined in: [useLiveQuery.ts:107](https://github.com/TanStack/db/blob/main/packa
 state: ComputedRef<Map<TKey, T>>;
 ```
 
-Defined in: [useLiveQuery.ts:106](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L106)
+Defined in: [useLiveQuery.ts:96](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L96)
 
 ***
 
@@ -63,7 +63,7 @@ Defined in: [useLiveQuery.ts:106](https://github.com/TanStack/db/blob/main/packa
 status: ComputedRef<CollectionStatus>;
 ```
 
-Defined in: [useLiveQuery.ts:60](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L60)
+Defined in: [useLiveQuery.ts:50](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L50)
 
 #### Inherited from
 

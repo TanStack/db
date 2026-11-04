@@ -3,7 +3,7 @@ import { createSourceRecord } from '../utils/source-record.js'
 import { createDeferred } from '../deferred.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
-import { deepEquals } from '../utils.js'
+import { samePublishedValue } from '../utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
 import { buildHealthTree, healthNode } from '../collection/health-tree.js'
 import { isFailedStatus } from '../live-query-primitives.js'
@@ -717,8 +717,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.unsubscribeCallbacks.add(unsubscribe)
 
       if (
-        Object.values(this.optimizableOrderByCollections).some(
-          (info) => info.joinedFilterSourceId === sourceId,
+        Object.values(this.optimizableOrderByCollections).some((info) =>
+          info.joinedFilterSourceIds?.includes(sourceId),
         )
       ) {
         this.unsubscribeCallbacks.add(
@@ -764,8 +764,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           () => false,
           undefined,
           () =>
-            orderByInfo.joinedFilterSourceId !== undefined &&
-            this.hasPendingJoinedWork(orderByInfo.joinedFilterSourceId),
+            orderByInfo.joinedFilterSourceIds?.some((joinedSourceId) =>
+              this.hasPendingJoinedWork(joinedSourceId),
+            ) ?? false,
         )
         this.orderedLoaders.set(sourceId, loader)
         loader.start()
@@ -1143,10 +1144,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   }
 
   private hasPendingJoinedFilterWork(): boolean {
-    return Object.values(this.optimizableOrderByCollections).some(
-      (info) =>
-        info.joinedFilterSourceId !== undefined &&
-        this.hasPendingJoinedWork(info.joinedFilterSourceId),
+    return Object.values(this.optimizableOrderByCollections).some((info) =>
+      info.joinedFilterSourceIds?.some((sourceId) =>
+        this.hasPendingJoinedWork(sourceId),
+      ),
     )
   }
 
@@ -1346,10 +1347,13 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
     wasPresent &&
     isPresent &&
     insertValue !== undefined &&
-    (publishedRows instanceof Set || !deepEquals(previousValue, insertValue))
+    (publishedRows instanceof Set ||
+      !samePublishedValue(previousValue, insertValue))
   ) {
     // Unordered Effects preserve all graph updates without comparing values.
-    // Ordered repairs compare with the preceding coherent publication.
+    // Ordered repairs compare with the preceding coherent publication: -0
+    // and 0 are distinct row values (FID-1), and a class instance equals
+    // only itself.
     return {
       type: `update`,
       key,

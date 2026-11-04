@@ -17,6 +17,7 @@ import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { cleanupAll } from './pagination-support.js'
+import { registerLimitAdmissionOracle } from './limit-admission-oracle.js'
 import type { PageRow } from './pagination-support.js'
 import type {
   ChangeMessage,
@@ -2843,6 +2844,8 @@ async function expectInflightRequestFillsNewWindow(): Promise<void> {
     await cleanupAll(live, source)
   }
 }
+
+registerLimitAdmissionOracle()
 
 describe(`pagination recomputation oracle`, () => {
   it(`refills a joined result window through a contract-compliant source`, async () => {

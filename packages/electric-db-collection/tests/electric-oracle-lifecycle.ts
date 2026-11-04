@@ -7,6 +7,33 @@
  * remains primary, while cleanup failures stay visible as warnings; without a
  * primary error, the first cleanup failure rejects after later releases run.
  */
+/**
+ * Starts an `awaitTxId` and an `awaitMatch` that no evidence satisfies, and
+ * returns how they have settled: both `pending` or both `rejected`. A split
+ * outcome is returned as itself, so a comparison rejects it.
+ */
+export function startUnmetWaits(utils: {
+  awaitTxId: (txid: number, timeout?: number) => Promise<boolean>
+  awaitMatch: (match: () => boolean, timeout?: number) => Promise<boolean>
+}): () => `pending` | `rejected` {
+  let rejected = 0
+  for (const wait of [
+    utils.awaitTxId(2_000_000_000, 2_000_000_000),
+    utils.awaitMatch(() => false, 2_000_000_000),
+  ]) {
+    void wait.then(
+      () => undefined,
+      () => rejected++,
+    )
+  }
+  return () =>
+    rejected === 2
+      ? `rejected`
+      : rejected === 0
+        ? `pending`
+        : (`one of two rejected` as never)
+}
+
 export async function atCheckpoint<T>(
   promise: Promise<T>,
   label: string,

@@ -1,9 +1,15 @@
 'use client'
 
 import { useRef } from 'react'
-import { rejectLiveQueryInput, toBoundaryError } from '@tanstack/db'
-import { useLiveQueryForSuspense } from './useLiveQuery'
-import { getLiveQueryResultInfo } from './live-query-internals'
+import {
+  getLiveQueryStatusFlags,
+  getSourceObjectToken,
+  getStableValueHash,
+  rejectLiveQueryInput,
+  toBoundaryError,
+} from '@tanstack/db'
+import { useLiveQueryImpl } from './useLiveQuery'
+import { getPreparedSources } from './source-id-bindings'
 import type { UseLiveQueryConfig } from './useLiveQuery'
 import type {
   Collection,
@@ -13,30 +19,188 @@ import type {
   HealthNode,
   InferResultType,
   InitialQueryBuilder,
+  LiveQueryObserver,
+  LiveQuerySnapshot,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
+
+type SuspenseCollection = Collection<object, string | number, {}>
+type SuspenseCollectionEntry = {
+  collection: SuspenseCollection
+  windowOwner: object
+  owner?: SuspenseBinding
+  observer?: LiveQueryObserver<object, string | number>
+  release: () => void
+}
+
+// Retry resources and first-load errors use the same scope without a DbClient.
+const unscopedClient = {}
+const suspenseCollectionsByClient = new WeakMap<
+  object,
+  Map<string, SuspenseCollectionEntry>
+>()
+function getSourceQualifiedSuspenseKey(
+  preparedValue: unknown,
+  queryHash: string,
+  client: DbClient | undefined,
+): string {
+  const sourceIds = getPreparedSources(
+    preparedValue,
+    client,
+    `useLiveSuspenseQuery`,
+  ).map(getSourceObjectToken)
+  const {
+    query: _query,
+    pool: _pool,
+    ...options
+  } = (preparedValue as { query?: unknown } | null | undefined)?.query
+    ? (preparedValue as Record<string, unknown>)
+    : {}
+  // Local output options qualify pending retry adoption; query identity binds
+  // mounted options. Object/function declarations compare by exact runtime reference.
+  options.autoIndex ??= `off`
+  for (const key in options) {
+    const value = options[key]
+    if (value === undefined) delete options[key]
+    else if (
+      value &&
+      (typeof value === `object` || typeof value === `function`)
+    )
+      options[key] = getSourceObjectToken(value)
+  }
+  return getStableValueHash([sourceIds, options, queryHash])
+}
+
+/** Uncommitted retries may adopt work; successful outputs have one owner. */
+export class SuspenseBinding {
+  private entry?: SuspenseCollectionEntry
+  private seed?: LiveQuerySnapshot<object, string | number>
+  collection?: Collection<any, any, any>
+  promise?: Promise<void>
+  ready = false
+
+  get needsOwnCollection(): boolean {
+    return this.entry !== undefined && this.entry.owner !== this
+  }
+
+  resolve(
+    input: unknown,
+    hash: string,
+    client: DbClient | undefined,
+    compile: (owned: boolean, windowOwner: object) => SuspenseCollection | null,
+  ): SuspenseCollection | null {
+    const scope = client ?? unscopedClient
+    let cache = suspenseCollectionsByClient.get(scope)
+    if (!cache) {
+      cache = new Map()
+      suspenseCollectionsByClient.set(scope, cache)
+    }
+    const owned = this.entry?.owner === this
+    const key = owned
+      ? undefined
+      : getSourceQualifiedSuspenseKey(input, hash, client)
+    const cached = key === undefined ? undefined : cache.get(key)
+    if (cached) return (this.entry = cached).collection
+
+    // A new attempt gets a fresh resolver token. Adoption retains that token;
+    // another attempt must not overwrite the adopted Collection's plan.
+    const windowOwner = owned ? this.entry!.windowOwner : {}
+    const collection = compile(owned, windowOwner)
+    if (owned && collection === this.entry!.collection) return collection
+    this.seed = undefined
+    if (collection && this.entry?.collection !== collection) {
+      const entryKey = key ?? getSourceQualifiedSuspenseKey(input, hash, client)
+      const release = () => {
+        if (cache.get(entryKey) === entry) cache.delete(entryKey)
+        removeStatusListener()
+      }
+      const entry = { collection, windowOwner, release }
+      this.entry = entry
+      cache.set(entryKey, entry)
+      const removeStatusListener = collection.on(
+        `status:change`,
+        ({ status }) => {
+          if (status === `cleaned-up`) release()
+          // Preserve failures through React's immediate retry.
+          else if (status === `error` || status === `crashed`)
+            setTimeout(release, 0)
+        },
+      )
+    }
+    return collection
+  }
+
+  // The first successful candidate may keep the preload. Other candidates get
+  // private outputs seeded from its completed snapshot. Keep the retry entry
+  // available until commit, since React can discard a successful candidate.
+  forkReady(
+    observer: LiveQueryObserver<object, string | number>,
+    compile: (owned: boolean, windowOwner: object) => SuspenseCollection | null,
+  ): SuspenseCollection | undefined {
+    if (!this.entry || this.entry.owner === this) return
+    const resource = (this.entry.observer ??= observer)
+    const snapshot =
+      typeof window === `undefined`
+        ? resource.getServerSnapshot(true)
+        : resource.getSnapshot()
+    if (!snapshot.isReady) return
+    if (!this.entry.owner) {
+      this.entry.owner = this
+      return
+    }
+    const windowOwner = {}
+    const collection = compile(false, windowOwner)
+    if (!collection) return
+    this.seed = { ...snapshot, collection }
+    this.entry = {
+      collection,
+      windowOwner,
+      owner: this,
+      release: this.entry.release,
+    }
+    return collection
+  }
+
+  read(snapshot: LiveQuerySnapshot<object, string | number>) {
+    if (snapshot.isReady || snapshot.isLoadingError || snapshot.isCrashed) {
+      // A copied ready view is provisional until this output's first load.
+      // Its failure must end both the seed and the hook's ready latch.
+      if (this.seed && snapshot.isLoadingError) this.ready = false
+      this.seed = undefined
+    }
+    // Copy only rows from the peer. This output's observer owns its health,
+    // including source notifications and query-local request failures.
+    if (this.seed && snapshot.health !== this.seed.health) {
+      this.seed = {
+        ...this.seed,
+        ...getLiveQueryStatusFlags(`ready`, snapshot.health),
+      }
+    }
+    return this.seed ?? snapshot
+  }
+
+  claim(): (() => void) | undefined {
+    // Capture this render's entry: React can replay an older commit's effect
+    // after a replacement suspends. That effect must release only its entry.
+    return this.entry?.release
+  }
+}
 
 // React can discard a render that suspends, including its refs. Keep the
 // initial-render failure across retries, scoped by client because streamed
 // preloads of the same collection can fail independently.
 const initialRenderErrors = new WeakMap<
   Collection<any, any, any>,
-  {
-    byClient: WeakMap<DbClient, { error: unknown; clientQuery?: object }>
-    unscoped?: { error: unknown; clientQuery?: object }
-  }
+  WeakMap<object, { error: unknown; clientQuery?: object }>
 >()
 
 function clearInitialRenderError(
   collection: Collection<any, any, any>,
   client: DbClient | undefined,
 ) {
-  const entry = initialRenderErrors.get(collection)
-  if (!entry) return
-  if (client) entry.byClient.delete(client)
-  else delete entry.unscoped
+  initialRenderErrors.get(collection)?.delete(client ?? unscopedClient)
 }
 
 function rememberInitialRenderError(
@@ -48,14 +212,13 @@ function rememberInitialRenderError(
   if (collection.status === `cleaned-up`) return
   let entry = initialRenderErrors.get(collection)
   if (!entry) {
-    entry = { byClient: new WeakMap() }
+    entry = new WeakMap()
     collection.once(`status:cleaned-up`, () => {
       initialRenderErrors.delete(collection)
     })
     initialRenderErrors.set(collection, entry)
   }
-  if (client) entry.byClient.set(client, { error, clientQuery })
-  else entry.unscoped = { error }
+  entry.set(client ?? unscopedClient, { error, clientQuery })
 }
 
 /**
@@ -200,12 +363,12 @@ export function useLiveSuspenseQuery<
 
 // Implementation - uses useLiveQuery internally and adds Suspense logic
 export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
-  const promiseRef = useRef<Promise<void> | null>(null)
-  const collectionRef = useRef<Collection<any, any, any> | null>(null)
-  const hasBeenReadyRef = useRef(false)
+  const bindingRef = useRef<SuspenseBinding | null>(null)
+  const binding = (bindingRef.current ??= new SuspenseBinding())
 
   // Use useLiveQuery to handle collection management and reactivity
-  const result = useLiveQueryForSuspense(configOrQueryOrCollection)
+  const { result, client, queryHash, observer, deferredCollections } =
+    useLiveQueryImpl(configOrQueryOrCollection, binding)
 
   if (!result.isEnabled) {
     // Suspense queries cannot be disabled - this matches TanStack Query's useSuspenseQuery behavior
@@ -218,64 +381,53 @@ export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
     )
   }
 
-  const queryInfo = getLiveQueryResultInfo(result)
+  // An enabled observer snapshot always has its Collection.
+  const collection = result.collection!
+
   // The render boundary: an error thrown before this render commits releases
   // the sync starts it deferred. A thrown promise suspends; its preload owns
   // those starts.
   try {
     // Reset promise and ready state when query identity changes
-    if (collectionRef.current !== result.collection) {
-      promiseRef.current = null
-      collectionRef.current = result.collection
-      hasBeenReadyRef.current = false
+    if (binding.collection !== collection) {
+      binding.promise = undefined
+      binding.collection = collection
+      binding.ready = false
     }
 
     // SUSPENSE LOGIC: Throw promise or error based on collection status
 
-    const collectionStatus = result.collection.status
+    const collectionStatus = collection.status
 
     // Track when we reach ready state
     if (result.isReady) {
-      hasBeenReadyRef.current = true
-      promiseRef.current = null
-      clearInitialRenderError(result.collection, queryInfo.client)
+      binding.ready = true
+      binding.promise = undefined
+      clearInitialRenderError(collection, client)
     }
 
-    const observerError = queryInfo.observer.getError()
+    const observerError = observer.getError()
     // A client request can reject with undefined, which getError() cannot
     // distinguish from no error. The request status preserves that distinction.
     const clientQuery =
-      queryInfo.client && queryInfo.queryHash
-        ? queryInfo.client._getLiveQuery(queryInfo.queryHash)
-        : undefined
+      client && queryHash ? client._getLiveQuery(queryHash) : undefined
     if (
-      !hasBeenReadyRef.current &&
+      !binding.ready &&
       (observerError !== undefined || clientQuery?.status === `error`)
     ) {
-      promiseRef.current = null
       throw observerError === undefined ? clientQuery?.error : observerError
     }
 
-    if (queryInfo.client?._isSsrStreamingEnabled() && !queryInfo.queryHash) {
-      const reason = queryInfo.identityError
-        ? `${queryInfo.identityError.reason} at ${queryInfo.identityError.path}`
-        : `the query has no stable identity`
-      throw new Error(
-        `Cannot stream this live query during SSR because ${reason}. Provide an explicit serializable queryKey.`,
-      )
-    }
-    const errorEntry = initialRenderErrors.get(result.collection)
-    const initialRenderError = queryInfo.client
-      ? errorEntry?.byClient.get(queryInfo.client)
-      : errorEntry?.unscoped
+    const initialRenderError = initialRenderErrors
+      .get(collection)
+      ?.get(client ?? unscopedClient)
     // A replacement client query must not inherit the prior request's error.
     if (
       initialRenderError?.clientQuery !== undefined &&
       initialRenderError.clientQuery !== clientQuery
     ) {
-      clearInitialRenderError(result.collection, queryInfo.client)
-    } else if (initialRenderError && !hasBeenReadyRef.current) {
-      promiseRef.current = null
+      clearInitialRenderError(collection, client)
+    } else if (initialRenderError && !binding.ready) {
       throw toBoundaryError(initialRenderError.error)
     }
 
@@ -284,38 +436,34 @@ export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
     // A crash throws at any time: the Collection can no longer serve reads.
     if (
       collectionStatus === `crashed` ||
-      (collectionStatus === `error` && !hasBeenReadyRef.current)
+      (collectionStatus === `error` && !binding.ready)
     ) {
-      promiseRef.current = null
-      throw toBoundaryError(result.collection.health.error?.cause)
+      throw toBoundaryError(collection.health.error?.cause)
     }
 
     if (
-      !hasBeenReadyRef.current &&
+      !binding.ready &&
       (result.isLoading ||
         result.isIdle ||
         result.isLoadingError ||
         result.isCrashed)
     ) {
       // Create or reuse promise for current collection
-      if (!promiseRef.current) {
-        const collection = result.collection
-        const client = queryInfo.client
-        const queryHash = queryInfo.queryHash
+      if (!binding.promise) {
         let active = true
         const stopWatchingCleanup = collection.once(`status:cleaned-up`, () => {
           active = false
         })
         let preload: Promise<void>
         try {
-          preload = queryInfo.observer.preload()
+          preload = observer.preload()
         } catch (error) {
           stopWatchingCleanup()
           throw error
         }
         const preloadClientQuery =
           client && queryHash ? client._getLiveQuery(queryHash) : undefined
-        promiseRef.current = preload
+        binding.promise = preload
           .catch((error: unknown) => {
             const latestClientQuery =
               client && queryHash ? client._getLiveQuery(queryHash) : undefined
@@ -331,7 +479,7 @@ export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
           .finally(stopWatchingCleanup)
       }
       // React Suspense catches this promise and retries after preload settles.
-      throw promiseRef.current
+      throw binding.promise
     }
 
     // Return data without status/loading flags (handled by Suspense/ErrorBoundary)
@@ -339,11 +487,12 @@ export function useLiveSuspenseQuery(configOrQueryOrCollection: any) {
     return {
       state: result.state,
       data: result.data,
-      collection: result.collection,
+      collection,
       health: result.health,
     }
   } catch (error) {
     if (error instanceof Promise) throw error
-    return rejectLiveQueryInput(queryInfo.deferredCollections, error)
+    binding.promise = undefined
+    return rejectLiveQueryInput(deferredCollections, error)
   }
 }

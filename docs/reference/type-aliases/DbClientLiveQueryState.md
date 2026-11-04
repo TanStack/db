@@ -7,4 +7,4 @@ title: DbClientLiveQueryState
 type DbClientLiveQueryState = "pending" | "success" | "error";
 ```
 
-Defined in: [packages/db/src/client.ts:171](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L171)
+Defined in: [packages/db/src/client.ts:172](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L172)

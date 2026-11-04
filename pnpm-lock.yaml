@@ -168,10 +168,10 @@ importers:
         specifier: ^20.3.34
         version: 20.3.34(@angular/common@20.3.34(@angular/core@20.3.34(@angular/compiler@20.3.34)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.34(@angular/compiler@20.3.34)(rxjs@7.8.2)(zone.js@0.15.1))(@angular/platform-browser@20.3.34(@angular/common@20.3.34(@angular/core@20.3.34(@angular/compiler@20.3.34)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.34(@angular/compiler@20.3.34)(rxjs@7.8.2)(zone.js@0.15.1)))(rxjs@7.8.2)
       '@tanstack/angular-db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/angular-db
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/db
       rxjs:
         specifier: ^7.8.2
@@ -208,19 +208,19 @@ importers:
   examples/electron/offline-first:
     dependencies:
       '@tanstack/electron-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/electron-db-sqlite-persistence
       '@tanstack/node-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/node-db-sqlite-persistence
       '@tanstack/offline-transactions':
         specifier: ^1.2.0
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.5.0
+        specifier: ^1.5.1
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/react-db
       '@tanstack/react-query':
         specifier: ^5.90.20
@@ -299,19 +299,19 @@ importers:
         specifier: 11.4.1
         version: 11.4.1(react-native@0.79.6(@babel/core@7.29.7)(@types/react@19.2.13)(react@19.0.0))
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/db
       '@tanstack/offline-transactions':
         specifier: ^1.2.0
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.5.0
+        specifier: ^1.5.1
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/react-db
       '@tanstack/react-native-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/react-native-db-sqlite-persistence
       '@tanstack/react-query':
         specifier: ^5.90.20
@@ -396,19 +396,19 @@ importers:
         specifier: 11.4.1
         version: 11.4.1(react-native@0.79.6(@babel/core@7.29.7)(@types/react@19.2.13)(react@19.0.0))
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/db
       '@tanstack/electric-db-collection':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/electric-db-collection
       '@tanstack/offline-transactions':
         specifier: ^1.2.0
         version: link:../../../packages/offline-transactions
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/react-db
       '@tanstack/react-native-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/react-native-db-sqlite-persistence
       '@tanstack/react-query':
         specifier: ^5.90.20
@@ -484,10 +484,10 @@ importers:
         specifier: ^5.90.20
         version: 5.90.20
       '@tanstack/query-db-collection':
-        specifier: ^1.5.0
+        specifier: ^1.5.1
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/react-db
       react:
         specifier: ^19.2.4
@@ -536,10 +536,10 @@ importers:
   examples/react/next-ssr-e2e:
     dependencies:
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/db
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/react-db
       next:
         specifier: ^16.3.1
@@ -570,19 +570,19 @@ importers:
   examples/react/offline-transactions:
     dependencies:
       '@tanstack/browser-db-sqlite-persistence':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/browser-db-sqlite-persistence
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/db
       '@tanstack/offline-transactions':
         specifier: ^1.2.0
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.5.0
+        specifier: ^1.5.1
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/react-db
       '@tanstack/react-query':
         specifier: ^5.90.20
@@ -640,10 +640,10 @@ importers:
   examples/react/paced-mutations-demo:
     dependencies:
       '@tanstack/db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/db
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/react-db
       mitt:
         specifier: ^3.0.1
@@ -680,10 +680,10 @@ importers:
         specifier: ^5.90.20
         version: 5.90.20
       '@tanstack/query-db-collection':
-        specifier: ^1.5.0
+        specifier: ^1.5.1
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.170.41
@@ -813,7 +813,7 @@ importers:
   examples/react/start-ssr-e2e:
     dependencies:
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.170.41
@@ -859,16 +859,16 @@ importers:
   examples/react/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.20
         version: 5.90.20
       '@tanstack/query-db-collection':
-        specifier: ^1.5.0
+        specifier: ^1.5.1
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.170.41
@@ -877,7 +877,7 @@ importers:
         specifier: ^1.168.60
         version: 1.168.60(esbuild@0.28.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(rollup@4.64.12)(vite-plugin-solid@2.11.10(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@7.3.7(@types/node@25.2.2)(jiti@2.7.0)(lightningcss@1.33.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@7.3.7(@types/node@25.2.2)(jiti@2.7.0)(lightningcss@1.33.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1)(lightningcss@1.33.0))
       '@tanstack/trailbase-db-collection':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.6
@@ -980,16 +980,16 @@ importers:
   examples/solid/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.20
         version: 5.90.20
       '@tanstack/query-db-collection':
-        specifier: ^1.5.0
+        specifier: ^1.5.1
         version: link:../../../packages/query-db-collection
       '@tanstack/solid-db':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/solid-db
       '@tanstack/solid-router':
         specifier: ^1.170.38
@@ -998,7 +998,7 @@ importers:
         specifier: ^1.168.57
         version: 1.168.57(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rollup@4.64.12)(solid-js@1.9.11)(vite-plugin-solid@2.11.10(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@7.3.7(@types/node@25.2.2)(jiti@2.7.0)(lightningcss@1.33.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@7.3.7(@types/node@25.2.2)(jiti@2.7.0)(lightningcss@1.33.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1)(lightningcss@1.33.0))
       '@tanstack/trailbase-db-collection':
-        specifier: ^1.0.0-rc.1.1
+        specifier: ^1.0.0-rc.1.3
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.6
@@ -1318,6 +1318,28 @@ importers:
         specifier: ^0.3.0
         version: 0.3.0
 
+  packages/db-adapter-conformance:
+    dependencies:
+      '@tanstack/db':
+        specifier: workspace:*
+        version: link:../db
+      fast-check:
+        specifier: ^3.23.0
+        version: 3.23.2
+    devDependencies:
+      '@fast-check/vitest':
+        specifier: ^0.4.1
+        version: 0.4.1(vitest@4.1.12)
+      '@neon/realtime':
+        specifier: 0.1.2
+        version: 0.1.2
+      '@standard-schema/spec':
+        specifier: ^1.1.0
+        version: 1.1.0
+      '@vitest/coverage-istanbul':
+        specifier: ^4.1.12
+        version: 4.1.12(vitest@4.1.12)
+
   packages/db-collection-e2e:
     dependencies:
       '@tanstack/db':
@@ -1624,6 +1646,12 @@ importers:
       react-dom:
         specifier: ^19.2.4
         version: 19.2.4(react@19.2.4)
+      react-dom18:
+        specifier: npm:react-dom@18.3.1
+        version: react-dom@18.3.1(react@19.2.4)
+      react18:
+        specifier: npm:react@18.3.1
+        version: react@18.3.1
 
   packages/react-native-db-sqlite-persistence:
     dependencies:
@@ -4934,6 +4962,15 @@ packages:
 
   '@napi-rs/wasm-runtime@1.1.0':
     resolution: {integrity: sha512-Fq6DJW+Bb5jaWE69/qOE0D1TUN9+6uWhCeZpdnSBk14pjLcCWR7Q8n49PTSPHazM37JqrsdpEthXy2xn6jWWiA==}
+
+  '@neon/realtime@0.1.2':
+    resolution: {integrity: sha512-82PkgG/iGZOHjO1znVTpBhUMTxpAd/82pFw141zeIS11SlTQLYsuMD5Emc/noatuMA99fZspokP8hnggip4rAA==}
+    engines: {node: '>=20.19.0'}
+    peerDependencies:
+      ws: ^8.21.2
+    peerDependenciesMeta:
+      ws:
+        optional: true
 
   '@next/env@16.4.1':
     resolution: {integrity: sha512-5sUUrrSvs/2/2LnLoesybMGx12EtPB46fdZ6RhAw0XDGSPxU2LFyQBB7yuEiOFFJPKmBY6+q2jTr1/AMbnp0/g==}
@@ -11224,6 +11261,10 @@ packages:
     resolution: {integrity: sha512-VpZrUqU5A69eQyW2c5CA1jtLecCsN2U/bD6VilrFDWq5+5UIEVO7nazS3TEcHf1zuPYO/sqGvUvW62g86RXZuA==}
     engines: {node: '>=4'}
 
+  postgres-array@3.0.4:
+    resolution: {integrity: sha512-nAUSGfSDGOaOAEGwqsRY27GPOea7CNipJPOA7lPbdEpx5Kg3qzdP0AaWC5MlhTWV9s4hFX39nomVZ+C4tnGOJQ==}
+    engines: {node: '>=12'}
+
   postgres-bytea@1.0.0:
     resolution: {integrity: sha512-xy3pmLuQqRBZBXDULy7KbaitYqLcmxigw14Q5sj8QBVLqEwXfeybIKVWiqAXTlcvdvb0+xkOtDbfQMOf4lST1w==}
     engines: {node: '>=0.10.0'}
@@ -11398,6 +11439,11 @@ packages:
   react-devtools-core@6.1.5:
     resolution: {integrity: sha512-ePrwPfxAnB+7hgnEr8vpKxL9cmnp7F322t8oqcPshbIQQhDKgFDW4tjhF2wjVbdXF9O/nyuy3sQWd9JGpiLPvA==}
 
+  react-dom@18.3.1:
+    resolution: {integrity: sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==}
+    peerDependencies:
+      react: ^18.3.1
+
   react-dom@19.2.4:
     resolution: {integrity: sha512-AXJdLo8kgMbimY95O2aKQqsz2iWi9jMgKJhRBAxECE4IFxfcazB2LmzloIoibJI3C12IlY20+KFaLv+71bUJeQ==}
     peerDependencies:
@@ -11477,6 +11523,10 @@ packages:
 
   react-refresh@0.18.0:
     resolution: {integrity: sha512-QgT5//D3jfjJb6Gsjxv0Slpj23ip+HtOpnNgnb2S5zU3CB26G/IDPGoy4RJB42wzFE46DRsstbW6tKHoKbhAxw==}
+    engines: {node: '>=0.10.0'}
+
+  react@18.3.1:
+    resolution: {integrity: sha512-wS+hAgJShR0KhEvPJArfuPVN1+Hz1t0Y6n5jLrGQbkb4urgPE/0Rve+1kMB1v/oWgHgm4WIcV+i7F2pTVj+2iQ==}
     engines: {node: '>=0.10.0'}
 
   react@19.0.0:
@@ -11741,6 +11791,9 @@ packages:
   saxes@6.0.0:
     resolution: {integrity: sha512-xAg7SOnEhrm5zI3puOOKyy1OMcMlIJZYNJY7xLBwSze0UjhPLnWfj2GF2EpT0jmzaJKIWKHLsaSSajf35bcYnA==}
     engines: {node: '>=v12.22.7'}
+
+  scheduler@0.23.2:
+    resolution: {integrity: sha512-UOShsPwz7NrMUqhR6t0hWjFduvOzbtv7toDH1/hIrfRNIDBnnBWd0CwJTGvTpngVlmwGCdP9/Zl/tVrDqcuYzQ==}
 
   scheduler@0.25.0:
     resolution: {integrity: sha512-xFVuu11jh+xcO7JOAGJNOXld8/TcEHK/4CituBUeUb5hqxJLj9YuemAEuvm9gQ/+pgXYfbQuqAkiYu+u7YEsNA==}
@@ -16557,6 +16610,11 @@ snapshots:
       '@emnapi/runtime': 1.11.3
       '@tybys/wasm-util': 0.10.1
     optional: true
+
+  '@neon/realtime@0.1.2':
+    dependencies:
+      base64-js: 1.5.1
+      postgres-array: 3.0.4
 
   '@next/env@16.4.1': {}
 
@@ -23982,6 +24040,8 @@ snapshots:
 
   postgres-array@2.0.0: {}
 
+  postgres-array@3.0.4: {}
+
   postgres-bytea@1.0.0: {}
 
   postgres-date@1.0.7: {}
@@ -24149,6 +24209,12 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+
+  react-dom@18.3.1(react@19.2.4):
+    dependencies:
+      loose-envify: 1.4.0
+      react: 19.2.4
+      scheduler: 0.23.2
 
   react-dom@19.2.4(react@19.2.0):
     dependencies:
@@ -24445,6 +24511,10 @@ snapshots:
   react-refresh@0.14.2: {}
 
   react-refresh@0.18.0: {}
+
+  react@18.3.1:
+    dependencies:
+      loose-envify: 1.4.0
 
   react@19.0.0: {}
 
@@ -24817,6 +24887,10 @@ snapshots:
   saxes@6.0.0:
     dependencies:
       xmlchars: 2.2.0
+
+  scheduler@0.23.2:
+    dependencies:
+      loose-envify: 1.4.0
 
   scheduler@0.25.0: {}
 

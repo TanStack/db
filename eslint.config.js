@@ -12,6 +12,8 @@ export default [
       `**/traildepot/**`,
       `examples/angular/**`,
       `packages/db-collection-e2e/vite.config.ts`,
+      // Third-party adapter source vendored unchanged as a conformance fixture.
+      `packages/db-adapter-conformance/tests/neon/vendor/**`,
       `packages/capacitor-db-sqlite-persistence/e2e/app/android/**`,
       `packages/capacitor-db-sqlite-persistence/e2e/app/ios/**`,
       // Expo expects Metro config in CommonJS format.

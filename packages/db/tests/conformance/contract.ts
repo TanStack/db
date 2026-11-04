@@ -22,8 +22,37 @@
  * Query identity (1.0 law, maintainer decisions 2026-10-22 and 2026-10-23).
  * The law depends on how a binding decides to compile again.
  *
- * A binding that compares query identity re-runs its query input and compiles
- * again only when the input's identity changed. React and Preact compare it
+ * A binding that compares query identity invalidates its authored input only
+ * when the input's identity changed. Invalidation does not always compile:
+ * an adapter-owned ordered list query whose stable structured plan changes only
+ * its finite outer limit/offset moves the existing window and retains its
+ * live-query Collection and upstream subscriptions (maintainer decision,
+ * 2026-10-30, #2291). For an invalidated input, changed source objects,
+ * projections, predicates, order, nested windows and Collection options still
+ * require compilation. An unchanged
+ * explicit key keeps its authored input, and changed opaque keyed inputs compile.
+ * An initially disabled input has no authored plan to retain: enabling it admits
+ * its first plan even with the same key.
+ * Explicit keys are immutable values (maintainer decision, 2026-11-03): fresh
+ * equal plain records and arrays retain the authored input, regardless of
+ * record property order. Replacing a nested value with a different value
+ * invalidates it. Replace changed objects along their path; mutating a key
+ * in place is unsupported and has no promised invalidation behavior.
+ * The same law applies to every client-backed adapter (issue #2345) and to
+ * Suspense hooks (maintainer decision, 2026-11-03). Independent query inputs
+ * own distinct live-query Collections, even under equal keys and options.
+ * Each moved client input uses the new page's preload/hydration identity;
+ * transported page snapshots keep their original identities. An explicitly
+ * supplied Collection remains caller-owned and may be shared. Before an initial
+ * Suspense render succeeds, only its fallback is public; retry progress is owed,
+ * but retention of an uncommitted Collection is not.
+ *
+ * A window move requires a committed host update and runs after any current
+ * Collection publication. A speculative React or Preact render cannot move the
+ * committed window or start acquisition. Pending moves follow core's atomic
+ * window publication and latest-window rules.
+ *
+ * React and Preact compare it
  * on every render. Such a binding compiles an input that has no `queryKey`
  * only when the query IR has a stable identity; otherwise it throws
  * `UnhashableQueryIRError`. The identity names each source by its Collection
@@ -39,7 +68,7 @@
  *
  * A binding that compiles again whenever its reactive reads change (Vue,
  * Solid, Angular, and Svelte without a `DbClient`) compares no identity. It
- * compiles any query input, including one without a stable IR identity, and
+ * accepts any query input, including one without a stable IR identity, and
  * its rows follow the current input: after a source swap under the same
  * Collection ID, every value it publishes holds only the new source's rows
  * (or none while it loads) and never the old ones,
@@ -77,7 +106,12 @@
  * All current scenarios must pass. A future known bug needs an independently
  * approved exact failure signature; a whole-test waiver could hide another bug.
  */
-import type { Collection, HealthNode, PooledLiveQueries } from '@tanstack/db'
+import type {
+  Collection,
+  CollectionConfig,
+  HealthNode,
+  PooledLiveQueries,
+} from '@tanstack/db'
 
 /** Default row shape used by the base scenarios (a "person"). */
 export interface Row {
@@ -95,7 +129,10 @@ export interface Row {
 export interface SourceHandle<T extends { id: string } = Row> {
   collection: Collection<any, any, any>
   insert: (row: T) => void
-  update: (row: T) => void
+  /** Local mutation sources can return the transaction's borrowed originals. */
+  update: (row: T) => void | {
+    mutations: ReadonlyArray<{ original: unknown }>
+  }
   remove: (row: T) => void
 }
 
@@ -131,6 +168,8 @@ export interface LaggingSourceHandle<
   loadStarted: () => boolean
   /** Settle every pending subset request. */
   settle: () => void
+  /** Settle the oldest request, leaving later requests pending. */
+  settleNext: () => void
 }
 
 /**
@@ -163,7 +202,11 @@ export interface DbOps {
   createOptimisticAction: (config: {
     onMutate: (variables: any) => void
     mutationFn: (variables: any) => Promise<any>
-  }) => (variables?: any) => { when: (state: 'settled') => Promise<any> }
+  }) => (variables?: any) => {
+    when: (state: 'settled') => Promise<any>
+    /** Borrowed mutation snapshots must survive framework materialization. */
+    mutations: ReadonlyArray<{ original: unknown }>
+  }
 }
 
 /** Normalized, adapter-agnostic view of a live query's current result. */
@@ -216,6 +259,8 @@ export interface LiveQueryHandle {
    * still tell a loading error (`isLoadingError`) from a crash (`isCrashed`).
    */
   statusSurface?: () => ConformanceStatusSurface
+  /** Public fallback visibility for a hook that suspends before initial readiness. */
+  isSuspended?: () => boolean
   /** The live-query Collection currently backing this result. */
   collection: () => Collection<any, any, any> | null
   /** Let the framework scheduler + core sync settle, then resolve. */
@@ -236,7 +281,7 @@ export interface LiveQueryHandle {
  */
 export interface ControllableHandle<P> extends LiveQueryHandle {
   /** Rejects when the adapter rejects the reconfigured query input. */
-  setParam: (param: P) => Promise<void>
+  setParam: (param: P, observe?: () => void) => Promise<void>
   /**
    * The `data` value the binding left published at the end of each
    * synchronous turn since mount, in order. Drivers record at their
@@ -265,13 +310,29 @@ export interface ControllableHandle<P> extends LiveQueryHandle {
  * defines the observation cut after framework updates and core sync settle.
  * The runtime suite observes public result data, state, and status. Framework
  * type inference and framework scheduler internals are outside this contract.
+ * The result-shape oracle also reads raw data at parameterObservationCut via
+ * setParam's observation callback. Shape follows the current query there;
+ * this earlier cut does not require rows to be fresh before the final flush.
  */
 export interface LiveQueryDriver {
   name: string
+  /**
+   * Native cut where setParam invokes its optional synchronous observation.
+   * The callback reads the real handle; it runs before setParam's final settle.
+   * Angular exposes synchronous Signal reads before effects, Vue nextTick,
+   * Solid synchronous propagation, Svelte flushSync, and React/Preact a
+   * committed synchronous rerender. These cuts are not interchangeable.
+   */
+  parameterObservationCut: string
   /** Public disabled data/state policy, not inferred from observed output. */
   disabledRepresentation: `absent` | `empty-reactive`
   /** Operators from the adapter's `@tanstack/db` realm. */
   ops: DbOps
+  /** Index constructors from the adapter's `@tanstack/db` realm. */
+  indexTypes: {
+    basic: NonNullable<CollectionConfig<Row>[`defaultIndexType`]>
+    btree: NonNullable<CollectionConfig<Row>[`defaultIndexType`]>
+  }
   /**
    * Create a realm-correct source collection + mutators, keyed by `id`. Pass
    * `collectionId` to create another source object under an existing ID.
@@ -279,7 +340,12 @@ export interface LiveQueryDriver {
   makeSource: <T extends { id: string }>(
     initialData: ReadonlyArray<T>,
     collectionId?: string,
+    options?: { rowUpdateMode?: `full` },
   ) => SourceHandle<T>
+  /** Wrap a source value in the real host's observable container, when supported. */
+  wrapSnapshotValue?: <T extends object>(value: T) => T
+  /** Local-only sources return actual transactions; host proxies enter initially. */
+  snapshotSourceUsesDraft?: boolean
   /** Create a source that starts `loading` and readies on demand (keyed by `id`). */
   makeDeferredSource: <T extends { id: string }>() => DeferredSourceHandle<T>
   /** Create a ready source whose sync adapter reports the scenario controls. */
@@ -337,7 +403,7 @@ export interface LiveQueryDriver {
       gcTime?: number
       pool?: PooledLiveQueries
       queryKey?: ReadonlyArray<unknown>
-    },
+    } & Pick<CollectionConfig<Row>, `autoIndex` | `defaultIndexType`>,
   ) => LiveQueryHandle
   /** Mount an explicitly-disabled query (adapter's own null/undefined form). */
   mountDisabled: () => LiveQueryHandle
@@ -345,9 +411,8 @@ export interface LiveQueryDriver {
    * Whether the binding compares query identity to decide when to compile
    * again (see the opening query-identity law). The driver declares the
    * adapter's documented policy for the inputs it mounts; the suite does not
-   * infer it from observed output. Svelte compares identity only for a query
-   * that a `DbClient` backs, and its shared drivers mount none, so they
-   * declare `false`.
+   * infer it from observed output. Svelte compares identity for client-backed queries; the driver declares
+   * this per input mode rather than per framework.
    */
   comparesQueryIdentity: boolean
   /** No active waivers. Kept empty in drivers to make this boundary explicit. */
@@ -362,6 +427,8 @@ export interface LiveQueryDriver {
   features?: {
     serverSnapshot?: boolean
     suspense?: boolean
+    /** A successful return is the initial-readiness observation; pending reads expose a fallback. */
+    suspendsUntilReady?: boolean
     /**
      * Public sharing policy: queries whose config passes `pooledLiveQueries`
      * and that filter only by `eq` on one source share one source subscription

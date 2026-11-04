@@ -118,3 +118,27 @@ grammar, assertions and run budgets did not change.
 
 Node 24.8.0 was used. This follow-up changes replay discovery only and adds no
 new Angular behavior or observation checkpoint.
+
+## Main integration, 2026-11-04
+
+The merge combines Angular branch `c098d577d241042bc247ac41a770b85e50c0b48f`
+with main `8feab6ea3eaae4456f738da39fa93508ddd5cc01`. Main added ordered-window
+reuse and shared result-shape/window-history receiving tests after the original
+PR base. The resolution retains main's `resolveLiveQueryValue` window ownership
+and deferred move effect, and the PR's synchronous observer snapshot reads and
+effect-owned subscription cleanup. The conformance-driver comment now names
+both its pre-effect shape reads and its effect cleanup accurately.
+
+All replay property/owner entries and both sets of coverage-map additions are
+retained. No oracle model, assertion, history grammar, run budget, or expected
+result was changed to resolve these conflicts. The merge commit first adding
+this section binds the evaluated combined source.
+
+Validation on Node 24.8.0: the full Angular suite passed 129 tests with one
+existing TODO, including window history, result shape, and the PR's current-query
+snapshot campaigns. Angular typecheck, build, focused ESLint and `lint:changed`
+passed. The replay manifest's owner, file mapping and command-location checks
+passed (three selected tests), and guarded `angular.current-snapshot` replay
+1101/path `0` executed one matching witness. The GC seed-706 campaign passed and
+reached `write-started-sync` ten times. Existing SSR/browser and controlled-host
+limits remain unchanged; this resolution adds no client/SSR provider code.
