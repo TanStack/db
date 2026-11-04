@@ -98,3 +98,23 @@ The changeset declares a major Angular package change because raising the
 minimum supported framework version is breaking. No observer production code,
 observer cache changeset, or core metadata-identity requirement belongs to this
 branch.
+
+## CI replay registration follow-up, 2026-11-04
+
+CI exposed a missing entry in `oracle-replay-manifest.ts` for the registered
+`angular.current-snapshot` property. The oracle itself passed in the framework
+job, but the central replay-owner check correctly rejected an unowned name.
+The fix maps it to `angular-db/tests/snapshot-conformance-oracle.test.ts`.
+
+Before the fix, `vitest run tests/oracle-replay.test.ts -t 'names an owner for
+every registered property' --coverage.enabled=false` failed with
+`['angular.current-snapshot']` instead of an empty unowned-property list. After
+the fix, the complete replay suite passed all 41 tests. The guarded replay from
+`packages/angular-db` also passed with property `angular.current-snapshot`, seed
+1101 and path `0`: one completed matching witness and one execution, with the
+fixed campaign skipped. The replay guard observed the actual Angular owner,
+rather than merely accepting a manifest entry. The existing oracle model,
+grammar, assertions and run budgets did not change.
+
+Node 24.8.0 was used. This follow-up changes replay discovery only and adds no
+new Angular behavior or observation checkpoint.

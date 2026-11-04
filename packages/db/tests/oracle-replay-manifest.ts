@@ -14,6 +14,11 @@ const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
   [
+    `angular-db/tests/snapshot-conformance-oracle.test.ts`,
+    `angular`,
+    `current-snapshot`,
+  ],
+  [
     `../scripts/eslint-plugin-oracle/part-reach-oracle.property.test.js`,
     `lint`,
     `part-reach`,
