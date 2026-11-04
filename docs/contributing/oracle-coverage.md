@@ -1090,7 +1090,12 @@ states respectively. A focused test in
 `packages/db/tests/query/lazy-join-source-where.test.ts` replays the on-demand
 report: each `loadSubset` the lazy side receives names the join keys. The
 owner does not generate subqueries that read a parent value, filters on both
-sides at once, or `fn.where()` filters, which remain parent-routed.
+sides at once, or `fn.where()` filters, which remain parent-routed. Only a
+focused test in the same file shows that a joined subquery whose `where` reads
+the parent stays parent-routed: a mutant that drops that check returns empty
+child arrays there, and the existing include suites (637 tests) pass it. A
+generated parent-reading subquery dimension in the cross-formulation owner
+would close that gap.
 
 Recorded limit (#2151): while an index-backed parent top-K refills within one
 graph run (a held row moved out, a tie group loaded at the window edge, a

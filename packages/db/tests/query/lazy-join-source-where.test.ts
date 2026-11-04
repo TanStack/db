@@ -208,4 +208,57 @@ describe(`lazy join source where`, () => {
       expect(hasKeyFilter(load, [7, 8, 9]), describeLoad(load)).toBe(true)
     }
   })
+
+  // A joined subquery whose filter reads the parent is not a source filter:
+  // it must stay routed by parent, so each task sees only its own owner's tags.
+  it(`include: a joined subquery that reads the parent row keeps its parent filter`, async () => {
+    const tasks = createEagerCollection(`owned-tasks`, [
+      { id: 1, owner: `a` },
+      { id: 2, owner: `b` },
+    ])
+    const taskTags = createEagerCollection(`owned-task-tags`, [
+      { id: 100, task_id: 1, tag_id: 7 },
+      { id: 101, task_id: 1, tag_id: 8 },
+      { id: 102, task_id: 2, tag_id: 7 },
+      { id: 103, task_id: 2, tag_id: 8 },
+    ])
+    const tags = createEagerCollection(`owned-tags`, [
+      { id: 7, owner: `a` },
+      { id: 8, owner: `b` },
+    ])
+
+    const live = createLiveQueryCollection((q) =>
+      q.from({ task: tasks }).select(({ task }) => ({
+        id: task.id,
+        tags: toArray(
+          q
+            .from({ taskTag: taskTags })
+            .where(({ taskTag }) => eq(taskTag.task_id, task.id))
+            .innerJoin(
+              {
+                tag: q
+                  .from({ tag: tags })
+                  .where(({ tag }) => eq(tag.owner, task.owner)),
+              },
+              ({ taskTag, tag }) => eq(taskTag.tag_id, tag.id),
+            )
+            .select(({ tag }) => ({ id: tag.id })),
+        ),
+      })),
+    )
+    cleanups.push(() => live.cleanup())
+    await live.preload()
+
+    expect(
+      live.toArray
+        .map((task) => ({
+          id: task.id,
+          tags: [...task.tags].map((tag) => tag.id),
+        }))
+        .sort((a, b) => a.id - b.id),
+    ).toEqual([
+      { id: 1, tags: [7] },
+      { id: 2, tags: [8] },
+    ])
+  })
 })
