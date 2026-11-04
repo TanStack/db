@@ -6,6 +6,7 @@ import { createTransaction } from '../src/transactions.js'
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
+  oracleReplaySkips,
   readOracleRunConfig,
 } from './oracle-config.js'
 import { createOracleReach } from './oracle-reach.js'
@@ -77,6 +78,9 @@ type BoundaryHistory = {
   actions: Array<GcAction>
 }
 const boundaryPropertyName = `collection-lifecycle.gc-retention-boundaries`
+const directStartPropertyName = `collection-lifecycle.gc-retention-boundaries.direct-start`
+const createDirectStartReach = () =>
+  createOracleReach(directStartPropertyName, [`write-started-sync`])
 const boundaryStates = [
   `queued-idle-renewal`,
   `startup-release-before-floor`,
@@ -114,8 +118,12 @@ const boundaryStates = [
 ] as const
 let boundaryReach = createOracleReach(boundaryPropertyName, boundaryStates)
 
-async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
+async function runBoundaryHistory(
+  history: BoundaryHistory,
+  directStartReach?: ReturnType<typeof createDirectStartReach>,
+): Promise<void> {
   boundaryReach.beginHistory()
+  directStartReach?.beginHistory()
   vi.useFakeTimers()
   vi.setSystemTime(0)
   resetCleanupQueue()
@@ -271,6 +279,7 @@ async function runBoundaryHistory(history: BoundaryHistory): Promise<void> {
         handlers.push(handler)
         if (history.direct && action.commit) {
           boundaryReach.reach(`write-started-sync`)
+          directStartReach?.reach(`write-started-sync`)
           transactions.push(collection.insert({ id: transactions.length + 1 }))
         } else {
           const transaction = createTransaction({
@@ -880,19 +889,30 @@ it.each(
   `preserves retention across transaction phases and idle delivery (seed %s)`,
   async (seed) => {
     boundaryReach = createOracleReach(boundaryPropertyName, boundaryStates)
-    // Keep the original mixed grammar and its seed/path coordinates intact.
-    // An explicit path replay executes only the requested mixed history.
-    if (!oracleReplayRequested()) {
+    // Each assertion has its own identity so its failure coordinates select
+    // the same grammar. Normal campaigns still aggregate both parts' reach.
+    if (!oracleReplaySkips(directStartPropertyName)) {
+      const directStartReach = createDirectStartReach()
       await fc.assert(
-        fc.asyncProperty(writeStartedSyncHistoryArbitrary, runBoundaryHistory),
+        fc.asyncProperty(writeStartedSyncHistoryArbitrary, (history) =>
+          runBoundaryHistory(history, directStartReach),
+        ),
         {
-          ...oraclePropertyOptions(10, boundaryPropertyName),
+          ...oraclePropertyOptions(10, directStartPropertyName),
           ...(seed === undefined ? {} : { seed }),
         },
       )
+      directStartReach.assertReached()
+      process.stdout.write(
+        `GC direct-start reach: ${JSON.stringify(Object.fromEntries(directStartReach.counts()))}\n`,
+      )
     }
+    // Preserve the mixed grammar's existing seed/path coordinates and budget.
+    if (oracleReplaySkips(boundaryPropertyName)) return
     await fc.assert(
-      fc.asyncProperty(boundaryHistoryArbitrary, runBoundaryHistory),
+      fc.asyncProperty(boundaryHistoryArbitrary, (history) =>
+        runBoundaryHistory(history),
+      ),
       {
         ...oraclePropertyOptions(250, boundaryPropertyName),
         ...(seed === undefined ? {} : { seed }),

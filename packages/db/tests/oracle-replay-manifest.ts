@@ -858,6 +858,10 @@ owners.set(
   `collection-lifecycle.gc-retention-boundaries`,
   `packages/db/tests/collection-gc-retention-oracle.property.test.ts`,
 )
+owners.set(
+  `collection-lifecycle.gc-retention-boundaries.direct-start`,
+  `packages/db/tests/collection-gc-retention-oracle.property.test.ts`,
+)
 
 for (const property of registeredOracleProperties) {
   if (property.startsWith(`includes.matrix.`)) {
@@ -987,6 +991,10 @@ const replayTestNames = new Map([
   ],
   [
     `collection-lifecycle.gc-retention-boundaries`,
+    `preserves retention across transaction phases.*seed undefined`,
+  ],
+  [
+    `collection-lifecycle.gc-retention-boundaries.direct-start`,
     `preserves retention across transaction phases.*seed undefined`,
   ],
   [

@@ -7503,7 +7503,11 @@ each normal campaign with ten generated direct-start histories, then runs its
 unchanged 250 mixed histories. This removes the known sampling gap where no
 history starts sync through direct insertion. The model, comparisons, all
 declared reach states, and both mixed run budgets remain intact. Explicit path
-replays retain the original mixed generator and skip the prefix. Seed 706
+replays of the mixed property retain its original generator and skip the prefix.
+The separately registered
+`collection-lifecycle.gc-retention-boundaries.direct-start` property replays
+only the prefix, with its own reach recorder. Both identities use the same
+model, driver, and comparisons. Seed 706
 reproduces the old gap and rejects omission of the prefix; the repaired fixed
 and random campaigns reached the state 15 and 17 times. Existing controlled
 idle-host and native-browser limits remain in force. See the

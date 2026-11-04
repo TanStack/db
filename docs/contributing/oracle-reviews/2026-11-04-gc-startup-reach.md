@@ -22,7 +22,8 @@ A legal run could omit direct startup entirely. Each normal fixed/random
 campaign now first generates ten direct-start histories using the existing
 startup scenario and its random parameters. The original 250 mixed histories
 still run with the same generator and seed/path coordinates. Explicit path
-replays skip the extra prefix and run only the requested mixed history.
+replays of the mixed property skip the extra prefix and run only the requested
+mixed history. The review follow-up below adds a separate prefix replay target.
 
 This adds coverage of an existing receiving path. It does not relax the model,
 count fixed examples as generated reach, or replace interaction histories.
@@ -80,3 +81,39 @@ or second expectation, and no concrete shared-model fault requiring another
 formulation was identified. The native-host premise is unchanged and remains
 outside this sampling repair. Ordinary reconstruction tests still use the
 shared model/driver/comparison; no unit tests were added to the oracle.
+
+
+## Review follow-up: independent direct-start replay
+
+[The review finding](https://github.com/TanStack/db/pull/2327#discussion_r4467712429)
+identified a replay gap: prefix failures shared the mixed property's identity,
+but replaying their seed/path selected a different grammar. The prefix now has
+its own registered identity,
+`collection-lifecycle.gc-retention-boundaries.direct-start`, owner, selector,
+and reach recorder. Each assertion runs only for its requested identity during
+path replay. Ordinary runs still execute both and retain aggregate reach.
+
+- **Law:** the guarded replay protocol documented in `oracle-replay.test.ts`
+  requires failure coordinates to execute the named property's grammar and
+  produce exactly one matching completed witness.
+- **Reach:** both normal campaigns generated ten direct-start histories each.
+  Aggregate direct-start reach was 15 for the fixed campaign and 19 for the
+  random campaign; all other declared states met their existing minimum.
+- **RED:** the added replay-selection check failed before registration with
+  unknown property `collection-lifecycle.gc-retention-boundaries.direct-start`.
+- **GREEN:** the targeted replay protocol suite passed five checks, including
+  real guarded child-process replays of both identities at seed 42, path `0`.
+  The GC file passed all nine tests with the original ten-prefix and 250-mixed
+  budgets per campaign.
+- **Mutant:** temporarily reject every prefix history with a calibration error.
+  The direct-start replay failed with that error; the mixed replay still passed
+  without executing the prefix. The source was restored after the experiment.
+- **Limits:** this repairs replay selection and reach attribution. It changes
+  neither the retention model nor production behavior and adds no native-host
+  coverage. The original GC evidence and controlled-host limits remain valid.
+
+Replay command from `packages/db` (substitute the mixed property to replay it):
+
+```sh
+TANSTACK_DB_ORACLE_SEED=42 TANSTACK_DB_ORACLE_PATH=0 TANSTACK_DB_ORACLE_PROPERTY=collection-lifecycle.gc-retention-boundaries.direct-start node --import tsx tests/oracle-replay.ts tests/collection-gc-retention-oracle.property.test.ts --maxWorkers=1 --coverage.enabled=false
+```

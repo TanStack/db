@@ -295,6 +295,7 @@ const staticOracleProperties = [
   `collection-sync.reentrant-drain`,
   `collection-lifecycle.gc-persisting-transaction`,
   `collection-lifecycle.gc-retention-boundaries`,
+  `collection-lifecycle.gc-retention-boundaries.direct-start`,
   `collection-lifecycle.gc-mutation-shapes`,
   `collection-state.retention`,
   `collection-state.accepted-snapshot.before-delete`,
