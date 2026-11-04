@@ -38,7 +38,7 @@ const driver = powerSyncMutationDriver()
 const historyArb = mutationHistoryArb(driver)
 const runs = 300
 // Each history opens, clears, and closes its own SQLite database, so a
-// campaign takes about 47 s locally; the budget leaves room for CI.
+// campaign takes about 50 s locally; the budget leaves room for CI.
 const campaignTimeoutMs = 240_000
 
 async function campaign(options: fc.Parameters<[unknown]>) {

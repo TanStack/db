@@ -307,12 +307,16 @@ function createPowerSyncCollectionConfig<
    * consistent with the database.
    */
   const pendingOperationStore = PendingOperationStore.GLOBAL
-  // Keep the tracked table unique in case of multiple tabs.
-  const trackedTableName = `__${viewName}_tracking_${Math.floor(
-    Math.random() * 0xffffffff,
-  )
-    .toString(16)
-    .padStart(8, `0`)}`
+  // Keep the tracked table unique in case of multiple tabs, and per sync
+  // run: a reload's new run creates its table before the retired run's
+  // cleanup has dropped its own.
+  const trackTable = (): string =>
+    `__${viewName}_tracking_${Math.floor(Math.random() * 0xffffffff)
+      .toString(16)
+      .padStart(8, `0`)}`
+  // The first run tracks into the table `getMeta()` names before it starts.
+  let currentTrackedTableName = trackTable()
+  let trackedTableUsed = false
 
   const transactor = new PowerSyncTransactor({
     database,
@@ -325,6 +329,9 @@ function createPowerSyncCollectionConfig<
    */
   const sync: SyncConfig<OutputType, string> = {
     sync: (params) => {
+      if (trackedTableUsed) currentTrackedTableName = trackTable()
+      trackedTableUsed = true
+      const trackedTableName = currentTrackedTableName
       const {
         begin,
         write,
@@ -1226,7 +1233,7 @@ function createPowerSyncCollectionConfig<
     utils: {
       getMeta: () => ({
         tableName: viewName,
-        trackedTableName,
+        trackedTableName: currentTrackedTableName,
         metadataIsTracked,
         serializeValue: (value) =>
           serializeForSQLite<TTable>(value, table, serializer),
