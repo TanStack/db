@@ -17,7 +17,7 @@ reviewed change.
 | Family                                | Status                                    | Laws                                                                                                                 |
 | ------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Eager live source                     | Built (`src/eager-live-source-oracle.ts`) | READY-2/3/4/8/10, HEALTH-1/2/5, PUB-1/2/3/5/7/9, FID-1/4, LIFE-2/5/10, EVID-1/2/3, RETRY-1 (eager), RECON-1, RENEW-1 |
-| Mutations and confirmation            | Built (`src/mutation-oracle.ts`)          | MUT-1/2/3/7/8/10/11/13, reload, transactions, FID-5; MUT-4/5 stay with core                                            |
+| Mutations and confirmation            | Built (`src/mutation-oracle.ts`)          | MUT-1/2/3/7/8/10/11/13, reload, transactions, FID-5; MUT-4/5 stay with core                                          |
 | On-demand loading                     | Needed                                    | DEM-1 to DEM-23, MAP-1 to MAP-4                                                                                      |
 | Reload and retry                      | Needed                                    | RELOAD-1 to RELOAD-5; RETRY-1 and HEALTH-2 beyond the eager source's retried failures                                |
 | Client cache and refetch              | Needed                                    | CACHE-1 to CACHE-8, REF-1 to REF-7, DIR-1 to DIR-5                                                                   |
