@@ -2,6 +2,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
+import { createOracleReach } from '../oracle-reach.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {
@@ -25,6 +26,7 @@ import {
 import type { Collection } from '../../src/collection/index.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 import type {
+  JoinFilter,
   SourceWork,
   WorkObservation,
 } from './includes-work-counter-support.js'
@@ -50,9 +52,15 @@ import type {
  * The input grammar varies an integer filler count from 1 through 24. Zero is
  * the ablated baseline; negative and fractional counts are invalid fixture
  * sizes. Joined queries vary unrelated links and join targets separately.
- * The join-free query grows every source together. Counts 1, 2, and 3 pin the
- * smallest valid boundary, 24 pins the upper bound, and fixed and random
- * campaigns sample the range.
+ * Both joined laws also vary a join filter: none, a `where` on the links
+ * alone, or a `where` on the joined targets alone. The optimizer pushes each
+ * filter into its own source, and laws 2 and 3 must still hold: the targets
+ * stay keyed by the kept links' join values, so a filter narrows the keyed
+ * load and must not replace it or make the include scan a side
+ * (live/ARCHITECTURE.md, Initial demand and Work). The reference drops the
+ * filtered row's link. The join-free query grows every source together. Counts 1, 2, and 3 pin the smallest valid
+ * boundary, 24 pins the upper bound, and fixed and random campaigns sample the
+ * range.
  *
  * The boundary conditions matter. Collections preload before they receive
  * B-tree indexes. Filler rows never match a selected route. This suite checks
@@ -69,6 +77,21 @@ const joinedBaselineWork: SourceWork = {
   links: { delivered: 2, examined: 2 },
 }
 
+// Each join filter drops one row after a keyed read. A target filter drops
+// one of the two named targets: the root and both named targets are
+// examined, the root and one target delivered. A link filter drops one of
+// the group's two links, so only the kept link's target is named.
+const joinedBaselineWorkByFilter: Record<JoinFilter, SourceWork> = {
+  none: joinedBaselineWork,
+  target: { ...joinedBaselineWork, terms: { delivered: 2, examined: 3 } },
+  link: {
+    ...joinedBaselineWork,
+    terms: { delivered: 2, examined: 2 },
+    links: { delivered: 1, examined: 2 },
+  },
+}
+const joinFilters = Object.keys(joinedBaselineWorkByFilter) as Array<JoinFilter>
+
 const joinFreeBaselineWork: SourceWork = {
   terms: { delivered: 1, examined: 1 },
   meanings: { delivered: 1, examined: 1 },
@@ -76,46 +99,49 @@ const joinFreeBaselineWork: SourceWork = {
   links: { delivered: 2, examined: 2 },
 }
 
-let joinedBaselineObservation: WorkObservation
+const joinedBaselineObservations = new Map<JoinFilter, WorkObservation>()
 let joinFreeBaselineObservation: WorkObservation
+
+// Both joined laws compare a scaled run with the minimal run of the same
+// query, under each join filter.
+async function expectJoinedWorkBound(
+  filler: { terms: number; links: number },
+  joinFilter: JoinFilter,
+): Promise<void> {
+  const baseline = joinedBaselineObservations.get(joinFilter)!
+  const scaled = await observeWork({
+    filler: { ...filler, meanings: 0, groups: 0 },
+    joinTargets: true,
+    joinFilter,
+  })
+  expect(baseline.result).toEqual(
+    expectedResult({ joinTargets: true, joinFilter }),
+  )
+  expect(scaled.result).toEqual(baseline.result)
+  expect(baseline.sourceWork).toEqual(joinedBaselineWorkByFilter[joinFilter])
+  expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork)
+}
 
 async function expectCorrelatedJoinWorkBound(
   fillerCount: number,
+  joinFilter: JoinFilter = `none`,
 ): Promise<void> {
-  const baseline = joinedBaselineObservation
-  const scaled = await observeWork({
-    filler: {
-      terms: 0,
-      meanings: 0,
-      groups: 0,
-      links: fillerCount,
-    },
-    joinTargets: true,
-  })
-  expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
-  expect(scaled.result).toEqual(baseline.result)
-  expect(baseline.sourceWork).toEqual(joinedBaselineWork)
-
-  expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork)
+  await expectJoinedWorkBound({ terms: 0, links: fillerCount }, joinFilter)
 }
 
-async function expectJoinTargetWorkBound(fillerCount: number): Promise<void> {
-  const baseline = joinedBaselineObservation
-  const scaled = await observeWork({
-    filler: {
-      terms: fillerCount,
-      meanings: 0,
-      groups: 0,
-      links: 0,
-    },
-    joinTargets: true,
-  })
-
-  expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
-  expect(scaled.result).toEqual(baseline.result)
-  expect(baseline.sourceWork).toEqual(joinedBaselineWork)
-  expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork)
+async function expectJoinTargetWorkBound(
+  fillerCount: number,
+  joinFilter: JoinFilter = `none`,
+): Promise<void> {
+  await expectJoinedWorkBound({ terms: fillerCount, links: 0 }, joinFilter)
 }
+
+// The joined campaigns declare every join-filter state and fail unless their
+// own generated runs enter each of them.
+const joinedCase: fc.Arbitrary<readonly [number, JoinFilter]> = fc.tuple(
+  fc.integer({ min: 1, max: 24 }),
+  fc.constantFrom(...joinFilters),
+)
 
 async function expectJoinFreeWorkBound(fillerCount: number): Promise<void> {
   const baseline = joinFreeBaselineObservation
@@ -150,22 +176,31 @@ function campaigns(fixedSeed: number, property: string, baseRuns = 6) {
 
 describe(`includes deterministic work-counter oracle`, () => {
   beforeAll(async () => {
-    const [joinedBaseline, joinFreeBaseline] = await Promise.all([
-      observeWork({ filler: noFillers, joinTargets: true }),
+    const [joinFreeBaseline, ...joinedBaselines] = await Promise.all([
       observeWork({ filler: noFillers, joinTargets: false }),
+      ...joinFilters.map((joinFilter) =>
+        observeWork({ filler: noFillers, joinTargets: true, joinFilter }),
+      ),
     ])
-    joinedBaselineObservation = joinedBaseline
     joinFreeBaselineObservation = joinFreeBaseline
+    joinFilters.forEach((joinFilter, index) =>
+      joinedBaselineObservations.set(joinFilter, joinedBaselines[index]!),
+    )
   })
 
   it.each([1, 2, 3])(
     `pins the work bound at the small filler boundary (%i)`,
-    expectCorrelatedJoinWorkBound,
+    (fillerCount) => expectCorrelatedJoinWorkBound(fillerCount),
   )
   it(`pins the joined-link filler range endpoint`, () =>
     expectCorrelatedJoinWorkBound(24))
-  it.each([1, 24])(
-    `pins join-target growth at filler count %i`,
+  it.each(
+    joinFilters.flatMap((joinFilter) => [
+      [1, joinFilter] as const,
+      [24, joinFilter] as const,
+    ]),
+  )(
+    `pins join-target growth at filler count %i (join filter %s)`,
     expectJoinTargetWorkBound,
   )
   it.each([1, 24])(
@@ -173,18 +208,34 @@ describe(`includes deterministic work-counter oracle`, () => {
     expectJoinFreeWorkBound,
   )
 
-  for (const campaign of campaigns(1709, `includes-work.correlated-links`)) {
-    fcTest.prop([fc.integer({ min: 1, max: 24 })], campaign.options)(
-      `a join preserves correlated source pushdown (${campaign.name})`,
-      expectCorrelatedJoinWorkBound,
-    )
-  }
-
-  for (const campaign of campaigns(170_900, `includes-work.join-targets`)) {
-    fcTest.prop([fc.integer({ min: 1, max: 24 })], campaign.options)(
-      `indexed join-target growth keeps source work flat (${campaign.name})`,
-      expectJoinTargetWorkBound,
-    )
+  for (const [property, seed, check] of [
+    [`includes-work.correlated-links`, 1709, expectCorrelatedJoinWorkBound],
+    [`includes-work.join-targets`, 170_900, expectJoinTargetWorkBound],
+  ] as const) {
+    for (const campaign of campaigns(seed, property)) {
+      it(`${property} keeps source work flat under each join filter (${campaign.name})`, async () => {
+        // One fixed example per join filter makes reach independent of the seed.
+        const fixed = joinFilters.map((joinFilter) => [1, joinFilter] as const)
+        const reach = createOracleReach(
+          `${property} (${campaign.name})`,
+          joinFilters,
+          { fixedHistories: fixed.length },
+        )
+        await fc.assert(
+          fc.asyncProperty(joinedCase, async (testCase) => {
+            const [fillerCount, joinFilter] = testCase
+            reach.beginHistory({ fixed: fixed.includes(testCase) })
+            reach.reach(joinFilter)
+            await check(fillerCount, joinFilter)
+          }),
+          {
+            ...campaign.options,
+            examples: fixed.map((testCase) => [testCase]),
+          },
+        )
+        reach.assertReached()
+      })
+    }
   }
 
   for (const campaign of campaigns(17_090, `includes-work.join-free`)) {
@@ -1049,12 +1100,11 @@ async function checkWindowedIncludeWork(testCase: WindowCase): Promise<number> {
 declareOracle({
   check: [
     checkWindowedIncludeWork,
-    expectCorrelatedJoinWorkBound,
-    expectJoinTargetWorkBound,
+    expectJoinedWorkBound,
     expectJoinFreeWorkBound,
   ],
   model: [windowUnits, modelKids],
-  grammar: [windowCase],
+  grammar: [windowCase, joinedCase],
 })
 
 // Enough runs that each dimension appears at the default multiplier; the

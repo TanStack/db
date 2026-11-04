@@ -66,7 +66,12 @@ import {
   isCaseWhenConditionTrue,
   toBooleanPredicate,
 } from './evaluators.js'
-import { processJoins, processSource, registerLazyDemandPlan } from './joins.js'
+import {
+  isSourceFilter,
+  processJoins,
+  processSource,
+  registerLazyDemandPlan,
+} from './joins.js'
 import { findAggregate } from './find-aggregate.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { processOrderBy } from './order-by.js'
@@ -1653,6 +1658,12 @@ function processFromClause(
   }
 
   const compileSource = (source: CollectionSourceRef | QueryRef) => {
+    // A pushed-down source filter reads no parent value: it is filtered by the
+    // parent like its Collection, so keyed lazy demand still applies.
+    const isParentRouted =
+      parentKeyStream !== undefined &&
+      source.type === `queryRef` &&
+      !isSourceFilter(source)
     const result = processSource(
       source,
       allInputs,
@@ -1680,7 +1691,7 @@ function processFromClause(
       sourceWhereClauses,
       valueIdentity,
       `from`,
-      parentKeyStream,
+      isParentRouted ? parentKeyStream : undefined,
     )
     return {
       ...result,
@@ -1689,8 +1700,7 @@ function processFromClause(
           sourceAlias: source.alias,
           include,
         })) ?? [],
-      isParentRouted:
-        source.type === `queryRef` && parentKeyStream !== undefined,
+      isParentRouted,
     }
   }
 
