@@ -663,3 +663,16 @@ error/sync-give-up, accept]`). Fix: remember that give-up and fail the
     that skips its wait for the source survives these histories; the
     cached-listener path it protects is owned by `tests/collection.test.ts`
     and the ownership oracle, which reject it.
+- **Decided 2026-11-03, RxDB updates merge named fields.** Same-key
+  histories found that RxDB's `incrementalPatch` keeps a stored field an
+  update does not name (seed 371775937). RxDB keeps that behavior: the
+  driver declares `merged-updates`, under which an update's stored row is
+  its authored row merged into the provider's row. This revises the law
+  set's complete-row MUT-8 clause for RxDB. An RxDB that replaces the row
+  fails MUT-8.
+- **Decided 2026-11-03, RxDB update of a deleted document.** It rejects
+  with `UpdateKeyNotFoundError` instead of fulfilling without persisting.
+- **Decided 2026-11-03, TrailBase multi-mutation transactions.** Requests
+  go out one at a time in mutation order and a rejection ends the
+  transaction; generating multi-mutation transactions, and the law for a
+  rejection partway through one, are a follow-up for the mutations owner.

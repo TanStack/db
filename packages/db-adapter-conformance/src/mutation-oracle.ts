@@ -131,6 +131,14 @@ export type MutationCapability =
    * go out at once.
    */
   | `ordered-answers`
+  /**
+   * An update writes the fields its authored row names into the provider's
+   * row and keeps the others, as RxDB's `incrementalPatch` does; a removed
+   * field is named, so it is cleared. Its write, as the provider stores it,
+   * is that merge (maintainer decision 2026-11-03, revising the law set's
+   * complete-row MUT-8 clause for RxDB).
+   */
+  | `merged-updates`
 
 /** The optimistic transaction a write call returns. */
 export interface MutationReceipt {
@@ -484,6 +492,39 @@ export function mutationHistoryArb(
         ? [first, { ...second, id: first.id }]
         : [first, second],
     )
+  // A held write the provider stores with a field the client has not seen,
+  // then an update of that key that does not name it: a merged update keeps
+  // the field, a complete-row one drops it.
+  const unseenFieldPair =
+    capabilities.has(`server-rewrites`) && capabilities.has(`held-writes`)
+      ? [
+          {
+            weight: 2,
+            arbitrary: fc
+              .tuple(write, write)
+              .map(([first, second]): Array<MutationStep> => {
+                if (first.kind !== `write` || second.kind !== `write`)
+                  return [first, second]
+                const { note: _note, ...update } = second
+                return [
+                  {
+                    ...first,
+                    type: first.type === `delete` ? `insert` : first.type,
+                    outcome: `accept`,
+                    held: true,
+                    rewrite: `set-note`,
+                  },
+                  {
+                    ...update,
+                    type: `update`,
+                    id: first.id,
+                    outcome: `accept`,
+                  },
+                ]
+              }),
+          },
+        ]
+      : []
   return fc.record({
     seed: fc.uniqueArray(rowArb, { selector: (row) => row.id, maxLength: 3 }),
     steps: fc
@@ -494,6 +535,7 @@ export function mutationHistoryArb(
             arbitrary: arbitrary.map((step) => [step]),
           })),
           { weight: 2, arbitrary: sameKeyPair },
+          ...unseenFieldPair,
         ),
         { minLength: 1, maxLength: 10 },
       )
@@ -630,6 +672,8 @@ interface MutationModel {
   readonly logOrdered: boolean
   /** The driver declares `ordered-answers`. */
   readonly answersInOrder: boolean
+  /** The driver declares `merged-updates`. */
+  readonly mergedUpdates: boolean
   provider: Map<number, string>
   applied: Map<number, string>
   heldRows: Array<PendingWrite>
@@ -639,6 +683,8 @@ interface MutationModel {
   /** Every write, by index. */
   writes: Array<PendingWrite>
   rewritten: number
+  /** Merged updates whose stored row kept a field they did not name. */
+  mergeKept: number
   requests: Array<{ type: WriteRequest[`type`]; id: number; value?: string }>
   settlements: Array<ExpectedSettlement>
 }
@@ -654,6 +700,7 @@ function initialModel(
     ordered: !domain.capabilities.has(`application-handlers`),
     logOrdered: domain.capabilities.has(`log-ordered-echoes`),
     answersInOrder: domain.capabilities.has(`ordered-answers`),
+    mergedUpdates: domain.capabilities.has(`merged-updates`),
     provider,
     applied: new Map(provider),
     heldRows: [],
@@ -661,6 +708,7 @@ function initialModel(
     echoes: [],
     writes: [],
     rewritten: 0,
+    mergeKept: 0,
     requests: [],
     settlements: [],
   }
@@ -735,19 +783,35 @@ function changedFields(
 
 /** The provider's copy of an accepted insert or update. */
 function copyOf(state: MutationModel, write: PendingWrite): ConformanceRow {
-  const sent = write.sent!
-  const base =
-    write.type === `update` && state.fieldUpdates
-      ? rowOf(write.id, state.provider.get(write.id)!)
-      : { id: write.id }
-  const merged = { ...base, ...sent } as ConformanceRow
+  return rewriteRow(storedFields(state, write), write.plan.rewrite)
+}
+
+/**
+ * The row an accepted insert or update stores before the provider's own
+ * rewrite. An update under `field-updates` merges the fields it sends, and
+ * under `merged-updates` the fields its authored row names, into the
+ * provider's row; otherwise the sent row replaces it.
+ */
+function storedFields(
+  state: MutationModel,
+  write: PendingWrite,
+): ConformanceRow {
+  const merges =
+    write.type === `update` && (state.fieldUpdates || state.mergedUpdates)
+  const base = merges
+    ? rowOf(write.id, state.provider.get(write.id)!)
+    : { id: write.id }
+  const named = state.mergedUpdates
+    ? rowOf(write.id, write.value!)
+    : write.sent!
+  const merged = { ...base, ...named } as ConformanceRow
   const { note, ...rest } = merged
   // A stored `undefined` or `NULL` is an absent field, except to a
   // structured-clone provider, which keeps an own `undefined`.
   const kept =
     (note ?? undefined) !== undefined ||
     (state.undefinedField === `own` && Object.hasOwn(merged, `note`))
-  return rewriteRow(kept ? merged : rest, write.plan.rewrite)
+  return kept ? merged : rest
 }
 
 function fold(
@@ -783,6 +847,13 @@ function decide(state: MutationModel, write: PendingWrite): void {
     const copy = rowValue(copyOf(state, write))
     state.provider.set(write.id, copy)
     if (write.plan.rewrite !== `none` && copy !== write.value) state.rewritten++
+    if (
+      state.mergedUpdates &&
+      write.type === `update` &&
+      !Object.hasOwn(rowOf(write.id, write.value!), `note`) &&
+      Object.hasOwn(storedFields(state, write), `note`)
+    )
+      state.mergeKept++
   }
   // A copy is withheld by its own plan or waits behind an undelivered one:
   // any earlier one from a log, an earlier one for its key otherwise, since
@@ -876,7 +947,17 @@ function advance(state: MutationModel): Array<RowState> {
       state.requests.push({
         type: next.type,
         id: next.id,
-        ...(next.sent === undefined ? {} : { value: requestValue(next.sent) }),
+        ...(next.sent === undefined
+          ? {}
+          : {
+              // A merged update's write is the merge, as the provider
+              // stores it; nothing commits on its key before it is decided.
+              value: requestValue(
+                state.mergedUpdates && next.type === `update`
+                  ? storedFields(state, next)
+                  : next.sent,
+              ),
+            }),
       })
       if (!state.ordered) continue
     }
@@ -1118,6 +1199,7 @@ export const mutationReachStates = [
   `same-key-pending`,
   `held-optimistic-row`,
   `server-rewrote-copy`,
+  `merge-kept-field`,
   `echo-held`,
   `echo-queued-behind-withheld`,
   `quiescent-after-writes`,
@@ -1138,6 +1220,7 @@ const capabilityOfState: Partial<
   'held-optimistic-row': `held-writes`,
   'server-rewrote-copy': `server-rewrites`,
   'echo-held': `held-echoes`,
+  'merge-kept-field': `merged-updates`,
   'echo-queued-behind-withheld': `held-echoes`,
 }
 
@@ -1519,6 +1602,7 @@ export async function checkMutationHistory(
       }
       if (state.heldRows.length > 0) reach(`held-optimistic-row`)
       if (state.rewritten > rewritten) reach(`server-rewrote-copy`)
+      if (state.mergeKept > 0) reach(`merge-kept-field`)
       if (state.pending.some((write) => write.answered)) reach(`echo-held`)
       if (state.echoes.some((write) => !write.withheld))
         reach(`echo-queued-behind-withheld`)
@@ -1543,6 +1627,7 @@ export async function checkMutationHistory(
       if (result === undefined) break
       if (state.heldRows.length > 0) reach(`held-optimistic-row`)
       if (state.rewritten > rewritten) reach(`server-rewrote-copy`)
+      if (state.mergeKept > 0) reach(`merge-kept-field`)
       if (state.pending.some((write) => write.answered)) reach(`echo-held`)
       if (state.echoes.some((write) => !write.withheld))
         reach(`echo-queued-behind-withheld`)

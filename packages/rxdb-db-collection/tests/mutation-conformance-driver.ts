@@ -346,6 +346,8 @@ export function rxdbMutationDriver(): MutationDriver {
       `held-writes`,
       `foreign-commits`,
       `server-rewrites`,
+      // `incrementalPatch` keeps the fields an update does not name.
+      `merged-updates`,
     ]),
     // A JSON document has no `undefined`: a removed field is absent.
     undefinedField: `absent`,

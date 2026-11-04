@@ -7296,7 +7296,15 @@ without `server-rewrites` and fails FID-5 with it. Before the held-row rule, the
 JSON-provider campaign failed MUT-1 on a fulfilled removal behind a pending
 write.
 
-RxDB (`undefinedField: 'absent'`, `server-rewrites`): the driver runs a real
+RxDB (`undefinedField: 'absent'`, `server-rewrites`, `merged-updates`): an
+update writes the fields its authored row names and keeps the others, as
+`incrementalPatch` does (maintainer decision 2026-11-03, revising the law
+set's complete-row MUT-8 clause for RxDB); a grammar arm stores a field the
+client has not seen, from a held write's rewrite, before an update that does
+not name it (reach `merge-kept-field`, 7 to 13 of 300 histories per seed),
+and an RxDB that replaces the row through `incrementalModify` fails MUT-8.
+Before the mode, seed 371775937 of the random campaign failed MUT-8 there.
+The driver runs a real
 RxDB database on memory storage, and a rewrite is RxDB's `preInsert` and
 `preSave` hooks; the request keeps the document as the adapter sent it. With
 the hooks made no-ops, the fixed campaign fails FID-5. The provider wraps that storage's `bulkWrite`, stores
