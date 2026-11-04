@@ -45,12 +45,17 @@ import type { ReferenceMutationMutant } from './reference-mutation-adapter'
  *   adapter does not order (`application-handlers`). Another runs like
  *   Convex: a JSON provider that answers requests in arrival order
  *   (`ordered-answers`), with a log feed and application handlers.
+ * - **Counted confirmation.** Another runs like TrailBase: a SQL provider
+ *   whose adapter confirms the n-th answered write on a key at the n-th
+ *   copy there (`counted-echoes`), so a commit by another client can settle
+ *   a pending write.
  * - **Campaigns per configuration.** Each configuration is its own grammar,
  *   so each runs a fixed and a random campaign, under its own property name.
  * - **Calibration.** Each hostile mutant of the reference adapter breaks one
  *   law, and the fixed campaign must reject it with that law (ORC-006). A
  *   provider that breaks a rule its driver declares (log order,
- *   application-handler requests, in-order answers) must fail too.
+ *   application-handler requests, in-order answers, confirmation by its
+ *   own copy) must fail too.
  */
 
 const property = `adapter-conformance.mutations.reference`
@@ -66,6 +71,10 @@ const logDriver = referenceMutationDriver(undefined, {
   log: true,
   application: true,
 })
+const countedDriver = referenceMutationDriver(undefined, {
+  sql: true,
+  counted: true,
+})
 const inOrderDriver = referenceMutationDriver(undefined, {
   json: true,
   log: true,
@@ -73,6 +82,14 @@ const inOrderDriver = referenceMutationDriver(undefined, {
   inOrder: true,
   confirms: true,
 })
+
+/**
+ * The violation a failed check threw: itself, or the cause of the error that
+ * also carries cleanup failures, as a mutant that strands a write leaves one.
+ */
+function violationIn(error: unknown): unknown {
+  return error instanceof AggregateError ? error.cause : error
+}
 
 async function campaign(
   options: fc.Parameters<[unknown]>,
@@ -127,6 +144,11 @@ describe(`mutation conformance: reference adapter`, () => {
       `adapter-conformance.mutations.reference-in-order`,
       `an in-order JSON log provider and application handlers`,
       inOrderDriver,
+    ],
+    [
+      `adapter-conformance.mutations.reference-counted`,
+      `a SQL provider and confirmation by counted copies`,
+      countedDriver,
     ],
   ]
   for (const [configured, label, under] of configurations) {
@@ -189,6 +211,14 @@ describe(`mutation conformance: reference adapter`, () => {
       },
       /MUT-13 \(settlement\)|MUT-1 /,
     ],
+    [
+      `an adapter that counts copies per key, declared to confirm by its own copy`,
+      {
+        ...referenceMutationDriver(undefined, { sql: true, counted: true }),
+        capabilities: sqlDriver.capabilities,
+      },
+      /MUT-1 |MUT-7/,
+    ],
   ]
   oracleReplayTest(it).each(misdeclared)(
     `rejects %s`,
@@ -198,8 +228,9 @@ describe(`mutation conformance: reference adapter`, () => {
         numRuns: runs,
       })
       expect(result.failed).toBe(true)
-      expect(result.errorInstance).toBeInstanceOf(ConformanceViolation)
-      expect((result.errorInstance as ConformanceViolation).law).toMatch(law)
+      const violation = violationIn(result.errorInstance)
+      expect(violation).toBeInstanceOf(ConformanceViolation)
+      expect((violation as ConformanceViolation).law).toMatch(law)
     },
     campaignTimeoutMs,
   )
@@ -243,6 +274,15 @@ describe(`mutation conformance: reference adapter`, () => {
     [`confirms-by-high-water`, /MUT-1|MUT-7/],
     [`drops-joint-settlement`, /MUT-[12] \(publication\)/],
     [`replays-joint-settlement`, /MUT-[12] \(publication\)/],
+    [`confirms-on-any-copy`, /MUT-1 |MUT-7|FID-5 \(public rows\)/],
+    [
+      `reload-skips-confirmation`,
+      /MUT-7|FID-5 \(public rows\)|reload \(settlement\)/,
+    ],
+    [
+      `reload-keeps-counts`,
+      /MUT-1 |MUT-7|FID-5 \(public rows\)|reload \(settlement\)/,
+    ],
   ]
   oracleReplayTest(it).each(mutants)(
     `rejects the %s mutant with %s`,
@@ -252,8 +292,9 @@ describe(`mutation conformance: reference adapter`, () => {
         { seed: 2118, numRuns: runs },
       )
       expect(result.failed).toBe(true)
-      expect(result.errorInstance).toBeInstanceOf(ConformanceViolation)
-      expect((result.errorInstance as ConformanceViolation).law).toMatch(law)
+      const violation = violationIn(result.errorInstance)
+      expect(violation).toBeInstanceOf(ConformanceViolation)
+      expect((violation as ConformanceViolation).law).toMatch(law)
     },
     campaignTimeoutMs,
   )

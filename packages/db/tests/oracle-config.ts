@@ -259,6 +259,7 @@ const staticOracleProperties = [
   `adapter-conformance.mutations.reference-sql`,
   `adapter-conformance.mutations.reference-log`,
   `adapter-conformance.mutations.reference-in-order`,
+  `adapter-conformance.mutations.reference-counted`,
   `adapter-conformance.mutations.rxdb`,
   `adapter-conformance.mutations.trailbase`,
   `adapter-conformance.mutations.powersync`,

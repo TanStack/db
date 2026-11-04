@@ -115,11 +115,15 @@ class ConvexMutationProvider implements MutationProvider {
   /** Requests not yet answered, in arrival order. */
   private readonly unanswered: Array<Answer> = []
   private readonly log: Array<WriteRequest> = []
-  /** Commits whose transitions are stalled; `own` marks a held echo. */
+  /**
+   * Transitions that are stalled: a commit's, where `own` marks a held echo,
+   * or a query-set change's acknowledgment, with its modifications.
+   */
   private readonly stalled: Array<{
-    rows: Array<ConformanceRow>
+    rows?: Array<ConformanceRow>
     ts: number
     own: boolean
+    extra?: Array<unknown>
   }> = []
   private time = 0
   /** The timestamp of the last transition sent. */
@@ -197,14 +201,15 @@ class ConvexMutationProvider implements MutationProvider {
       const removed = modifications
         .filter((m) => m.type === `Remove`)
         .map(({ queryId }) => ({ type: `QueryRemoved`, queryId }))
-      // The server acknowledges a query-set change in a new transition.
-      queueMicrotask(() =>
-        this.transition(
-          ++this.time,
-          added && this.stalled.length === 0 ? this.result() : undefined,
-          removed,
-        ),
-      )
+      // The server acknowledges a query-set change in a new transition,
+      // which waits behind stalled ones: transitions are in order.
+      queueMicrotask(() => {
+        const ts = ++this.time
+        const rows = added ? this.result() : undefined
+        if (this.stalled.length > 0)
+          this.stalled.push({ rows, ts, own: false, extra: removed })
+        else this.transition(ts, rows, removed)
+      })
       return
     }
     if (message.type !== `Mutation`) return
@@ -302,10 +307,10 @@ class ConvexMutationProvider implements MutationProvider {
   deliver(): void {
     const first = this.stalled.shift()
     if (!first) return
-    this.transition(first.ts, first.rows)
+    this.transition(first.ts, first.rows, first.extra)
     while (this.stalled[0] && !this.stalled[0].own) {
       const next = this.stalled.shift()!
-      this.transition(next.ts, next.rows)
+      this.transition(next.ts, next.rows, next.extra)
     }
   }
 
@@ -360,6 +365,11 @@ export function convexMutationDriver(): MutationDriver {
       `log-ordered-echoes`,
       `application-handlers`,
       `ordered-answers`,
+      // The collection's queries share the client's one transition stream.
+      `reloads`,
+      `reload-keeps-feed`,
+      // The new run takes the client's current result as a snapshot.
+      `snapshot-reloads`,
     ]),
     undefinedField: `absent`,
     // The client creates a failed mutation's error from the server's
@@ -427,6 +437,7 @@ export function convexMutationDriver(): MutationDriver {
         provider,
         settle: provider.settle,
         drain: () => provider.drain(),
+        reload: () => collection.reload(),
         dispose: async () => {
           await collection.cleanup()
           await provider.dispose()

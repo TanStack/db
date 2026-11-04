@@ -7578,12 +7578,31 @@ and every later incremental write on the collection waits forever
 campaigns failed HEALTH-5 at an update whose storage write throws. The adapter
 keeps `incrementalPatch` and its conflict retry, and its RxDB dev dependency
 and peer range are now 17.6.0 and `>=17.6.0` (maintainer decision
-2026-11-03); both campaigns pass. A conflict (status 409) is not generated. An update of a
+2026-11-03); both campaigns pass. An update of a
 document that another client deleted while the update was pending now
 rejects with `UpdateKeyNotFoundError` (maintainer decision 2026-11-03; it
-used to fulfill without persisting); commits by another client while a write
-is pending are outside the grammar (MUT-11), so `rxdb.test.ts` holds the
-supplemental witness, RED on the parent.
+used to fulfill without persisting); the grammar leaves that history out as
+the law set's `unknownKeyUpdate`, so `rxdb.test.ts` holds the supplemental
+witness, RED on the parent. Another client's commit is a write straight to
+the collection's storage with a new revision, as a second tab or a
+replication pull writes it; a held write answered after it meets a revision
+conflict (status 409), and RxDB's retry of that write is the same request.
+Through the same `RxCollection`, the driver's commit waited behind RxDB's
+per-document queue, and the fixed campaign timed out. With commits over
+pending writes in the grammar (MUT-11), a held delete failed with the
+conflict, because `bulkRemove` does not retry; the adapter now removes each
+document with `incrementalRemove`, which retries over the newer revision, as
+`incrementalPatch` does. Reloads (`reloads`, `snapshot-reloads`): a reload's
+initial fetch is a snapshot, which core applies at once. On the parent, a
+reload while a write was held failed MUT-1 and MUT-7: the new run awaited
+its held initial commit before it went live, so a write returned while its
+change was still buffered and its row vanished, or the write never settled.
+The run now goes live once its commits are queued, a write returns once the
+current run is live, and only `markReady()` waits for the rows to apply,
+which keeps `rxdb.test.ts`'s startup readiness law. The initial fetch of a
+reload is always a snapshot; one that depended on the kept rows was held
+when another client's held delete had emptied them, so the model would have
+had to copy that branch.
 A removed field is an own `undefined` in the authored row (maintainer
 decision 2026-11-03, keeping the documented rule in
 `packages/db/tests/proxy-detachment-contract-oracle.test.ts`); the core owner
@@ -7598,11 +7617,38 @@ provider does with the next write on that key is the law set's per-adapter
 not generated. Every provider keeps one key's copies in commit order, so a
 copy waits behind an undelivered one for its key. An update removes `note`
 only when the held row holds a note value, in the model and every writer.
-Limits: commits by another client only while no mutation is pending, so MUT-11
-is not checked (a commit held behind a pending mutation is core's MUT-5); no
-manual or multi-mutation transactions, so MUT-8's mutation order within one
-transaction is not checked; no schema validation or update that changes no
-field; a newer backend value in a disjoint field; server-generated keys.
+Commits by another client arrive at any step, also over a pending write on
+their key (reach `foreign-commit-while-pending`,
+`foreign-commit-over-unanswered-write`, `foreign-commit-behind-withheld-copy`),
+as long as the provider can still take every request it has not answered: an
+insert conflict and an update of a key another client deleted stay the law
+set's `unknownKeyUpdate`. The model's feed carries both kinds of copy in
+commit order; core applies the delivered copies once no write persists, so a
+commit by another client shows only then and settles nothing (MUT-11). With
+`reloads`, a history reloads the Collection (reach `reload`,
+`reload-with-withheld-copy`, `reload-with-unanswered-write`), and every
+reload must have fulfilled by the next quiescent cut. A reload either starts
+a new feed, whose listing confirms every write answered before it, or keeps
+the feed (`reload-keeps-feed`); a snapshot listing (`snapshot-reloads`)
+applies at once. Copies that arrive in one step once no write persists may
+publish one by one or together, so the per-row settlement rule also follows
+the delivered rows then. Calibration adds a reference configuration that
+counts copies per key (`counted-echoes`, below), the same adapter declared to
+confirm by its own copy, which must fail, and three mutants: one that
+confirms at any copy on its key, one whose listing does not confirm the
+writes it covers, and one whose counts survive a reload. The request-log
+labels name a repeated request as extra. A settled write keeps a held
+optimistic row only while a committed sync transaction that has not applied
+touches its key (glossary); the model had kept one for every settled write,
+and seed 82 of the SQL configuration found the difference: a reload's
+listing confirmed an insert whose row another client had deleted, so no
+transaction touched it and core dropped the row at once. A reload while
+another is in flight returns that reload's promise (core), so the step is
+skipped, and the propagation step also waits for pending reloads.
+Limits: no manual or multi-mutation transactions, so MUT-8's mutation order
+within one transaction is not checked; no schema validation or update that
+changes no field; a newer backend value in a disjoint field;
+server-generated keys.
 
 TrailBase (`undefinedField: 'null'`, `field-updates`, `held-echoes`, and every
 other mutation capability): the driver's RecordApi acts as a TrailBase
@@ -7622,8 +7668,27 @@ change stream is in commit order (`log-ordered-echoes`). The adapter confirms
 the n-th answered write on a key by the n-th change event on that key, so an
 earlier write's late event cannot confirm a later write on the key; with same-key
 histories, the version that confirmed by any event after the write began
-failed MUT-1 and MUT-7, and a mutant keeping it is rejected. Events from
-another client while a write is pending are outside these histories (MUT-11).
+failed MUT-1 and MUT-7, and a mutant keeping it is rejected. TrailBase events
+carry no write identity (checked through client 0.14.3: writes answer with
+no version, and `seq` only numbers one subscription's events), so another
+client's event on a record can confirm a pending write there: declared as
+`counted-echoes`, the n-th answered write on a key settles at the n-th event
+on it, counting while a write is admitted or an answered write's event is
+still to come (maintainer decision 2026-11-04). Strict MUT-11 rejects it on
+the fixed campaign (a held delete settles at another client's upsert), and
+the model now checks the declared rule exactly. A reload (`reloads`) used to
+strand a write whose event the retired stream owed, since the counts outlived
+the run (RED: MUT-7 settlement `pending`). Each run now subscribes in the
+write queue, once every write admitted before it is answered, so each of
+those committed before the stream opened; the eager listing then credits
+their numbers, and until it does, the new stream's events count apart. A
+run's turn ends at its cleanup, so a stale subscription holds neither a
+replacement run nor a write, as `lifecycle-oracle.property.test.ts`
+requires; the version that held the turn failed eight of its cells. On
+demand, the open stream credits them, since no listing carries every row;
+the mutation oracle runs eager mode only. The driver's events belong to the
+stream open at their commit, so the retired stream's held events never
+arrive on the new one.
 A transaction's update and delete requests go out one at a time in mutation
 order, so the next write starts only after each is answered, and a rejection
 ends the transaction there; `trailbase.test.ts` holds a supplemental witness
@@ -7653,7 +7718,9 @@ confirmation, a coupling the model does not represent; `held-echoes` is not
 declared, because one watcher callback applies every committed write;
 `server-rewrites` is not declared, because the local database rewrites
 nothing; removal by assigning `null` and multi-mutation transactions are not
-generated.
+generated. Reloads (`reloads`) and commits by another client pass with no
+adapter change; without held writes, no write is pending when another
+client commits.
 
 Electric (`application-handlers`, `log-ordered-echoes`, `held-echoes`,
 `undefinedField: 'null'`, `write-rejection`, `held-writes`, `foreign-commits`,
@@ -7667,8 +7734,18 @@ through its shape stream (MUT-7), with the handlers' requests and the
 backend's rows as the application's. GREEN with no adapter change; a mutant
 whose txid evidence check accepts any txid fails MUT-1 at the first insert.
 The existing `tests/documented-mutations-oracle.test.ts` owner keeps the
-documented guidance handlers. Limits: one sync run (no reconnect or
-must-refetch while a write waits); `awaitMatch` is not exercised.
+documented guidance handlers. A reload resumes the shape log from its handle
+and offset (`reloads`, `reload-keeps-feed`); the driver answers that
+catch-up request at once, where it had parked it as a live request, which
+left every reload pending. On the parent, a reload rejected every pending
+`awaitTxId` with `StreamAbortedError`, so a write the backend accepted
+rolled back (MUT-1). A run's cleanup now leaves its pending waits for one
+turn: a reload starts the next run in that turn, and the waits carry into
+it, resolved by the resumed log or the retired run's evidence once the run is
+ready (EVID-2); without a next run they reject, and an external abort still
+rejects them at once (maintainer decisions 2026-10-30 and 2026-11-02). The
+Electric retry-decision and lifecycle owners pass. Limits: no reconnect or
+must-refetch while a write waits; `awaitMatch` is not exercised.
 
 Convex (`application-handlers`, `ordered-answers`, `log-ordered-echoes`,
 `held-echoes`, `undefinedField: 'absent'`, `write-rejection`, `held-writes`,
@@ -7686,7 +7763,13 @@ its wait for the source after the handler survives both campaigns, because
 the histories keep one subscription whose result the client applies before it
 resolves the mutation; the cached-listener path that wait protects is owned by
 `tests/collection.test.ts` and the ownership oracle, which reject that mutant.
-The JavaScript client only; no reconnect while a mutation waits.
+A reload keeps the client's one transition stream (`reloads`,
+`reload-keeps-feed`), and its new run takes the client's current result as a
+snapshot (`snapshot-reloads`). The driver had acknowledged the reload's
+query-set change with a transition past a stalled one, which resolved a
+pending mutation early and emptied the rows; acknowledgments now queue in
+transition order. The JavaScript client only; no reconnect while a mutation
+waits.
 
 
 ### Ordered-loader authority CI counterexample, 2026-11-03

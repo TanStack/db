@@ -103,6 +103,22 @@ export type ReferenceMutationMutant =
    * one again.
    */
   | `replays-joint-settlement`
+  /**
+   * MUT-7 (counted): a write is confirmed by any copy on its key that
+   * arrives while a write is admitted, as TrailBase did before it numbered
+   * its writes, so an earlier write's late copy confirms a later one.
+   */
+  | `confirms-on-any-copy`
+  /**
+   * MUT-7 (reload): the new run's listing does not confirm the writes it
+   * covers, so a write whose copy the retired feed owed never settles.
+   */
+  | `reload-skips-confirmation`
+  /**
+   * MUT-7 (reload, counted): the counts survive a reload without crediting
+   * the listing, so a later copy is taken for an earlier write's.
+   */
+  | `reload-keeps-counts`
 
 export interface ReferenceMutationOptions {
   /** A JSON provider. */
@@ -121,6 +137,11 @@ export interface ReferenceMutationOptions {
   application?: boolean
   /** The provider answers requests in arrival order. */
   inOrder?: boolean
+  /**
+   * The adapter confirms writes by counting copies per key, as TrailBase
+   * does (`counted-echoes`); with a SQL provider.
+   */
+  counted?: boolean
 }
 
 const jsonClone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -171,9 +192,17 @@ export class ControlledMutationProvider implements MutationProvider {
     listener: (change: ProviderChange, sequence: number) => void,
   ): () => void {
     this.listener = listener
+    // A new feed starts after the retired one: its undelivered copies never
+    // arrive, and the new run's listing carries their commits.
+    this.withheld.splice(0)
     return () => {
       if (this.listener === listener) this.listener = undefined
     }
+  }
+
+  /** The last commit's sequence number; a listing covers every commit. */
+  get lastCommit(): number {
+    return this.commits
   }
 
   snapshot(): Array<ConformanceRow> {
@@ -320,6 +349,9 @@ export class ControlledMutationProvider implements MutationProvider {
 
 let sequence = 0
 
+/** A provider's answer to one request, as the adapter confirms it. */
+type Answer = { commit: number; id: number; ticket: number }
+
 /** Builds the reference adapter's Collection over `provider`. */
 function referenceCollection(
   provider: ControlledMutationProvider,
@@ -328,6 +360,7 @@ function referenceCollection(
     sql = false,
     confirms = sql,
     application = false,
+    counted = false,
   }: ReferenceMutationOptions,
 ) {
   // MUT-10: each write waits for the earlier one to be decided, by the
@@ -335,17 +368,23 @@ function referenceCollection(
   // (SQL) follows after the turn.
   let turn: Promise<unknown> = Promise.resolve()
   const persist = async (
-    sendAll: () => Promise<Array<number>>,
+    sendAll: () => Promise<Array<Answer>>,
   ): Promise<void> => {
-    if (mutant === `writes-concurrently` || application) {
-      await confirmAll(await sendAll())
-      return
+    admitted++
+    try {
+      if (mutant === `writes-concurrently` || application) {
+        await confirmAll(await sendAll())
+        return
+      }
+      const sent = turn.then(sendAll)
+      const chained =
+        mutant === `chains-on-confirmation` ? sent.then(confirmAll) : sent
+      turn = chained.catch(() => undefined)
+      await confirmAll(await sent)
+    } finally {
+      admitted--
+      forgetCounts()
     }
-    const sent = turn.then(sendAll)
-    const chained =
-      mutant === `chains-on-confirmation` ? sent.then(confirmAll) : sent
-    turn = chained.catch(() => undefined)
-    await confirmAll(await sent)
   }
   // Mutation functions settled since the oracle's step began; the
   // joint-settlement mutants act once a second one has.
@@ -369,20 +408,63 @@ function referenceCollection(
   // ones, so each write waits for its own commit, not for the highest seen.
   const applied = new Set<number>()
   let highest = 0
-  // A commit can have several waiters: the write, and under
-  // `chains-on-confirmation` the next write's turn.
-  let confirmations: Array<{ commit: number; resolve: () => void }> = []
-  const isApplied = (commit: number) =>
-    mutant === `confirms-by-high-water`
-      ? highest >= commit
-      : applied.has(commit)
-  const confirmed = (commit: number): Promise<void> => {
-    if (!confirms || mutant === `settles-on-answer` || isApplied(commit))
-      return Promise.resolve()
-    return new Promise((resolve) => confirmations.push({ commit, resolve }))
+  // Counted (`counted-echoes`), as TrailBase confirms: the adapter numbers
+  // its answered writes and the copies per key, counting while a write is
+  // admitted or an answered write's copy is still to come, and the n-th
+  // answered write on a key is confirmed by the n-th copy there.
+  let admitted = 0
+  const answeredCount = new Map<number, number>()
+  const arrivedCount = new Map<number, number>()
+  // Keys with a copy while a write is admitted, for `confirms-on-any-copy`.
+  const anyCopy = new Set<number>()
+  const forgetCounts = () => {
+    if (admitted > 0) return
+    anyCopy.clear()
+    if (
+      [...answeredCount].every(
+        ([id, answered]) => (arrivedCount.get(id) ?? 0) >= answered,
+      )
+    ) {
+      answeredCount.clear()
+      arrivedCount.clear()
+    }
   }
-  const confirmAll = (commits: Array<number>) =>
-    Promise.all(commits.map(confirmed)).then(() => undefined)
+  /** Sends one request; the answer names its commit and its number. */
+  const send = async (request: WriteRequest): Promise<Answer> => {
+    const commit = await provider.write(request)
+    const ticket = (answeredCount.get(request.id) ?? 0) + 1
+    if (counted) answeredCount.set(request.id, ticket)
+    return { commit, id: request.id, ticket }
+  }
+  // An answer can have several waiters: the write, and under
+  // `chains-on-confirmation` the next write's turn.
+  let confirmations: Array<{ answer: Answer; resolve: () => void }> = []
+  const isApplied = ({ commit, id, ticket }: Answer) =>
+    mutant === `confirms-on-any-copy`
+      ? anyCopy.has(id)
+      : counted
+        ? (arrivedCount.get(id) ?? 0) >= ticket
+        : mutant === `confirms-by-high-water`
+          ? highest >= commit
+          : applied.has(commit) || commit <= listedThrough
+  const confirmed = (answer: Answer): Promise<void> => {
+    if (!confirms || mutant === `settles-on-answer` || isApplied(answer))
+      return Promise.resolve()
+    return new Promise((resolve) => confirmations.push({ answer, resolve }))
+  }
+  const confirmAll = (answers: Array<Answer>) =>
+    Promise.all(answers.map(confirmed)).then(() => undefined)
+  const resolveConfirmed = () => {
+    const ready = confirmations.filter(({ answer }) => isApplied(answer))
+    confirmations = confirmations.filter((entry) => !ready.includes(entry))
+    for (const { resolve } of ready) resolve()
+    forgetCounts()
+  }
+  // The rows this adapter has written, kept across a reload as core keeps
+  // them; the latest listing covers every commit through `listedThrough`.
+  const keys = new Set<number>()
+  let listedThrough = 0
+  let started = false
   // The `writes-back-authored` mutant writes through the sync run's apply.
   let applyChange: ((change: ProviderChange) => void) | undefined
   const writeBack = (row: ConformanceRow) => {
@@ -416,7 +498,6 @@ function referenceCollection(
     sync: {
       rowUpdateMode: `full`,
       sync: ({ begin, write, commit, markReady }) => {
-        const keys = new Set<number>()
         const apply = (change: ProviderChange) => {
           begin()
           if (change.type === `delete`) {
@@ -431,35 +512,72 @@ function referenceCollection(
           }
           void commit()
         }
-        begin()
-        for (const row of provider.snapshot()) {
-          write({ type: `insert`, value: row })
-          keys.add(row.id)
-        }
-        void commit()
-        markReady()
-        applyChange = apply
         const receive = (change: ProviderChange, commitSequence: number) => {
           apply(change)
           applied.add(commitSequence)
           highest = Math.max(highest, commitSequence)
-          const ready = confirmations.filter(({ commit }) => isApplied(commit))
-          confirmations = confirmations.filter(
-            (entry) => !ready.includes(entry),
-          )
-          for (const { resolve } of ready) resolve()
+          const id = change.type === `delete` ? change.id : change.row.id
+          if (admitted > 0 || answeredCount.size > 0)
+            arrivedCount.set(id, (arrivedCount.get(id) ?? 0) + 1)
+          if (admitted > 0) anyCopy.add(id)
+          resolveConfirmed()
         }
-        return provider.subscribe((change, commitSequence) => {
-          if (mutant === `applies-copy-late`)
-            setTimeout(() => receive(change, commitSequence), 0)
-          else receive(change, commitSequence)
-        })
+        // The listing: the provider's rows, over the rows a reload keeps, and
+        // a delete of each kept row it lacks. It covers every commit so far,
+        // so it confirms every answered write; counted, it credits every
+        // answered number.
+        const list = () => {
+          const rows = provider.snapshot()
+          begin()
+          const listed = new Set(rows.map((row) => row.id))
+          for (const row of rows) {
+            write({ type: keys.has(row.id) ? `update` : `insert`, value: row })
+            keys.add(row.id)
+          }
+          for (const id of [...keys])
+            if (!listed.has(id)) {
+              write({ type: `delete`, key: id })
+              keys.delete(id)
+            }
+          void commit()
+          markReady()
+          if (mutant !== `reload-skips-confirmation`)
+            listedThrough = provider.lastCommit
+          if (counted && mutant !== `reload-keeps-counts`)
+            for (const [id, answered] of answeredCount)
+              arrivedCount.set(
+                id,
+                Math.max(arrivedCount.get(id) ?? 0, answered),
+              )
+          resolveConfirmed()
+        }
+        let unsubscribe: (() => void) | undefined
+        let retired = false
+        const start = () => {
+          if (retired) return
+          unsubscribe = provider.subscribe((change, commitSequence) => {
+            if (mutant === `applies-copy-late`)
+              setTimeout(() => receive(change, commitSequence), 0)
+            else receive(change, commitSequence)
+          })
+          applyChange = apply
+          list()
+        }
+        // Counted, a reload's run subscribes in the write queue: a request in
+        // flight across the subscription could commit on either side of it.
+        if (counted && started) turn = turn.then(start)
+        else start()
+        started = true
+        return () => {
+          retired = true
+          unsubscribe?.()
+        }
       },
     },
     onInsert: ({ transaction }) =>
       answer(
         persist(async () => {
-          const commits: Array<number> = []
+          const commits: Array<Answer> = []
           for (const mutation of transaction.mutations) {
             const request = {
               type: `insert` as const,
@@ -469,9 +587,9 @@ function referenceCollection(
                 ? { note: null as unknown as undefined, ...mutation.modified }
                 : structuredClone(mutation.modified),
             }
-            commits.push(await provider.write(request))
+            commits.push(await send(request))
             if (mutant === `writes-insert-twice`)
-              commits.push(await provider.write(request))
+              commits.push(await send(request))
             writeBack(mutation.modified)
           }
           return commits
@@ -480,10 +598,10 @@ function referenceCollection(
     onUpdate: ({ transaction }) =>
       answer(
         persist(async () => {
-          const commits: Array<number> = []
+          const commits: Array<Answer> = []
           for (const mutation of transaction.mutations) {
             commits.push(
-              await provider.write({
+              await send({
                 type: `update`,
                 id: mutation.key,
                 row: updateRow(mutation),
@@ -498,11 +616,9 @@ function referenceCollection(
       answer(
         persist(async () => {
           if (mutant === `skips-delete`) return []
-          const commits: Array<number> = []
+          const commits: Array<Answer> = []
           for (const mutation of transaction.mutations) {
-            commits.push(
-              await provider.write({ type: `delete`, id: mutation.key }),
-            )
+            commits.push(await send({ type: `delete`, id: mutation.key }))
           }
           return commits
         }),
@@ -545,6 +661,9 @@ const sqlMutants = new Set<ReferenceMutationMutant | undefined>([
   `settles-on-answer`,
   `chains-on-confirmation`,
   `confirms-by-high-water`,
+  `confirms-on-any-copy`,
+  `reload-skips-confirmation`,
+  `reload-keeps-counts`,
 ])
 
 /** A production driver for the reference adapter, optionally mutated. */
@@ -557,6 +676,8 @@ export function referenceMutationDriver(
     application = false,
     inOrder = false,
     confirms = sql,
+    counted = mutant === `confirms-on-any-copy` ||
+      mutant === `reload-keeps-counts`,
   }: ReferenceMutationOptions = {},
 ): MutationDriver {
   const capabilities: Array<MutationCapability> = [
@@ -564,14 +685,16 @@ export function referenceMutationDriver(
     `held-writes`,
     `foreign-commits`,
     `server-rewrites`,
+    `reloads`,
   ]
   if (sql) capabilities.push(`field-updates`)
   if (confirms) capabilities.push(`held-echoes`)
   if (log) capabilities.push(`log-ordered-echoes`)
   if (application) capabilities.push(`application-handlers`)
   if (inOrder) capabilities.push(`ordered-answers`)
+  if (counted) capabilities.push(`counted-echoes`)
   return {
-    adapter: `reference mutations${json ? ` (JSON provider)` : ``}${sql ? ` (SQL provider)` : ``}${log ? ` (log)` : ``}${application ? ` (application handlers)` : ``}${inOrder ? ` (in order)` : ``}${mutant ? ` (${mutant})` : ``}`,
+    adapter: `reference mutations${json ? ` (JSON provider)` : ``}${sql ? ` (SQL provider)` : ``}${log ? ` (log)` : ``}${application ? ` (application handlers)` : ``}${inOrder ? ` (in order)` : ``}${counted ? ` (counted)` : ``}${mutant ? ` (${mutant})` : ``}`,
     ...(json && { undefinedField: `absent` as const }),
     ...(sql && { undefinedField: `null` as const }),
     capabilities: new Set(capabilities),
@@ -584,7 +707,7 @@ export function referenceMutationDriver(
       const { collection, jointSettlement } = referenceCollection(
         provider,
         mutant,
-        { sql, confirms, application },
+        { sql, confirms, application, counted },
       )
       const view = observedView(collection, {
         row: (row) => row,
@@ -610,6 +733,7 @@ export function referenceMutationDriver(
         },
         provider,
         drain: () => provider.drain(),
+        reload: () => collection.reload(),
       }
     },
   }

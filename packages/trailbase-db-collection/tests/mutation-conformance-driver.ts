@@ -24,12 +24,18 @@
  *   (`held-echoes`). The change stream is in commit order, so a held event
  *   stalls it and later events wait behind it (`log-ordered-echoes`);
  *   TrailBase confirms each write through its change stream (the law set's
- *   `confirm-through-sync`);
+ *   `confirm-through-sync`). Its events carry no write identity, so the
+ *   adapter counts them: the n-th answered write on a record settles at the
+ *   n-th event on it, also another client's (`counted-echoes`, maintainer
+ *   decision 2026-11-04);
  * - a rewrite (`server-rewrites`) is the service changing the stored row, as
  *   a column default, trigger, or check does; its event carries the stored
  *   row;
  * - a commit by another client changes the service's rows and sends its
- *   event at once.
+ *   event at once, or behind a held event, also while a write is pending;
+ * - a reload (`reloads`) subscribes again and lists the table: an event
+ *   belongs to the stream open at its commit, so the retired stream's held
+ *   events never arrive on the new one.
  *
  * Limits: the record API is a test double that bypasses the SDK's fetch and
  * SSE decoding, as `conformance-driver.ts` does; the key is the client's,
@@ -93,7 +99,10 @@ class TrailBaseMutationProvider implements MutationProvider {
       Promise.resolve(
         new ReadableStream<Event>({
           start: (controller) => {
+            // A new subscription gets only later commits: the retired
+            // stream's held events never arrive.
             this.controller = controller
+            this.withheld.splice(0)
           },
           // Cleanup cancels the stream; later events have no reader.
           cancel: () => {
@@ -171,7 +180,12 @@ class TrailBaseMutationProvider implements MutationProvider {
       this.table.set(change.row.id, record)
       event = held ? { Update: asSent(record) } : { Insert: asSent(record) }
     }
-    const send = () => this.controller?.enqueue(event)
+    // An event belongs to the stream open at its commit; a reload's new
+    // stream does not carry it.
+    const stream = this.controller
+    const send = () => {
+      if (stream && stream === this.controller) stream.enqueue(event)
+    }
     // The change stream is in commit order: an event waits behind a held one.
     if (withhold || this.withheld.length > 0)
       this.withheld.push({ send, own: withhold })
@@ -227,6 +241,8 @@ export function trailBaseMutationDriver(): MutationDriver {
       `field-updates`,
       `held-echoes`,
       `log-ordered-echoes`,
+      `counted-echoes`,
+      `reloads`,
     ]),
     undefinedField: `null`,
     create(seed): MutationFixture {
@@ -259,6 +275,7 @@ export function trailBaseMutationDriver(): MutationDriver {
         },
         provider,
         drain: () => provider.drain(),
+        reload: () => collection.reload(),
         dispose: () => collection.cleanup(),
       }
     },

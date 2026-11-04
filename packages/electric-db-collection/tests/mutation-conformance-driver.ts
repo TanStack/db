@@ -27,8 +27,10 @@
  *   application's.
  *
  * The application inserts an absent `note` as `null` and removes a held one
- * by assigning `undefined`, the update API's removed field. Limits: one sync
- * run; no reconnect or must-refetch while a write waits; `awaitMatch` is not
+ * by assigning `undefined`, the update API's removed field. A reload's new
+ * run resumes the shape log from its handle and offset with a catch-up
+ * request, which the provider answers at once (`reload-keeps-feed`). Limits:
+ * no reconnect or must-refetch while a write waits; `awaitMatch` is not
  * exercised.
  */
 import { createCollection } from '@tanstack/db'
@@ -121,6 +123,12 @@ class ElectricMutationProvider implements MutationProvider {
             headers: { operation: `insert` },
           })),
         ])
+        return
+      }
+      // A catch-up request, as a reloaded stream resumes the log with,
+      // gets the next batch or, with none, an answer that it is up to date.
+      if (url.searchParams.get(`live`) !== `true` && this.outbox.length === 0) {
+        this.respond(request, [])
         return
       }
       this.waiting = request
@@ -301,6 +309,9 @@ export function electricMutationDriver(): MutationDriver {
       `held-echoes`,
       `log-ordered-echoes`,
       `application-handlers`,
+      // A reloaded shape stream resumes the same log from its offset.
+      `reloads`,
+      `reload-keeps-feed`,
     ]),
     undefinedField: `null`,
     create(seed): MutationFixture {
@@ -387,6 +398,7 @@ export function electricMutationDriver(): MutationDriver {
         provider,
         settle: provider.settle,
         drain: () => provider.drain(),
+        reload: () => collection.reload(),
         dispose: () => collection.cleanup(),
       }
     },

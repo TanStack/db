@@ -46,6 +46,17 @@
  *   store a row that differs from the authored one (`server-rewrites`: a
  *   server default, trigger, or normalization); its copy is then the row's
  *   value, and the optimistic row gives way to it when the copy applies.
+ * - **MUT-11.** A commit by another client while mutations are pending does
+ *   not settle them and does not show under them: core holds its sync
+ *   transaction until every mutation settles, and a pending write's own
+ *   copy, not the other client's, confirms it. The declared exception is
+ *   `counted-echoes` (TrailBase, whose events carry no write identity),
+ *   where the model counts copies per key (maintainer decision 2026-11-04).
+ * - **Reload.** A reload neither settles nor fails a pending write
+ *   wrongly: a write whose copy the retired feed owed settles at the new
+ *   run's listing, a write that keeps its feed settles at its copy, and
+ *   every reload has fulfilled by the next quiescent cut (core's reload
+ *   contract in `packages/db/src/collection/sync.ts`).
  * - **HEALTH-5.** No history causes an unhandled rejection or an undeclared
  *   error- or warning-level console diagnostic.
  *
@@ -67,10 +78,13 @@
  * adapter persists them itself or, with `application-handlers`, confirms the
  * writes the application's handlers persist. A write may follow a pending
  * one on the same key. With `held-echoes` it checks confirmation through
- * sync (MUT-7). It does not check manual or multi-mutation transactions,
- * schema validation, or `awaitMatch`. Commits from other clients arrive only
- * while no mutation is pending, so MUT-11 is not checked; a commit held
- * behind a pending mutation is core's MUT-5.
+ * sync (MUT-7). Commits from other clients arrive at any point, also over a
+ * pending write on their key, as long as the provider can still take every
+ * request it has not answered; an insert conflict or an update of a key
+ * another client deleted is the law set's per-adapter `unknownKeyUpdate`,
+ * which no driver declares. With `reloads` a history reloads the Collection.
+ * It does not check manual or multi-mutation transactions, schema
+ * validation, or `awaitMatch`.
  */
 import fc from 'fast-check'
 import { ConformanceViolation } from './eager-live-source-oracle'
@@ -139,6 +153,47 @@ export type MutationCapability =
    * complete-row MUT-8 clause for RxDB).
    */
   | `merged-updates`
+  /**
+   * The adapter confirms an answered write by counting change events, as
+   * TrailBase does, whose events carry no write identity: the n-th answered
+   * write on a key settles once n copies on that key have arrived, counting
+   * copies of commits by other clients. Copies count from the first
+   * admitted write until no write is admitted and every answered write's
+   * copy has arrived; then the counts start over. So a copy from another
+   * client can settle a write before its own copy arrives, and the public
+   * rows then show that copy until the own copy applies (maintainer
+   * decision 2026-11-04, the declared TrailBase rule for MUT-11).
+   */
+  | `counted-echoes`
+  /**
+   * The driver can reload the Collection (`collection.reload()`, through
+   * the fixture's `reload`): core retires the sync run, and the new run
+   * lists the provider's rows and subscribes to a new change feed. Copies
+   * the retired run's feed had not delivered never arrive; the listing
+   * carries their commits, so it confirms every write answered before it.
+   * Under `counted-echoes` the new run subscribes in the adapter's write
+   * queue, once every write admitted before the reload is answered, since
+   * a request in flight across the subscription could commit on either
+   * side of it; copies sent while no run is subscribed are lost, and the
+   * listing then credits every answered write's number.
+   */
+  | `reloads`
+  /**
+   * With `reloads`: the new run reads the same change feed as the retired
+   * one, as a Convex client's queries share its one transition stream.
+   * Copies not delivered yet still arrive, and the new run's listing comes
+   * behind them. Its listing is the rows the feed has delivered, so it
+   * confirms nothing; it changes nothing the model tracks unless it is a
+   * snapshot (`snapshot-reloads`), which applies them at once.
+   */
+  | `reload-keeps-feed`
+  /**
+   * With `reloads`: the new run's listing is a snapshot, which core applies
+   * at once, with every committed sync transaction before it, even while a
+   * mutation persists (core's truncate rule), so the listing's rows show
+   * under the pending mutations as soon as it applies.
+   */
+  | `snapshot-reloads`
 
 /** The optimistic transaction a write call returns. */
 export interface MutationReceipt {
@@ -258,7 +313,10 @@ export interface MutationProvider {
 
 /** What the check tells a fixture's propagation step. */
 export interface SettleCut {
-  /** How many writes' `when('settled')` receipts have not settled yet. */
+  /**
+   * How many writes' `when('settled')` receipts, and reloads' promises, have
+   * not settled yet.
+   */
   unsettled: () => number
 }
 
@@ -279,6 +337,8 @@ export interface MutationFixture {
   drain?: () => void | Promise<void>
   /** The adapter's propagation step, awaited before every comparison. */
   settle?: (cut: SettleCut) => Promise<void>
+  /** `collection.reload()` (`reloads`). */
+  reload?: () => Promise<void>
   dispose?: () => void | Promise<void>
 }
 
@@ -341,8 +401,15 @@ export interface MutationDriver {
  * - `release`: the provider answers the oldest held request (`held-writes`).
  * - `deliver`: the provider delivers the oldest copy it answered but
  *   withheld from its change feed (`held-echoes`).
- * - `foreign`: another client commits an upsert or a delete while no
- *   mutation is pending (`foreign-commits`).
+ * - `reload`: the application reloads the Collection (`reloads`), unless
+ *   an earlier reload is still in flight, which returns its promise. An arm
+ *   generates a write whose copy is withheld, a reload, and another write
+ *   on its key.
+ * - `foreign`: another client commits an upsert or a delete
+ *   (`foreign-commits`), also while mutations are pending (MUT-11), as long
+ *   as the provider can still take every request it has not answered. An
+ *   arm generates a held write, or one whose copy is withheld, and then a
+ *   commit by another client on its key.
  *
  * After the last step the check releases every held request, reaching a
  * quiescent cut. Keys range over 1..4 and titles over three values, so writes
@@ -368,6 +435,7 @@ export type MutationStep =
   | { readonly kind: `release` }
   | { readonly kind: `deliver` }
   | { readonly kind: `foreign`; readonly change: ProviderChange }
+  | { readonly kind: `reload` }
 
 /** A write step. */
 export type WriteStep = Extract<MutationStep, { kind: `write` }>
@@ -476,6 +544,12 @@ export function mutationHistoryArb(
       arbitrary: fc.constant({ kind: `deliver` as const }),
     })
   }
+  if (capabilities.has(`reloads`)) {
+    steps.push({
+      weight: 1,
+      arbitrary: fc.constant({ kind: `reload` as const }),
+    })
+  }
   if (capabilities.has(`foreign-commits`)) {
     steps.push({
       weight: 2,
@@ -506,7 +580,7 @@ export function mutationHistoryArb(
     capabilities.has(`server-rewrites`) && capabilities.has(`held-writes`)
       ? [
           {
-            weight: 2,
+            weight: 3,
             arbitrary: fc
               .tuple(write, write)
               .map(([first, second]): Array<MutationStep> => {
@@ -530,6 +604,54 @@ export function mutationHistoryArb(
           },
         ]
       : []
+  // A write the provider holds, or answers with its copy withheld, then a
+  // commit by another client on its key (MUT-11): the other client's copy
+  // arrives before the write is answered, or queues behind its copy.
+  const foreignOverPending = (held: boolean) =>
+    fc.tuple(write, rowArb).map(([first, row]): Array<MutationStep> => [
+      {
+        ...first,
+        type: first.type === `delete` ? `update` : first.type,
+        outcome: `accept`,
+        held,
+        echoHeld: !held,
+      },
+      {
+        kind: `foreign`,
+        change: { type: `upsert`, row: { ...row, id: first.id } },
+      },
+    ])
+  const foreignPairs = capabilities.has(`foreign-commits`)
+    ? [
+        ...(capabilities.has(`held-writes`)
+          ? [{ weight: 1, arbitrary: foreignOverPending(true) }]
+          : []),
+        ...(capabilities.has(`held-echoes`)
+          ? [{ weight: 1, arbitrary: foreignOverPending(false) }]
+          : []),
+      ]
+    : []
+  // A write whose copy is withheld or whose answer is held, a reload, and
+  // another write on its key: the retired feed owed the first write's copy.
+  const reloadPairs = capabilities.has(`reloads`)
+    ? [
+        {
+          weight: 1,
+          arbitrary: fc
+            .tuple(write, write, fc.boolean())
+            .map(([first, second, held]): Array<MutationStep> => [
+              {
+                ...first,
+                outcome: `accept`,
+                held: held && capabilities.has(`held-writes`),
+                echoHeld: !held && capabilities.has(`held-echoes`),
+              },
+              { kind: `reload` },
+              { ...second, type: `update`, id: first.id },
+            ]),
+        },
+      ]
+    : []
   return fc.record({
     seed: fc.uniqueArray(rowArb, { selector: (row) => row.id, maxLength: 3 }),
     steps: fc
@@ -541,6 +663,8 @@ export function mutationHistoryArb(
           })),
           { weight: 2, arbitrary: sameKeyPair },
           ...unseenFieldPair,
+          ...foreignPairs,
+          ...reloadPairs,
         ),
         { minLength: 1, maxLength: 10 },
       )
@@ -624,6 +748,22 @@ interface PendingWrite {
   requested: boolean
   /** Accepted, with its copy not yet delivered by the change feed. */
   answered: boolean
+  /** Under `counted-echoes`: the number its answer took on its key. */
+  ticket?: number
+}
+
+/**
+ * A commit's copy in the provider's change feed: an accepted write's, or a
+ * commit by another client's. It carries the row as that commit stored it,
+ * absent for a delete.
+ */
+interface Copy {
+  readonly id: number
+  readonly value?: string
+  /** The accepted write it copies; absent for another client's commit. */
+  readonly write?: PendingWrite
+  /** The write's plan withholds it until `deliver`. */
+  readonly withheld: boolean
 }
 
 type ExpectedSettlement = `pending` | `fulfilled` | { rejected: Error }
@@ -649,13 +789,19 @@ type ExpectedSettlement = `pending` | `fulfilled` | { rejected: Error }
  *   requested, but it stays pending until its copy arrives (MUT-7).
  * - `requests` is every write request MUT-8 and MUT-10 allow so far.
  * - `settlements` is each write's `when('settled')` settlement.
- * - `applied` is the synced rows core has applied. An accepted write's
- *   provider copy reaches core as an accepted sync transaction, which is
- *   held while any optimistic transaction is persisting, so `applied` takes
- *   `provider` only when no mutation is pending.
- * - `heldRows` lists the accepted writes whose sync transaction is held, in
- *   author order: each keeps its held optimistic row until that transaction
- *   applies (glossary: accepted sync transaction, held optimistic row).
+ * - `delivered` is the provider's rows as its change feed has delivered
+ *   them: a copy arrives at once, or after a withheld one ahead of it.
+ * - `applied` is the synced rows core has applied. Each delivered copy
+ *   reaches core as an accepted sync transaction, which is held while any
+ *   optimistic transaction is persisting, so `applied` takes `delivered`
+ *   only when no mutation is pending. A commit by another client while a
+ *   mutation is pending therefore shows only once every mutation settles,
+ *   and it does not settle a write (MUT-11), except under the declared
+ *   `counted-echoes` rule.
+ * - `heldRows` lists the settled writes that keep a held optimistic row, in
+ *   author order: a committed sync transaction that has not applied touches
+ *   the write's key (`unapplied`), and the row stays until it applies
+ *   (glossary: accepted sync transaction, held optimistic row).
  *
  * The public rows are `applied` with `heldRows` and then `pending` folded on
  * in author order: core shows a mutation's optimistic state until its
@@ -677,12 +823,45 @@ interface MutationModel {
   readonly answersInOrder: boolean
   /** The driver declares `merged-updates`. */
   readonly mergedUpdates: boolean
+  /** The driver declares `counted-echoes`. */
+  readonly counted: boolean
   provider: Map<number, string>
+  delivered: Map<number, string>
   applied: Map<number, string>
   heldRows: Array<PendingWrite>
+  /**
+   * Keys that committed sync transactions touch which have not applied: a
+   * copy that arrived while a mutation persists, or a held listing's rows.
+   * A settled write keeps its held optimistic row only while its key is
+   * here (glossary: held optimistic row).
+   */
+  unapplied: Set<number>
   pending: Array<PendingWrite>
-  /** Answered writes whose copies are not delivered, in commit order. */
-  echoes: Array<PendingWrite>
+  /** Copies not delivered yet, in commit order. */
+  echoes: Array<Copy>
+  /** Under `counted-echoes`: answered writes and arrived copies per key. */
+  answeredCount: Map<number, number>
+  arrivedCount: Map<number, number>
+  /**
+   * In the current step, the delivered rows each time core could apply them:
+   * when no mutation is pending and a copy arrives or the last one settles.
+   * Core applies every committed sync transaction when the last mutation
+   * settles, so copies that arrive in one step may publish one by one or
+   * together.
+   */
+  trail: Array<Map<number, string>>
+  /**
+   * Under `reloads`: a reload's new run has not listed yet. Under
+   * `counted-echoes` it waits for the writes admitted before it, up to
+   * this write index, to be answered; meanwhile no run is subscribed.
+   */
+  listingAfter: number | undefined
+  /** The driver declares `reloads`. */
+  readonly reloads: boolean
+  /** The driver declares `reload-keeps-feed`. */
+  readonly keepsFeed: boolean
+  /** The driver declares `snapshot-reloads`. */
+  readonly snapshotReloads: boolean
   /** Every write, by index. */
   writes: Array<PendingWrite>
   rewritten: number
@@ -715,11 +894,21 @@ function initialModel(
     logOrdered: domain.capabilities.has(`log-ordered-echoes`),
     answersInOrder: domain.capabilities.has(`ordered-answers`),
     mergedUpdates: domain.capabilities.has(`merged-updates`),
+    counted: domain.capabilities.has(`counted-echoes`),
     provider,
+    delivered: new Map(provider),
     applied: new Map(provider),
     heldRows: [],
+    unapplied: new Set(),
     pending: [],
     echoes: [],
+    answeredCount: new Map(),
+    arrivedCount: new Map(),
+    trail: [],
+    listingAfter: undefined,
+    reloads: domain.capabilities.has(`reloads`),
+    keepsFeed: domain.capabilities.has(`reload-keeps-feed`),
+    snapshotReloads: domain.capabilities.has(`snapshot-reloads`),
     writes: [],
     rewritten: 0,
     mergeKept: 0,
@@ -854,6 +1043,7 @@ function decide(state: MutationModel, write: PendingWrite): void {
   if (write.plan.outcome === `reject`) {
     state.settlements[write.index] = { rejected: write.plan.error }
     retire(state, write)
+    listIfAnswered(state)
     return
   }
   if (write.type === `delete`) state.provider.delete(write.id)
@@ -873,16 +1063,137 @@ function decide(state: MutationModel, write: PendingWrite): void {
     state.provider.set(write.id, copy)
     if (write.plan.rewrite !== `none` && copy !== write.value) state.rewritten++
   }
-  // A copy is withheld by its own plan or waits behind an undelivered one:
-  // any earlier one from a log, an earlier one for its key otherwise, since
-  // every provider keeps one key's copies in commit order.
+  write.answered = true
+  if (state.counted) {
+    write.ticket = (state.answeredCount.get(write.id) ?? 0) + 1
+    state.answeredCount.set(write.id, write.ticket)
+  }
+  feed(state, {
+    id: write.id,
+    ...(write.type === `delete`
+      ? {}
+      : { value: state.provider.get(write.id)! }),
+    write,
+    withheld: write.plan.echoHeld,
+  })
+  settleCounted(state, write.id)
+  listIfAnswered(state)
+}
+
+/**
+ * A reload's new run lists the provider's rows once every write admitted
+ * before it is answered: the retired feed's undelivered copies are gone,
+ * the listing delivers every commit, and it confirms every answered write,
+ * under `counted-echoes` by crediting every answered number.
+ */
+function listIfAnswered(state: MutationModel): void {
+  const after = state.listingAfter
+  if (after === undefined) return
+  if (state.pending.some((write) => write.index <= after && !write.answered))
+    return
+  state.listingAfter = undefined
+  state.echoes = []
+  // The listing writes every row it lists and deletes every kept row it
+  // lacks.
+  for (const id of [...state.delivered.keys(), ...state.provider.keys()])
+    state.unapplied.add(id)
+  state.delivered = new Map(state.provider)
+  for (const [id, answered] of state.answeredCount)
+    state.arrivedCount.set(
+      id,
+      Math.max(state.arrivedCount.get(id) ?? 0, answered),
+    )
+  for (const write of [...state.pending])
+    if (write.answered) confirm(state, write)
+  // A snapshot applies at once with every sync transaction before it, so no
+  // held optimistic row waits for its copy any more.
+  if (state.pending.length === 0 || state.snapshotReloads) {
+    applyDelivered(state)
+    state.heldRows = []
+  }
+  forgetCounts(state)
+}
+
+/**
+ * A commit's copy enters the change feed. It is withheld by its own plan or
+ * waits behind an undelivered one: any earlier one from a log, an earlier
+ * one for its key otherwise, since every provider keeps one key's copies in
+ * commit order. Otherwise it arrives at once.
+ */
+function feed(state: MutationModel, copy: Copy): void {
+  // No run is subscribed: the copy is lost, and the listing carries it.
+  if (state.listingAfter !== undefined) return
   if (
-    write.plan.echoHeld ||
-    state.echoes.some((earlier) => blocks(state, earlier, write))
+    copy.withheld ||
+    state.echoes.some((earlier) => blocks(state, earlier, copy))
+  )
+    state.echoes.push(copy)
+  else arrive(state, copy)
+}
+
+/**
+ * A copy arrives: it enters the delivered rows, which core applies once no
+ * mutation is pending. A write's own copy settles it, except under
+ * `counted-echoes`, where every copy on a key counts toward the answered
+ * writes on it.
+ */
+function arrive(state: MutationModel, copy: Copy): void {
+  if (copy.value === undefined) state.delivered.delete(copy.id)
+  else state.delivered.set(copy.id, copy.value)
+  state.unapplied.add(copy.id)
+  if (state.counted) {
+    if (state.pending.length > 0 || state.answeredCount.size > 0)
+      state.arrivedCount.set(
+        copy.id,
+        (state.arrivedCount.get(copy.id) ?? 0) + 1,
+      )
+    settleCounted(state, copy.id)
+  } else if (copy.write) confirm(state, copy.write)
+  else if (state.pending.length === 0) applyDelivered(state)
+}
+
+/** No mutation is pending: core applies the delivered rows. */
+function applyDelivered(state: MutationModel): void {
+  state.applied = new Map(state.delivered)
+  state.unapplied.clear()
+  const last = state.trail.at(-1)
+  if (!last || !sameRows(rowState(last), rowState(state.delivered)))
+    state.trail.push(new Map(state.delivered))
+}
+
+/**
+ * Under `counted-echoes`: settle each answered write on `id` whose number
+ * the arrived copies reach, then start the counts over once no write is
+ * admitted and every answered write's copy has arrived.
+ */
+function settleCounted(state: MutationModel, id: number): void {
+  if (!state.counted) return
+  const arrived = state.arrivedCount.get(id) ?? 0
+  for (const write of [...state.pending])
+    if (
+      write.id === id &&
+      write.ticket !== undefined &&
+      write.ticket <= arrived
+    )
+      confirm(state, write)
+  if (state.pending.length === 0) applyDelivered(state)
+  forgetCounts(state)
+}
+
+/**
+ * Under `counted-echoes`: the counts start over once no write is admitted
+ * and every answered write's copy has arrived.
+ */
+function forgetCounts(state: MutationModel): void {
+  if (
+    state.pending.length === 0 &&
+    [...state.answeredCount].every(
+      ([key, answered]) => (state.arrivedCount.get(key) ?? 0) >= answered,
+    )
   ) {
-    write.answered = true
-    state.echoes.push(write)
-  } else confirm(state, write)
+    state.answeredCount.clear()
+    state.arrivedCount.clear()
+  }
 }
 
 /**
@@ -890,35 +1201,31 @@ function decide(state: MutationModel, write: PendingWrite): void {
  * behind it, up to the next one its own plan withheld.
  */
 function deliverEchoes(state: MutationModel): Array<RowState> {
-  confirm(state, state.echoes.shift()!)
+  arrive(state, state.echoes.shift()!)
   const states = [visible(state)]
   for (;;) {
     const next = state.echoes.find(
-      (write, index) =>
-        !write.plan.echoHeld &&
+      (copy, index) =>
+        !copy.withheld &&
         state.echoes
           .slice(0, index)
-          .every((earlier) => !blocks(state, earlier, write)),
+          .every((earlier) => !blocks(state, earlier, copy)),
     )
     if (!next) return states
     state.echoes.splice(state.echoes.indexOf(next), 1)
-    confirm(state, next)
+    arrive(state, next)
     states.push(visible(state))
   }
 }
 
-/** Whether an undelivered copy holds back a later write's copy. */
-function blocks(
-  state: MutationModel,
-  earlier: PendingWrite,
-  later: PendingWrite,
-): boolean {
+/** Whether an undelivered copy holds back a later commit's copy. */
+function blocks(state: MutationModel, earlier: Copy, later: Copy): boolean {
   return state.logOrdered || earlier.id === later.id
 }
 
 /** An accepted write's copy arrives: it fulfills. */
 function confirm(state: MutationModel, write: PendingWrite): void {
-  state.heldRows.push(write)
+  if (state.unapplied.has(write.id)) state.heldRows.push(write)
   state.settlements[write.index] = `fulfilled`
   retire(state, write)
 }
@@ -928,9 +1235,10 @@ function retire(state: MutationModel, write: PendingWrite): void {
   // The last persisting transaction settled: every held sync transaction
   // applies in its publication.
   if (state.pending.length === 0) {
-    state.applied = new Map(state.provider)
+    applyDelivered(state)
     state.heldRows = []
   }
+  forgetCounts(state)
 }
 
 /**
@@ -984,6 +1292,41 @@ function advance(state: MutationModel): Array<RowState> {
   }
 }
 
+/**
+ * Whether the provider can take `first`, then every pending request it has
+ * not answered, in author order, each as its type requires: an insert of a
+ * key it lacks, an update or delete of one it holds. What a provider does
+ * otherwise is the law set's per-adapter `unknownKeyUpdate` or an insert
+ * conflict, which no driver here declares, so the grammar leaves such
+ * histories out.
+ */
+function providerTakes(
+  state: MutationModel,
+  first: ProviderChange | undefined,
+  then?: { type: PendingWrite[`type`]; id: number; accepted: boolean },
+): boolean {
+  const keys = new Set(state.provider.keys())
+  if (first?.type === `upsert`) keys.add(first.row.id)
+  else if (first) keys.delete(first.id)
+  // A request the plan rejects still reaches the provider as its type, so
+  // it needs its key as well; only an accepted one changes the keys.
+  const requests = state.pending
+    .filter((write) => !write.answered)
+    .map(({ type, id, plan }) => ({
+      type,
+      id,
+      accepted: plan.outcome === `accept`,
+    }))
+  return [...requests, ...(then ? [then] : [])].every((request) => {
+    const holds = keys.has(request.id)
+    if (request.accepted) {
+      if (request.type === `delete`) keys.delete(request.id)
+      else keys.add(request.id)
+    }
+    return request.type === `insert` ? !holds : holds
+  })
+}
+
 /** The oldest pending write the provider has not answered. */
 function undecided(state: MutationModel): PendingWrite | undefined {
   return state.pending.find((write) => !write.answered)
@@ -1004,7 +1347,22 @@ type StepDone =
     }
   | { kind: `release`; outcome: WritePlan[`outcome`] }
   | { kind: `deliver` }
-  | { kind: `foreign` }
+  | {
+      kind: `reload`
+      /** An answered write's copy was withheld in the retired feed. */
+      withheldCopy: boolean
+      /** A pending write was not answered yet. */
+      unanswered: boolean
+    }
+  | {
+      kind: `foreign`
+      /** A mutation of this client was pending. */
+      whilePending: boolean
+      /** A pending write on its key was not answered yet. */
+      overUnanswered: boolean
+      /** Its copy queued behind an undelivered copy on its key. */
+      behindWithheld: boolean
+    }
 
 /**
  * Applies one step to the model. Returns undefined when the step is not
@@ -1016,6 +1374,7 @@ function stepModel(
   step: MutationStep,
   plan: (step: WriteStep) => WritePlan,
 ): { done: StepDone; published: Array<RowState> } | undefined {
+  state.trail = []
   switch (step.kind) {
     case `write`: {
       // The public rows the write is authored over.
@@ -1038,8 +1397,16 @@ function stepModel(
         sameKey.some((write) => !write.answered)
       )
         return undefined
+      // The public rows decide what the application can write, and the
+      // provider must be able to take it once the requests ahead of it are
+      // answered: a commit by another client may have changed the key.
       const legal =
-        step.type === `insert` ? !rows.has(step.id) : rows.has(step.id)
+        (step.type === `insert` ? !rows.has(step.id) : rows.has(step.id)) &&
+        providerTakes(state, undefined, {
+          type: step.type,
+          id: step.id,
+          accepted: step.outcome === `accept`,
+        })
       const over = rows.get(step.id)
       const row = step.type === `delete` ? undefined : authoredRow(step, over)
       const value = row && rowValue(row)
@@ -1110,13 +1477,52 @@ function stepModel(
       const published = [...deliverEchoes(state), ...advance(state)]
       return { done: { kind: `deliver` }, published }
     }
+    case `reload`: {
+      // A reload in flight returns its promise; the next one starts after.
+      if (!state.reloads || state.listingAfter !== undefined) return undefined
+      const done: StepDone = {
+        kind: `reload`,
+        withheldCopy: state.echoes.some((copy) => copy.write !== undefined),
+        unanswered: state.pending.some((write) => !write.answered),
+      }
+      if (state.keepsFeed) {
+        // The new run lists the rows the feed has delivered; as a snapshot
+        // they apply at once, with every sync transaction before them.
+        if (state.snapshotReloads) {
+          applyDelivered(state)
+          state.heldRows = []
+        }
+        return { done, published: [visible(state)] }
+      }
+      state.listingAfter = state.counted ? state.writes.length - 1 : -1
+      state.echoes = []
+      listIfAnswered(state)
+      return { done, published: [visible(state)] }
+    }
     case `foreign`: {
-      if (state.pending.length > 0) return undefined
-      if (step.change.type === `upsert`)
-        state.provider.set(step.change.row.id, rowValue(step.change.row))
-      else state.provider.delete(step.change.id)
-      state.applied = new Map(state.provider)
-      return { done: { kind: `foreign` }, published: [visible(state)] }
+      // Another client commits, also while this client's mutations are
+      // pending (MUT-11), as long as the provider can still take every
+      // request it has not answered.
+      const { change } = step
+      const id = change.type === `upsert` ? change.row.id : change.id
+      if (change.type === `delete` && !state.provider.has(id)) return undefined
+      if (!providerTakes(state, change)) return undefined
+      const done: StepDone = {
+        kind: `foreign`,
+        whilePending: state.pending.length > 0,
+        overUnanswered: state.pending.some(
+          (write) => write.id === id && !write.answered,
+        ),
+        behindWithheld: state.echoes.some((copy) => copy.id === id),
+      }
+      if (change.type === `upsert`) state.provider.set(id, rowValue(change.row))
+      else state.provider.delete(id)
+      feed(state, {
+        id,
+        ...(change.type === `upsert` ? { value: state.provider.get(id)! } : {}),
+        withheld: false,
+      })
+      return { done, published: [visible(state)] }
     }
   }
 }
@@ -1163,8 +1569,9 @@ function orders<T>(items: ReadonlyArray<T>): Array<Array<T>> {
  * Whether a row's published values follow one order in which the step's
  * writes on that row could settle. For each order of those writes, the row's
  * path is its value before the step, its value with the step's writes
- * pending, its value after each of them settles, and the model's final
- * value. The published values must be that path with some values skipped,
+ * pending, its value after each of them settles, its value in the
+ * delivered rows each time core could apply them (`trail`), and the
+ * model's final value. The published values must be that path with some values skipped,
  * as one publication can carry several settlements, and must end at the
  * final value. A value off every path, a value that returns, or a missing
  * final publication fails.
@@ -1202,6 +1609,7 @@ function rowFollowsSettlement(
         valueWith(order.slice(0, settledCount)),
       ),
       valueWith(order),
+      ...state.trail.map((rows) => rows.get(id) ?? null),
       final,
     ]
     // The observed values, in order, appear along the path.
@@ -1245,6 +1653,12 @@ export const mutationReachStates = [
   `write-queued-behind-held`,
   `held-write-rejected`,
   `foreign-commit`,
+  `foreign-commit-while-pending`,
+  `foreign-commit-over-unanswered-write`,
+  `foreign-commit-behind-withheld-copy`,
+  `reload`,
+  `reload-with-withheld-copy`,
+  `reload-with-unanswered-write`,
   `field-removed`,
   `same-key-pending`,
   `held-optimistic-row`,
@@ -1282,6 +1696,19 @@ const stateNeeds: Partial<
   },
   'held-write-rejected': { all: [`held-writes`, `write-rejection`] },
   'foreign-commit': { all: [`foreign-commits`] },
+  'foreign-commit-while-pending': {
+    all: [`foreign-commits`],
+    any: [`held-writes`, `held-echoes`],
+  },
+  'foreign-commit-over-unanswered-write': {
+    all: [`foreign-commits`, `held-writes`],
+  },
+  'foreign-commit-behind-withheld-copy': {
+    all: [`foreign-commits`, `held-echoes`],
+  },
+  reload: { all: [`reloads`] },
+  'reload-with-withheld-copy': { all: [`reloads`, `held-echoes`] },
+  'reload-with-unanswered-write': { all: [`reloads`, `held-writes`] },
   'held-optimistic-row': { all: [`held-writes`] },
   'server-rewrote-copy': { all: [`server-rewrites`] },
   'echo-held': { all: [`held-echoes`] },
@@ -1439,9 +1866,12 @@ export async function checkMutationHistory(
   const { collection, provider, writer } = fixture
   const state = initialModel(history.seed, driver)
   const receipts: Array<{ current: Settlement }> = []
+  const reloadReceipts: Array<{ current: Settlement }> = []
   const cut: SettleCut = {
     unsettled: () =>
-      receipts.filter((receipt) => receipt.current === `pending`).length,
+      [...receipts, ...reloadReceipts].filter(
+        (receipt) => receipt.current === `pending`,
+      ).length,
   }
   let accepted = 0
   let skipped = 0
@@ -1472,21 +1902,40 @@ export async function checkMutationHistory(
         : { value: requestValue(request.row) }),
     }))
     if (JSON.stringify(requests) !== JSON.stringify(state.requests)) {
-      // Timing and content fail differently: a log that extends the owed one
-      // has an extra or early request, a log the owed one extends misses or
-      // delays one, and any other difference is a request's content.
-      const prefix = (
+      // Timing and content fail differently: a log that holds the owed one
+      // in order with more requests, or repeats a request, has an extra or
+      // early request, a log
+      // the owed one holds that way misses or delays one, and any other
+      // difference is a request's content.
+      const within = (
         shorter: ReadonlyArray<unknown>,
         longer: ReadonlyArray<unknown>,
-      ) =>
-        JSON.stringify(shorter) ===
-        JSON.stringify(longer.slice(0, shorter.length))
+      ) => {
+        let at = 0
+        for (const request of longer)
+          if (
+            at < shorter.length &&
+            JSON.stringify(request) === JSON.stringify(shorter[at])
+          )
+            at++
+        return at === shorter.length
+      }
+      // A request that repeats the one before it where the logs part is a
+      // duplicate, also when it took the next write's plan.
+      const parts = requests.findIndex(
+        (request, index) =>
+          JSON.stringify(request) !== JSON.stringify(state.requests[index]),
+      )
+      const repeats =
+        parts > 0 &&
+        JSON.stringify(requests[parts]) === JSON.stringify(requests[parts - 1])
       throw violation(
-        requests.length > state.requests.length &&
-          prefix(state.requests, requests)
+        repeats ||
+          (requests.length > state.requests.length &&
+            within(state.requests, requests))
           ? `MUT-10/MUT-13 (extra or early request)`
           : requests.length < state.requests.length &&
-              prefix(requests, state.requests)
+              within(requests, state.requests)
             ? `MUT-10/MUT-13 (missing or late request)`
             : `MUT-8 (provider requests)`,
         stepIndex,
@@ -1494,7 +1943,7 @@ export async function checkMutationHistory(
         requests,
       )
     }
-    const quiescent = state.pending.length === 0
+    const quiescent = state.pending.length === 0 && state.echoes.length === 0
     const rows = rowsOf(collection.values())
     if (!sameRows(rows, visible(state)))
       throw violation(
@@ -1516,9 +1965,11 @@ export async function checkMutationHistory(
           : typeof got === `object` && matches(got.rejected, expected.rejected)
       if (!ok)
         throw violation(
+          // An accepted write settles late, or early once answered (MUT-7);
+          // before its answer it settles early (MUT-13).
           typeof expected === `object`
             ? `MUT-2 (settlement)`
-            : answered.has(index)
+            : expected === `fulfilled` || answered.has(index)
               ? `MUT-7 (settlement)`
               : `MUT-13 (settlement)`,
           stepIndex,
@@ -1539,6 +1990,19 @@ export async function checkMutationHistory(
         rowState(state.provider),
         providerRows,
       )
+    // Core's reload contract: a reload completes when its run's rows apply
+    // or it marks ready, so by a quiescent cut every reload has fulfilled.
+    reloadReceipts.forEach((receipt) => {
+      if (receipt.current !== `fulfilled`)
+        throw violation(
+          `reload (settlement)`,
+          stepIndex,
+          `fulfilled`,
+          typeof receipt.current === `object`
+            ? String(receipt.current.rejected)
+            : receipt.current,
+        )
+    })
     if (receipts.length > 0) reach(`quiescent-after-writes`)
   }
 
@@ -1557,17 +2021,19 @@ export async function checkMutationHistory(
       if (!sameRows(rows, got.at(-1) ?? published)) got.push(rows)
     }
     published = got.at(-1) ?? published
-    // Writes that settle at one step settle in an order no law fixes. Then
-    // each row must follow one order of its own writes' settlements and end
-    // at the model's final rows; an earlier synced value, a value that
-    // returns, or a missing publication still shows.
+    // Writes that settle at one step settle in an order no law fixes, and
+    // copies that arrive once none is pending may publish one by one or
+    // together. Then each row must follow one order of its own writes'
+    // settlements, then the delivered rows, and end at the model's final
+    // rows; an earlier synced value, a value that returns, or a missing
+    // publication still shows.
     const valueIn = (rows: RowState, id: number) =>
       rows.find(([key]) => key === id)?.[1] ?? null
     const ids = new Set(
       [start, ...got, visible(state)].flatMap((rows) => rows.map(([id]) => id)),
     )
     const ok =
-      settledAtStep(state, from) > 1
+      settledAtStep(state, from) > 1 || state.trail.length > 1
         ? [...ids].every((id) =>
             rowFollowsSettlement(
               state,
@@ -1589,7 +2055,7 @@ export async function checkMutationHistory(
     if (state.rewritten > rewritten) reach(`server-rewrote-copy`)
     if (state.mergeKept > 0) reach(`merge-kept-field`)
     if (state.pending.some((write) => write.answered)) reach(`echo-held`)
-    if (state.echoes.some((write) => !write.plan.echoHeld))
+    if (state.echoes.some((copy) => !copy.withheld))
       reach(`echo-queued-behind-withheld`)
     rewritten = state.rewritten
   }
@@ -1617,6 +2083,16 @@ export async function checkMutationHistory(
     publications = recordPublications(collection)
     await compare(-1)
     for (const [index, step] of steps.entries()) {
+      // A reload while one is in flight returns that reload's promise and
+      // starts no run (core's reload contract). When a reload completes is
+      // the adapter's, at its run's `markReady()`, so such a step is skipped.
+      if (
+        step.kind === `reload` &&
+        reloadReceipts.some((receipt) => receipt.current === `pending`)
+      ) {
+        skipped++
+        continue
+      }
       const before = visible(state)
       const from = stepStart(state)
       const result = stepModel(state, step, planFor)
@@ -1671,6 +2147,15 @@ export async function checkMutationHistory(
             (step as Extract<MutationStep, { kind: `foreign` }>).change,
           )
           reach(`foreign-commit`)
+          if (done.whilePending) reach(`foreign-commit-while-pending`)
+          if (done.overUnanswered) reach(`foreign-commit-over-unanswered-write`)
+          if (done.behindWithheld) reach(`foreign-commit-behind-withheld-copy`)
+          break
+        case `reload`:
+          reloadReceipts.push(recordSettlement(fixture.reload!()))
+          reach(`reload`)
+          if (done.withheldCopy) reach(`reload-with-withheld-copy`)
+          if (done.unanswered) reach(`reload-with-unanswered-write`)
           break
       }
       reachModelStates()
@@ -1684,7 +2169,7 @@ export async function checkMutationHistory(
     }
     // Answer every held request and deliver every withheld copy, reaching a
     // quiescent cut (FID-5).
-    while (state.pending.length > 0) {
+    while (state.pending.length > 0 || state.echoes.length > 0) {
       const before = visible(state)
       const from = stepStart(state)
       const step: MutationStep = undecided(state)
@@ -1719,7 +2204,9 @@ export async function checkMutationHistory(
     await settle(fixture, cut)
     if (outlived > 0)
       cleanupErrors.push(
-        new Error(`${outlived} writes were still pending after drain`),
+        new Error(
+          `${outlived} writes or reloads were still pending after drain`,
+        ),
       )
     if (primary === undefined && detached.found().length > 0) {
       primary = violation(

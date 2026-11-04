@@ -302,6 +302,7 @@ export function powerSyncMutationDriver(): MutationDriver {
       `write-rejection`,
       `foreign-commits`,
       `field-updates`,
+      `reloads`,
     ]),
     undefinedField: `null`,
     async create(seed): Promise<MutationFixture> {
@@ -337,6 +338,7 @@ export function powerSyncMutationDriver(): MutationDriver {
         },
         provider,
         settle: provider.settle,
+        reload: () => collection.reload(),
         dispose: async () => {
           await collection.cleanup()
           await provider.dispose()

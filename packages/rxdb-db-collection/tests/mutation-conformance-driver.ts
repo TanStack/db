@@ -28,10 +28,14 @@
  *   (`matchesFailure`).
  *   A held request waits in the wrapper until `release`. An accepted
  *   request runs the memory storage's own `bulkWrite`;
- * - a commit from another client is a write through the same RxCollection
- *   (`upsert`, or `remove` of the found document), as a second tab or a
- *   replication writes into the database. It bypasses the plans and the
- *   request log;
+ * - a commit from another client is a write of the document, with a new
+ *   revision, straight to the collection's storage, as a second tab or a
+ *   replication pull writes it. It bypasses RxDB's per-document write
+ *   queue, the plans, and the request log, so it can land while one of the
+ *   adapter's writes is held. That write then meets a revision conflict
+ *   (status 409) when it is answered, and RxDB writes it again over the
+ *   newer document: the retry is the same write request, so it is not
+ *   logged again and keeps its plan;
  * - a rewrite (`server-rewrites`) is RxDB's `preInsert` and `preSave` hooks,
  *   which change a document before RxDB writes it, as an application's
  *   hooks for defaults or normalization do. The request keeps the document
@@ -43,10 +47,15 @@
  * `"n"`, and `observedView` maps each key and row id back with
  * `conformanceKey`. A JSON document omits an absent `note`.
  *
- * Limits: a conflict (status 409) is not generated.
+ * Limits: a conflict arises only from a commit by another client.
  */
 import { createCollection } from '@tanstack/db'
-import { createRxDatabase, prepareQuery } from 'rxdb/plugins/core'
+import {
+  createRevision,
+  createRxDatabase,
+  now,
+  prepareQuery,
+} from 'rxdb/plugins/core'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import { rxdbCollectionOptions } from '../src/rxdb'
 import {
@@ -190,6 +199,10 @@ class RxdbMutationProvider implements MutationProvider {
   /** Each pending write's document as the adapter sent it, before hooks. */
   private readonly sent = new Map<string, Doc>()
   private storageInstance: RxStorageInstance<Doc, unknown, unknown> | undefined
+  /** The memory storage's own `bulkWrite`, as another client reaches it. */
+  private storageWrite: BulkWrite | undefined
+  /** The plan of each accepted write RxDB retries after a conflict. */
+  private readonly retrying = new Map<string, WritePlan>()
   rxCollection: RxCollection<Doc> | undefined
 
   /** Memory storage whose `conformance` collection writes go through `write`. */
@@ -210,6 +223,7 @@ class RxdbMutationProvider implements MutationProvider {
         const bulkWrite = instance.bulkWrite.bind(
           instance,
         ) as unknown as BulkWrite
+        this.storageWrite = bulkWrite
         const write: BulkWrite = (rows, context) =>
           this.write(rows, context, bulkWrite)
         instance.bulkWrite = write as unknown as typeof instance.bulkWrite
@@ -233,10 +247,14 @@ class RxdbMutationProvider implements MutationProvider {
         response.error.push(...(await bulkWrite([row], context)).error)
         continue
       }
-      this.log.push(writeRequest(row, this.sent.get(row.document.id)))
-      this.sent.delete(row.document.id)
-      const plan = this.plans.shift() ?? acceptAtOnce
-      if (plan.held && !this.draining) {
+      const id = row.document.id
+      // RxDB's retry of a write that met a conflict is the same request.
+      const retried = this.retrying.get(id)
+      this.retrying.delete(id)
+      if (!retried) this.log.push(writeRequest(row, this.sent.get(id)))
+      this.sent.delete(id)
+      const plan = retried ?? this.plans.shift() ?? acceptAtOnce
+      if (plan.held && !retried && !this.draining) {
         await new Promise<void>((resolve) => this.held.push(resolve))
       }
       if (plan.outcome === `reject`) {
@@ -244,7 +262,10 @@ class RxdbMutationProvider implements MutationProvider {
         response.error.push(writeError(row, plan.error, context))
         continue
       }
-      response.error.push(...(await bulkWrite([row], context)).error)
+      const { error } = await bulkWrite([row], context)
+      if (error.some((failure) => failure.status === 409))
+        this.retrying.set(id, plan)
+      response.error.push(...error)
     }
     return response
   }
@@ -266,7 +287,8 @@ class RxdbMutationProvider implements MutationProvider {
     const hook = (data: Doc) => {
       if (this.foreign || (data as { _deleted?: boolean })._deleted) return
       if (!this.sent.has(data.id)) this.sent.set(data.id, { ...data })
-      const rewrite = this.plans[0]?.rewrite ?? `none`
+      const rewrite =
+        (this.retrying.get(data.id) ?? this.plans[0])?.rewrite ?? `none`
       const row = rewriteRow(conformanceRow(data), rewrite)
       data.title = row.title
       if (row.note === undefined) delete data.note
@@ -294,17 +316,24 @@ class RxdbMutationProvider implements MutationProvider {
   }
 
   async foreignCommit(change: ProviderChange): Promise<void> {
-    const rxCollection = this.rxCollection!
-    this.foreign = true
-    try {
-      if (change.type === `upsert`) {
-        await rxCollection.upsert(document(change.row))
-      } else {
-        await rxCollection.findOne(String(change.id)).remove()
-      }
-    } finally {
-      this.foreign = false
+    const id = String(change.type === `upsert` ? change.row.id : change.id)
+    const [previous] = await this.storageInstance!.findDocumentsById([id], true)
+    const fields =
+      change.type === `upsert`
+        ? document(change.row)
+        : { ...conformanceRow(previous!), id }
+    const written: RxDocumentData<Doc> = {
+      ...(fields),
+      _deleted: change.type === `delete`,
+      _attachments: {},
+      _meta: { lwt: now() },
+      _rev: createRevision(this.rxCollection!.database.token, previous),
     }
+    const { error } = await this.storageWrite!(
+      [{ ...(previous ? { previous } : {}), document: written }],
+      `conformance-foreign`,
+    )
+    if (error.length > 0) throw new Error(`foreign commit failed`)
   }
 
   /** The provider's starting rows, written before the adapter syncs. */
@@ -347,6 +376,9 @@ export function rxdbMutationDriver(): MutationDriver {
       `server-rewrites`,
       // `incrementalPatch` keeps the fields an update does not name.
       `merged-updates`,
+      // A reload's initial fetch is a snapshot when the Collection keeps rows.
+      `reloads`,
+      `snapshot-reloads`,
     ]),
     // A JSON document has no `undefined`: a removed field is absent.
     undefinedField: `absent`,
@@ -389,6 +421,7 @@ export function rxdbMutationDriver(): MutationDriver {
         },
         provider,
         drain: () => provider.drain(),
+        reload: () => collection.reload(),
         dispose: async () => {
           // Removing the database waits for its writes, which the check's
           // drain has answered.

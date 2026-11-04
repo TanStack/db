@@ -821,7 +821,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db-adapter-conformance/tests/reference-mutation-oracle.property.test.ts`,
     `adapter-conformance.mutations`,
-    `reference reference-json reference-sql reference-log reference-in-order`,
+    `reference reference-json reference-sql reference-log reference-in-order reference-counted`,
   ],
   [
     `rxdb-db-collection/tests/mutation-conformance-oracle.property.test.ts`,
