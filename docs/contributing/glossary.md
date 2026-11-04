@@ -205,17 +205,36 @@ crossing subsystem boundaries; these comparisons are not interchangeable.
 | observation | One recorded public fact. |
 | trace | An ordered sequence of observations. |
 | checkpoint or observation cut | The exact point where the contract requires comparison. |
-| oracle replay | Re-running a recorded oracle failure from its seed, shrink path, actions, or other replay inputs. Do not use it for runtime truncate replay, retry, or a new random campaign. |
+| oracle replay | Re-running a recorded oracle failure from its seed, shrink path, actions, or other replay inputs. Do not use it for runtime truncate replay, retry, or a new random campaign. A run with a chosen seed and no path is a reseeded campaign, not a replay. |
 | projection or abstraction | The parts of concrete state retained for one judgment. |
 | refinement check | An executable comparison at a named checkpoint that accepts only production observations allowed by the model. A sampled check is not a proof for every behavior. |
 | partial oracle | An oracle that judges only named parts of the contract. |
-| reach witness | Evidence that the production driver reached the claimed boundary. |
+| reach witness | Evidence that the production driver reached the claimed boundary, such as a real host, a provider call, or a protocol step. It concerns the production path. Compare reach, which concerns the history grammar. |
+| declared state | A state that a law depends on. The oracle property names it, and its reach is counted. |
+| reach | The number of histories that entered a declared state. A missed required reach fails the run. Reach counts states that were actually entered, not labels that the grammar assigns. Compare reach witness. |
 | versioned review record | Review evidence stored at a stable location with the exact reviewed head and append-only entries, so later edits cannot silently change the recorded verdict. |
-| mutant | A deliberate wrong answer or implementation used to test oracle sensitivity. |
+| mutant | A deliberate wrong answer or implementation used to test oracle sensitivity: a corrupted trace, a hostile production driver, or a production code change. Do not call it a hostile mutant; every mutant is hostile. |
+| calibration | A test that applies a mutant and requires the check to report a violation of the named law. A calibration skips a candidate whose unaltered trace already fails. |
+| killed or survived | A mutant is killed when the check reports a violation of the named law. A crash, timeout, or setup error is recorded separately and is not a kill. A mutant that passes survived. |
 | fault injection | A deliberate runtime failure, delay, cancellation, or malformed response used to test a system boundary. |
 | shrinking | Reducing a failing generated history while preserving the failure. |
 | bounded exhaustiveness | Executing every case inside stated finite bounds. |
 | held-out challenge | A challenge not used to shape the tested design. After it guides a change, retain it but stop calling it held out. |
+| oracle property | One registered unit that checks laws. It has an id, a law, a history grammar, a reference model or a differential law, production drivers, a refinement check, and campaigns. |
+| generated history | A history drawn from the history grammar by a seeded generator. |
+| fixed history | A named history that is a member of the history grammar. It is checked at registration and runs on every campaign. A fixed regression is a fixed history kept from a found failure. Do not call it a pin, and do not call it an example, which this repository uses for ordinary example-based tests. fast-check's `examples` option is one mechanism for running fixed histories. |
+| constructed history | A history that a declared builder produces inside the history grammar so that it enters a named declared state. It guarantees that state's reach in every campaign. Do not call it a segment. |
+| campaign | One run plan over an oracle property. A fixed-seed campaign uses a documented seed. A random campaign draws a seed and logs it. A reseeded campaign is a random campaign whose seed was chosen to reproduce one. Do not call it a lane. |
+| campaign seed and replay path | fast-check's coordinates for re-running one campaign and one shrunk failure. Qualify the seed as a campaign seed; a hydration seed is a product term. |
+| run budget | The base number of generated histories in a campaign, before the run multiplier. A lowered or removed run budget is reported. Qualify it; a retry budget is a product term. |
+| verdict | The result of a refinement check: pass, or a violation that names its checkpoint, law, and difference. |
+| differential law | A law that compares observations from two production paths at a checkpoint where the contract owes the same answer. It uses no reference model. |
+| receiving path | A further production path, such as a real host, SDK, browser, or provider, that shares an oracle's reference model and refinement check. A receiving witness is the evidence that the path ran and was compared. |
+| oracle owner | The file that owns a law's judgment, as listed in the coverage map. Always qualify it; owner alone is a product term. |
+| decision record | A recorded maintainer decision with an id, date, scope, and text. A law or a limit cites it as its authority. Production output is never authority. |
+| limit | A declared statement of what an oracle does not establish, such as a state, dimension, production path, or comparison that it does not cover. It names an oracle owner and a decision record and reports whether it was in effect. A tool-detected hole is a gap, not a limit. |
+| gap | A hole that a tool or review detects, such as a declared state that was never reached or a mutant that survived. A gap is resolved by an oracle change or recorded as a limit. Qualify it; a sequence gap is a product term. |
+| self-oracle | An oracle whose subject is the oracle framework itself. |
 
 ## Grammar rules
 
@@ -253,7 +272,9 @@ Use `settled` for a promise that fulfilled or rejected. Use `complete` for named
 coverage, content, history, or a non-promise operation only when no stronger
 boundary term applies. Use `success` only for fulfillment. Qualify overloaded words such as `state`,
 `request`, `snapshot`, `session`, `owner`, `release`, `recovery`, and
-`generation` at first use.
+`generation` at first use. In oracle prose, qualify `driver` (production
+driver), `seed` (campaign seed), `owner` (oracle owner), `coverage` (oracle
+coverage), and `budget` (run budget).
 
 ## Model alignment rule
 
