@@ -215,7 +215,9 @@ describe(`includes deterministic work-counter oracle`, () => {
     for (const campaign of campaigns(seed, property)) {
       it(`${property} keeps source work flat under each join filter (${campaign.name})`, async () => {
         // One fixed example per join filter makes reach independent of the seed.
-        const fixed = joinFilters.map((joinFilter) => [1, joinFilter] as const)
+        const fixed = joinFilters.map(
+          (joinFilter): readonly [number, JoinFilter] => [1, joinFilter],
+        )
         const reach = createOracleReach(
           `${property} (${campaign.name})`,
           joinFilters,
