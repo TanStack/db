@@ -15,8 +15,10 @@ import { initClient } from 'trailbase'
 
 const trailBaseClient = initClient('https://your-trailbase-instance.com')
 
+type Todo = { id: string; text: string; completed: boolean }
+
 const todosCollection = createCollection(
-  trailBaseCollectionOptions({
+  trailBaseCollectionOptions<Todo>({
     client: trailBaseClient,
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
