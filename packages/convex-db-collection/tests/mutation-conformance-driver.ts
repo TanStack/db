@@ -11,9 +11,11 @@
  * subscription holds the result after that mutation. The driver supplies
  * such an application:
  *
- * - the provider is the server's table. A write request is one `Mutation`
- *   message; its args carry the complete row as Convex values, so a field
- *   whose value is `undefined` is absent (`undefinedField: 'absent'`);
+ * - the provider is the server's table. The application's handler sends a
+ *   transaction as one `Mutation` message, which the server runs as one
+ *   transaction (`atomic-transactions`); each write request in its args
+ *   carries the complete row as Convex values, so a field whose value is
+ *   `undefined` is absent (`undefinedField: 'absent'`);
  * - the server runs one client's mutations in arrival order
  *   (`ordered-answers`) and answers each by plan. A rejection is a failed
  *   `MutationResponse` carrying the plan's message; an acceptance commits at
@@ -63,7 +65,7 @@ const rowsQuery = makeFunctionReference<
 
 const writeMutation = makeFunctionReference<
   `mutation`,
-  { request: WriteRequest },
+  { requests: Array<WriteRequest> },
   null
 >(`rows:write`)
 
@@ -214,10 +216,10 @@ class ConvexMutationProvider implements MutationProvider {
     }
     if (message.type !== `Mutation`) return
     const requestId = message.requestId as number
-    const { request } = jsonToConvex(
+    const { requests } = jsonToConvex(
       (message.args as Array<JSONValue>)[0]!,
-    ) as unknown as { request: WriteRequest }
-    this.log.push(request)
+    ) as unknown as { requests: Array<WriteRequest> }
+    this.log.push(...requests)
     this.activity++
     const plan = this.plans.shift() ?? acceptAtOnce
     const held = plan.held && !this.draining
@@ -237,12 +239,14 @@ class ConvexMutationProvider implements MutationProvider {
         // A server answers a mutation before the transition that carries
         // it; the client resolves the mutation at that later transition.
         const { ts, publish } = this.commit(
-          request.type === `delete`
-            ? { type: `delete`, id: request.id }
-            : {
-                type: `upsert`,
-                row: rewriteRow(request.row as ConformanceRow, plan.rewrite),
-              },
+          requests.map((request): ProviderChange =>
+            request.type === `delete`
+              ? { type: `delete`, id: request.id }
+              : {
+                  type: `upsert`,
+                  row: rewriteRow(request.row as ConformanceRow, plan.rewrite),
+                },
+          ),
           plan.echoHeld && !this.draining,
         )
         this.socket!.deliver({
@@ -275,11 +279,12 @@ class ConvexMutationProvider implements MutationProvider {
    * it behind a held echo.
    */
   private commit(
-    change: ProviderChange,
+    changes: ReadonlyArray<ProviderChange>,
     holdEcho: boolean,
   ): { ts: number; publish: () => void } {
-    if (change.type === `delete`) this.table.delete(change.id)
-    else this.table.set(change.row.id, change.row)
+    for (const change of changes)
+      if (change.type === `delete`) this.table.delete(change.id)
+      else this.table.set(change.row.id, change.row)
     const ts = ++this.time
     const rows = this.result()
     return {
@@ -325,7 +330,7 @@ class ConvexMutationProvider implements MutationProvider {
   }
 
   foreignCommit(change: ProviderChange): void {
-    this.commit(change, false).publish()
+    this.commit([change], false).publish()
   }
 
   rows(): ReadonlyArray<ConformanceRow> {
@@ -351,6 +356,16 @@ class ConvexMutationProvider implements MutationProvider {
   dispose = () => this.client.close()
 }
 
+/** Replaces a held row's fields; only a held note value is removed. */
+function edit(
+  draft: { title: string; note?: string },
+  row: ConformanceRow,
+): void {
+  draft.title = row.title
+  if (Object.hasOwn(row, `note`)) draft.note = row.note
+  else if (typeof draft.note === `string`) delete draft.note
+}
+
 let sequence = 0
 
 export function convexMutationDriver(): MutationDriver {
@@ -370,6 +385,7 @@ export function convexMutationDriver(): MutationDriver {
       `reload-keeps-feed`,
       // The new run takes the client's current result as a snapshot.
       `snapshot-reloads`,
+      `atomic-transactions`,
     ]),
     undefinedField: `absent`,
     // The client creates a failed mutation's error from the server's
@@ -380,9 +396,10 @@ export function convexMutationDriver(): MutationDriver {
     create(seed): MutationFixture {
       const provider = new ConvexMutationProvider(seed)
       // The application's handlers: one Convex mutation per write.
+      // One Convex mutation per transaction, which the server runs as one
+      // transaction.
       const persist = async (requests: Array<WriteRequest>) => {
-        for (const request of requests)
-          await provider.client.mutation(writeMutation, { request })
+        await provider.client.mutation(writeMutation, { requests })
       }
       const collection = createCollection(
         convexCollectionOptions({
@@ -426,13 +443,18 @@ export function convexMutationDriver(): MutationDriver {
         writer: {
           insert: (row) => collection.insert(row),
           update: (row) =>
-            collection.update(row.id, (draft) => {
-              draft.title = row.title
-              if (Object.hasOwn(row, `note`)) draft.note = row.note
-              // Only a held note value is removed.
-              else if (typeof draft.note === `string`) delete draft.note
-            }),
+            collection.update(row.id, (draft) => edit(draft, row)),
           delete: (id) => collection.delete(id),
+          batch: (type, rows) => {
+            const ids = rows.map((row) => row.id)
+            return type === `insert`
+              ? collection.insert([...rows])
+              : type === `update`
+                ? collection.update(ids, (drafts) =>
+                    drafts.forEach((draft, at) => edit(draft, rows[at]!)),
+                  )
+                : collection.delete(ids)
+          },
         },
         provider,
         settle: provider.settle,

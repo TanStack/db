@@ -10,8 +10,9 @@
  * adapter's `awaitTxId`. The driver supplies such an application:
  *
  * - the provider is the backend and its Postgres table. Its API takes a
- *   write request, answers by plan, and on acceptance commits it in a new
- *   transaction and answers with that txid;
+ *   transaction's write requests in one call, answers them by one plan, and
+ *   on acceptance commits them in one new transaction, all or none, and
+ *   answers with that txid (`atomic-transactions`);
  * - each handler sends the complete row as a SQL row (an absent `note` is
  *   `NULL`, `undefinedField: 'null'`), then awaits `awaitTxId(txid)`. The
  *   adapter does not order the handlers (`application-handlers`), so each
@@ -169,23 +170,28 @@ class ElectricMutationProvider implements MutationProvider {
     this.respond(request, this.outbox.shift()!)
   }
 
-  /** Commits a change in a new transaction and queues its batch. */
-  private commit(change: ProviderChange, holdEcho: boolean): number {
+  /** Commits changes in one new transaction and queues its batch. */
+  private commit(
+    changes: ReadonlyArray<ProviderChange>,
+    holdEcho: boolean,
+  ): number {
     const txid = ++this.txid
-    let message: Record<string, unknown> | undefined
-    if (change.type === `delete`) {
-      if (this.table.delete(change.id))
-        message = {
-          key: String(change.id),
-          value: { id: String(change.id) },
-          headers: { operation: `delete`, txids: [txid] },
-        }
-    } else {
+    const batch: Batch = []
+    for (const change of changes) {
+      if (change.type === `delete`) {
+        if (this.table.delete(change.id))
+          batch.push({
+            key: String(change.id),
+            value: { id: String(change.id) },
+            headers: { operation: `delete`, txids: [txid] },
+          })
+        continue
+      }
       const held = this.table.get(change.row.id)
       this.table.set(change.row.id, change.row)
       const after = wire(change.row)
       const before = held && wire(held)
-      message = {
+      batch.push({
         key: String(change.row.id),
         // Default replica mode: the key and the changed columns.
         value: before
@@ -196,9 +202,8 @@ class ElectricMutationProvider implements MutationProvider {
             )
           : after,
         headers: { operation: before ? `update` : `insert`, txids: [txid] },
-      }
+      })
     }
-    const batch = message ? [message] : []
     // The log is in commit order: a batch waits behind a held echo.
     if (holdEcho || this.stalled.length > 0)
       this.stalled.push({ batch, own: holdEcho })
@@ -209,9 +214,13 @@ class ElectricMutationProvider implements MutationProvider {
 
   // The application's side: its backend API.
 
-  /** One write request; answers with the commit's txid. */
-  api(request: WriteRequest): Promise<{ txid: number }> {
-    this.log.push(JSON.parse(JSON.stringify(request)) as WriteRequest)
+  /**
+   * One call with a transaction's write requests, which the backend commits
+   * in one Postgres transaction, all or none; answers with its txid.
+   */
+  api(requests: ReadonlyArray<WriteRequest>): Promise<{ txid: number }> {
+    for (const request of requests)
+      this.log.push(JSON.parse(JSON.stringify(request)) as WriteRequest)
     const plan = this.plans.shift() ?? acceptAtOnce
     return new Promise((resolve, reject) => {
       const answer = () => {
@@ -219,15 +228,16 @@ class ElectricMutationProvider implements MutationProvider {
           reject(plan.error)
           return
         }
-        const change: ProviderChange =
+        const changes = requests.map((request): ProviderChange =>
           request.type === `delete`
             ? { type: `delete`, id: request.id }
             : {
                 type: `upsert`,
                 row: rewriteRow(fromSqlRow({ ...request.row }), plan.rewrite),
-              }
+              },
+        )
         resolve({
-          txid: this.commit(change, plan.echoHeld && !this.draining),
+          txid: this.commit(changes, plan.echoHeld && !this.draining),
         })
       }
       if (plan.held && !this.draining) this.held.push(answer)
@@ -266,7 +276,7 @@ class ElectricMutationProvider implements MutationProvider {
   }
 
   foreignCommit(change: ProviderChange): void {
-    this.commit(change, false)
+    this.commit([change], false)
   }
 
   rows(): ReadonlyArray<ConformanceRow> {
@@ -296,6 +306,23 @@ class ElectricMutationProvider implements MutationProvider {
   }
 }
 
+/** A row as the application inserts it: an absent `note` is `null`. */
+function record(row: ConformanceRow): ElectricRow {
+  const { id, title, note } = toSqlRow(row)
+  return { id, title, note }
+}
+
+/**
+ * Replaces a held row's fields; a `NULL` note is already absent, so only a
+ * held one is removed.
+ */
+function edit(draft: ElectricRow, row: ConformanceRow): void {
+  draft.title = row.title
+  if (Object.hasOwn(row, `note`)) draft.note = row.note!
+  else if (typeof draft.note === `string`)
+    (draft as { note?: string | null }).note = undefined
+}
+
 let sequence = 0
 
 export function electricMutationDriver(): MutationDriver {
@@ -312,6 +339,9 @@ export function electricMutationDriver(): MutationDriver {
       // A reloaded shape stream resumes the same log from its offset.
       `reloads`,
       `reload-keeps-feed`,
+      // The application's handlers commit a transaction in one backend
+      // transaction.
+      `atomic-transactions`,
     ]),
     undefinedField: `null`,
     create(seed): MutationFixture {
@@ -324,10 +354,8 @@ export function electricMutationDriver(): MutationDriver {
         },
         requests: Array<WriteRequest>,
       ) => {
-        for (const request of requests) {
-          const { txid } = await provider.api(request)
-          await collection.utils.awaitTxId(txid)
-        }
+        const { txid } = await provider.api(requests)
+        await collection.utils.awaitTxId(txid)
       }
       const collection = createCollection(
         electricCollectionOptions<ElectricRow>({
@@ -381,19 +409,20 @@ export function electricMutationDriver(): MutationDriver {
         }),
         base: () => [...collection.base.values()].map(fromSqlRow),
         writer: {
-          insert: (row) => {
-            const { id, title, note } = toSqlRow(row)
-            return collection.insert({ id, title, note })
-          },
+          insert: (row) => collection.insert(record(row)),
           update: (row) =>
-            collection.update(row.id, (draft) => {
-              draft.title = row.title
-              if (Object.hasOwn(row, `note`)) draft.note = row.note!
-              // A `NULL` note is already absent; only a held one is removed.
-              else if (typeof draft.note === `string`)
-                (draft as { note?: string | null }).note = undefined
-            }),
+            collection.update(row.id, (draft) => edit(draft, row)),
           delete: (id) => collection.delete(id),
+          batch: (type, rows) => {
+            const ids = rows.map((row) => row.id)
+            return type === `insert`
+              ? collection.insert(rows.map(record))
+              : type === `update`
+                ? collection.update(ids, (drafts) =>
+                    drafts.forEach((draft, at) => edit(draft, rows[at]!)),
+                  )
+                : collection.delete(ids)
+          },
         },
         provider,
         settle: provider.settle,

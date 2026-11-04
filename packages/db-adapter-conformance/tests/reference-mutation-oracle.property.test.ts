@@ -45,6 +45,9 @@ import type { ReferenceMutationMutant } from './reference-mutation-adapter'
  *   adapter does not order (`application-handlers`). Another runs like
  *   Convex: a JSON provider that answers requests in arrival order
  *   (`ordered-answers`), with a log feed and application handlers.
+ * - **Transactions.** The default and JSON configurations send a
+ *   transaction's requests one at a time, as RxDB must; the others answer a
+ *   transaction all-or-nothing (`atomic-transactions`).
  * - **Counted confirmation.** Another runs like TrailBase: a SQL provider
  *   whose adapter confirms the n-th answered write on a key at the n-th
  *   copy there (`counted-echoes`), so a commit by another client can settle
@@ -65,15 +68,20 @@ const runs = 300
 const campaignTimeoutMs = 120_000
 
 const jsonDriver = referenceMutationDriver(undefined, { json: true })
-const sqlDriver = referenceMutationDriver(undefined, { sql: true })
+const sqlDriver = referenceMutationDriver(undefined, {
+  sql: true,
+  atomic: true,
+})
 const logDriver = referenceMutationDriver(undefined, {
   sql: true,
   log: true,
   application: true,
+  atomic: true,
 })
 const countedDriver = referenceMutationDriver(undefined, {
   sql: true,
   counted: true,
+  atomic: true,
 })
 const inOrderDriver = referenceMutationDriver(undefined, {
   json: true,
@@ -81,6 +89,7 @@ const inOrderDriver = referenceMutationDriver(undefined, {
   application: true,
   inOrder: true,
   confirms: true,
+  atomic: true,
 })
 
 /**
@@ -212,6 +221,25 @@ describe(`mutation conformance: reference adapter`, () => {
       /MUT-13 \(settlement\)|MUT-1 /,
     ],
     [
+      `an atomic adapter, declared to send a transaction's requests one by one`,
+      {
+        ...referenceMutationDriver(undefined, { atomic: true }),
+        capabilities: driver.capabilities,
+      },
+      /MUT-|FID-5/,
+    ],
+    [
+      `an adapter that sends a transaction's requests one by one, declared atomic`,
+      {
+        ...referenceMutationDriver(),
+        capabilities: new Set([
+          ...driver.capabilities,
+          `atomic-transactions` as const,
+        ]),
+      },
+      /MUT-|FID-5/,
+    ],
+    [
       `an adapter that counts copies per key, declared to confirm by its own copy`,
       {
         ...referenceMutationDriver(undefined, { sql: true, counted: true }),
@@ -278,6 +306,10 @@ describe(`mutation conformance: reference adapter`, () => {
     [
       `reload-skips-confirmation`,
       /MUT-7|FID-5 \(public rows\)|reload \(settlement\)/,
+    ],
+    [
+      `continues-after-rejection`,
+      /MUT-10\/MUT-13 \(extra or early request\)|MUT-8|FID-5/,
     ],
     [
       `reload-keeps-counts`,

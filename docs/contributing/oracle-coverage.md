@@ -7569,7 +7569,11 @@ object. On the parent of the fix, 38 of the fixed campaign's 300 histories
 failed MUT-10 (a write reached RxDB while an earlier one was pending) and 24
 failed MUT-2 (a rejected delete rejected with an array of write errors). The
 adapter now runs each write after the earlier one is decided and rejects a
-failed delete with RxDB's `RxError`. RxDB rejection kinds (`rejectionKinds`): a per-row write error and a
+failed delete with RxDB's `RxError`. RxDB has no transaction over several
+documents, so a transaction's requests go out one at a time and the first
+rejection ends it; its inserts went out as one `bulkUpsert`, which wrote the
+documents after a rejected one and could reorder them (RED: MUT-10/MUT-13 and
+MUT-8 on the transaction histories), and now go out one at a time. RxDB rejection kinds (`rejectionKinds`): a per-row write error and a
 `bulkWrite` that throws, as a failing storage does; each must be reached. On
 RxDB 17.1.0 to 17.5.0 a thrown storage error wedges the incremental write
 queue: the throw is an unhandled rejection, `incrementalPatch` never settles,
@@ -7645,10 +7649,23 @@ listing confirmed an insert whose row another client had deleted, so no
 transaction touched it and core dropped the row at once. A reload while
 another is in flight returns that reload's promise (core), so the step is
 skipped, and the propagation step also waits for pending reloads.
-Limits: no manual or multi-mutation transactions, so MUT-8's mutation order
-within one transaction is not checked; no schema validation or update that
-changes no field; a newer backend value in a disjoint field;
-server-generated keys.
+Transactions of two or three mutations of one type on distinct keys go
+through the writer's `batch` (reach `transaction-accepted`,
+`transaction-rejected`, and, without atomicity, `transaction-rejected-partway`).
+Maintainer decision 2026-11-04: a transaction persists all or none where the
+provider can (`atomic-transactions`: one plan answers it, its requests go out
+together, and its copies arrive as one commit); otherwise its requests go out
+in mutation order and the first rejection ends it, with earlier ones
+committed. Either way it rejects and its whole optimistic state rolls back.
+The reference adapter runs both laws (default and JSON configurations one at
+a time, the others atomic); each declared the other way fails, and a mutant
+that still sends requests after a rejection fails. Held optimistic rows layer
+in author order also when a later write settles first, as one can under
+`counted-echoes`; the model had layered them in settlement order, and the
+counted campaigns found it on a delete transaction behind a held insert.
+Limits: no manual transactions that mix types or Collections; no schema
+validation or update that changes no field; a newer backend value in a
+disjoint field; server-generated keys.
 
 TrailBase (`undefinedField: 'null'`, `field-updates`, `held-echoes`, and every
 other mutation capability): the driver's RecordApi acts as a TrailBase
@@ -7689,14 +7706,14 @@ demand, the open stream credits them, since no listing carries every row;
 the mutation oracle runs eager mode only. The driver's events belong to the
 stream open at their commit, so the retired stream's held events never
 arrive on the new one.
-A transaction's update and delete requests go out one at a time in mutation
-order, so the next write starts only after each is answered, and a rejection
-ends the transaction there; `trailbase.test.ts` holds a supplemental witness
-(RED on the parent: the next write started before a sibling request was
-answered). Multi-mutation transactions are not generated, so this and the
-law for a rejection partway through a transaction (whether later requests
-still go out, and what partial acceptance leaves) remain open: follow-up for
-this owner, decision 2026-11-03.
+Each transaction is one `client.execute(operations, true)` call, one
+TrailBase transaction (`atomic-transactions`); `trailBaseCollectionOptions`
+now requires `client` (maintainer decision 2026-11-04, a breaking change).
+On the parent, which sent a transaction's updates and deletes one at a time,
+the fixed campaign failed MUT-10/MUT-13 (a held delete transaction's second
+request was late), and a rejection there left the earlier requests committed.
+The server's `createBulk` was already atomic; the driver had modeled it per
+record.
 The record API is a test double that bypasses the SDK's fetch and SSE
 decoding.
 
@@ -7718,9 +7735,10 @@ confirmation, a coupling the model does not represent; `held-echoes` is not
 declared, because one watcher callback applies every committed write;
 `server-rewrites` is not declared, because the local database rewrites
 nothing; removal by assigning `null` and multi-mutation transactions are not
-generated. Reloads (`reloads`) and commits by another client pass with no
-adapter change; without held writes, no write is pending when another
-client commits.
+generated. Reloads (`reloads`), commits by another client, and atomic
+transactions (one write transaction; one plan answers it and a rejection
+rolls it back) pass with no adapter change; without held writes, no write is
+pending when another client commits.
 
 Electric (`application-handlers`, `log-ordered-echoes`, `held-echoes`,
 `undefinedField: 'null'`, `write-rejection`, `held-writes`, `foreign-commits`,
@@ -7744,7 +7762,9 @@ turn: a reload starts the next run in that turn, and the waits carry into
 it, resolved by the resumed log or the retired run's evidence once the run is
 ready (EVID-2); without a next run they reject, and an external abort still
 rejects them at once (maintainer decisions 2026-10-30 and 2026-11-02). The
-Electric retry-decision and lifecycle owners pass. Limits: no reconnect or
+Electric retry-decision and lifecycle owners pass. The application's
+handlers commit a transaction in one backend transaction with one txid
+(`atomic-transactions`). Limits: no reconnect or
 must-refetch while a write waits; `awaitMatch` is not exercised.
 
 Convex (`application-handlers`, `ordered-answers`, `log-ordered-echoes`,
@@ -7768,8 +7788,9 @@ A reload keeps the client's one transition stream (`reloads`,
 snapshot (`snapshot-reloads`). The driver had acknowledged the reload's
 query-set change with a transition past a stalled one, which resolved a
 pending mutation early and emptied the rows; acknowledgments now queue in
-transition order. The JavaScript client only; no reconnect while a mutation
-waits.
+transition order. The application's handlers send a transaction as one Convex
+mutation, which the server runs as one transaction (`atomic-transactions`).
+The JavaScript client only; no reconnect while a mutation waits.
 
 
 ### Ordered-loader authority CI counterexample, 2026-11-03

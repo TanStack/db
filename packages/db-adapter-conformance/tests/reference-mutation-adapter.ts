@@ -119,6 +119,11 @@ export type ReferenceMutationMutant =
    * the listing, so a later copy is taken for an earlier write's.
    */
   | `reload-keeps-counts`
+  /**
+   * MUT-8 (transactions): after a rejection, a transaction that is not
+   * atomic still sends its later requests, as RxDB's `bulkUpsert` did.
+   */
+  | `continues-after-rejection`
 
 export interface ReferenceMutationOptions {
   /** A JSON provider. */
@@ -142,6 +147,12 @@ export interface ReferenceMutationOptions {
    * does (`counted-echoes`); with a SQL provider.
    */
   counted?: boolean
+  /**
+   * A transaction is one call the provider answers all-or-nothing
+   * (`atomic-transactions`); otherwise its requests go out one at a time and
+   * the first rejection ends it.
+   */
+  atomic?: boolean
 }
 
 const jsonClone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -157,11 +168,12 @@ export class ControlledMutationProvider implements MutationProvider {
   private readonly withheld: Array<{
     feed: () => void
     own: boolean
-    id: number
+    ids: ReadonlyArray<number>
   }> = []
   private readonly log: Array<WriteRequest> = []
   private listener:
-    ((change: ProviderChange, sequence: number) => void) | undefined
+    | ((changes: ReadonlyArray<ProviderChange>, sequence: number) => void)
+    | undefined
   private commits = 0
   /** Called as each of the oracle's steps begins. */
   onStep: () => void = () => {}
@@ -189,7 +201,10 @@ export class ControlledMutationProvider implements MutationProvider {
   // The adapter's side: its change feed, initial read, and writes.
 
   subscribe(
-    listener: (change: ProviderChange, sequence: number) => void,
+    listener: (
+      changes: ReadonlyArray<ProviderChange>,
+      sequence: number,
+    ) => void,
   ): () => void {
     this.listener = listener
     // A new feed starts after the retired one: its undelivered copies never
@@ -210,12 +225,15 @@ export class ControlledMutationProvider implements MutationProvider {
   }
 
   /**
-   * Answers with the commit's sequence number, which its change feed
-   * carries, so an adapter can confirm the write through sync.
+   * One call: the requests of one transaction, answered by one plan and
+   * committed together, or a single request. Answers with the commit's
+   * sequence number, which its change feed carries, so an adapter can
+   * confirm the write through sync.
    */
-  write(request: WriteRequest): Promise<number> {
+  write(requests: ReadonlyArray<WriteRequest>): Promise<number> {
     const { json, sql } = this.options
-    this.log.push(json || sql ? jsonClone(request) : structuredClone(request))
+    for (const request of requests)
+      this.log.push(json || sql ? jsonClone(request) : structuredClone(request))
     const plan = this.plans.shift() ?? acceptAtOnce
     return new Promise<number>((resolve, reject) => {
       const answer = () => {
@@ -223,26 +241,20 @@ export class ControlledMutationProvider implements MutationProvider {
           reject(plan.error)
           return
         }
-        if (request.type === `delete`) {
-          resolve(
-            this.commit({ type: `delete`, id: request.id }, plan.echoHeld),
-          )
-          return
-        }
-        // A SQL update merges the fields it sends into the stored row.
-        const row =
-          request.type === `update` && sql
-            ? { ...this.committed.get(request.id), ...jsonClone(request.row) }
-            : request.row
-        resolve(
-          this.commit(
-            {
-              type: `upsert`,
-              row: rewriteRow(row as ConformanceRow, plan.rewrite),
-            },
-            plan.echoHeld,
-          ),
-        )
+        const changes = requests.map((request): ProviderChange => {
+          if (request.type === `delete`)
+            return { type: `delete`, id: request.id }
+          // A SQL update merges the fields it sends into the stored row.
+          const row =
+            request.type === `update` && sql
+              ? { ...this.committed.get(request.id), ...jsonClone(request.row) }
+              : request.row
+          return {
+            type: `upsert`,
+            row: rewriteRow(row as ConformanceRow, plan.rewrite),
+          }
+        })
+        resolve(this.commit(changes, plan.echoHeld))
       }
       // In order, an answer waits behind every earlier unanswered request.
       const entry = { answer, held: plan.held && !this.draining }
@@ -269,27 +281,38 @@ export class ControlledMutationProvider implements MutationProvider {
   }
 
   /**
-   * Commits a change and feeds it back, at once or at `deliver`. Without
-   * field updates a write replaces the whole row, as a complete-row API does.
+   * Commits changes as one commit and feeds them back together, at once or
+   * at `deliver`. Without field updates a write replaces the whole row, as a
+   * complete-row API does.
    */
-  private commit(change: ProviderChange, withhold = false): number {
-    if (change.type === `delete`) this.committed.delete(change.id)
-    else this.committed.set(change.row.id, this.stored(change.row))
+  private commit(
+    changes: ReadonlyArray<ProviderChange>,
+    withhold = false,
+  ): number {
+    for (const change of changes)
+      if (change.type === `delete`) this.committed.delete(change.id)
+      else this.committed.set(change.row.id, this.stored(change.row))
     const sequence = ++this.commits
-    const fed = this.echoesAuthored
-      ? structuredClone(change)
-      : change.type === `delete`
-        ? change
-        : { ...change, row: this.stored(change.row) }
+    const fed = changes.map((change) =>
+      this.echoesAuthored
+        ? structuredClone(change)
+        : change.type === `delete`
+          ? change
+          : { ...change, row: this.stored(change.row) },
+    )
     const feed = () => this.listener?.(fed, sequence)
     // A copy waits behind a withheld one: any, from a log, or one for its
-    // key, since a provider keeps one key's copies in commit order.
-    const id = change.type === `delete` ? change.id : change.row.id
+    // keys, since a provider keeps one key's copies in commit order.
+    const ids = changes.map((change) =>
+      change.type === `delete` ? change.id : change.row.id,
+    )
     if (
       (withhold && !this.draining) ||
-      this.withheld.some((entry) => this.options.log || entry.id === id)
+      this.withheld.some(
+        (entry) => this.options.log || entry.ids.some((id) => ids.includes(id)),
+      )
     )
-      this.withheld.push({ feed, own: withhold, id })
+      this.withheld.push({ feed, own: withhold, ids })
     else feed()
     return sequence
   }
@@ -315,7 +338,11 @@ export class ControlledMutationProvider implements MutationProvider {
           !entry.own &&
           this.withheld
             .slice(0, at)
-            .every((earlier) => !this.options.log && earlier.id !== entry.id),
+            .every(
+              (earlier) =>
+                !this.options.log &&
+                earlier.ids.every((id) => !entry.ids.includes(id)),
+            ),
       )
       if (index < 0) return
       this.withheld.splice(index, 1)[0]!.feed()
@@ -335,7 +362,7 @@ export class ControlledMutationProvider implements MutationProvider {
 
   foreignCommit(change: ProviderChange): void {
     this.onStep()
-    this.commit(change)
+    this.commit([change])
   }
 
   rows(): ReadonlyArray<ConformanceRow> {
@@ -361,6 +388,7 @@ function referenceCollection(
     confirms = sql,
     application = false,
     counted = false,
+    atomic = false,
   }: ReferenceMutationOptions,
 ) {
   // MUT-10: each write waits for the earlier one to be decided, by the
@@ -429,12 +457,37 @@ function referenceCollection(
       arrivedCount.clear()
     }
   }
-  /** Sends one request; the answer names its commit and its number. */
-  const send = async (request: WriteRequest): Promise<Answer> => {
-    const commit = await provider.write(request)
-    const ticket = (answeredCount.get(request.id) ?? 0) + 1
-    if (counted) answeredCount.set(request.id, ticket)
-    return { commit, id: request.id, ticket }
+  /**
+   * Sends one call; the answers name its commit and each request's number.
+   * Atomic, a transaction is one call; otherwise each request is its own,
+   * and the first rejection ends the transaction.
+   */
+  const send = async (
+    requests: ReadonlyArray<WriteRequest>,
+  ): Promise<Array<Answer>> => {
+    const commit = await provider.write(requests)
+    return requests.map(({ id }) => {
+      const ticket = (answeredCount.get(id) ?? 0) + 1
+      if (counted) answeredCount.set(id, ticket)
+      return { commit, id, ticket }
+    })
+  }
+  const sendAll = async (
+    requests: ReadonlyArray<WriteRequest>,
+  ): Promise<Array<Answer>> => {
+    if (atomic) return send(requests)
+    const answers: Array<Answer> = []
+    let failure: { error: unknown } | undefined
+    for (const request of requests) {
+      try {
+        answers.push(...(await send([request])))
+      } catch (error) {
+        if (mutant !== `continues-after-rejection`) throw error
+        failure ??= { error }
+      }
+    }
+    if (failure) throw failure.error
+    return answers
   }
   // An answer can have several waiters: the write, and under
   // `chains-on-confirmation` the next write's turn.
@@ -466,10 +519,11 @@ function referenceCollection(
   let listedThrough = 0
   let started = false
   // The `writes-back-authored` mutant writes through the sync run's apply.
-  let applyChange: ((change: ProviderChange) => void) | undefined
+  let applyChange:
+    ((changes: ReadonlyArray<ProviderChange>) => void) | undefined
   const writeBack = (row: ConformanceRow) => {
     if (mutant === `writes-back-authored`)
-      applyChange?.({ type: `upsert`, row: structuredClone(row) })
+      applyChange?.([{ type: `upsert`, row: structuredClone(row) }])
   }
   /** The row an update request carries. */
   const updateRow = (mutation: {
@@ -498,28 +552,35 @@ function referenceCollection(
     sync: {
       rowUpdateMode: `full`,
       sync: ({ begin, write, commit, markReady }) => {
-        const apply = (change: ProviderChange) => {
+        // One commit applies as one sync transaction.
+        const apply = (changes: ReadonlyArray<ProviderChange>) => {
           begin()
-          if (change.type === `delete`) {
-            if (keys.delete(change.id))
-              write({ type: `delete`, key: change.id })
-          } else {
-            write({
-              type: keys.has(change.row.id) ? `update` : `insert`,
-              value: change.row,
-            })
-            keys.add(change.row.id)
-          }
+          for (const change of changes)
+            if (change.type === `delete`) {
+              if (keys.delete(change.id))
+                write({ type: `delete`, key: change.id })
+            } else {
+              write({
+                type: keys.has(change.row.id) ? `update` : `insert`,
+                value: change.row,
+              })
+              keys.add(change.row.id)
+            }
           void commit()
         }
-        const receive = (change: ProviderChange, commitSequence: number) => {
-          apply(change)
+        const receive = (
+          changes: ReadonlyArray<ProviderChange>,
+          commitSequence: number,
+        ) => {
+          apply(changes)
           applied.add(commitSequence)
           highest = Math.max(highest, commitSequence)
-          const id = change.type === `delete` ? change.id : change.row.id
-          if (admitted > 0 || answeredCount.size > 0)
-            arrivedCount.set(id, (arrivedCount.get(id) ?? 0) + 1)
-          if (admitted > 0) anyCopy.add(id)
+          const counting = admitted > 0 || answeredCount.size > 0
+          for (const change of changes) {
+            const id = change.type === `delete` ? change.id : change.row.id
+            if (counting) arrivedCount.set(id, (arrivedCount.get(id) ?? 0) + 1)
+            if (admitted > 0) anyCopy.add(id)
+          }
           resolveConfirmed()
         }
         // The listing: the provider's rows, over the rows a reload keeps, and
@@ -577,8 +638,7 @@ function referenceCollection(
     onInsert: ({ transaction }) =>
       answer(
         persist(async () => {
-          const commits: Array<Answer> = []
-          for (const mutation of transaction.mutations) {
+          const requests = transaction.mutations.flatMap((mutation) => {
             const request = {
               type: `insert` as const,
               id: mutation.key,
@@ -587,28 +647,28 @@ function referenceCollection(
                 ? { note: null as unknown as undefined, ...mutation.modified }
                 : structuredClone(mutation.modified),
             }
-            commits.push(await send(request))
-            if (mutant === `writes-insert-twice`)
-              commits.push(await send(request))
+            return mutant === `writes-insert-twice`
+              ? [request, request]
+              : [request]
+          })
+          const commits = await sendAll(requests)
+          for (const mutation of transaction.mutations)
             writeBack(mutation.modified)
-          }
           return commits
         }),
       ),
     onUpdate: ({ transaction }) =>
       answer(
         persist(async () => {
-          const commits: Array<Answer> = []
-          for (const mutation of transaction.mutations) {
-            commits.push(
-              await send({
-                type: `update`,
-                id: mutation.key,
-                row: updateRow(mutation),
-              }),
-            )
+          const commits = await sendAll(
+            transaction.mutations.map((mutation) => ({
+              type: `update` as const,
+              id: mutation.key,
+              row: updateRow(mutation),
+            })),
+          )
+          for (const mutation of transaction.mutations)
             writeBack(mutation.modified)
-          }
           return commits
         }),
       ),
@@ -616,11 +676,12 @@ function referenceCollection(
       answer(
         persist(async () => {
           if (mutant === `skips-delete`) return []
-          const commits: Array<Answer> = []
-          for (const mutation of transaction.mutations) {
-            commits.push(await send({ type: `delete`, id: mutation.key }))
-          }
-          return commits
+          return sendAll(
+            transaction.mutations.map((mutation) => ({
+              type: `delete` as const,
+              id: mutation.key,
+            })),
+          )
         }),
       ),
   })
@@ -666,6 +727,16 @@ const sqlMutants = new Set<ReferenceMutationMutant | undefined>([
   `reload-keeps-counts`,
 ])
 
+/** Replaces a held row's fields with `row`'s; only a held note value is removed. */
+function edit(
+  draft: { title: string; note?: string },
+  row: ConformanceRow,
+): void {
+  draft.title = row.title
+  if (Object.hasOwn(row, `note`)) draft.note = row.note
+  else if (typeof draft.note === `string`) delete draft.note
+}
+
 /** A production driver for the reference adapter, optionally mutated. */
 export function referenceMutationDriver(
   mutant?: ReferenceMutationMutant,
@@ -678,6 +749,7 @@ export function referenceMutationDriver(
     confirms = sql,
     counted = mutant === `confirms-on-any-copy` ||
       mutant === `reload-keeps-counts`,
+    atomic = false,
   }: ReferenceMutationOptions = {},
 ): MutationDriver {
   const capabilities: Array<MutationCapability> = [
@@ -693,8 +765,9 @@ export function referenceMutationDriver(
   if (application) capabilities.push(`application-handlers`)
   if (inOrder) capabilities.push(`ordered-answers`)
   if (counted) capabilities.push(`counted-echoes`)
+  if (atomic) capabilities.push(`atomic-transactions`)
   return {
-    adapter: `reference mutations${json ? ` (JSON provider)` : ``}${sql ? ` (SQL provider)` : ``}${log ? ` (log)` : ``}${application ? ` (application handlers)` : ``}${inOrder ? ` (in order)` : ``}${counted ? ` (counted)` : ``}${mutant ? ` (${mutant})` : ``}`,
+    adapter: `reference mutations${json ? ` (JSON provider)` : ``}${sql ? ` (SQL provider)` : ``}${log ? ` (log)` : ``}${application ? ` (application handlers)` : ``}${inOrder ? ` (in order)` : ``}${counted ? ` (counted)` : ``}${atomic ? ` (atomic)` : ``}${mutant ? ` (${mutant})` : ``}`,
     ...(json && { undefinedField: `absent` as const }),
     ...(sql && { undefinedField: `null` as const }),
     capabilities: new Set(capabilities),
@@ -707,7 +780,7 @@ export function referenceMutationDriver(
       const { collection, jointSettlement } = referenceCollection(
         provider,
         mutant,
-        { sql, confirms, application, counted },
+        { sql, confirms, application, counted, atomic },
       )
       const view = observedView(collection, {
         row: (row) => row,
@@ -723,13 +796,18 @@ export function referenceMutationDriver(
         writer: {
           insert: (row) => collection.insert(row),
           update: (row) =>
-            collection.update(row.id, (draft) => {
-              draft.title = row.title
-              if (Object.hasOwn(row, `note`)) draft.note = row.note
-              // Only a held note value is removed.
-              else if (typeof draft.note === `string`) delete draft.note
-            }),
+            collection.update(row.id, (draft) => edit(draft, row)),
           delete: (id) => collection.delete(id),
+          batch: (type, rows) =>
+            type === `insert`
+              ? collection.insert([...rows])
+              : type === `update`
+                ? collection.update(
+                    rows.map((row) => row.id),
+                    (drafts) =>
+                      drafts.forEach((draft, at) => edit(draft, rows[at]!)),
+                  )
+                : collection.delete(rows.map((row) => row.id)),
         },
         provider,
         drain: () => provider.drain(),

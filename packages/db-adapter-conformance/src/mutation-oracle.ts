@@ -83,8 +83,12 @@
  * request it has not answered; an insert conflict or an update of a key
  * another client deleted is the law set's per-adapter `unknownKeyUpdate`,
  * which no driver declares. With `reloads` a history reloads the Collection.
- * It does not check manual or multi-mutation transactions, schema
- * validation, or `awaitMatch`.
+ * A transaction of two or three mutations of one type goes through the
+ * writer's `batch`: under `atomic-transactions` it persists all or none,
+ * and otherwise its requests go out in mutation order and the first
+ * rejection ends it (maintainer decision 2026-11-04). It does not check
+ * manual transactions that mix types or Collections, schema validation, or
+ * `awaitMatch`.
  */
 import fc from 'fast-check'
 import { ConformanceViolation } from './eager-live-source-oracle'
@@ -194,6 +198,18 @@ export type MutationCapability =
    * under the pending mutations as soon as it applies.
    */
   | `snapshot-reloads`
+  /**
+   * A transaction of several mutations is all-or-nothing: its requests go
+   * out together and the provider answers them with one plan, committing
+   * all or none, and their copies arrive as one commit. Without it, the
+   * requests go out one at a time, each answered by its own plan, and the
+   * first rejection ends the transaction: its later requests are not sent,
+   * and the earlier accepted ones stay committed. Either way the
+   * transaction rejects with that error and its whole optimistic state
+   * rolls back (maintainer decision 2026-11-04: atomic where the provider
+   * can be).
+   */
+  | `atomic-transactions`
 
 /** The optimistic transaction a write call returns. */
 export interface MutationReceipt {
@@ -212,6 +228,15 @@ export interface MutationWriter {
    */
   update: (row: ConformanceRow) => MutationReceipt
   delete: (id: number) => MutationReceipt
+  /**
+   * One transaction of one mutation per row, in row order:
+   * `collection.insert(rows)`, an update of the rows' keys that replaces
+   * each held row's fields as `update` does, or `collection.delete(ids)`.
+   */
+  batch: (
+    type: `insert` | `update` | `delete`,
+    rows: ReadonlyArray<ConformanceRow>,
+  ) => MutationReceipt
 }
 
 /** One write request the adapter made to the provider. */
@@ -401,6 +426,11 @@ export interface MutationDriver {
  * - `release`: the provider answers the oldest held request (`held-writes`).
  * - `deliver`: the provider delivers the oldest copy it answered but
  *   withheld from its change feed (`held-echoes`).
+ * - `transaction`: one transaction of two or three mutations of one type on
+ *   distinct keys that no pending write holds, through the writer's
+ *   `batch`. Under `atomic-transactions` its one plan decides every
+ *   mutation; otherwise each mutation has its own, and a rejection at
+ *   `rejectAt` ends it.
  * - `reload`: the application reloads the Collection (`reloads`), unless
  *   an earlier reload is still in flight, which returns its promise. An arm
  *   generates a write whose copy is withheld, a reload, and another write
@@ -436,9 +466,29 @@ export type MutationStep =
   | { readonly kind: `deliver` }
   | { readonly kind: `foreign`; readonly change: ProviderChange }
   | { readonly kind: `reload` }
+  | {
+      readonly kind: `transaction`
+      readonly type: `insert` | `update` | `delete`
+      /** One row per mutation, on distinct keys, in mutation order. */
+      readonly rows: ReadonlyArray<{
+        readonly id: number
+        readonly title: string
+        readonly note?: string
+      }>
+      readonly outcome: `accept` | `reject`
+      readonly held: boolean
+      readonly echoHeld: boolean
+      readonly rewrite: ServerRewrite
+      readonly rejectionKind?: string
+      /** Without `atomic-transactions`: the mutation whose request rejects. */
+      readonly rejectAt: number
+    }
 
 /** A write step. */
 export type WriteStep = Extract<MutationStep, { kind: `write` }>
+
+/** A transaction step. */
+export type TransactionStep = Extract<MutationStep, { kind: `transaction` }>
 
 export interface MutationHistory {
   readonly seed: ReadonlyArray<ConformanceRow>
@@ -544,6 +594,41 @@ export function mutationHistoryArb(
       arbitrary: fc.constant({ kind: `deliver` as const }),
     })
   }
+  steps.push({
+    weight: 3,
+    arbitrary: fc
+      .record({
+        type: fc.constantFrom(
+          `insert` as const,
+          `update` as const,
+          `delete` as const,
+        ),
+        rows: fc.uniqueArray(rowArb, {
+          selector: (row) => row.id,
+          minLength: 2,
+          maxLength: 3,
+        }),
+        plan: write,
+        // Half reject, since a transaction's keys are rarely all legal.
+        rejects: capabilities.has(`write-rejection`)
+          ? fc.boolean()
+          : fc.constant(false),
+        rejectAt: fc.integer({ min: 0, max: 2 }),
+      })
+      .map(({ type, rows, plan, rejects, rejectAt }): MutationStep => ({
+        kind: `transaction`,
+        type,
+        rows,
+        outcome: rejects ? `reject` : `accept`,
+        held: plan.held,
+        echoHeld: !rejects && plan.echoHeld,
+        rewrite: type === `delete` ? `none` : plan.rewrite,
+        ...(plan.rejectionKind === undefined
+          ? {}
+          : { rejectionKind: plan.rejectionKind }),
+        rejectAt,
+      })),
+  })
   if (capabilities.has(`reloads`)) {
     steps.push({
       weight: 1,
@@ -733,7 +818,12 @@ function rowOf(id: number, value: string): ConformanceRow {
 
 /** A mutation whose plan has not decided it yet. */
 interface PendingWrite {
+  /** Its position among every write's mutations. */
   readonly index: number
+  /** Its transaction's receipt, which `settlements` is indexed by. */
+  readonly receipt: number
+  /** Its transaction's mutations, in mutation order; itself alone mostly. */
+  readonly group: ReadonlyArray<PendingWrite>
   readonly type: `insert` | `update` | `delete`
   readonly id: number
   /** The authored row's model value; absent for a delete. */
@@ -750,18 +840,23 @@ interface PendingWrite {
   answered: boolean
   /** Under `counted-echoes`: the number its answer took on its key. */
   ticket?: number
+  /** Its copy arrived; its transaction settles once every mutation's has. */
+  confirmed: boolean
 }
 
 /**
- * A commit's copy in the provider's change feed: an accepted write's, or a
- * commit by another client's. It carries the row as that commit stored it,
- * absent for a delete.
+ * A commit's copy in the provider's change feed: an accepted write's, an
+ * atomic transaction's, or a commit by another client's. It carries each
+ * row as that commit stored it.
  */
 interface Copy {
-  readonly id: number
-  readonly value?: string
-  /** The accepted write it copies; absent for another client's commit. */
-  readonly write?: PendingWrite
+  /** Each row the commit changed, absent `value` for a delete. */
+  readonly changes: ReadonlyArray<{
+    readonly id: number
+    readonly value?: string
+  }>
+  /** The accepted mutations it copies; none for another client's commit. */
+  readonly writes: ReadonlyArray<PendingWrite>
   /** The write's plan withholds it until `deliver`. */
   readonly withheld: boolean
 }
@@ -862,6 +957,8 @@ interface MutationModel {
   readonly keepsFeed: boolean
   /** The driver declares `snapshot-reloads`. */
   readonly snapshotReloads: boolean
+  /** The driver declares `atomic-transactions`. */
+  readonly atomic: boolean
   /** Every write, by index. */
   writes: Array<PendingWrite>
   rewritten: number
@@ -909,6 +1006,7 @@ function initialModel(
     reloads: domain.capabilities.has(`reloads`),
     keepsFeed: domain.capabilities.has(`reload-keeps-feed`),
     snapshotReloads: domain.capabilities.has(`snapshot-reloads`),
+    atomic: domain.capabilities.has(`atomic-transactions`),
     writes: [],
     rewritten: 0,
     mergeKept: 0,
@@ -1040,43 +1138,53 @@ function visible(state: MutationModel): RowState {
  * pending, answered, until `confirm` (MUT-7). A rejected one settles.
  */
 function decide(state: MutationModel, write: PendingWrite): void {
+  // The first rejection ends the transaction: it rejects, and its whole
+  // optimistic state rolls back; accepted earlier requests stay committed.
   if (write.plan.outcome === `reject`) {
-    state.settlements[write.index] = { rejected: write.plan.error }
-    retire(state, write)
+    state.settlements[write.receipt] = { rejected: write.plan.error }
+    for (const member of write.group)
+      if (state.pending.includes(member)) retire(state, member)
     listIfAnswered(state)
     return
   }
-  if (write.type === `delete`) state.provider.delete(write.id)
-  else {
-    // A merged update keeps a stored field it does not name: the provider's
-    // row held `note` before this write, and the authored row has none.
-    const stored = state.provider.get(write.id)
-    if (
-      state.mergedUpdates &&
-      write.type === `update` &&
-      stored !== undefined &&
-      Object.hasOwn(rowOf(write.id, stored), `note`) &&
-      !Object.hasOwn(rowOf(write.id, write.value!), `note`)
-    )
-      state.mergeKept++
-    const copy = rowValue(copyOf(state, write))
-    state.provider.set(write.id, copy)
-    if (write.plan.rewrite !== `none` && copy !== write.value) state.rewritten++
+  // An atomic transaction commits every mutation by its one plan, and its
+  // copies arrive as one commit.
+  const members = state.atomic ? write.group : [write]
+  const changes: Array<{ id: number; value?: string }> = []
+  for (const member of members) {
+    if (member.type === `delete`) state.provider.delete(member.id)
+    else {
+      // A merged update keeps a stored field it does not name: the
+      // provider's row held `note` before this write, and the authored row
+      // has none.
+      const stored = state.provider.get(member.id)
+      if (
+        state.mergedUpdates &&
+        member.type === `update` &&
+        stored !== undefined &&
+        Object.hasOwn(rowOf(member.id, stored), `note`) &&
+        !Object.hasOwn(rowOf(member.id, member.value!), `note`)
+      )
+        state.mergeKept++
+      const copy = rowValue(copyOf(state, member))
+      state.provider.set(member.id, copy)
+      if (member.plan.rewrite !== `none` && copy !== member.value)
+        state.rewritten++
+    }
+    member.answered = true
+    if (state.counted) {
+      member.ticket = (state.answeredCount.get(member.id) ?? 0) + 1
+      state.answeredCount.set(member.id, member.ticket)
+    }
+    changes.push({
+      id: member.id,
+      ...(member.type === `delete`
+        ? {}
+        : { value: state.provider.get(member.id)! }),
+    })
   }
-  write.answered = true
-  if (state.counted) {
-    write.ticket = (state.answeredCount.get(write.id) ?? 0) + 1
-    state.answeredCount.set(write.id, write.ticket)
-  }
-  feed(state, {
-    id: write.id,
-    ...(write.type === `delete`
-      ? {}
-      : { value: state.provider.get(write.id)! }),
-    write,
-    withheld: write.plan.echoHeld,
-  })
-  settleCounted(state, write.id)
+  feed(state, { changes, writes: members, withheld: write.plan.echoHeld })
+  for (const member of members) settleCounted(state, member.id)
   listIfAnswered(state)
 }
 
@@ -1138,18 +1246,17 @@ function feed(state: MutationModel, copy: Copy): void {
  * writes on it.
  */
 function arrive(state: MutationModel, copy: Copy): void {
-  if (copy.value === undefined) state.delivered.delete(copy.id)
-  else state.delivered.set(copy.id, copy.value)
-  state.unapplied.add(copy.id)
-  if (state.counted) {
-    if (state.pending.length > 0 || state.answeredCount.size > 0)
-      state.arrivedCount.set(
-        copy.id,
-        (state.arrivedCount.get(copy.id) ?? 0) + 1,
-      )
-    settleCounted(state, copy.id)
-  } else if (copy.write) confirm(state, copy.write)
-  else if (state.pending.length === 0) applyDelivered(state)
+  const counting = state.pending.length > 0 || state.answeredCount.size > 0
+  for (const { id, value } of copy.changes) {
+    if (value === undefined) state.delivered.delete(id)
+    else state.delivered.set(id, value)
+    state.unapplied.add(id)
+    if (state.counted && counting)
+      state.arrivedCount.set(id, (state.arrivedCount.get(id) ?? 0) + 1)
+  }
+  if (state.counted) for (const { id } of copy.changes) settleCounted(state, id)
+  else for (const write of copy.writes) confirm(state, write)
+  if (state.pending.length === 0) applyDelivered(state)
 }
 
 /** No mutation is pending: core applies the delivered rows. */
@@ -1220,14 +1327,30 @@ function deliverEchoes(state: MutationModel): Array<RowState> {
 
 /** Whether an undelivered copy holds back a later commit's copy. */
 function blocks(state: MutationModel, earlier: Copy, later: Copy): boolean {
-  return state.logOrdered || earlier.id === later.id
+  return (
+    state.logOrdered ||
+    earlier.changes.some(({ id }) =>
+      later.changes.some((change) => change.id === id),
+    )
+  )
 }
 
-/** An accepted write's copy arrives: it fulfills. */
+/**
+ * An accepted mutation's copy arrives. Its transaction fulfills once every
+ * mutation's has, and each keeps a held optimistic row while an unapplied
+ * sync transaction touches its key.
+ */
 function confirm(state: MutationModel, write: PendingWrite): void {
-  if (state.unapplied.has(write.id)) state.heldRows.push(write)
-  state.settlements[write.index] = `fulfilled`
-  retire(state, write)
+  if (!state.pending.includes(write)) return
+  write.confirmed = true
+  if (!write.group.every((member) => member.confirmed)) return
+  state.settlements[write.receipt] = `fulfilled`
+  for (const member of write.group) {
+    if (state.unapplied.has(member.id)) state.heldRows.push(member)
+    retire(state, member)
+  }
+  // Held rows layer in author order, also when a later write settles first.
+  state.heldRows.sort((a, b) => a.index - b.index)
 }
 
 function retire(state: MutationModel, write: PendingWrite): void {
@@ -1268,22 +1391,25 @@ function advance(state: MutationModel): Array<RowState> {
         ))
     if (!next) return states
     if (!next.requested) {
-      next.requested = true
-      state.requests.push({
-        type: next.type,
-        id: next.id,
-        ...(next.sent === undefined
-          ? {}
-          : {
-              // A merged update's write is the merge, as the provider
-              // stores it; nothing commits on its key before it is decided.
-              value: requestValue(
-                state.mergedUpdates && next.type === `update`
-                  ? storedFields(state, next)
-                  : next.sent,
-              ),
-            }),
-      })
+      // An atomic transaction's requests go out together, in mutation order.
+      for (const member of state.atomic ? next.group : [next]) {
+        member.requested = true
+        state.requests.push({
+          type: member.type,
+          id: member.id,
+          ...(member.sent === undefined
+            ? {}
+            : {
+                // A merged update's write is the merge, as the provider
+                // stores it at its request.
+                value: requestValue(
+                  state.mergedUpdates && member.type === `update`
+                    ? storedFields(state, member)
+                    : member.sent,
+                ),
+              }),
+        })
+      }
       if (!state.ordered) continue
     }
     if (next.plan.held) return states
@@ -1303,21 +1429,26 @@ function advance(state: MutationModel): Array<RowState> {
 function providerTakes(
   state: MutationModel,
   first: ProviderChange | undefined,
-  then?: { type: PendingWrite[`type`]; id: number; accepted: boolean },
+  then: ReadonlyArray<{
+    type: PendingWrite[`type`]
+    id: number
+    accepted: boolean
+  }> = [],
 ): boolean {
   const keys = new Set(state.provider.keys())
   if (first?.type === `upsert`) keys.add(first.row.id)
   else if (first) keys.delete(first.id)
   // A request the plan rejects still reaches the provider as its type, so
   // it needs its key as well; only an accepted one changes the keys.
+  // A mutation behind a rejected one of its transaction is never sent.
   const requests = state.pending
-    .filter((write) => !write.answered)
+    .filter((write) => !write.answered && !behindRejection(write))
     .map(({ type, id, plan }) => ({
       type,
       id,
       accepted: plan.outcome === `accept`,
     }))
-  return [...requests, ...(then ? [then] : [])].every((request) => {
+  return [...requests, ...then].every((request) => {
     const holds = keys.has(request.id)
     if (request.accepted) {
       if (request.type === `delete`) keys.delete(request.id)
@@ -1325,6 +1456,13 @@ function providerTakes(
     }
     return request.type === `insert` ? !holds : holds
   })
+}
+
+/** A mutation whose transaction ends at an earlier mutation's rejection. */
+function behindRejection(write: PendingWrite): boolean {
+  return write.group.some(
+    (member) => member.index < write.index && member.plan.outcome === `reject`,
+  )
 }
 
 /** The oldest pending write the provider has not answered. */
@@ -1348,6 +1486,12 @@ type StepDone =
   | { kind: `release`; outcome: WritePlan[`outcome`] }
   | { kind: `deliver` }
   | {
+      kind: `transaction`
+      outcome: WritePlan[`outcome`]
+      /** A mutation was accepted before the one that rejected. */
+      partway: boolean
+    }
+  | {
       kind: `reload`
       /** An answered write's copy was withheld in the retired feed. */
       withheldCopy: boolean
@@ -1363,6 +1507,50 @@ type StepDone =
       /** Its copy queued behind an undelivered copy on its key. */
       behindWithheld: boolean
     }
+
+/**
+ * Admits one transaction's mutations, in mutation order, under one receipt.
+ * Under `atomic-transactions` they share its one plan; otherwise each has
+ * its own, and a mutation without one is never requested.
+ */
+function admit(
+  state: MutationModel,
+  mutations: ReadonlyArray<{
+    type: PendingWrite[`type`]
+    id: number
+    row: ConformanceRow | undefined
+    over: string | undefined
+  }>,
+  plans: ReadonlyArray<WritePlan>,
+): void {
+  const receipt = state.settlements.length
+  state.settlements.push(`pending`)
+  const group: Array<PendingWrite> = []
+  mutations.forEach(({ type, id, row, over }, at) => {
+    const fields =
+      row && type === `update` && state.fieldUpdates
+        ? changedFields(row, rowOf(id, over!))
+        : row
+    const write: PendingWrite = {
+      index: state.writes.length,
+      receipt,
+      group,
+      type,
+      id,
+      ...(row && {
+        value: rowValue(row),
+        sent: sentFields(fields!, state.undefinedField, fields === row),
+      }),
+      plan: (state.atomic ? plans[0] : plans[at]) ?? acceptAtOnce,
+      requested: false,
+      answered: false,
+      confirmed: false,
+    }
+    group.push(write)
+    state.pending.push(write)
+    state.writes.push(write)
+  })
+}
 
 /**
  * Applies one step to the model. Returns undefined when the step is not
@@ -1402,11 +1590,13 @@ function stepModel(
       // answered: a commit by another client may have changed the key.
       const legal =
         (step.type === `insert` ? !rows.has(step.id) : rows.has(step.id)) &&
-        providerTakes(state, undefined, {
-          type: step.type,
-          id: step.id,
-          accepted: step.outcome === `accept`,
-        })
+        providerTakes(state, undefined, [
+          {
+            type: step.type,
+            id: step.id,
+            accepted: step.outcome === `accept`,
+          },
+        ])
       const over = rows.get(step.id)
       const row = step.type === `delete` ? undefined : authoredRow(step, over)
       const value = row && rowValue(row)
@@ -1419,25 +1609,7 @@ function stepModel(
       const queued =
         state.ordered &&
         state.pending.some((write) => !write.answered && write.plan.held)
-      const fields =
-        row && step.type === `update` && state.fieldUpdates
-          ? changedFields(row, rowOf(step.id, over!))
-          : row
-      const write: PendingWrite = {
-        index: state.settlements.length,
-        type: step.type,
-        id: step.id,
-        ...(row && {
-          value,
-          sent: sentFields(fields!, state.undefinedField, fields === row),
-        }),
-        plan: plan(step),
-        requested: false,
-        answered: false,
-      }
-      state.settlements.push(`pending`)
-      state.pending.push(write)
-      state.writes.push(write)
+      admit(state, [{ type: step.type, id: step.id, row, over }], [plan(step)])
       // The optimistic state publishes when the write call returns.
       const published = [visible(state), ...advance(state)]
       return {
@@ -1477,12 +1649,83 @@ function stepModel(
       const published = [...deliverEchoes(state), ...advance(state)]
       return { done: { kind: `deliver` }, published }
     }
+    case `transaction`: {
+      const rows = new Map(visible(state))
+      const ids = step.rows.map((row) => row.id)
+      // Its keys have no pending write: layering on a pending write is the
+      // single writes' arm.
+      if (
+        new Set(ids).size !== ids.length ||
+        state.pending.some((write) => ids.includes(write.id))
+      )
+        return undefined
+      const rejectAt =
+        step.outcome === `reject`
+          ? Math.min(step.rejectAt, ids.length - 1)
+          : ids.length
+      const mutations = []
+      for (const { id, title, note } of step.rows) {
+        const over = rows.get(id)
+        if ((step.type === `insert`) !== (over === undefined)) return undefined
+        const single: WriteStep = {
+          kind: `write`,
+          type: step.type,
+          id,
+          title,
+          ...(note === undefined ? {} : { note }),
+          outcome: step.outcome,
+          held: step.held,
+          echoHeld: step.echoHeld,
+          rewrite: step.rewrite,
+        }
+        const row =
+          step.type === `delete` ? undefined : authoredRow(single, over)
+        // Core records no mutation for an update that changes nothing.
+        if (row && step.type === `update` && rowValue(row) === over)
+          return undefined
+        mutations.push({ type: step.type, id, row, over, single })
+      }
+      const accepted = (at: number) =>
+        state.atomic ? step.outcome === `accept` : at < rejectAt
+      if (
+        !providerTakes(
+          state,
+          undefined,
+          mutations
+            .filter((_, at) => state.atomic || at <= rejectAt)
+            .map(({ type, id }, at) => ({ type, id, accepted: accepted(at) })),
+        )
+      )
+        return undefined
+      // Atomic, one plan answers the transaction; otherwise each request
+      // up to the rejection has its own, and only the first can be held.
+      const plans = state.atomic
+        ? [plan(mutations[0]!.single)]
+        : mutations.slice(0, rejectAt + 1).map(({ single }, at) =>
+            plan({
+              ...single,
+              outcome: at === rejectAt ? `reject` : `accept`,
+              held: at === 0 && step.held,
+              echoHeld: at !== rejectAt && step.echoHeld,
+            }),
+          )
+      admit(state, mutations, plans)
+      const published = [visible(state), ...advance(state)]
+      return {
+        done: {
+          kind: `transaction`,
+          outcome: step.outcome,
+          partway: !state.atomic && step.outcome === `reject` && rejectAt > 0,
+        },
+        published,
+      }
+    }
     case `reload`: {
       // A reload in flight returns its promise; the next one starts after.
       if (!state.reloads || state.listingAfter !== undefined) return undefined
       const done: StepDone = {
         kind: `reload`,
-        withheldCopy: state.echoes.some((copy) => copy.write !== undefined),
+        withheldCopy: state.echoes.some((copy) => copy.writes.length > 0),
         unanswered: state.pending.some((write) => !write.answered),
       }
       if (state.keepsFeed) {
@@ -1513,13 +1756,22 @@ function stepModel(
         overUnanswered: state.pending.some(
           (write) => write.id === id && !write.answered,
         ),
-        behindWithheld: state.echoes.some((copy) => copy.id === id),
+        behindWithheld: state.echoes.some((copy) =>
+          copy.changes.some((change) => change.id === id),
+        ),
       }
       if (change.type === `upsert`) state.provider.set(id, rowValue(change.row))
       else state.provider.delete(id)
       feed(state, {
-        id,
-        ...(change.type === `upsert` ? { value: state.provider.get(id)! } : {}),
+        changes: [
+          {
+            id,
+            ...(change.type === `upsert`
+              ? { value: state.provider.get(id)! }
+              : {}),
+          },
+        ],
+        writes: [],
         withheld: false,
       })
       return { done, published: [visible(state)] }
@@ -1551,7 +1803,7 @@ function stepStart(state: MutationModel): StepStart {
  */
 function settledAtStep(state: MutationModel, start: StepStart): number {
   return [...start.pending, ...state.writes.slice(start.writes)].filter(
-    (write) => state.settlements[write.index] !== `pending`,
+    (write) => state.settlements[write.receipt] !== `pending`,
   ).length
 }
 
@@ -1585,7 +1837,8 @@ function rowFollowsSettlement(
 ): boolean {
   const pending = [...start.pending, ...state.writes.slice(start.writes)]
   const own = pending.filter(
-    (write) => write.id === id && state.settlements[write.index] !== `pending`,
+    (write) =>
+      write.id === id && state.settlements[write.receipt] !== `pending`,
   )
   const final = new Map(visible(state)).get(id) ?? null
   const valueWith = (done: ReadonlyArray<PendingWrite>) =>
@@ -1593,7 +1846,7 @@ function rowFollowsSettlement(
       fold(start.applied, [
         ...start.heldRows,
         ...done.filter(
-          (write) => state.settlements[write.index] === `fulfilled`,
+          (write) => state.settlements[write.receipt] === `fulfilled`,
         ),
       ]),
       pending.filter((write) => !done.includes(write)),
@@ -1656,6 +1909,9 @@ export const mutationReachStates = [
   `foreign-commit-while-pending`,
   `foreign-commit-over-unanswered-write`,
   `foreign-commit-behind-withheld-copy`,
+  `transaction-accepted`,
+  `transaction-rejected`,
+  `transaction-rejected-partway`,
   `reload`,
   `reload-with-withheld-copy`,
   `reload-with-unanswered-write`,
@@ -1705,6 +1961,12 @@ const stateNeeds: Partial<
   },
   'foreign-commit-behind-withheld-copy': {
     all: [`foreign-commits`, `held-echoes`],
+  },
+  'transaction-rejected': { all: [`write-rejection`] },
+  // Only a transaction that is not atomic can commit part of itself.
+  'transaction-rejected-partway': {
+    all: [`write-rejection`],
+    none: [`atomic-transactions`],
   },
   reload: { all: [`reloads`] },
   'reload-with-withheld-copy': { all: [`reloads`, `held-echoes`] },
@@ -1955,7 +2217,7 @@ export async function checkMutationHistory(
     const answered = new Set(
       state.pending
         .filter((write) => write.answered)
-        .map((write) => write.index),
+        .map((write) => write.receipt),
     )
     state.settlements.forEach((expected, index) => {
       const got = receipts[index]!.current
@@ -2059,13 +2321,14 @@ export async function checkMutationHistory(
       reach(`echo-queued-behind-withheld`)
     rewritten = state.rewritten
   }
-  // The plan the model decided the last write by; the provider gets it too.
-  let lastPlan: WritePlan | undefined
+  // The plans the model decided the step's requests by, in request order;
+  // the provider gets them too.
+  const planned: Array<WritePlan> = []
   const planFor = (step: WriteStep): WritePlan => {
     // Indexed by write, so a driver's `matchesFailure` can name it; the write
     // records its receipt after its plan.
     const error = new Error(`conformance write rejected ${receipts.length}`)
-    lastPlan = {
+    const plan: WritePlan = {
       outcome: step.outcome,
       held: step.held,
       echoHeld: step.echoHeld,
@@ -2075,7 +2338,8 @@ export async function checkMutationHistory(
         : { rejectionKind: step.rejectionKind }),
       error,
     }
-    return lastPlan
+    planned.push(plan)
+    return plan
   }
 
   try {
@@ -2097,6 +2361,7 @@ export async function checkMutationHistory(
       const from = stepStart(state)
       const result = stepModel(state, step, planFor)
       if (result === undefined) {
+        planned.length = 0
         skipped++
         continue
       }
@@ -2106,7 +2371,7 @@ export async function checkMutationHistory(
       switch (done.kind) {
         case `write`: {
           const write = step as WriteStep
-          provider.plan(lastPlan!)
+          for (const plan of planned.splice(0)) provider.plan(plan)
           const row: ConformanceRow = {
             id: write.id,
             title: write.title,
@@ -2130,6 +2395,28 @@ export async function checkMutationHistory(
             reach(`field-removed`)
           if (done.sameKeyPending) reach(`same-key-pending`)
           if (write.outcome === `reject` && !write.held) law = `MUT-2`
+          break
+        }
+        case `transaction`: {
+          const transaction = step as TransactionStep
+          for (const plan of planned.splice(0)) provider.plan(plan)
+          const receipt = writer.batch(
+            transaction.type,
+            transaction.rows.map(({ id, title, note }) => ({
+              id,
+              title,
+              ...(note === undefined ? {} : { note }),
+            })),
+          )
+          receipts.push(recordSettlement(receipt.when(`settled`)))
+          reach(
+            transaction.outcome === `accept`
+              ? `transaction-accepted`
+              : `transaction-rejected`,
+          )
+          if (done.partway) reach(`transaction-rejected-partway`)
+          if (transaction.outcome === `reject` && !transaction.held)
+            law = `MUT-2`
           break
         }
         case `release`:
@@ -2320,6 +2607,7 @@ export function queuedHeldWritesCalibration(driver: MutationDriver): {
             insert: count(writer.insert),
             update: count(writer.update),
             delete: count(writer.delete),
+            batch: count(writer.batch),
           },
           provider: new Proxy(provider, {
             get(target, key) {

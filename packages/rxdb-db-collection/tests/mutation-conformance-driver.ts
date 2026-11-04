@@ -323,7 +323,7 @@ class RxdbMutationProvider implements MutationProvider {
         ? document(change.row)
         : { ...conformanceRow(previous!), id }
     const written: RxDocumentData<Doc> = {
-      ...(fields),
+      ...fields,
       _deleted: change.type === `delete`,
       _attachments: {},
       _meta: { lwt: now() },
@@ -362,6 +362,13 @@ class RxdbMutationProvider implements MutationProvider {
   requests(): ReadonlyArray<WriteRequest> {
     return this.log
   }
+}
+
+/** Replaces a held document's fields; only a held note value is removed. */
+function edit(draft: Doc, row: ConformanceRow): void {
+  draft.title = row.title
+  if (Object.hasOwn(row, `note`)) draft.note = row.note
+  else if (typeof draft.note === `string`) delete draft.note
 }
 
 let sequence = 0
@@ -411,13 +418,18 @@ export function rxdbMutationDriver(): MutationDriver {
         writer: {
           insert: (row) => collection.insert(document(row)),
           update: (row) =>
-            collection.update(String(row.id), (draft) => {
-              draft.title = row.title
-              if (Object.hasOwn(row, `note`)) draft.note = row.note
-              // Only a held note value is removed.
-              else if (typeof draft.note === `string`) delete draft.note
-            }),
+            collection.update(String(row.id), (draft) => edit(draft, row)),
           delete: (id) => collection.delete(String(id)),
+          batch: (type, rows) => {
+            const ids = rows.map((row) => String(row.id))
+            return type === `insert`
+              ? collection.insert(rows.map(document))
+              : type === `update`
+                ? collection.update(ids, (drafts) =>
+                    drafts.forEach((draft, at) => edit(draft, rows[at]!)),
+                  )
+                : collection.delete(ids)
+          },
         },
         provider,
         drain: () => provider.drain(),

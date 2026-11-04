@@ -13,9 +13,10 @@
  *   adapter executes on the table inside its write transaction. An insert
  *   sends every column; an update sets only its changed columns
  *   (`field-updates`); the request carries the bound values;
- * - a plan answers the next request inside the adapter's transaction: a
- *   rejection throws the plan's error from the statement, as SQLite does for
- *   a failed write, which rolls the transaction back. The driver does not
+ * - the adapter runs each transaction in one write transaction
+ *   (`atomic-transactions`), and the next plan answers all of its requests:
+ *   a rejection throws the plan's error once its statements have run, as a
+ *   failed write does, which rolls the transaction back. The driver does not
  *   declare `held-writes`: a held statement holds the database's one write
  *   lock, which the adapter's diff flush also needs, so it would delay the
  *   confirmation of earlier writes, a coupling the model does not represent;
@@ -155,22 +156,26 @@ class PowerSyncMutationProvider implements MutationProvider {
       callback: (tx: LockContext) => Promise<unknown>,
       lockTimeout?: number,
     ) => {
-      // Set by the statement wrapper inside the transaction callback.
-      let wrote = false as boolean
+      // One plan answers the transaction, taken at its first write; a
+      // rejection throws once every statement has run, inside the
+      // transaction, which rolls it all back (`atomic-transactions`).
+      let plan: WritePlan | undefined
       const result = await this.rawWriteTransaction(async (tx) => {
         const execute = tx.execute.bind(tx)
         const guarded = Object.create(tx) as LockContext
         guarded.execute = async (sql: string, params: Array<unknown> = []) => {
           const request = writeRequest(sql, params)
-          if (!request) return execute(sql, params)
-          this.log.push(request)
-          const plan = this.plans.shift() ?? acceptAtOnce
-          if (plan.outcome === `reject`) throw plan.error
-          wrote = true
+          if (request) {
+            this.log.push(request)
+            plan ??= this.plans.shift() ?? acceptAtOnce
+          }
           return execute(sql, params)
         }
-        return callback(guarded)
+        const answer = await callback(guarded)
+        if (plan?.outcome === `reject`) throw plan.error
+        return answer
       }, lockTimeout)
+      const wrote = plan !== undefined
       if (wrote) this.expectDrain()
       return result
     }) as PowerSyncDatabase[`writeTransaction`]
@@ -295,6 +300,26 @@ function conformanceRow(record: Partial<Record>): ConformanceRow {
   return fromSqlRow({ ...record, id: conformanceKey(String(record.id)) })
 }
 
+/** A row as the application inserts it: an absent `note` is `null`. */
+function record(row: ConformanceRow) {
+  const { id, title, note } = toSqlRow(row)
+  return { id: String(id), title, note }
+}
+
+/**
+ * Replaces a held row's fields; a `NULL` note is already absent, so only a
+ * held one is removed.
+ */
+function edit(
+  draft: { title?: string | null; note?: string | null },
+  row: ConformanceRow,
+): void {
+  draft.title = row.title
+  if (Object.hasOwn(row, `note`)) draft.note = row.note!
+  else if (typeof draft.note === `string`)
+    (draft as { note?: string | null }).note = undefined
+}
+
 export function powerSyncMutationDriver(): MutationDriver {
   return {
     adapter: `@tanstack/powersync-db-collection (eager)`,
@@ -303,6 +328,7 @@ export function powerSyncMutationDriver(): MutationDriver {
       `foreign-commits`,
       `field-updates`,
       `reloads`,
+      `atomic-transactions`,
     ]),
     undefinedField: `null`,
     async create(seed): Promise<MutationFixture> {
@@ -322,19 +348,20 @@ export function powerSyncMutationDriver(): MutationDriver {
         collection: view,
         base: () => [...collection.base.values()].map(conformanceRow),
         writer: {
-          insert: (row) => {
-            const { id, title, note } = toSqlRow(row)
-            return collection.insert({ id: String(id), title, note })
-          },
+          insert: (row) => collection.insert(record(row)),
           update: (row) =>
-            collection.update(String(row.id), (draft) => {
-              draft.title = row.title
-              if (Object.hasOwn(row, `note`)) draft.note = row.note!
-              // A `NULL` note is already absent; only a held one is removed.
-              else if (typeof draft.note === `string`)
-                (draft as { note?: string | null }).note = undefined
-            }),
+            collection.update(String(row.id), (draft) => edit(draft, row)),
           delete: (id) => collection.delete(String(id)),
+          batch: (type, rows) => {
+            const ids = rows.map((row) => String(row.id))
+            return type === `insert`
+              ? collection.insert(rows.map(record))
+              : type === `update`
+                ? collection.update(ids, (drafts) =>
+                    drafts.forEach((draft, at) => edit(draft, rows[at]!)),
+                  )
+                : collection.delete(ids)
+          },
         },
         provider,
         settle: provider.settle,
