@@ -158,6 +158,9 @@ export function trailBaseCollectionOptions<
   let eventSequence = 0
   // Writes admitted and not yet settled.
   let writes = 0
+  // The run whose listing has not committed yet; no write settles until it
+  // has, since the listing confirms the writes it credits.
+  let listing: object | undefined
 
   const internalSyncMode = config.syncMode ?? `eager`
   let fullSyncCompleted = false
@@ -176,6 +179,7 @@ export function trailBaseCollectionOptions<
     timeout: number = 120 * 1000,
   ): Promise<void> => {
     const completed = (value: Map<string, number>) =>
+      !listing &&
       tickets.every(([id, ticket]) => (value.get(id) ?? 0) >= ticket)
     if (completed(seenIds.state)) {
       return Promise.resolve()
@@ -206,18 +210,19 @@ export function trailBaseCollectionOptions<
   // change stream carries each of them (MUT-7).
   let sending = 0
   let turn: Promise<unknown> = Promise.resolve()
+  const inTurn = <T>(send: () => Promise<T>): Promise<T> => {
+    const sent = (sending++ === 0 ? send() : turn.then(send)).finally(() => {
+      sending--
+    })
+    turn = sent.catch(() => {})
+    return sent
+  }
   const persist = async (
     write: () => Promise<Array<readonly [string, number]>>,
   ) => {
     writes++
     try {
-      const sent = (sending++ === 0 ? write() : turn.then(write)).finally(
-        () => {
-          sending--
-        },
-      )
-      turn = sent.catch(() => {})
-      await awaitIds(await sent)
+      await awaitIds(await inTurn(write))
     } finally {
       writes--
       forgetSeenIds()
@@ -256,6 +261,8 @@ export function trailBaseCollectionOptions<
       let cancelled = false
       const cleanup = () => {
         cancelled = true
+        leaveTurn()
+        creditListing()
         settleListener()
         cancelEventReader()
       }
@@ -427,6 +434,9 @@ export function trailBaseCollectionOptions<
             const applied = commit()
             if (applied !== true) appliedPages.push(applied)
           }
+          // Every page is committed; core may hold them behind a credited
+          // write, so the credit cannot wait for them to apply.
+          if (everyRow) creditListing()
         } finally {
           if (--loadsInFlight === 0) eventSequenceByKey.clear()
         }
@@ -493,9 +503,43 @@ export function trailBaseCollectionOptions<
         fail(error)
       }
 
+      // Each run subscribes in the write queue, once every write admitted
+      // before it is answered: each of those committed before the stream
+      // opened, so its event may be on the retired stream only, and the
+      // eager listing carries it. The open stream credits their numbers,
+      // and no write settles until the listing has committed (MUT-7).
+      const run = {}
+      let leaveTurn!: () => void
+      const left = new Promise<void>((resolve) => (leaveTurn = resolve))
+      const creditListing = () => {
+        if (listing !== run) return
+        listing = undefined
+        seenIds.setState((curr: Map<string, number>) => new Map(curr))
+      }
+
       async function start() {
         try {
-          const eventStream = await config.recordApi.subscribe(`*`)
+          let opening: Promise<ReadableStream<Event>> | undefined
+          // The turn ends when the stream opens or fails, or at cleanup, so a
+          // stale subscription holds neither a replacement run nor a write.
+          await inTurn(() => {
+            if (cancelled) return left
+            opening = config.recordApi.subscribe(`*`).then((stream) => {
+              if (!cancelled) {
+                listing = run
+                seenIds.setState((curr: Map<string, number>) => {
+                  const next = new Map(curr)
+                  for (const [id, answered] of answeredIds)
+                    next.set(id, Math.max(next.get(id) ?? 0, answered))
+                  return next
+                })
+              }
+              return stream
+            })
+            return Promise.race([opening.catch(() => {}), left])
+          })
+          if (!opening) return
+          const eventStream = await opening
           if (cancelled) {
             await eventStream.cancel()
             return
@@ -533,6 +577,10 @@ export function trailBaseCollectionOptions<
             await load({}, true)
             if (cancelled) return
             fullSyncCompleted = true
+          } else {
+            // On demand, no listing carries every row: the open stream
+            // credits the answered writes.
+            creditListing()
           }
           // After this run's fail(), markReady() does nothing.
           if (!cancelled) markReady()

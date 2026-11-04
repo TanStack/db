@@ -128,9 +128,12 @@ export function rxdbCollectionOptions(
    * It is not about sync between a client and a server!
    */
   type SyncParams = Parameters<SyncConfig<Row, string>[`sync`]>[0]
+  let live: Promise<void> = Promise.resolve()
+  let runs = 0
   const sync: SyncConfig<Row, Key> = {
     sync: (params: SyncParams) => {
       const { begin, write, commit, markReady, fail, collection } = params
+      const reloaded = runs++ > 0
 
       let initialFetchComplete = false
       async function initialFetch() {
@@ -141,12 +144,9 @@ export function rxdbCollectionOptions(
          */
         let cursor: RxDocumentData<Row> | undefined = undefined
         const syncBatchSize = config.syncBatchSize ? config.syncBatchSize : 1000
-        // The initial fetch reads every document. When the Collection holds
-        // rows, such as a reload's kept rows, it is a snapshot that replaces
-        // them, so a row RxDB no longer has goes.
-        begin({
-          snapshot: !collection._state.acceptedSyncedEntries().next().done,
-        })
+        // The initial fetch reads every document. A reload's is a snapshot:
+        // it replaces the kept rows at once, and a row RxDB no longer has goes.
+        begin({ snapshot: reloaded })
 
         while (!initialFetchComplete) {
           let query: FilledMangoQuery<Row>
@@ -203,7 +203,10 @@ export function rxdbCollectionOptions(
             })
           })
         }
-        await commit()
+        // Core holds this commit while a write persists, and that write
+        // waits for this run to go live, so the run goes live without waiting
+        // for it to apply; core's queue keeps the buffered events behind it.
+        return { applied: commit() }
       }
 
       type WriteMessage = Parameters<typeof write>[0]
@@ -219,8 +222,14 @@ export function rxdbCollectionOptions(
         commit()
       }
 
+      // A write returns once its change is committed: while this run buffers
+      // changes during its initial fetch, a write waits until the run is live.
+      let goLive!: () => void
+      live = new Promise<void>((resolve) => (goLive = resolve))
+
       let sub: Subscription | undefined
       function stopOngoingFetch() {
+        goLive()
         buffer.length = 0
         if (!sub) return
         getFromMapOrCreate(
@@ -266,7 +275,7 @@ export function rxdbCollectionOptions(
         const isCleanedUp = () => collection.status === `cleaned-up`
 
         startOngoingFetch()
-        await initialFetch()
+        const fetched = await initialFetch()
         if (isCleanedUp()) {
           return
         }
@@ -277,13 +286,18 @@ export function rxdbCollectionOptions(
         // continuous event stream postpone readiness forever.
         const pending = buffer.splice(0)
         buffering = false
+        let flushed: ReturnType<typeof commit> | undefined
         if (pending.length > 0) {
           begin()
           for (const msg of pending) write(msg)
-          await commit()
-          if (isCleanedUp()) {
-            return
-          }
+          flushed = commit()
+        }
+        goLive()
+        // Ready once the initial rows and the buffered changes apply.
+        await fetched.applied
+        await flushed
+        if (isCleanedUp()) {
+          return
         }
 
         // After this run's fail(), markReady() does nothing.
@@ -305,12 +319,13 @@ export function rxdbCollectionOptions(
   }
 
   // Writes reach RxDB in author order: each starts after the earlier one is
-  // decided, whether it fulfilled or rejected.
+  // decided, whether it fulfilled or rejected. A write returns once the
+  // current sync run is live, so its change has been committed.
   let turn: Promise<unknown> = Promise.resolve()
   const inTurn = (write: () => Promise<void>): Promise<void> => {
     const run = turn.then(write)
     turn = run.catch(() => {})
-    return run
+    return run.then(() => live)
   }
   const throwWriteError = (result: {
     error: Array<RxStorageWriteError<Row>>
@@ -355,8 +370,14 @@ export function rxdbCollectionOptions(
           // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
           (m) => m.type === `delete`,
         )
-        const ids = mutations.map((mutation) => getKey(mutation.original))
-        throwWriteError(await rxCollection.bulkRemove(ids))
+        // Each delete retries over a newer revision another client wrote
+        // while it waited, as `incrementalPatch` does for an update.
+        for (const mutation of mutations) {
+          const doc = await rxCollection
+            .findOne(getKey(mutation.original))
+            .exec()
+          await doc?.incrementalRemove()
+        }
       }),
   }
   return withCollectionConfigFactory(collectionConfig, () =>

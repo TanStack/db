@@ -950,7 +950,7 @@ class ElectricLifecycle<T extends Row<unknown>> {
   }
 
   start(): number {
-    if (this.active) this.retire()
+    if (this.active) this.retire(undefined, true)
     this.active = true
     this.runReady = false
     this.failure = undefined
@@ -963,10 +963,22 @@ class ElectricLifecycle<T extends Row<unknown>> {
     return this.active && this.epoch === epoch
   }
 
-  retire(epoch?: number): void {
+  /**
+   * Retire the run. Its pending waits reject, or, `untilNextRun`, they wait
+   * one turn: a reload starts the next run in that turn, and its run
+   * resumes the shape log, so the waits carry into it. Its evidence, or the
+   * retired run's once it is ready, resolves them, and its failure rejects
+   * them; without a next run they reject.
+   */
+  retire(epoch?: number, untilNextRun = false): void {
     if (epoch !== undefined && !this.isActive(epoch)) return
     this.active = false
-    this.rejectWaits(new StreamAbortedError(this.collectionId))
+    const aborted = new StreamAbortedError(this.collectionId)
+    if (!untilNextRun) this.rejectWaits(aborted)
+    else
+      queueMicrotask(() => {
+        if (!this.active) this.rejectWaits(aborted)
+      })
     this.matchBuffer = { committedMessages: [], pendingMessages: [] }
     for (const txid of this.evidence.seenTxids) this.retired.seenTxids.add(txid)
     this.retired.seenSnapshots.push(...this.evidence.seenSnapshots)
@@ -2019,7 +2031,9 @@ function createElectricSync<T extends Row<unknown>>(
 
     abortController.signal.addEventListener(`abort`, () => {
       rejectFullSnapshot(new StreamAbortedError(collectionId))
-      lifecycle.retire(lifecycleEpoch)
+      // An external abort ends the waits with the run; a run's cleanup
+      // leaves them to a reload's next run.
+      lifecycle.retire(lifecycleEpoch, sessionCleanedUp)
     })
 
     const stream = new ShapeStream({
@@ -2868,7 +2882,7 @@ function createElectricSync<T extends Row<unknown>>(
         pendingResumeBatches.length = 0
         // Reset deduplication tracking so collection can load fresh data if restarted
         loadSubsetDedupe?.reset()
-        lifecycle.retire(lifecycleEpoch)
+        lifecycle.retire(lifecycleEpoch, true)
       },
     }
   }
