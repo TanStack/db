@@ -1529,7 +1529,8 @@ export async function runOptimisticHistory(
             step.removesD === true &&
             was !== undefined &&
             was.d !== undefined
-          if (removesHeldD) counts.removedFieldEdits++
+          // Reach counts a removal only where an optimistic row shows it.
+          if (removesHeldD && step.optimistic) counts.removedFieldEdits++
           const now = model.visible().get(step.key)
           if (
             inFlight &&
