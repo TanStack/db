@@ -496,171 +496,186 @@ const boundaryParameters = fc.record({
   ),
   siblingPending: fc.boolean(),
 })
-const boundaryLaneHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
-  ...[
-    `startup`,
-    `unsubscribe`,
-    `idle`,
-    `pending`,
-    `pending-alone`,
-    `pending-subscribed`,
-    `delayed-commit`,
-    `preload`,
-    `disabled`,
-    `warm-preload`,
-    `failed-preload-held`,
-    `failed-preload-last`,
-    `async-cleanup-held`,
-    `async-cleanup-retired`,
-    `async-cleanup-single`,
-  ].map((lane) =>
-    boundaryParameters.map((parameters): BoundaryHistory => {
-      const {
-        gcTime,
-        age,
-        outcome,
-        sibling,
-        direct,
-        disabledTime,
-        noTimePeriods,
-        timeout,
-        oldestFirst,
-        preloadCount,
-        releaseGap,
-        siblingOutcome,
-        siblingPending,
-      } = parameters
-      const actions: Array<GcAction> = []
-      const asyncCleanup = lane.startsWith(`async-cleanup`)
-      // The two cleanup timing lanes always preserve a sibling. A separate
-      // single-transaction lane keeps the nearby no-survivor boundary.
-      const hasSibling = asyncCleanup
-        ? lane !== `async-cleanup-single`
-        : sibling
-      const settleAfterCleanup = lane === `async-cleanup-retired`
-      const failedPreload = lane.startsWith(`failed-preload`)
-      const preloadLast = lane === `failed-preload-last`
-      const settleTransaction = (slot: number, result = outcome): GcAction =>
-        result === `rollback`
-          ? { kind: `rollback`, slot }
-          : { kind: `settle`, slot, outcome: result }
-      const pendingSibling = asyncCleanup && siblingPending
-      const firstSlot = hasSibling && !oldestFirst && !pendingSibling ? 1 : 0
-      const lastSlot = firstSlot === 0 ? 1 : 0
-      const preload = () => {
-        for (let count = 0; count < preloadCount; count++) {
-          if (count > 0)
-            actions.push({ kind: `advance`, elapsedMs: releaseGap })
-          actions.push({ kind: `preload` })
-        }
-      }
-      if (lane === `warm-preload`)
-        actions.push(
-          { kind: `advance`, elapsedMs: Math.max(gcTime, 50) },
-          { kind: `preload` },
-        )
-      if (lane === `unsubscribe`) actions.push({ kind: `subscribe` })
-      if (lane === `idle`) {
-        actions.push({ kind: `advance`, elapsedMs: Math.max(gcTime, 50) + 1 })
-        for (let i = 0; i < noTimePeriods; i++)
-          actions.push({ kind: `idle`, hasTime: false, didTimeout: false })
-      }
-      actions.push({
-        kind: `insert`,
-        commit: !lane.startsWith(`pending`) && lane !== `delayed-commit`,
-      })
-      if (lane === `pending-subscribed`) {
-        actions.push(
-          { kind: `subscribe` },
-          { kind: `advance`, elapsedMs: Math.max(gcTime, 50) + age + 1 },
-          { kind: `idle`, hasTime: true, didTimeout: false },
-          { kind: `unsubscribe` },
-          { kind: `advance`, elapsedMs: gcTime - 1 },
-          { kind: `idle`, hasTime: true, didTimeout: false },
-          { kind: `advance`, elapsedMs: 1 },
-          { kind: `idle`, hasTime: true, didTimeout: false },
-        )
-      } else if (lane === `pending` || lane === `pending-alone`) {
-        actions.push({ kind: `advance`, elapsedMs: Math.max(gcTime, 50) - 1 })
-        if (lane === `pending`) actions.push({ kind: `rollback`, slot: 0 })
-        actions.push({ kind: `advance`, elapsedMs: 2 })
-      } else {
-        if (lane === `delayed-commit`) {
-          actions.push(
-            { kind: `advance`, elapsedMs: age },
-            { kind: `commit`, slot: 0 },
+const boundaryLaneHistoryArbitrary = (
+  onlyLane?: `startup`,
+): fc.Arbitrary<BoundaryHistory> =>
+  fc.oneof(
+    ...[
+      `startup`,
+      `unsubscribe`,
+      `idle`,
+      `pending`,
+      `pending-alone`,
+      `pending-subscribed`,
+      `delayed-commit`,
+      `preload`,
+      `disabled`,
+      `warm-preload`,
+      `failed-preload-held`,
+      `failed-preload-last`,
+      `async-cleanup-held`,
+      `async-cleanup-retired`,
+      `async-cleanup-single`,
+    ]
+      .filter((lane) => onlyLane === undefined || lane === onlyLane)
+      .map((lane) =>
+        boundaryParameters.map((parameters): BoundaryHistory => {
+          const {
+            gcTime,
+            age,
+            outcome,
+            sibling,
+            direct,
+            disabledTime,
+            noTimePeriods,
+            timeout,
+            oldestFirst,
+            preloadCount,
+            releaseGap,
+            siblingOutcome,
+            siblingPending,
+          } = parameters
+          const actions: Array<GcAction> = []
+          const asyncCleanup = lane.startsWith(`async-cleanup`)
+          // The two cleanup timing lanes always preserve a sibling. A separate
+          // single-transaction lane keeps the nearby no-survivor boundary.
+          const hasSibling = asyncCleanup
+            ? lane !== `async-cleanup-single`
+            : sibling
+          const settleAfterCleanup = lane === `async-cleanup-retired`
+          const failedPreload = lane.startsWith(`failed-preload`)
+          const preloadLast = lane === `failed-preload-last`
+          const settleTransaction = (
+            slot: number,
+            result = outcome,
+          ): GcAction =>
+            result === `rollback`
+              ? { kind: `rollback`, slot }
+              : { kind: `settle`, slot, outcome: result }
+          const pendingSibling = asyncCleanup && siblingPending
+          const firstSlot =
+            hasSibling && !oldestFirst && !pendingSibling ? 1 : 0
+          const lastSlot = firstSlot === 0 ? 1 : 0
+          const preload = () => {
+            for (let count = 0; count < preloadCount; count++) {
+              if (count > 0)
+                actions.push({ kind: `advance`, elapsedMs: releaseGap })
+              actions.push({ kind: `preload` })
+            }
+          }
+          if (lane === `warm-preload`)
+            actions.push(
+              { kind: `advance`, elapsedMs: Math.max(gcTime, 50) },
+              { kind: `preload` },
+            )
+          if (lane === `unsubscribe`) actions.push({ kind: `subscribe` })
+          if (lane === `idle`) {
+            actions.push({
+              kind: `advance`,
+              elapsedMs: Math.max(gcTime, 50) + 1,
+            })
+            for (let i = 0; i < noTimePeriods; i++)
+              actions.push({ kind: `idle`, hasTime: false, didTimeout: false })
+          }
+          actions.push({
+            kind: `insert`,
+            commit: !lane.startsWith(`pending`) && lane !== `delayed-commit`,
+          })
+          if (lane === `pending-subscribed`) {
+            actions.push(
+              { kind: `subscribe` },
+              { kind: `advance`, elapsedMs: Math.max(gcTime, 50) + age + 1 },
+              { kind: `idle`, hasTime: true, didTimeout: false },
+              { kind: `unsubscribe` },
+              { kind: `advance`, elapsedMs: gcTime - 1 },
+              { kind: `idle`, hasTime: true, didTimeout: false },
+              { kind: `advance`, elapsedMs: 1 },
+              { kind: `idle`, hasTime: true, didTimeout: false },
+            )
+          } else if (lane === `pending` || lane === `pending-alone`) {
+            actions.push({
+              kind: `advance`,
+              elapsedMs: Math.max(gcTime, 50) - 1,
+            })
+            if (lane === `pending`) actions.push({ kind: `rollback`, slot: 0 })
+            actions.push({ kind: `advance`, elapsedMs: 2 })
+          } else {
+            if (lane === `delayed-commit`) {
+              actions.push(
+                { kind: `advance`, elapsedMs: age },
+                { kind: `commit`, slot: 0 },
+              )
+            }
+            if (lane === `preload` || failedPreload) preload()
+            if (hasSibling)
+              actions.push({ kind: `insert`, commit: !pendingSibling })
+            if (lane === `unsubscribe`) actions.push({ kind: `unsubscribe` })
+            actions.push({ kind: `advance`, elapsedMs: age })
+            if (lane === `warm-preload`) preload()
+            if (asyncCleanup) actions.push({ kind: `cleanup-start` })
+            if (asyncCleanup && settleAfterCleanup)
+              actions.push({ kind: `cleanup-settle` })
+            if (failedPreload && !preloadLast)
+              actions.push({ kind: `preload-failure` })
+            actions.push(settleTransaction(firstSlot))
+            if (hasSibling)
+              actions.push(
+                { kind: `advance`, elapsedMs: releaseGap },
+                { kind: `idle`, hasTime: true, didTimeout: false },
+                pendingSibling
+                  ? { kind: `rollback`, slot: lastSlot }
+                  : settleTransaction(lastSlot, siblingOutcome),
+              )
+            if (lane === `preload`) actions.push({ kind: `ready` })
+            if (failedPreload && preloadLast)
+              actions.push({ kind: `preload-failure` })
+            if (asyncCleanup)
+              actions.push(
+                { kind: `advance`, elapsedMs: Math.max(gcTime, 50) + 1 },
+                { kind: `idle`, hasTime: true, didTimeout: false },
+                ...(!settleAfterCleanup
+                  ? ([{ kind: `cleanup-settle` }] as const)
+                  : []),
+              )
+          }
+          actions.push({ kind: `idle`, hasTime: true, didTimeout: timeout })
+          // Test just below the startup floor and after every finite deadline.
+          if (lane === `startup` && age < 49)
+            actions.push(
+              { kind: `advance`, elapsedMs: 49 - age },
+              { kind: `idle`, hasTime: true, didTimeout: false },
+            )
+          // Derive boundary cuts from the independent law, not production timers.
+          const reference = createGcModel(
+            lane === `disabled` ? disabledTime : gcTime,
+            lane !== `preload` && !failedPreload,
           )
-        }
-        if (lane === `preload` || failedPreload) preload()
-        if (hasSibling)
-          actions.push({ kind: `insert`, commit: !pendingSibling })
-        if (lane === `unsubscribe`) actions.push({ kind: `unsubscribe` })
-        actions.push({ kind: `advance`, elapsedMs: age })
-        if (lane === `warm-preload`) preload()
-        if (asyncCleanup) actions.push({ kind: `cleanup-start` })
-        if (asyncCleanup && settleAfterCleanup)
-          actions.push({ kind: `cleanup-settle` })
-        if (failedPreload && !preloadLast)
-          actions.push({ kind: `preload-failure` })
-        actions.push(settleTransaction(firstSlot))
-        if (hasSibling)
+          for (const action of actions)
+            if (gcActionLegal(reference, action)) stepGcModel(reference, action)
+          const remaining = gcDeadline(reference) - reference.now
+          if (!reference.retired && Number.isFinite(remaining)) {
+            actions.push(
+              { kind: `advance`, elapsedMs: Math.max(0, remaining - 1) },
+              { kind: `idle`, hasTime: true, didTimeout: false },
+              { kind: `advance`, elapsedMs: 1 },
+              { kind: `idle`, hasTime: true, didTimeout: false },
+            )
+          }
           actions.push(
-            { kind: `advance`, elapsedMs: releaseGap },
-            { kind: `idle`, hasTime: true, didTimeout: false },
-            pendingSibling
-              ? { kind: `rollback`, slot: lastSlot }
-              : settleTransaction(lastSlot, siblingOutcome),
+            { kind: `advance`, elapsedMs: 200 },
+            { kind: `idle`, hasTime: !timeout, didTimeout: timeout },
+            { kind: `cleanup` },
           )
-        if (lane === `preload`) actions.push({ kind: `ready` })
-        if (failedPreload && preloadLast)
-          actions.push({ kind: `preload-failure` })
-        if (asyncCleanup)
-          actions.push(
-            { kind: `advance`, elapsedMs: Math.max(gcTime, 50) + 1 },
-            { kind: `idle`, hasTime: true, didTimeout: false },
-            ...(!settleAfterCleanup
-              ? ([{ kind: `cleanup-settle` }] as const)
-              : []),
-          )
-      }
-      actions.push({ kind: `idle`, hasTime: true, didTimeout: timeout })
-      // Test just below the startup floor and after every finite deadline.
-      if (lane === `startup` && age < 49)
-        actions.push(
-          { kind: `advance`, elapsedMs: 49 - age },
-          { kind: `idle`, hasTime: true, didTimeout: false },
-        )
-      // Derive boundary cuts from the independent law, not production timers.
-      const reference = createGcModel(
-        lane === `disabled` ? disabledTime : gcTime,
-        lane !== `preload` && !failedPreload,
-      )
-      for (const action of actions)
-        if (gcActionLegal(reference, action)) stepGcModel(reference, action)
-      const remaining = gcDeadline(reference) - reference.now
-      if (!reference.retired && Number.isFinite(remaining)) {
-        actions.push(
-          { kind: `advance`, elapsedMs: Math.max(0, remaining - 1) },
-          { kind: `idle`, hasTime: true, didTimeout: false },
-          { kind: `advance`, elapsedMs: 1 },
-          { kind: `idle`, hasTime: true, didTimeout: false },
-        )
-      }
-      actions.push(
-        { kind: `advance`, elapsedMs: 200 },
-        { kind: `idle`, hasTime: !timeout, didTimeout: timeout },
-        { kind: `cleanup` },
-      )
-      return {
-        gcTime: lane === `disabled` ? disabledTime : gcTime,
-        direct: direct && lane === `startup`,
-        ready: lane !== `preload` && !failedPreload,
-        asyncCleanup,
-        actions,
-      }
-    }),
-  ),
-)
+          return {
+            gcTime: lane === `disabled` ? disabledTime : gcTime,
+            direct: direct && lane === `startup`,
+            ready: lane !== `preload` && !failedPreload,
+            asyncCleanup,
+            actions,
+          }
+        }),
+      ),
+  )
 
 // These histories choose each next command from the reference's legal actions.
 // The prefix establishes subscriber multiplicity, three persisting siblings,
@@ -846,10 +861,18 @@ const automaticCleanupHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc
   })
 
 const boundaryHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
-  { arbitrary: boundaryLaneHistoryArbitrary, weight: 5 },
+  { arbitrary: boundaryLaneHistoryArbitrary(), weight: 5 },
   { arbitrary: interactionHistoryArbitrary, weight: 1 },
   { arbitrary: automaticCleanupHistoryArbitrary, weight: 1 },
 )
+
+// The mixed grammar reaches direct insertion only through one lane and a
+// boolean choice. Generate this receiving path in each normal campaign so
+// reach does not depend on that conjunction being sampled. Parameters and
+// outcomes still vary, and the same model, driver and checks judge the history.
+const writeStartedSyncHistoryArbitrary = boundaryLaneHistoryArbitrary(
+  `startup`,
+).map((history) => ({ ...history, direct: true }))
 
 it.each(
   runConfig.replaySeed === undefined ? [20261026, undefined] : [undefined],
@@ -857,6 +880,17 @@ it.each(
   `preserves retention across transaction phases and idle delivery (seed %s)`,
   async (seed) => {
     boundaryReach = createOracleReach(boundaryPropertyName, boundaryStates)
+    // Keep the original mixed grammar and its seed/path coordinates intact.
+    // An explicit path replay executes only the requested mixed history.
+    if (!oracleReplayRequested()) {
+      await fc.assert(
+        fc.asyncProperty(writeStartedSyncHistoryArbitrary, runBoundaryHistory),
+        {
+          ...oraclePropertyOptions(10, boundaryPropertyName),
+          ...(seed === undefined ? {} : { seed }),
+        },
+      )
+    }
     await fc.assert(
       fc.asyncProperty(boundaryHistoryArbitrary, runBoundaryHistory),
       {
@@ -865,8 +899,8 @@ it.each(
       },
     )
     boundaryReach.assertReached()
-    console.info(
-      `GC boundary reach: ${JSON.stringify(Object.fromEntries(boundaryReach.counts()))}`,
+    process.stdout.write(
+      `GC boundary reach: ${JSON.stringify(Object.fromEntries(boundaryReach.counts()))}\n`,
     )
   },
 )

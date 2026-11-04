@@ -6326,3 +6326,16 @@ useful extension: the hash identity oracle owns those semantic distinctions,
 but its helper-level evidence does not by itself exercise distinct storage.
 The separate Index structural-collision obligation above remains open.
 See the appended [review evidence](oracle-reviews/2026-10-30-distinct-collisions.md).
+
+## GC direct-start reach, 2026-11-04
+
+The existing `collection-lifecycle.gc-retention-boundaries` owner now begins
+each normal campaign with ten generated direct-start histories, then runs its
+unchanged 250 mixed histories. This removes the known sampling gap where no
+history starts sync through direct insertion. The model, comparisons, all
+declared reach states, and both mixed run budgets remain intact. Explicit path
+replays retain the original mixed generator and skip the prefix. Seed 706
+reproduces the old gap and rejects omission of the prefix; the repaired fixed
+and random campaigns reached the state 15 and 17 times. Existing controlled
+idle-host and native-browser limits remain in force. See the
+[CI repair evidence](oracle-reviews/2026-11-04-gc-startup-reach.md).
