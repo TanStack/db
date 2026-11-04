@@ -159,3 +159,96 @@ audit of unrelated upstream changes.
 Reviewed packages/db-sqlite-persistence-core/src/persisted.ts SHA256: `7445fdf60921cd04feb1f1aa22415b3f637545b084223ba2b7af9f19328194ab`.
 
 Reviewed packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts SHA256: `cf58a63b38f465d3c558d55e3b62daf5984a7c6035615c26fc44803e84e781e7`.
+
+
+## November 3: stale persistence preparation and upstream merge
+
+Source baseline: PR head `8f6abecd5c7430e09ced81f7304292cb48673f79`, merged with
+upstream `36f879727d594601e28329e177c802dc179bf9e9`. This entry describes the
+source and oracle changes in the commit containing this entry. Self-review.
+
+- **Law:** Collection cleanup invalidates pending source preparation. Late
+  metadata settlement must not restart the retired persistence runtime or retain
+  a cache claim/coordinator subscription. Authority: the cleanup lifecycle in
+  the glossary and the proposed mutation-admission contract in the Electric
+  guide. Successful startup must still dispatch after metadata and index startup.
+- **Reach:** the existing `persisted-cleanup` receiving path now observes a live
+  cache claim before cleanup, then completed cleanup and transaction settlement.
+  All thirteen paths run eight times in each fixed/random campaign. The release
+  flag varies metadata release before/after cleanup settlement; payloads remain
+  strings of length 0–8. No run budget was reduced.
+- **RED:** before the persistence repair, both generated startup campaigns fail
+  `retired preparation cannot restart storage`: two claim requests versus one.
+  The previous checker observed only blocked dispatch and missed resource
+  acquisition after cleanup. The extension ran before the production repair.
+- **GREEN:** the lifecycle-generation check before `ensureStarted()` makes both
+  startup campaigns pass. Resource expectations come from the cleanup law;
+  claim/subscription recorders observe external collaborator calls, without
+  inspecting the runtime's generation or preparation machinery.
+- **Mutant:** removing only the new generation check fails direct replay with
+  seed `20261030`, path `0:0`, property `electric.sdk-mutation-startup`, at the same
+  claim-request assertion. Restoring it passes the same replay. This is an
+  assertion failure at the intended checkpoint, not a setup error or timeout.
+- **Limits:** the installed Electric SDK receives controlled HTTP and the real
+  persistence wrapper receives controlled managed storage. No live-service,
+  native SQLite resource-release, renewal-timer, arbitrary restart scheduling,
+  or prompt storage-I/O cancellation claim follows.
+
+Commands from `packages/electric-db-collection` (Node available on PATH):
+
+```sh
+node ../../node_modules/vitest/vitest.mjs run tests/electric-sdk-delivery-oracle.property.test.ts \
+  -t 'admits cold mutations' --coverage.enabled=false --typecheck.enabled=false
+TANSTACK_DB_ORACLE_PROPERTY=electric.sdk-mutation-startup \
+TANSTACK_DB_ORACLE_SEED=20261030 TANSTACK_DB_ORACLE_PATH=0:0 \
+node ../../node_modules/vitest/vitest.mjs run tests/electric-sdk-delivery-oracle.property.test.ts \
+  --coverage.enabled=false --typecheck.enabled=false
+```
+
+ORC-001–005: the existing contract, driver, grammar and independent admission
+judgment remain; cleanup adds external resource observations at settlement.
+Removing the cleanup path loses the stale-continuation witness; removing the
+successful persisted/index paths loses the adjacent valid-startup witnesses.
+Cleanup precedes source entry; cleanup without an admitted Collection operation
+is outside this grammar. ORC-006–007: RED and restored direct replay above,
+with unchanged fixed/random budgets. ORC-008–009: no model state or vocabulary
+was renamed or merged. ORC-010: existing first-violation reporting and ordered
+cleanup remain. ORC-011: no shared semantic classifier is used for the zero-live-
+resources rule, and no concrete second-formulation hypothesis was identified.
+ORC-012: this append-only entry is versioned with the source/test changes.
+ORC-013: live startup versus retired startup distinguishes the guard from an
+unconditional abort. ORC-014: the boundary stays explicitly controlled.
+ORC-015–016: existing declared per-path reach is retained, with cleanup reach
+moved to the settlement boundary; no standalone examples were added.
+
+The merge retains upstream's retry health and retired-evidence policy alongside
+mutation-gate invalidation. In particular, retirement no longer advances the
+Electric epoch: upstream failure reporting may still belong to that retired run,
+and the next start advances the epoch. External abort only rejects preparation
+for its originating active run.
+
+
+Validation: 42 adapter files / 1,219 runtime tests pass (the command excluded
+`electric-sdk-delivery.test.ts` and `electric-descriptor-isolation-oracle.test.ts`;
+two other exclude patterns matched no files). The focused four-file run passes
+400 runtime tests. Those initial runs also reported three missing local build
+artifacts during typechecking; production package builds were then generated
+before rerunning typechecking. Persistence `tsc --noEmit` passes after linking
+its Browser workspace dependency. Changed-source ESLint, oracle lint, formatting,
+and `git diff --check` pass. No generated build output is committed.
+
+Production size against upstream `36f879727`: core +117B gzip, Electric +196B,
+persistence +59B; total +372B gzip (+0.2%), +295B brotli. This runs the
+repository size comparator with `--exact-base --no-scenarios`; no new app-scenario
+claim follows. The local runtime lacks `npx`, so a temporary shell shim routes
+its `vite build` calls to the installed workspace binary. The lifecycle check
+uses the existing runtime generation and abort error; no extra lifecycle,
+retry path, or queue is introduced. Diff cleanup against current upstream finds
+no formatting-only churn or unused mechanism; all eleven existing per-file
+justifications still apply.
+
+The final focused type-only run passes all four files (126 checks, no type
+errors or unhandled source errors). Expo example tsconfig warnings remain from
+the filtered dependency installation and do not fail these checks. The merge
+commit skips lint-staged's whole incoming-upstream formatting pass; changed
+source ESLint, oracle lint, formatting, type checks and diff checks ran directly.

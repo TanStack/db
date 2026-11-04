@@ -5,6 +5,18 @@ export { recordOracleReplay } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `pagination.limit-admission-replay-pending-negative`,
+  `pagination.limit-admission-replay-pending-valid`,
+  `pagination.limit-admission-builder-negative`,
+  `pagination.limit-admission-builder-valid`,
+  `pagination.limit-admission-unstarted-negative`,
+  `pagination.limit-admission-unstarted-valid`,
+  `pagination.limit-admission-ready-negative`,
+  `pagination.limit-admission-ready-valid`,
+  `pagination.limit-admission-initial-pending-negative`,
+  `pagination.limit-admission-initial-pending-valid`,
+  `pagination.limit-admission-move-pending-negative`,
+  `pagination.limit-admission-move-pending-valid`,
   `framework.react.result-shape`,
   `framework.react-dependency-list.result-shape`,
   `framework.preact.result-shape`,
@@ -36,7 +48,51 @@ const staticOracleProperties = [
   `framework.svelte.window-history`,
   `framework.svelte.pending-window-history`,
   `framework.svelte.publication-window-history`,
+  `framework.react-DbClient.window-history`,
+  `framework.react-DbClient.pending-window-history`,
+  `framework.react-DbClient.publication-window-history`,
+  `framework.react-Suspense.window-history`,
+  `framework.react-Suspense.pending-window-history`,
+  `framework.react-Suspense.publication-window-history`,
+  `framework.react-Suspense-DbClient.window-history`,
+  `framework.react-Suspense-DbClient.pending-window-history`,
+  `framework.react-Suspense-DbClient.publication-window-history`,
+  `framework.svelte-DbClient.window-history`,
+  `framework.svelte-DbClient.pending-window-history`,
+  `framework.svelte-DbClient.publication-window-history`,
+  `framework.react.peer-window-history`,
+  `framework.react-dependency-list.peer-window-history`,
+  `framework.preact.peer-window-history`,
+  `framework.vue.peer-window-history`,
+  `framework.solid.peer-window-history`,
+  `framework.angular.peer-window-history`,
+  `framework.svelte.peer-window-history`,
+  `framework.react-DbClient.peer-window-history`,
+  `framework.react-Suspense.peer-window-history`,
+  `framework.react-Suspense-DbClient.peer-window-history`,
+  `framework.svelte-DbClient.peer-window-history`,
+  `react.client-window`,
+  `react.suspense-retry-history`,
+  `react.suspense-siblings`,
+  `react.suspense-replacement-history`,
+  `react.suspense-preload-restart-history`,
+  `svelte.client-window`,
+  `svelte.client-window-recovery`,
+  `live-query-observer.hydration-subset-handoff`,
+  `framework.react.keyed-admission`,
+  `framework.react-dependency-list.keyed-admission`,
+  `framework.preact.keyed-admission`,
+  `framework.react-DbClient.keyed-admission`,
+  `framework.svelte-DbClient.keyed-admission`,
+  `framework.react.immutable-key-history`,
+  `framework.react-dependency-list.immutable-key-history`,
+  `framework.react-DbClient.immutable-key-history`,
+  `framework.react-Suspense.immutable-key-history`,
+  `framework.react-Suspense-DbClient.immutable-key-history`,
+  `framework.preact.immutable-key-history`,
+  `framework.svelte-DbClient.immutable-key-history`,
   `react.window-render`,
+  `react.window-retry-ownership`,
   `preact.window-render`,
   `lint.part-reach`,
   `oracle.declared-reach`,
@@ -73,6 +129,10 @@ const staticOracleProperties = [
   `live-query-observer.partial-attach`,
   `live-query-observer.release-failure`,
   `live-query-observer.hydration-error-timing`,
+  `live-query-observer.row-container-sharing`,
+  `live-query-observer.capture-paths`,
+  `live-query-observer.record-shape`,
+  `live-query-observer.sparse-array`,
   `subscription-lifecycle.notification-error`,
   `live-query.start-handoff`,
   `react.descriptor-error-surface`,
@@ -97,8 +157,12 @@ const staticOracleProperties = [
   `cursor-pagination.reset`,
   `cursor-pagination.failure`,
   `query-db.refetch-ordered-prefix`,
+  `query-db.refetch-held-page-end`,
   `ordered-loader.request-authority`,
   `ordered-loader.unproven-report`,
+  `ordered-loader.replay-continuation`,
+  `ordered-loader.retirement-invalidation`,
+  `ordered-loader.retirement-receiver`,
   `replay.ordered-window-faults`,
   `replay.ordered-failed-replay`,
   `replay.ordered-preload-recovery`,
@@ -113,6 +177,7 @@ const staticOracleProperties = [
   `proxy.callback-history`,
   `indexeddb.pending-history`,
   `proxy.revert-history`,
+  `proxy.revert-signed-zero`,
   `proxy.revert-nested-round-trips`,
   `proxy.revert-class-writes`,
   `proxy.revert-partial-reverts`,
@@ -188,6 +253,13 @@ const staticOracleProperties = [
   `sqlite-persistence.open-transaction-boundary`,
   `sqlite-persistence.request-local-failure-buffered-source`,
   `sqlite-persistence.optimistic-history`,
+  `adapter-conformance.eager-live-source.reference`,
+  `adapter-conformance.eager-live-source.neon-realtime`,
+  `adapter-conformance.eager-live-source.trailbase`,
+  `adapter-conformance.eager-live-source.rxdb`,
+  `adapter-conformance.eager-live-source.powersync`,
+  `adapter-conformance.eager-live-source.electric`,
+  `adapter-conformance.eager-live-source.convex`,
   `trailbase.lifecycle`,
   `source-health.history`,
   `source-health.required-history`,
@@ -287,6 +359,14 @@ const staticOracleProperties = [
   `sync-metadata-session.persisted-peers`,
   `sync-metadata-session.persisted-peers-full`,
   `sync-metadata-session.persisted-peers-on-demand`,
+  `sync-metadata-session.persisted-seed-reinsert-reload`,
+  `sync-metadata-session.sqlite-seed-reinsert-reload`,
+  `sync-metadata-session.persisted-kept-metadata-durability`,
+  `sync-metadata-session.persisted-queued-metadata-repair`,
+  `sync-metadata-session.sqlite-kept-metadata-durability`,
+  `sync-metadata-session.sqlite-recovery-schedules`,
+  `sync-metadata-session.persisted-missing-row-metadata`,
+  `sync-metadata-session.sqlite-missing-row-metadata`,
   `sync-metadata-session.nested-conflicts.hold-invariance`,
   `sync-metadata-session.nested-conflicts.key-independence`,
   `d2-source.exact-retractions`,
@@ -413,7 +493,7 @@ const publicationProperties = [
 
 // utils-oracle and comparison-oracle number their properties in file order.
 const utilsProperties = Array.from(
-  { length: 40 },
+  { length: 43 },
   (_, index) => `utils.${index + 1}`,
 )
 const comparisonProperties = Array.from(
@@ -706,6 +786,23 @@ export function readOracleRunConfig(
   return { multiplier, replaySeed, replayPath, replayProperty }
 }
 
+/**
+ * Select a fresh campaign seed unless the caller supplied one. Report the
+ * selection before fast-check runs: a later reach failure is outside its
+ * reporter and must still be replayable. This line records selection, not
+ * execution; guarded replay witnesses remain the execution evidence.
+ */
+export function oracleCampaignSeed(
+  seed: number | undefined,
+  property: string | undefined,
+): number {
+  const selected = seed ?? Math.floor(Math.random() * 0x100000000) - 0x80000000
+  console.info(
+    `ORACLE_SEED ${JSON.stringify({ property: property ?? null, seed: selected })}`,
+  )
+  return selected
+}
+
 type OracleRunParameters = {
   numRuns: number
   seed?: number
@@ -750,9 +847,10 @@ function randomParameters<TExample>(
           replayPath: undefined,
           replayProperty: undefined,
         }
+  const selectedSeed = oracleCampaignSeed(replaySeed, property)
   const parameters: OracleRunParameters =
     replaySeed === undefined
-      ? { numRuns }
+      ? { numRuns, seed: selectedSeed }
       : {
           numRuns,
           seed: replaySeed,

@@ -3,7 +3,7 @@ id: UseLiveQueryReturnWithCollection
 title: UseLiveQueryReturnWithCollection
 ---
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:87](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L87)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:86](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L86)
 
 ## Extends
 
@@ -35,7 +35,7 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:87](https://github.co
 collection: Collection<T, TKey, TUtils>;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:95](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L95)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:94](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L94)
 
 ***
 
@@ -45,7 +45,7 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:95](https://github.co
 data: TData;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:94](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L94)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:93](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L93)
 
 ***
 
@@ -55,7 +55,7 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:94](https://github.co
 state: Map<TKey, T>;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:93](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L93)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:92](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L92)
 
 ***
 
@@ -65,4 +65,4 @@ Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:93](https://github.co
 status: CollectionStatus;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:96](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L96)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:95](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L95)

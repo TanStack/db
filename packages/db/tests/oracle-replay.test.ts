@@ -139,6 +139,23 @@ describe(`guarded oracle replay`, () => {
       `tests/query/pagination-oracle.property.test.ts`,
       1,
     ],
+    ...[
+      `builder`,
+      `unstarted`,
+      `ready`,
+      `initial-pending`,
+      `move-pending`,
+      `replay-pending`,
+    ].flatMap((path) =>
+      [`negative`, `valid`].map(
+        (admission) =>
+          [
+            `pagination.limit-admission-${path}-${admission}`,
+            `tests/query/pagination-oracle.property.test.ts`,
+            1,
+          ] as const,
+      ),
+    ),
   ] as const)(
     `selects only the requested %s replay lane`,
     (property, file, expectedTests) => {
@@ -312,9 +329,12 @@ describe(`oracle replay reporting`, () => {
     directory = undefined
   })
 
-  it(`leaves ordinary seeded and random options unchanged`, () => {
+  it(`preserves explicit seeds and supplies a fresh seed for ordinary runs`, () => {
     vi.stubEnv(`TANSTACK_DB_ORACLE_REPLAY_WITNESS`, undefined)
-    expect(oracleRandomParameters(5, undefined)).toEqual({ numRuns: 5 })
+    expect(oracleRandomParameters(5, undefined)).toEqual({
+      numRuns: 5,
+      seed: expect.any(Number),
+    })
     expect(oracleRandomParameters(5, 42)).toEqual({ numRuns: 5, seed: 42 })
     expect(oracleReplayReporter(`oracle-replay.calibration`, 42, `0`)).toEqual(
       {},
@@ -392,17 +412,52 @@ describe(`named oracle replay manifest`, () => {
     [
       [`react`, `react-db/tests/conformance.test.tsx`],
       [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
+      [`react-DbClient`, `react-db/tests/conformance.test.tsx`],
+      [`react-Suspense`, `react-db/tests/conformance.test.tsx`],
+      [`react-Suspense-DbClient`, `react-db/tests/conformance.test.tsx`],
       [`preact`, `preact-db/tests/conformance.test.ts`],
       [`vue`, `vue-db/tests/conformance.test.ts`],
       [`solid`, `solid-db/tests/conformance.test.tsx`],
       [`angular`, `angular-db/tests/conformance.test.ts`],
       [`svelte`, `svelte-db/tests/conformance.svelte.test.ts`],
+      [`svelte-DbClient`, `svelte-db/tests/conformance.svelte.test.ts`],
     ].flatMap(([driver, owner]) =>
       [
         `window-history`,
         `pending-window-history`,
         `publication-window-history`,
-        `result-shape`,
+        `peer-window-history`,
+        ...([
+          `react`,
+          `react-dependency-list`,
+          `react-DbClient`,
+          `react-Suspense`,
+          `react-Suspense-DbClient`,
+          `preact`,
+          `svelte-DbClient`,
+        ].includes(driver!)
+          ? [`immutable-key-history`]
+          : []),
+        ...([
+          `react`,
+          `react-dependency-list`,
+          `preact`,
+          `vue`,
+          `solid`,
+          `angular`,
+          `svelte`,
+        ].includes(driver!)
+          ? [`result-shape`]
+          : []),
+        ...([
+          `react`,
+          `react-dependency-list`,
+          `react-DbClient`,
+          `preact`,
+          `svelte-DbClient`,
+        ].includes(driver!)
+          ? [`keyed-admission`]
+          : []),
       ].map((family) => [`framework.${driver}.${family}`, owner] as const),
     ),
   )(`keeps the originating driver for %s`, (property, owner) => {
@@ -413,6 +468,7 @@ describe(`named oracle replay manifest`, () => {
       file: `packages/${owner}`,
       status: `assertion`,
       source: `packages/db/tests/conformance/${property.endsWith(`.result-shape`) ? `result-shape-oracle` : `window-history-oracle`}.ts`,
+      testNamePattern: expect.any(String),
     })
   })
 
@@ -486,7 +542,28 @@ describe(`named oracle replay manifest`, () => {
           driver === `react-dependency-list`
             ? `react (dependency list)`
             : driver
-        expect(driverSource).toContain(`name: \`${driverName}\``)
+        if (
+          [
+            `react-DbClient`,
+            `react-Suspense`,
+            `react-Suspense-DbClient`,
+          ].includes(driver!)
+        ) {
+          // These three names come from one finite runtime product. Require
+          // both generating axes and the exact naming expression; guarded
+          // receiving replays verify the resulting names actually execute.
+          expect(driverSource).toContain(
+            `for (const suspense of [false, true])`,
+          )
+          expect(driverSource).toContain(`for (const client of [false, true])`)
+          expect(driverSource).toContain(
+            'name: `react${suspense ? ` Suspense` : ``}${client ? ` (DbClient)` : ``}`',
+          )
+        } else {
+          expect(driverSource).toContain(
+            `name: \`${driverName === `svelte-DbClient` ? `svelte (DbClient)` : driverName}\``,
+          )
+        }
         if (family === `result-shape`)
           expect(source).toContain(`framework.\${id}.result-shape`)
         else
@@ -505,6 +582,27 @@ describe(`named oracle replay manifest`, () => {
         // These oracles number their properties in file order.
         const [family] = entry.property.split(`.`)
         expect(source).toContain(`\`${family}.\${id}\``)
+      } else if (entry.property.startsWith(`pagination.limit-admission-`)) {
+        const suffix = entry.property.slice(
+          `pagination.limit-admission-`.length,
+        )
+        const separator = suffix.lastIndexOf(`-`)
+        const path = suffix.slice(0, separator)
+        const admission = suffix.slice(separator + 1)
+        expect([
+          `builder`,
+          `unstarted`,
+          `ready`,
+          `initial-pending`,
+          `move-pending`,
+          `replay-pending`,
+        ]).toContain(path)
+        expect([`negative`, `valid`]).toContain(admission)
+        expect(source).toContain(`\`${path}\``)
+        expect(source).toContain(`for (const negative of [false, true])`)
+        expect(source).toContain(
+          'pagination.limit-admission-${path}-${negative ? `negative` : `valid`}',
+        )
       } else if (entry.property.startsWith(`pagination.matrix.`)) {
         const [, , familyCell] = entry.property.split(`.`)
         const [family, cell] = familyCell!.split(`-`)

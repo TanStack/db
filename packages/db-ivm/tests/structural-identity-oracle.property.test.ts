@@ -63,7 +63,7 @@ type Spec =
 
 const SYMBOL = Symbol(`s`)
 const ENUMERABLE_SYMBOL = Symbol(`enumerable`)
-const { replayProperty } = readOracleRunConfig()
+const { replayProperty, replaySeed } = readOracleRunConfig()
 const LEAVES: ReadonlyArray<unknown> = [
   0,
   -0,
@@ -437,7 +437,7 @@ describe(`structuralIdentity`, () => {
       2000,
       `structural-identity.equal-representations`,
     )
-    if (options.seed === undefined)
+    if (replaySeed === undefined)
       await fc.assert(property, { numRuns: options.numRuns, seed: 20261014 })
     await fc.assert(property, options)
   })
@@ -597,7 +597,7 @@ describe(`structuralIdentity`, () => {
       2000,
       `structural-identity.independent-values`,
     )
-    if (options.seed === undefined)
+    if (replaySeed === undefined)
       await fc.assert(property, { numRuns: options.numRuns, seed: 1158727847 })
     await fc.assert(property, options)
   })

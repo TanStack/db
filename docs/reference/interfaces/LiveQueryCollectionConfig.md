@@ -41,13 +41,39 @@ const config: LiveQueryCollectionConfig<any, any> = {
 
 ## Properties
 
+### autoIndex?
+
+```ts
+optional autoIndex: "eager" | "off";
+```
+
+Defined in: [packages/db/src/query/live/types.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L117)
+
+Automatic indexing for this live-query Collection's output. Defaults to
+'off'. Eager indexing requires defaultIndexType.
+
+***
+
+### defaultIndexType?
+
+```ts
+optional defaultIndexType: IndexConstructor<string | number>;
+```
+
+Defined in: [packages/db/src/query/live/types.ts:123](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L123)
+
+Index implementation for this Collection's automatic and manual indexes.
+Setting it alone does not enable automatic indexing.
+
+***
+
 ### defaultStringCollation?
 
 ```ts
 optional defaultStringCollation: StringCollationConfig;
 ```
 
-Defined in: [packages/db/src/query/live/types.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L122)
+Defined in: [packages/db/src/query/live/types.ts:134](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L134)
 
 Optional compare options for string sorting.
 If provided, these will be used instead of inheriting from the FROM collection.
@@ -166,7 +192,7 @@ Optional schema for validation
 optional singleResult: true;
 ```
 
-Defined in: [packages/db/src/query/live/types.ts:116](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L116)
+Defined in: [packages/db/src/query/live/types.ts:128](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L128)
 
 If enabled the collection will return a single object instead of an array
 

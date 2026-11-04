@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
-import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
+import {
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+  withAcceptedReceipt,
+} from '@tanstack/db'
 import pDefer from 'p-defer'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
@@ -96,6 +101,66 @@ describe(`Sync Streams`, () => {
         (uuid(), 'Product E', 75, 'clothing')
     `)
   }
+
+  // LIFE-10 after the diff trigger exists: a wrapping sync, such as
+  // persistence, rejects the first load's acceptance. The conformance
+  // driver's failures come before the trigger, so this case is pinned here.
+  it(`eager mode: releases the diff trigger and watcher when the first load's acceptance fails`, async () => {
+    const db = await createDatabase()
+    await createTestProducts(db)
+    const disposed: Array<number> = []
+    const createDiffTrigger = db.triggers.createDiffTrigger.bind(db.triggers)
+    db.triggers.createDiffTrigger = async (options) => {
+      const dispose = await createDiffTrigger(options)
+      const index = disposed.length
+      disposed.push(0)
+      return async (...args) => {
+        disposed[index]!++
+        return dispose(...args)
+      }
+    }
+    const signals: Array<AbortSignal | undefined> = []
+    const onChange = db.onChangeWithCallback.bind(db)
+    db.onChangeWithCallback = (handler, options) => {
+      signals.push(options?.signal)
+      return onChange(handler, options)
+    }
+    const acceptanceFailure = new Error(`acceptance failed`)
+    const options = powerSyncCollectionOptions({
+      database: db,
+      table: APP_SCHEMA.props.products,
+    })
+    const collection = createCollection({
+      ...options,
+      sync: {
+        ...options.sync,
+        sync: (params) =>
+          options.sync.sync({
+            ...params,
+            commit: (signal?: AbortSignal) => {
+              const receipt = params.commit(signal)
+              const rejected = Promise.reject(acceptanceFailure)
+              rejected.catch(() => undefined)
+              return withAcceptedReceipt(
+                receipt === true ? Promise.resolve() : receipt,
+                rejected,
+              )
+            },
+          }),
+      },
+    })
+
+    try {
+      await expect(collection.preload()).rejects.toBe(acceptanceFailure)
+      await vi.waitFor(() => expect(disposed).toEqual([1]))
+      expect(signals.map((signal) => signal?.aborted)).toEqual([true])
+    } finally {
+      await collection.cleanup()
+    }
+    expect(disposed, `released once across the failure and cleanup`).toEqual([
+      1,
+    ])
+  })
 
   it(`eager mode: should call onLoad on sync start and onUnload on cleanup`, async () => {
     const db = await createDatabase()

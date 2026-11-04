@@ -13,6 +13,12 @@ import { registeredOracleProperties } from './oracle-config.js'
 const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
+  [
+    `db/tests/query/pagination-oracle.property.test.ts`,
+    `pagination`,
+    `limit-admission-replay-pending-negative limit-admission-replay-pending-valid limit-admission-builder-negative limit-admission-builder-valid limit-admission-unstarted-negative limit-admission-unstarted-valid limit-admission-ready-negative limit-admission-ready-valid limit-admission-initial-pending-negative limit-admission-initial-pending-valid limit-admission-move-pending-negative limit-admission-move-pending-valid`,
+    `db/tests/query/limit-admission-oracle.ts`,
+  ],
   ...[
     [`react`, `react-db/tests/conformance.test.tsx`],
     [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
@@ -30,49 +36,80 @@ const ownerGroups: ReadonlyArray<
         `db/tests/conformance/result-shape-oracle.ts`,
       ] as const,
   ),
+  ...[
+    [`react`, `react-db/tests/conformance.test.tsx`],
+    [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
+    [`react-DbClient`, `react-db/tests/conformance.test.tsx`],
+    [`react-Suspense`, `react-db/tests/conformance.test.tsx`],
+    [`react-Suspense-DbClient`, `react-db/tests/conformance.test.tsx`],
+    [`preact`, `preact-db/tests/conformance.test.ts`],
+    [`vue`, `vue-db/tests/conformance.test.ts`],
+    [`solid`, `solid-db/tests/conformance.test.tsx`],
+    [`angular`, `angular-db/tests/conformance.test.ts`],
+    [`svelte`, `svelte-db/tests/conformance.svelte.test.ts`],
+    [`svelte-DbClient`, `svelte-db/tests/conformance.svelte.test.ts`],
+  ].map(
+    ([driver, owner]) =>
+      [
+        owner!,
+        `framework.${driver}`,
+        `window-history pending-window-history publication-window-history peer-window-history`,
+        `db/tests/conformance/window-history-oracle.ts`,
+      ] as const,
+  ),
+  ...[
+    [`react`, `react-db/tests/conformance.test.tsx`],
+    [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
+    [`react-DbClient`, `react-db/tests/conformance.test.tsx`],
+    [`preact`, `preact-db/tests/conformance.test.ts`],
+    [`svelte-DbClient`, `svelte-db/tests/conformance.svelte.test.ts`],
+  ].map(
+    ([driver, owner]) =>
+      [
+        owner!,
+        `framework.${driver}`,
+        `keyed-admission`,
+        `db/tests/conformance/window-history-oracle.ts`,
+      ] as const,
+  ),
+  [`react-db/tests/client-window-oracle.test.tsx`, `react`, `client-window`],
+  ...[
+    [`react`, `react-db/tests/conformance.test.tsx`],
+    [`react-dependency-list`, `react-db/tests/conformance.test.tsx`],
+    [`react-DbClient`, `react-db/tests/conformance.test.tsx`],
+    [`react-Suspense`, `react-db/tests/conformance.test.tsx`],
+    [`react-Suspense-DbClient`, `react-db/tests/conformance.test.tsx`],
+    [`preact`, `preact-db/tests/conformance.test.ts`],
+    [`svelte-DbClient`, `svelte-db/tests/conformance.svelte.test.ts`],
+  ].map(
+    ([driver, owner]) =>
+      [
+        owner!,
+        `framework.${driver}`,
+        `immutable-key-history`,
+        `db/tests/conformance/window-history-oracle.ts`,
+      ] as const,
+  ),
   [
-    `react-db/tests/conformance.test.tsx`,
-    `framework.react`,
-    `window-history pending-window-history publication-window-history`,
-    `db/tests/conformance/window-history-oracle.ts`,
+    `svelte-db/tests/client-window-oracle.svelte.test.ts`,
+    `svelte`,
+    `client-window client-window-recovery`,
   ],
   [
-    `react-db/tests/conformance.test.tsx`,
-    `framework.react-dependency-list`,
-    `window-history pending-window-history publication-window-history`,
-    `db/tests/conformance/window-history-oracle.ts`,
+    `db/tests/live-query-observer-hydration-oracle.property.test.ts`,
+    `live-query-observer`,
+    `hydration-subset-handoff`,
   ],
   [
-    `preact-db/tests/conformance.test.ts`,
-    `framework.preact`,
-    `window-history pending-window-history publication-window-history`,
-    `db/tests/conformance/window-history-oracle.ts`,
+    `react-db/tests/window-render-oracle.test.tsx`,
+    `react`,
+    `window-render window-retry-ownership`,
   ],
   [
-    `vue-db/tests/conformance.test.ts`,
-    `framework.vue`,
-    `window-history pending-window-history publication-window-history`,
-    `db/tests/conformance/window-history-oracle.ts`,
+    `react-db/tests/suspense-lifecycle-oracle.test.tsx`,
+    `react`,
+    `suspense-retry-history suspense-replacement-history suspense-preload-restart-history suspense-siblings`,
   ],
-  [
-    `solid-db/tests/conformance.test.tsx`,
-    `framework.solid`,
-    `window-history pending-window-history publication-window-history`,
-    `db/tests/conformance/window-history-oracle.ts`,
-  ],
-  [
-    `angular-db/tests/conformance.test.ts`,
-    `framework.angular`,
-    `window-history pending-window-history publication-window-history`,
-    `db/tests/conformance/window-history-oracle.ts`,
-  ],
-  [
-    `svelte-db/tests/conformance.svelte.test.ts`,
-    `framework.svelte`,
-    `window-history pending-window-history publication-window-history`,
-    `db/tests/conformance/window-history-oracle.ts`,
-  ],
-  [`react-db/tests/window-render-oracle.test.tsx`, `react`, `window-render`],
   [`preact-db/tests/window-render-oracle.test.tsx`, `preact`, `window-render`],
   [
     `react-db/tests/ssr-effects-oracle.test.ts`,
@@ -158,7 +195,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/live-query-observer-snapshot-oracle.property.test.ts`,
     `live-query-observer`,
-    `retained-snapshot`,
+    `retained-snapshot row-container-sharing capture-paths record-shape sparse-array`,
   ],
   [
     `db/tests/cleanup-queue-oracle.property.test.ts`,
@@ -420,12 +457,12 @@ const ownerGroups: ReadonlyArray<
   [
     `query-db-collection/tests/refetch-ordered-prefix-oracle.test.ts`,
     `query-db`,
-    `refetch-ordered-prefix`,
+    `refetch-ordered-prefix refetch-held-page-end`,
   ],
   [
     `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
     `ordered-loader`,
-    `request-authority unproven-report`,
+    `request-authority unproven-report replay-continuation retirement-invalidation retirement-receiver`,
   ],
   [
     `db-sqlite-persistence-core/tests/sqlite-core-adapter-cli-runtime.test.ts`,
@@ -576,7 +613,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/proxy-revert-oracle.property.test.ts`,
     `proxy`,
-    `revert-history revert-nested-round-trips revert-class-writes revert-partial-reverts revert-native-histories`,
+    `revert-history revert-signed-zero revert-nested-round-trips revert-class-writes revert-partial-reverts revert-native-histories`,
   ],
   [
     `db/tests/proxy-native-methods-oracle.property.test.ts`,
@@ -729,7 +766,57 @@ const ownerGroups: ReadonlyArray<
   [
     `db-sqlite-persistence-core/tests/sync-metadata-session-persisted.test.ts`,
     `sync-metadata-session`,
-    `persisted-flat persisted-nested persisted-seeds persisted-conflicts persisted-cached persisted-nested-seeds persisted-reads persisted-reads-seeds persisted-peers persisted-peers-full persisted-peers-on-demand`,
+    `persisted-flat persisted-nested persisted-seeds persisted-conflicts persisted-cached persisted-nested-seeds persisted-reads persisted-reads-seeds persisted-peers persisted-peers-full persisted-peers-on-demand persisted-seed-reinsert-reload persisted-kept-metadata-durability persisted-queued-metadata-repair`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sync-metadata-session-sqlite.test.ts`,
+    `sync-metadata-session`,
+    `sqlite-seed-reinsert-reload sqlite-kept-metadata-durability`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sync-metadata-recovery.test.ts`,
+    `sync-metadata-session`,
+    `sqlite-recovery-schedules`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sync-metadata-missing-row.test.ts`,
+    `sync-metadata-session`,
+    `persisted-missing-row-metadata sqlite-missing-row-metadata`,
+  ],
+  [
+    `db-adapter-conformance/tests/reference-adapter-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `reference`,
+  ],
+  [
+    `db-adapter-conformance/tests/neon-realtime-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `neon-realtime`,
+  ],
+  [
+    `trailbase-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `trailbase`,
+  ],
+  [
+    `rxdb-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `rxdb`,
+  ],
+  [
+    `powersync-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `powersync`,
+  ],
+  [
+    `electric-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `electric`,
+  ],
+  [
+    `convex-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `adapter-conformance.eager-live-source`,
+    `convex`,
   ],
 ]
 
@@ -817,7 +904,35 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  ...[
+    `reference`,
+    `neon-realtime`,
+    `trailbase`,
+    `rxdb`,
+    `powersync`,
+    `electric`,
+    `convex`,
+  ].map(
+    (driver) =>
+      [
+        `adapter-conformance.eager-live-source.${driver}`,
+        `conforms on a random campaign or a replayed seed`,
+      ] as const,
+  ),
+  [
+    `query-db.refetch-held-page-end`,
+    `generated same-key page shifts.*replay campaign`,
+  ],
   [`react.window-render`, `window changes at React commit.*fresh`],
+  [`react.window-retry-ownership`, `retry ownership/.*fresh`],
+  [`react.client-window`, `client page identity.*fresh`],
+  [`svelte.client-window`, `Svelte client page identity.*fresh`],
+  [`svelte.client-window-recovery`, `client key recovery/.*fresh`],
+  [`react.suspense-siblings`, `co-mounted siblings/.*fresh`],
+  [
+    `live-query-observer.hydration-subset-handoff`,
+    `seeded ready-subset handoff \\(fresh\\)`,
+  ],
   [`preact.window-render`, `window changes at Preact commit.*fresh`],
   [`ivm.topk-numeric-window`, `Numeric window oracle:.*random campaign`],
   [
@@ -880,6 +995,22 @@ const replayTestNames = new Map([
   [
     `live-query-observer.retained-snapshot`,
     `first reads match the capture-time rows.*random`,
+  ],
+  [
+    `live-query-observer.row-container-sharing`,
+    `reuses rows across metadata changes.*random`,
+  ],
+  [
+    `live-query-observer.capture-paths`,
+    `checks query capture boundaries.*random`,
+  ],
+  [
+    `live-query-observer.record-shape`,
+    `compares authored shape at every read.*random`,
+  ],
+  [
+    `live-query-observer.sparse-array`,
+    `publishes changed array positions to every receiver.*random`,
   ],
   [`live-query.start-handoff`, `reports only its own thrown starts.*random`],
   [
@@ -971,6 +1102,12 @@ const replayTestNames = new Map([
 const seedReplayProperties = new Set([`evaluators.like`])
 
 function directReplayTestName(property: string): string | undefined {
+  if (property.startsWith(`pagination.limit-admission-`)) {
+    const suffix = property.slice(`pagination.limit-admission-`.length)
+    const negative = suffix.endsWith(`-negative`)
+    const path = suffix.slice(0, -(negative ? `-negative` : `-valid`).length)
+    return `${path} ${negative ? `rejects negatives` : `admits valid neighbors`} \\(random\\)`
+  }
   if (property.startsWith(`framework.`)) {
     switch (property.split(`.`).at(-1)) {
       case `result-shape`:
@@ -981,6 +1118,12 @@ function directReplayTestName(property: string): string | undefined {
         return `pending window histories \\(fresh\\)`
       case `publication-window-history`:
         return `publication callback window histories \\(fresh\\)`
+      case `peer-window-history`:
+        return `peer page histories \\(fresh\\)`
+      case `keyed-admission`:
+        return `initial disabled keyed admission \\(fresh\\)`
+      case `immutable-key-history`:
+        return `immutable query key histories \\(fresh\\)`
     }
   }
   if (property.startsWith(`react.ssr-effects-`)) {
@@ -1014,6 +1157,18 @@ function directReplayTestName(property: string): string | undefined {
  */
 const outsideReplayConfigs = new Map([
   [`scripts`, `oracle-scripts.vitest.config.mjs`],
+])
+
+/**
+ * An owner inside packages/ that its package's default config excludes, with
+ * the config that runs it. The Neon receiving driver is expected RED, so it
+ * runs only under its own config.
+ */
+const ownerReplayConfigs = new Map([
+  [
+    `packages/db-adapter-conformance/tests/neon-realtime-oracle.property.test.ts`,
+    `vitest.neon.config.ts`,
+  ],
 ])
 
 export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
@@ -1056,7 +1211,7 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
             ? `pnpm exec vitest run ${file.split(`/`).slice(2).join(`/`)}`
             : outsidePackages
               ? `node --import tsx ${`../`.repeat(cwd!.split(`/`).length)}packages/db/tests/oracle-replay.ts ${outsideConfig === undefined ? `` : `--config ${outsideConfig} `}${file.split(`/`).pop()}`
-              : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${file.split(`/`).slice(2).join(`/`)}`,
+              : `node --import tsx ${cwd === `packages/db` ? `tests` : `../db/tests`}/oracle-replay.ts ${ownerReplayConfigs.has(file) ? `--config ${ownerReplayConfigs.get(file)} ` : ``}${file.split(`/`).slice(2).join(`/`)}`,
     environment:
       status === `statistics-only`
         ? [

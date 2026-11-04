@@ -320,12 +320,12 @@ it.each([
   },
 )
 
-it(`configures identical fixed and seedless-random alias campaigns`, () => {
+it(`selects a fresh seed without changing the random alias campaign budget`, () => {
   const runs = readAliasOracleRuns({})
   expect(runs).toBe(oracleRuns(50))
   expect(
     oracleRandomParameters(runs, undefined, `op-sqlite.write-marker-aliases`),
-  ).toEqual({ numRuns: runs })
+  ).toEqual({ numRuns: runs, seed: expect.any(Number) })
 })
 
 it(`reseeds the random alias campaigns from a seed-only replay`, () => {

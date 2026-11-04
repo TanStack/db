@@ -186,8 +186,9 @@ export function checkCacheOptionPublications(
     checkCacheOptionRows(publication, rows, key)
 }
 
-/** Independent Suspense callers share only compatible local output options.
- * Authority: maintainer decision during PR #2314 review, 2026-10-30. Portable
+/** Independent Suspense callers own distinct output Collections, even with equal
+ * declarations. Authority: maintainer decision, 2026-11-03, superseding the
+ * compatible-sharing rule from PR #2314. Portable
  * query identity and mounted first-options retention remain separate laws.
  * Declaration names abstract absent or exact runtime references/scalar values.
  * Each option varies alone, so a combined-option guard cannot hide a gap.
@@ -223,17 +224,19 @@ export const localOptionPairs = localOptionHistories.flatMap((option) =>
     ),
 )
 export type LocalOptionHistory = (typeof localOptionPairs)[number]
-export function compatibleLocalOptions(history: LocalOptionHistory) {
+export function equalLocalDeclarations(history: LocalOptionHistory) {
   const effective = history.declarations.map((declaration) =>
     declaration === `undefined` ? `absent` : declaration,
   )
   return history.identity !== `different-key` && effective[0] === effective[1]
 }
-export function checkLocalOptionSharing(
+export function checkLocalOutputOwnership(
   left: object,
   right: object,
   history: LocalOptionHistory,
 ) {
-  if (compatibleLocalOptions(history)) expect(right).toBe(left)
-  else expect(right).not.toBe(left)
+  expect(
+    right,
+    `independent Suspense output (${history.option}/${history.identity})`,
+  ).not.toBe(left)
 }

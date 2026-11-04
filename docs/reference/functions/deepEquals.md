@@ -7,7 +7,7 @@ title: deepEquals
 function deepEquals(a, b): boolean;
 ```
 
-Defined in: [packages/db/src/utils.ts:44](https://github.com/TanStack/db/blob/main/packages/db/src/utils.ts#L44)
+Defined in: [packages/db/src/utils.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/utils.ts#L45)
 
 Deep equality function that compares two values recursively
 Handles primitives, objects, arrays, Date, RegExp, Map, Set, TypedArrays, and Temporal objects

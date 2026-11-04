@@ -25,9 +25,9 @@
  *   bundler drops the full text; a separate bundle check owns that.
  * - **Docs:** the freshly generated errors page has a heading for every code
  *   that names its class, and an HTML ID matching its production-message link.
- *   Source PRs judge the actual generator's stdout.
- *   The release docs pipeline owns tracked generated-page freshness, following
- *   the maintainer's decision to keep generated docs out of source PRs.
+ *   This oracle judges the actual generator's stdout. The ordinary
+ *   `generate-error-docs.test.ts` also requires the committed page to match
+ *   the current catalogs.
  *
  * - **Error sites:** code outside `errors.ts` also throws plain `Error`,
  *   `TypeError`, and `RangeError` values with library text. Each such site

@@ -309,7 +309,7 @@ test.each(callbackHistories)(
     await runCallbackHistory(
       history,
       {
-        mount: async ({ skipInitial, project, handlers }) => {
+        mount: async ({ skipInitial, ordered, project, handlers }) => {
           const source = createCollection(
             mockSyncCollectionOptions<CallbackRow>({
               id: `callback-core`,
@@ -319,10 +319,12 @@ test.each(callbackHistories)(
           )
           await source.preload()
           const config: EffectConfig<CallbackOutput> = {
-            query: () =>
-              new Query()
-                .from({ row: source })
-                .fn.select(({ row }) => project(row)),
+            query: () => {
+              const rows = new Query().from({ row: source })
+              return (
+                ordered ? rows.orderBy(({ row }) => row.id).limit(10) : rows
+              ).fn.select(({ row }) => project(row))
+            },
             skipInitial,
             ...handlers,
           }

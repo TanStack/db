@@ -112,6 +112,11 @@ function createMockCollection<T extends object, K extends string | number>(
     get _stateRevision() {
       return stateRevision
     },
+    // This unordered fixture changes membership only in row publications, so
+    // its row clock also invalidates every possible layout change.
+    get _layoutRevision() {
+      return stateRevision
+    },
     on: (event: string, cb: (e: any) => void) => {
       if (event === `status:change`) statusSubs.add(cb)
       return () => statusSubs.delete(cb)
