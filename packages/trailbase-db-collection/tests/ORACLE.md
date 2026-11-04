@@ -24,7 +24,7 @@ The same interpreter runs a fixed corpus and generated histories.
   the listener and not for the subscription, it does not depend on the order
   in which `start` and the load resume; a mutant that adds an await before
   `start` subscribes is equivalent.
-- The early-demand lane checks that law with its own service model: `list`
+- The early-demand grammar checks that law with its own service model: `list`
   answers from the service rows at the moment it is called, and a change
   reaches only subscriptions that exist when it commits. Its 16 histories
   cross the subscription outcome (listen, subscribe rejects, reader fails,
@@ -40,17 +40,17 @@ The same interpreter runs a fixed corpus and generated histories.
   change that the listener applies while the page is in flight, so the page
   skips rows that such an event touched. Every page row is written as a
   full-row `update`, which creates a missing row and replaces a held one, so
-  a page never collides with an event that core accepted but still holds. The page-event lane
+  a page never collides with an event that core accepted but still holds. The page-event grammar
   enumerates 15 histories: eager startup or an on-demand load; an update,
   delete, or insert; committed before the list call (on-demand only), while
   the page is in flight, or after it applies. It compares the Collection's
   rows with the service after the page settles and after a later change. A
-  generated lane (`trailbase.page-event`) extends the same law: 258 service
+  generated grammar (`trailbase.page-event`) extends the same law: 258 service
   rows read in two pages of 256, cursor or offset paging, one or two
   overlapping on-demand loads, and up to four inserts, updates, and deletes
   among page releases. After every step a changed key holds the service's
   value; after the history drains, every returned or changed key does. Four
-  named replays pin an update between pages, an update then a delete during a
+  fixed histories cover an update between pages, an update then a delete during a
   page, overlapping loads around an update, and offset paging with two
   updates. After the history drains, the Collection holds exactly the rows
   that a page returned or an event touched and that the service still has.
@@ -62,14 +62,14 @@ The same interpreter runs a fixed corpus and generated histories.
   applies, because the stream and the list are separate requests. An
   `Insert` event is a full row, so the listener writes it as an `update`: a
   late insert for a row that a page already holds no longer tears the stream
-  down with `DuplicateKeySyncError`. The page-event lane crosses changes
+  down with `DuplicateKeySyncError`. The page-event grammar crosses changes
   committed before the list with delivery at once, while the page is in
   flight, or after it applies, including an insert followed by an update;
-  the generated lane delivers each change at once or later, in commit order.
+  the generated grammar delivers each change at once or later, in commit order.
   Both check that a later change still reaches the listener. A late older
   event shows its older value until the newer event that follows it arrives.
   The adapter has no row version to order an event against a page, so the
-  lanes check a row only once every event for it has arrived.
+  grammars check a row only once every event for it has arrived.
 - A page never fails a load for an older event that core accepted but holds
   while a user mutation persists. TrailBase mutation handlers wait for their
   own change event, so core holds sync commits for the round trip of every
@@ -108,8 +108,8 @@ The same interpreter runs a fixed corpus and generated histories.
 its late result changes nothing` checks that a subset load whose signal
   aborts while its list is in flight rejects with `AbortError` and writes
   no row when the list answers. Two histories make this limit
-  executable; they do not claim it is the right product behavior. They pin
-  one stream end followed by one change and one load. A page whose newer
+  executable; they do not claim it is the right product behavior. They are
+  fixed histories of one stream end followed by one change and one load. A page whose newer
   event never arrives because the stream ended keeps the value the fence
   allowed; that follows from the same no-resubscribe limit and has no cell.
 - Graceful closure drains buffered events before releasing the reader.
@@ -126,14 +126,14 @@ its late result changes nothing` checks that a subset load whose signal
   fulfilled. Its direct subset promise settles as a canceled no-op after I/O.
 - Error and detached-rejection observations are append-only through final gate
   release and cleanup. Epoch tags record when an observation arrives, not the
-  hidden sync run that caused it. Exact console output checks pin the
+  hidden sync run that caused it. Exact console output checks cover the
   adapter's
   current compatibility policy, not a general service reporting contract.
 
 Histories contain one to three Collection sync runs, eager/on-demand modes, delayed startup
 and list resolve/reject, zero to eight row edits, five stream endings, and
-immediate versus settled cleanup. Thirty-two fixed cases pin the boundaries;
-ordinary runs add 50 fixed-seed and 50 fresh-seed histories with shrinking.
+immediate versus settled cleanup. Thirty-two fixed histories cover the boundaries;
+ordinary runs add 50 histories from a fixed-seed campaign and 50 from a random campaign, with shrinking.
 Additional controls cover rejecting late cancellation in both modes and mutate
 provider-owned list, event, and buffered rows before parsing. Model rows derive
 separately from command scalars, so provider mutation cannot change the answer.
@@ -142,14 +142,14 @@ This is not a model of filtered subsets, optimistic mutation
 acknowledgements, or service reconnects. Offset paging takes updates only: an
 insert or delete between pages moves rows across a position boundary at the
 service, which the adapter cannot correct. An eager load cannot overlap an
-on-demand one, because an eager source has no subset loader. The page lanes
+on-demand one, because an eager source has no subset loader. The page-event grammars
 use one change listener per run; more than two concurrent loads and pages
 larger than two remain outside the generated grammar.
 The generated event phase starts after loading; existing loading-time unit
 matrices and the two held-cancellation startup controls remain valuable. Those
 controls were both RED when listener failure awaited cancellation, and GREEN
-when cancellation was observed separately. The lifecycle driver calls the core subset boundary;
-the early-demand lane also drives a real live query. Service-backed E2E coverage remains separate.
+when cancellation was observed separately. The lifecycle production driver calls the core subset boundary;
+the early-demand grammar also drives a real live query. Service-backed E2E coverage remains separate.
 
 ## Run and replay
 
@@ -167,7 +167,7 @@ TANSTACK_DB_ORACLE_SEED=123 TANSTACK_DB_ORACLE_PATH=0:1 TANSTACK_DB_ORACLE_PROPE
 ```
 
 Use `TANSTACK_DB_ORACLE_PROPERTY=trailbase.page-event` and `-t 'generated page
-histories with a random or replayed seed'` for the page lane.
+histories with a random or replayed seed'` for the page-event grammar.
 
 Replace the example seed/path with the failure's values. The guarded runner
 requires a witness that the named property executed with this seed and path;
@@ -177,7 +177,7 @@ do not copy its replay parser.
 
 ## Evidence against false greens
 
-The early-demand lane fails all 16 histories on the adapter from before the
+The early-demand grammar fails all 16 histories on the adapter from before the
 listener wait (#2115's `main`): each history lists rows before the listener
 runs. Four mutants of the wait fail it at assertions:
 
@@ -188,7 +188,7 @@ runs. Four mutants of the wait fail it at assertions:
 | The wait ignores the caller's abort    |                 2 |
 | Cleanup does not settle the wait       |                 2 |
 
-The page-event and stream-end lanes fail on the adapter before this change:
+The page-event and stream-end grammars fail on the adapter before this change:
 an update during the fetch makes the page's insert collide with the row the
 event wrote (`DuplicateKeySyncError`, so the load rejects), a delete during
 the fetch brings the row back, and a later load that lists a changed row
@@ -200,7 +200,7 @@ collides the same way.
 | Pages ignore change events in flight |                 4 |
 | Pages always insert                  |                 2 |
 
-The held-commit lane fails on the adapter before this change: with a
+The held-commit grammar fails on the adapter before this change: with a
 mutation persisting, a page's `insert` for a row that a held event inserted
 is a duplicate of the pending synced row, and the load rejects. Deciding
 insert or update from the visible rows (`collection.has`) still fails that
@@ -220,20 +220,20 @@ The delivery dimension fails on the adapter before the listener change: an
 insert and its update committed before the list call, delivered after the
 page applies, make the listener's `insert` collide with the page's newer row.
 The stream tears down, and a later change never arrives. A listener that
-writes `insert` fails both the single-page history and the generated lane's
-named replay at that assertion.
+writes `insert` fails both the single-page history and the generated grammar's
+named fixed history at that assertion.
 
-The generated lane and its four replays all fail on the adapter before the
+The generated grammar and its four fixed histories all fail on the adapter before the
 fence and on the fence-less mutant; both properties shrink to one update while
-the first page is in flight. Always inserting survives that lane, because a
+the first page is in flight. Always inserting survives that grammar, because a
 page can only meet a different stored value after a missed event, which only
-the stream-end lane produces. A wall-clock fence failed the fresh-run cell: an
+the stream-end grammar produces. A wall-clock fence failed the fresh-run cell: an
 earlier run's event in the same millisecond hid the row from the new run.
 The 10x campaign passed 800 generated page histories.
 
 Before the stale-startup fix, both campaigns independently shrank to: cancel a
 pending subscription, restart and load a healthy stream, reject the old subscribe.
-The old startup canceled the replacement reader. The fixed corpus pins this in
+The old startup canceled the replacement reader. The fixed corpus covers this in
 both modes and sends further edits through the replacement stream.
 
 Five isolated source-transform mutations were each rejected by the fixed corpus:
@@ -248,5 +248,5 @@ Five isolated source-transform mutations were each rejected by the fixed corpus:
 
 These targeted mutations test known failure classes, not overall mutation
 coverage or a proof of completeness. The 10× campaign passed 800 generated
-histories (fixed seed 714203, random seed 127535183) plus the 32 corpus cases.
+histories (fixed campaign seed 714203, random campaign seed 127535183) plus the 32 corpus cases.
 No service-backed E2E run is claimed.

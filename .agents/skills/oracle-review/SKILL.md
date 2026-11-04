@@ -11,7 +11,7 @@ test can coexist with correct production.
 
 Read [the oracle guide](../../../docs/contributing/oracle-rubric.md) and
 [the glossary](../../../docs/contributing/glossary.md) in full, then read the
-relevant owner and limits in
+relevant oracle owner and limits in
 [the coverage map](../../../docs/contributing/oracle-coverage.md).
 
 After a handoff or compaction, reopen required sources whose relevant contents
@@ -41,7 +41,7 @@ from the [instrument library](../../../docs/contributing/instruments/index.md):
 - **Law restructuring** tests whether merging, splitting, replacing, or removing
   laws gives a better account while preserving necessary obligations.
 - **Mutant gap hunt** tests whether a plausible wrong implementation can pass
-  the owner and traces survivors to a missing distinction, a contract-permitted
+  the oracle owner and traces survivors to a missing distinction, a contract-permitted
   difference, a scoped equivalence argument, or a baseline product bug.
 
 Choose attacks for the actual uncertainty; do not run every card or require a
@@ -76,10 +76,10 @@ Report each one as a finding:
 - A claim about a state that no declared reach shows generated histories enter.
 - A skipped, narrowed, or relaxed comparison without a coverage-map entry and a
   maintainer decision.
-- A pinned example where the law needs a generator dimension.
+- A fixed-history-only coverage claim where the law needs a generator dimension.
 - A counterexample labeled as older than the change and then left without a
   fix, a coverage-map record, or a maintainer decision.
-- A closure claim without a hostile mutant that fails the oracle.
+- A closure claim without a mutant that fails the oracle.
 
 Report supported findings and remaining uncertainty. Do not invent findings,
 retire laws, or rewrite expectations to make a review come out decisive.

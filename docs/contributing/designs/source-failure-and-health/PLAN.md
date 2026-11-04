@@ -153,7 +153,7 @@ names and shapes.
         `subscribeWs` closes without retrying. A correct reconnect would
         have to subscribe again and re-list every active subset. The
         maintainer decided to leave reconnect to the TrailBase maintainers.
-  - [ ] Update the stream-end lane in `tests/lifecycle-oracle.property.test.ts`
+  - [ ] Update the stream-end grammar in `tests/lifecycle-oracle.property.test.ts`
         (added in #2126) from "rows stay, later changes are not delivered"
         to also expect a final health error.
 - [x] **RxDB** (`rxdb-db-collection/src/rxdb.ts`): no change. V10 is
@@ -198,14 +198,14 @@ names and shapes.
       release. Extend the topology beyond the TLA model: a collection reached
       by two aliases, includes with per-row children, and pooled views.
 - [ ] Model D (`includes-temporal-oracle.test.ts`): rework the source-error
-      lane to the final-error law. Start from `evidence/
+      grammar to the final-error law. Start from `evidence/
       model-d-source-error-grammar.patch` (the C4, C5, and C6 grammar
       dimensions: truncate during the error, ready → error, exact
       acquisitions, and every `source-ready` position). Under the new law,
       `source-ready` after `source-error` in one sync run is illegal, so those
       histories become "restart, then recover".
 - [ ] Shared framework conformance suite (`packages/db/tests/conformance/`):
-      a health scenario, so all five drivers check `health` the same way.
+      a health scenario, so all five production drivers check `health` the same way.
 - [ ] Adapter witnesses: each adapter reports post-ready failures through
       health and keeps its rows. Electric adds SDK give-up cases through the
       real SDK (missing headers, retry exhaustion).
@@ -246,7 +246,7 @@ names and shapes.
 - [ ] Package READMEs that mention `isError` (for example
       `packages/angular-db/README.md`).
 - [ ] `docs/contributing/oracle-coverage.md`: the new health owner, and the
-      Model D source-error lane.
+      Model D source-error grammar.
 - [ ] `docs/contributing/oracle-reviews/progressive-source-readiness.md`:
       record the decided law and the companion fixes (#2126, #2127, #2128).
       #2129 carried this update and is being replaced.

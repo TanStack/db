@@ -137,7 +137,7 @@ accepted data-before-reset and reset-before-data in the protocol model.
 
 `electric-sdk-framing.test.ts` independently uses the real SDK with controlled
 HTTP responses. Both normal and stale-row-bearing 409 bodies produce singleton
-reset callbacks, as the generated protocol histories now require. This pins the
+reset callbacks, as the generated protocol histories now require. This fixes the
 installed SDK's HTTP reset path, not an exhaustive specification of every possible
 server response or SSE path.
 
@@ -159,7 +159,7 @@ delivers a new insert and a partial update after the initial up-to-date. Every
 contiguous callback partition is tested. Expected rows follow tag membership
 and ordinary row updates, without consulting adapter transaction state.
 
-The bug was RED in two progressive fixed cases and the random property (seed
+The bug was RED in two progressive fixed histories and the random property (seed
 `-1632249566`, path `0:1`); seven fixed controls passed. Previous tag tests began
 after readiness, while the initial-sync generators lacked tag move-outs followed
 by later live work. This was also reproduced by the full service-backed Electric
@@ -209,7 +209,7 @@ after user callbacks fence both the waiter loop and the remaining message batch.
 
 All three extensions have fixed-seed and random properties, with the shared
 oracle multiplier and seed/path replay controls. These are ordinary assertions,
-not expected-failure classifiers. At `049cc9a5d`, fixed seeds `42711`, `42712`,
+not expected-failure classifiers. At `049cc9a5d`, fixed campaign seeds `42711`, `42712`,
 and `42713` reproduce the three failures respectively. Binding and reentry use
 epoch/ownership guards; persisted membership uses the approved refetch contract.
 

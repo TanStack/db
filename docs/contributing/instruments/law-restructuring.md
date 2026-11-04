@@ -12,7 +12,7 @@ recovering the obligations they represent.
 1. Decompose the laws into traceable obligations, conditions, distinctions,
    and promised observations. Check that these parts can reconstruct each
    original claim; invented categories can lose the essential constraint.
-   If public wording and an executable owner disagree, retain both claims and
+   If public wording and an executable oracle owner disagree, retain both claims and
    the unresolved authority. A passing test alone cannot retire public wording.
 2. Propose a different organization and state the operation: merge under a
    common principle, split by authority or checkpoint, replace a concept, or
@@ -38,7 +38,7 @@ Keeping the existing laws separate is a valid result.
 
 **Control:** reconstruct each original obligation from the candidate and check
 its discriminating witness. A semantic change may be justified, but is not an
-equivalent refactor. Merging prose does not require merging executable owners
+equivalent refactor. Merging prose does not require merging executable oracle owners
 whose models or production boundaries differ.
 
 **Distortion:** neat categories that erase obligations, speculative connections

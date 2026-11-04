@@ -53,10 +53,10 @@ distinguish a mistake. Keep test bodies and assertions out of the design brief.
    clean git status in its checkout.
 4. **Repair the oracle chain, when authorized.** Locate the missing law, model
    rule, history action, production path, recorder, or assertion. Extend the
-   primary owner where it can express the distinction. Show that the extension
+   primary oracle owner where it can express the distinction. Show that the extension
    rejects the motivating mutant and a nearby plausible wrong design without
    rejecting a legal alternative. For a bug on the baseline, demonstrate the
-   production RED before its repair. Update the coverage map when the owner's
+   production RED before its repair. Update the coverage map when the oracle owner's
    reach or limits change. For a claimed oracle repair, follow
    [ORC-012](../oracle-rubric.md#orc-012-review-evidence): at closeout,
    verdict-critical evidence outside the executable oracle belongs in a
