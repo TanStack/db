@@ -88,7 +88,6 @@ const schema = {
   required: [`id`, `title`],
 } as const
 
-
 /**
  * An RxDB document as a conformance row: key `"n"` is row id `n`. Other
  * fields pass through, so an optimistic row's own `undefined` stays, and
@@ -188,7 +187,7 @@ class RxdbMutationProvider implements MutationProvider {
   private foreign = false
   /** Each pending write's document as the adapter sent it, before hooks. */
   private readonly sent = new Map<string, Doc>()
-  private instance: RxStorageInstance<Doc, unknown, unknown> | undefined
+  private storageInstance: RxStorageInstance<Doc, unknown, unknown> | undefined
   rxCollection: RxCollection<Doc> | undefined
 
   /** Memory storage whose `conformance` collection writes go through `write`. */
@@ -201,7 +200,7 @@ class RxdbMutationProvider implements MutationProvider {
       createStorageInstance: async (params) => {
         const instance = await memory.createStorageInstance(params)
         if (params.collectionName !== `conformance`) return instance
-        this.instance = instance as unknown as RxStorageInstance<
+        this.storageInstance = instance as unknown as RxStorageInstance<
           Doc,
           unknown,
           unknown
@@ -249,7 +248,7 @@ class RxdbMutationProvider implements MutationProvider {
   }
 
   private async holds(id: string): Promise<boolean> {
-    const found = await this.instance!.findDocumentsById([id], true)
+    const found = await this.storageInstance!.findDocumentsById([id], true)
     return found.length > 0
   }
 
@@ -314,7 +313,7 @@ class RxdbMutationProvider implements MutationProvider {
 
   /** The storage's documents, not RxDB's document cache. */
   async rows(): Promise<ReadonlyArray<ConformanceRow>> {
-    const instance = this.instance!
+    const instance = this.storageInstance!
     const { documents } = await instance.query(
       prepareQuery(instance.schema, {
         selector: { _deleted: false },
