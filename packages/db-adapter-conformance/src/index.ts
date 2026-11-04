@@ -43,6 +43,7 @@ export {
   mutationReachStatesFor,
   rewriteRow,
   acceptAtOnce,
+  queuedHeldWritesCalibration,
 } from './mutation-oracle'
 export { settleWhenQuiet } from './driver-support'
 export type { QuietSettleOptions } from './driver-support'

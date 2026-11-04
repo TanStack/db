@@ -185,6 +185,8 @@ class RxdbMutationProvider implements MutationProvider {
   private readonly held: Array<() => void> = []
   private readonly log: Array<WriteRequest> = []
   private foreign = false
+  /** Teardown: every request is answered at once. */
+  private draining = false
   /** Each pending write's document as the adapter sent it, before hooks. */
   private readonly sent = new Map<string, Doc>()
   private storageInstance: RxStorageInstance<Doc, unknown, unknown> | undefined
@@ -234,7 +236,7 @@ class RxdbMutationProvider implements MutationProvider {
       this.log.push(writeRequest(row, this.sent.get(row.document.id)))
       this.sent.delete(row.document.id)
       const plan = this.plans.shift() ?? acceptAtOnce
-      if (plan.held) {
+      if (plan.held && !this.draining) {
         await new Promise<void>((resolve) => this.held.push(resolve))
       }
       if (plan.outcome === `reject`) {
@@ -282,8 +284,12 @@ class RxdbMutationProvider implements MutationProvider {
     this.held.shift()?.()
   }
 
-  /** Answers every held request, so the database can close. */
-  releaseAll(): void {
+  /**
+   * Answers every held request, and from now on each request at once, also
+   * one the adapter's queue sends only after these answers.
+   */
+  drain(): void {
+    this.draining = true
     for (const answer of this.held.splice(0)) answer()
   }
 
@@ -382,10 +388,10 @@ export function rxdbMutationDriver(): MutationDriver {
           delete: (id) => collection.delete(String(id)),
         },
         provider,
+        drain: () => provider.drain(),
         dispose: async () => {
-          // Removing the database waits for its writes, so answer any write
-          // a failed history left held.
-          provider.releaseAll()
+          // Removing the database waits for its writes, which the check's
+          // drain has answered.
           await collection.cleanup()
           await db.remove()
         },

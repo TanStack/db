@@ -7453,8 +7453,10 @@ restarted run empty. A fixed-seed campaign runs the React client
 Owner: `packages/db-adapter-conformance/src/mutation-oracle.ts`, run against
 the reference adapter in
 `packages/db-adapter-conformance/tests/reference-mutation-oracle.property.test.ts`
-(`adapter-conformance.mutations.reference`, with a structured-clone, a JSON,
-and a SQL provider), against RxDB in
+(`adapter-conformance.mutations.reference`, with five provider
+configurations: structured clone, JSON, SQL, an Electric-like log with
+application handlers, and a Convex-like in-order log; each runs a fixed and a
+random campaign under its own property), against RxDB in
 `packages/rxdb-db-collection/tests/mutation-conformance-oracle.property.test.ts`
 (`adapter-conformance.mutations.rxdb`), against TrailBase in
 `packages/trailbase-db-collection/tests/mutation-conformance-oracle.property.test.ts`
@@ -7516,17 +7518,33 @@ held write rejected, a commit by another client, an accepted field removal, a
 held optimistic row, a copy the provider rewrote, an answered write whose copy
 is withheld, each declared rejection kind, and a quiescent cut after writes,
 at least five histories each per campaign; a grammar arm generates
-updates without `note`, so removals are common. Calibration: twelve reference
-mutants each fail
-with their law (an applied copy after the mutation function settles, a
+updates without `note`, so removals are common. Calibration: sixteen
+reference mutants each fail with their law (an applied copy after the mutation function settles, a
 swallowed or wrapped rejection, a duplicated insert request, writes that do
 not wait for the earlier one, a skipped delete, an update that sends only
 changed fields, under a JSON provider a change feed that carries the
 authored row instead of the stored copy, and an adapter that writes the
 authored row into its synced rows after the provider accepts, and under a SQL
 provider an update that sends the complete row, one that drops a removed
-field, and a mutation function that settles when the provider answers instead
-of when its copy arrives). The write-back mutant survives the fixed campaign
+field, a mutation function that settles when the provider answers instead
+of when its copy arrives, an adapter that waits for the earlier write's
+confirmation instead of its answer, one that confirms a withheld copy once
+a later one applies, and, once one step settles a second write, publications
+that never reach subscribers or that return a row to its earlier value). On
+the history of two rows whose rejected updates settle at one release, the
+check before the settlement-order rule accepted both publication mutants. A
+cleanup calibration in every driver that holds writes queues a second held
+write and injects a request no write made: the check must report that
+violation, so its `drain` must answer a request the adapter's queue sends
+only during teardown, and no write may be pending after `drain`. Before
+that contract, RxDB's cleanup hung, and the reference and TrailBase drivers
+left the second write pending. A provider that breaks a rule its driver declares (a log
+whose copies overtake a withheld one, an adapter that orders application
+handlers' writes, a provider that answers out of order) also fails. When one
+step settles several writes, each row must follow one order of its own writes'
+settlements and end at the model's final rows; an order in which a later
+write on a key settles first is accepted, since a rejection can settle before
+an earlier write's confirmation. The write-back mutant survives the fixed campaign
 without `server-rewrites` and fails FID-5 with it. Before the held-row rule, the
 JSON-provider campaign failed MUT-1 on a fulfilled removal behind a pending
 write.
@@ -7669,7 +7687,6 @@ the histories keep one subscription whose result the client applies before it
 resolves the mutation; the cached-listener path that wait protects is owned by
 `tests/collection.test.ts` and the ownership oracle, which reject that mutant.
 The JavaScript client only; no reconnect while a mutation waits.
-||||||| 9be3c4ed2
 
 
 ### Ordered-loader authority CI counterexample, 2026-11-03

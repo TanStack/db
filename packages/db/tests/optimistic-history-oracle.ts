@@ -345,14 +345,15 @@ class HistoryModel {
       Object.entries(step.fields).every(([key, value]) =>
         Object.is(row[key as keyof Fields], value),
       ) &&
-      !(step.removesD && Object.hasOwn(row, `d`))
+      // A removal removes only a value: an own `undefined` `d` has none.
+      !(step.removesD && row.d !== undefined)
     )
       return
     const authored: HistoryRow = {
       ...(row ?? { id: step.key, a: 0, b: 0, c: this.insertDefault }),
       ...(step.type === `edit` ? step.fields : {}),
     }
-    if (step.type === `edit` && step.removesD && Object.hasOwn(authored, `d`))
+    if (step.type === `edit` && step.removesD && authored.d !== undefined)
       authored.d = undefined
     this.transactions.push({
       key: step.key,
@@ -1527,7 +1528,7 @@ export async function runOptimisticHistory(
             step.type === `edit` &&
             step.removesD === true &&
             was !== undefined &&
-            Object.hasOwn(was, `d`)
+            was.d !== undefined
           if (removesHeldD) counts.removedFieldEdits++
           const now = model.visible().get(step.key)
           if (
@@ -1579,7 +1580,7 @@ export async function runOptimisticHistory(
                     { optimistic: step.optimistic },
                     (draft) => {
                       Object.assign(draft, step.fields)
-                      if (step.removesD) delete draft.d
+                      if (step.removesD && draft.d !== undefined) delete draft.d
                     },
                   )
           const manual = step.type === `edit` && step.pending === true

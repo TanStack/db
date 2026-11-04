@@ -78,6 +78,8 @@ class ElectricMutationProvider implements MutationProvider {
   private readonly table = new Map<number, ConformanceRow>()
   private readonly plans: Array<WritePlan> = []
   private readonly held: Array<() => void> = []
+  /** Teardown: every request is answered at once, every copy sent. */
+  private draining = false
   private readonly log: Array<WriteRequest> = []
   /** Committed batches the shape log has not sent, in commit order. */
   private readonly outbox: Array<Batch> = []
@@ -216,9 +218,11 @@ class ElectricMutationProvider implements MutationProvider {
                 type: `upsert`,
                 row: rewriteRow(fromSqlRow({ ...request.row }), plan.rewrite),
               }
-        resolve({ txid: this.commit(change, plan.echoHeld) })
+        resolve({
+          txid: this.commit(change, plan.echoHeld && !this.draining),
+        })
       }
-      if (plan.held) this.held.push(answer)
+      if (plan.held && !this.draining) this.held.push(answer)
       else answer()
     })
   }
@@ -243,8 +247,12 @@ class ElectricMutationProvider implements MutationProvider {
     this.flush()
   }
 
-  /** Answers every held request and resumes the log. */
+  /**
+   * Answers every held request and resumes the log, and from now on answers
+   * each request at once and holds no copy.
+   */
   drain(): void {
+    this.draining = true
     for (const answer of this.held.splice(0)) answer()
     while (this.stalled.length > 0) this.deliver()
   }

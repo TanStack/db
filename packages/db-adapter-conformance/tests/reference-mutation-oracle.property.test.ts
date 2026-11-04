@@ -14,6 +14,7 @@ import {
   mutationModel,
   mutationProperty,
   mutationReachStatesFor,
+  queuedHeldWritesCalibration,
 } from '../src'
 import { referenceMutationDriver } from './reference-mutation-adapter'
 import type { MutationDriver } from '../src'
@@ -44,8 +45,12 @@ import type { ReferenceMutationMutant } from './reference-mutation-adapter'
  *   adapter does not order (`application-handlers`). Another runs like
  *   Convex: a JSON provider that answers requests in arrival order
  *   (`ordered-answers`), with a log feed and application handlers.
+ * - **Campaigns per configuration.** Each configuration is its own grammar,
+ *   so each runs a fixed and a random campaign, under its own property name.
  * - **Calibration.** Each hostile mutant of the reference adapter breaks one
- *   law, and the fixed campaign must reject it with that law (ORC-006).
+ *   law, and the fixed campaign must reject it with that law (ORC-006). A
+ *   provider that breaks a rule its driver declares (log order,
+ *   application-handler requests, in-order answers) must fail too.
  */
 
 const property = `adapter-conformance.mutations.reference`
@@ -72,8 +77,9 @@ const inOrderDriver = referenceMutationDriver(undefined, {
 async function campaign(
   options: fc.Parameters<[unknown]>,
   under: MutationDriver = driver,
+  name: string = property,
 ) {
-  const reach = createOracleReach(property, mutationReachStatesFor(under), {
+  const reach = createOracleReach(name, mutationReachStatesFor(under), {
     minimum: 5,
   })
   await fc.assert(mutationProperty(under, reach), options)
@@ -99,69 +105,144 @@ describe(`mutation conformance: reference adapter`, () => {
     campaignTimeoutMs,
   )
 
-  oracleReplayTest(it)(
-    `conforms with a JSON provider on a fixed-seed campaign`,
-    async () => {
-      const reach = await campaign(
-        { seed: 2118, numRuns: oracleRuns(runs) },
-        jsonDriver,
-      )
-      reach.assertReached()
+  // Each provider configuration is its own grammar, so each runs a fixed and
+  // a random campaign (ORC-007), under its own property name for replay.
+  const configurations: Array<[string, string, MutationDriver]> = [
+    [
+      `adapter-conformance.mutations.reference-json`,
+      `a JSON provider`,
+      jsonDriver,
+    ],
+    [
+      `adapter-conformance.mutations.reference-sql`,
+      `a SQL provider`,
+      sqlDriver,
+    ],
+    [
+      `adapter-conformance.mutations.reference-log`,
+      `a SQL log provider and application handlers`,
+      logDriver,
+    ],
+    [
+      `adapter-conformance.mutations.reference-in-order`,
+      `an in-order JSON log provider and application handlers`,
+      inOrderDriver,
+    ],
+  ]
+  for (const [configured, label, under] of configurations) {
+    oracleReplayTest(it)(
+      `conforms with ${label} on a fixed-seed campaign`,
+      async () => {
+        const reach = await campaign(
+          { seed: 2118, numRuns: oracleRuns(runs) },
+          under,
+          configured,
+        )
+        reach.assertReached()
+      },
+      campaignTimeoutMs,
+    )
+    oracleReplayTest(it, configured)(
+      `conforms with ${label} on a random campaign or a replayed seed`,
+      async () => {
+        const reach = await campaign(
+          oraclePropertyOptions(runs, configured),
+          under,
+          configured,
+        )
+        reach.assertReached()
+      },
+      campaignTimeoutMs,
+    )
+  }
+
+  // A provider that breaks a rule its driver declares must fail: the model's
+  // log order, application-handler requests, and in-order answers each
+  // decide what the check owes.
+  const misdeclared: Array<[string, MutationDriver, string | RegExp]> = [
+    [
+      `a provider whose copies overtake a withheld one, declared a log`,
+      {
+        ...referenceMutationDriver(undefined, { sql: true, application: true }),
+        capabilities: logDriver.capabilities,
+      },
+      `MUT-7 (settlement)`,
+    ],
+    [
+      `an adapter that orders its writes, declared application handlers`,
+      {
+        ...referenceMutationDriver(undefined, { sql: true, log: true }),
+        capabilities: logDriver.capabilities,
+      },
+      `MUT-10/MUT-13 (missing or late request)`,
+    ],
+    [
+      `a provider that answers out of order, declared in order`,
+      {
+        ...referenceMutationDriver(undefined, {
+          json: true,
+          log: true,
+          application: true,
+          confirms: true,
+        }),
+        capabilities: inOrderDriver.capabilities,
+      },
+      /MUT-13 \(settlement\)|MUT-1 /,
+    ],
+  ]
+  oracleReplayTest(it).each(misdeclared)(
+    `rejects %s`,
+    async (_name, under, law) => {
+      const result = await fc.check(mutationProperty(under), {
+        seed: 2118,
+        numRuns: runs,
+      })
+      expect(result.failed).toBe(true)
+      expect(result.errorInstance).toBeInstanceOf(ConformanceViolation)
+      expect((result.errorInstance as ConformanceViolation).law).toMatch(law)
     },
     campaignTimeoutMs,
   )
 
+  // Cleanup after a violation answers a held write that reaches the
+  // provider only during teardown, so the violation is reported; a hang
+  // fails at the test timeout (ORC-010).
   oracleReplayTest(it)(
-    `conforms with a SQL provider on a fixed-seed campaign`,
+    `reports a violation found while a held write waits in the queue`,
     async () => {
-      const reach = await campaign(
-        { seed: 2118, numRuns: oracleRuns(runs) },
-        sqlDriver,
+      const calibration = queuedHeldWritesCalibration(driver)
+      const error = await checkMutationHistory(
+        calibration.driver,
+        calibration.history,
+      ).then(
+        () => undefined,
+        (failure: unknown) => failure,
       )
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
-  )
-
-  oracleReplayTest(it)(
-    `conforms with a SQL log provider and application handlers on a fixed-seed campaign`,
-    async () => {
-      const reach = await campaign(
-        { seed: 2118, numRuns: oracleRuns(runs) },
-        logDriver,
+      expect(error).toBeInstanceOf(ConformanceViolation)
+      expect((error as ConformanceViolation).law).toBe(
+        `MUT-10/MUT-13 (extra or early request)`,
       )
-      reach.assertReached()
     },
-    campaignTimeoutMs,
-  )
-
-  oracleReplayTest(it)(
-    `conforms with an in-order JSON log provider and application handlers on a fixed-seed campaign`,
-    async () => {
-      const reach = await campaign(
-        { seed: 2118, numRuns: oracleRuns(runs) },
-        inOrderDriver,
-      )
-      reach.assertReached()
-    },
-    campaignTimeoutMs,
+    10_000,
   )
 
   const mutants: Array<[ReferenceMutationMutant, string | RegExp]> = [
     [`applies-copy-late`, `MUT-1`],
     [`swallows-rejection`, `MUT-2`],
     [`wraps-rejection`, `MUT-2`],
-    [`writes-insert-twice`, `MUT-10/MUT-13`],
-    [`writes-concurrently`, `MUT-10/MUT-13`],
-    [`skips-delete`, /MUT-8|FID-5/],
+    [`writes-insert-twice`, `MUT-10/MUT-13 (extra or early request)`],
+    [`writes-concurrently`, `MUT-10/MUT-13 (extra or early request)`],
+    [`skips-delete`, /missing or late request|FID-5/],
     [`sends-changes-only`, `MUT-8`],
     [`echoes-authored-row`, /FID-5/],
     [`writes-back-authored`, /FID-5/],
     [`sends-complete-row`, `MUT-8 (provider requests)`],
     [`drops-removal`, `MUT-8 (provider requests)`],
     [`settles-on-answer`, /MUT-1|MUT-7/],
-    [`chains-on-confirmation`, /MUT-8|MUT-10/],
+    [`chains-on-confirmation`, `MUT-10/MUT-13 (missing or late request)`],
     [`confirms-by-high-water`, /MUT-1|MUT-7/],
+    [`drops-joint-settlement`, /MUT-[12] \(publication\)/],
+    [`replays-joint-settlement`, /MUT-[12] \(publication\)/],
   ]
   oracleReplayTest(it).each(mutants)(
     `rejects the %s mutant with %s`,

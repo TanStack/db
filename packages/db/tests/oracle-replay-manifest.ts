@@ -821,7 +821,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db-adapter-conformance/tests/reference-mutation-oracle.property.test.ts`,
     `adapter-conformance.mutations`,
-    `reference`,
+    `reference reference-json reference-sql reference-log reference-in-order`,
   ],
   [
     `rxdb-db-collection/tests/mutation-conformance-oracle.property.test.ts`,
@@ -954,6 +954,20 @@ const replayTestNames = new Map([
       [
         `adapter-conformance.mutations.${driver}`,
         `conforms on a random campaign or a replayed seed`,
+      ] as const,
+  ),
+  ...(
+    [
+      [`json`, `a JSON provider`],
+      [`sql`, `a SQL provider`],
+      [`log`, `a SQL log provider and application handlers`],
+      [`in-order`, `an in-order JSON log provider and application handlers`],
+    ] as const
+  ).map(
+    ([name, label]) =>
+      [
+        `adapter-conformance.mutations.reference-${name}`,
+        `conforms with ${label} on a random campaign or a replayed seed`,
       ] as const,
   ),
   [

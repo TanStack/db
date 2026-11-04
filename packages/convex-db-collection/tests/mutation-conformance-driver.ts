@@ -110,6 +110,8 @@ class ConvexMutationProvider implements MutationProvider {
   private readonly table = new Map<number, ConformanceRow>()
   private readonly plans: Array<WritePlan> = []
   private readonly held: Array<Answer> = []
+  /** Teardown: every request is answered at once, every copy sent. */
+  private draining = false
   /** Requests not yet answered, in arrival order. */
   private readonly unanswered: Array<Answer> = []
   private readonly log: Array<WriteRequest> = []
@@ -213,8 +215,9 @@ class ConvexMutationProvider implements MutationProvider {
     this.log.push(request)
     this.activity++
     const plan = this.plans.shift() ?? acceptAtOnce
+    const held = plan.held && !this.draining
     const answer: Answer = {
-      held: plan.held,
+      held,
       run: () => {
         if (plan.outcome === `reject`) {
           this.socket!.deliver({
@@ -235,7 +238,7 @@ class ConvexMutationProvider implements MutationProvider {
                 type: `upsert`,
                 row: rewriteRow(request.row as ConformanceRow, plan.rewrite),
               },
-          plan.echoHeld,
+          plan.echoHeld && !this.draining,
         )
         this.socket!.deliver({
           type: `MutationResponse`,
@@ -249,7 +252,7 @@ class ConvexMutationProvider implements MutationProvider {
       },
     }
     this.unanswered.push(answer)
-    if (plan.held) this.held.push(answer)
+    if (held) this.held.push(answer)
     else if (this.unanswered[0] === answer) this.answer(answer)
   }
 
@@ -306,8 +309,12 @@ class ConvexMutationProvider implements MutationProvider {
     }
   }
 
-  /** Answers every held request and resumes the transitions. */
+  /**
+   * Answers every held request and resumes the transitions, and from now on
+   * answers each request at once and stalls no transition.
+   */
   drain(): void {
+    this.draining = true
     while (this.held.length > 0) this.release()
     while (this.stalled.length > 0) this.deliver()
   }

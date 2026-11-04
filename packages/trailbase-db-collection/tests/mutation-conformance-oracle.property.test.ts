@@ -1,5 +1,5 @@
 import { fc } from '@fast-check/vitest'
-import { describe, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
@@ -8,11 +8,13 @@ import {
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
+  ConformanceViolation,
   checkMutationHistory,
   mutationHistoryArb,
   mutationModel,
   mutationProperty,
   mutationReachStatesFor,
+  queuedHeldWritesCalibration,
 } from '../../db-adapter-conformance/src'
 import { trailBaseMutationDriver } from './mutation-conformance-driver'
 
@@ -65,6 +67,27 @@ describe(`mutation conformance: TrailBase`, () => {
       reach.assertReached()
     },
     campaignTimeoutMs,
+  )
+  // Cleanup after a violation answers a held write that reaches the
+  // provider only during teardown, so the violation is reported; a hang
+  // fails at the test timeout (ORC-010).
+  oracleReplayTest(it)(
+    `reports a violation found while a held write waits in the queue`,
+    async () => {
+      const calibration = queuedHeldWritesCalibration(driver)
+      const error = await checkMutationHistory(
+        calibration.driver,
+        calibration.history,
+      ).then(
+        () => undefined,
+        (failure: unknown) => failure,
+      )
+      expect(error).toBeInstanceOf(ConformanceViolation)
+      expect((error as ConformanceViolation).law).toBe(
+        `MUT-10/MUT-13 (extra or early request)`,
+      )
+    },
+    10_000,
   )
 })
 

@@ -80,6 +80,8 @@ class TrailBaseMutationProvider implements MutationProvider {
   private readonly table = new Map<number, ConformanceRecord>()
   private readonly plans: Array<WritePlan> = []
   private readonly held: Array<() => void> = []
+  /** Teardown: every request is answered at once, every copy sent. */
+  private draining = false
   /** Events the stream holds at a held echo; `own` marks the holding one. */
   private readonly withheld: Array<{ send: () => void; own: boolean }> = []
   private readonly log: Array<WriteRequest> = []
@@ -132,10 +134,10 @@ class TrailBaseMutationProvider implements MutationProvider {
           reject(plan.error)
           return
         }
-        this.commit(this.change(request, plan), plan.echoHeld)
+        this.commit(this.change(request, plan), plan.echoHeld && !this.draining)
         resolve()
       }
-      if (plan.held) this.held.push(answer)
+      if (plan.held && !this.draining) this.held.push(answer)
       else answer()
     })
   }
@@ -184,8 +186,13 @@ class TrailBaseMutationProvider implements MutationProvider {
     this.held.shift()?.()
   }
 
-  /** Answers every held request and sends every withheld event. */
+  /**
+   * Answers every held request and sends every withheld event, and from now
+   * on answers each request at once and holds no event, also for a request
+   * the adapter's queue sends only after these answers.
+   */
   drain(): void {
+    this.draining = true
     for (const answer of this.held.splice(0)) answer()
     for (const { send } of this.withheld.splice(0)) send()
   }

@@ -37,6 +37,7 @@ import type {
   MutationDriver,
   MutationFixture,
   MutationProvider,
+  ObservedCollection,
   ProviderChange,
   WritePlan,
   WriteRequest,
@@ -91,6 +92,17 @@ export type ReferenceMutationMutant =
    * has applied, so a withheld copy is skipped.
    */
   | `confirms-by-high-water`
+  /**
+   * MUT-1, MUT-2: once one step settles a second write, no publication
+   * reaches subscribers until the next turn, so a rollback never shows.
+   */
+  | `drops-joint-settlement`
+  /**
+   * MUT-1, MUT-2: once one step settles a second write, each row a
+   * publication updates returns to its earlier value, then shows the new
+   * one again.
+   */
+  | `replays-joint-settlement`
 
 export interface ReferenceMutationOptions {
   /** A JSON provider. */
@@ -118,6 +130,8 @@ export class ControlledMutationProvider implements MutationProvider {
   private readonly committed = new Map<number, ConformanceRow>()
   private readonly plans: Array<WritePlan> = []
   private readonly held: Array<() => void> = []
+  /** Teardown: every request is answered at once, every copy sent. */
+  private draining = false
   /** Copies not yet fed, in commit order; `own` marks a plan's withholding. */
   private readonly withheld: Array<{
     feed: () => void
@@ -128,6 +142,8 @@ export class ControlledMutationProvider implements MutationProvider {
   private listener:
     ((change: ProviderChange, sequence: number) => void) | undefined
   private commits = 0
+  /** Called as each of the oracle's steps begins. */
+  onStep: () => void = () => {}
 
   constructor(
     seed: ReadonlyArray<ConformanceRow>,
@@ -200,9 +216,9 @@ export class ControlledMutationProvider implements MutationProvider {
         )
       }
       // In order, an answer waits behind every earlier unanswered request.
-      const entry = { answer, held: plan.held }
+      const entry = { answer, held: plan.held && !this.draining }
       this.unanswered.push(entry)
-      if (plan.held) this.held.push(() => this.answerEntry(entry))
+      if (entry.held) this.held.push(() => this.answerEntry(entry))
       else if (!this.options.inOrder || this.unanswered[0] === entry)
         this.answerEntry(entry)
     })
@@ -241,7 +257,7 @@ export class ControlledMutationProvider implements MutationProvider {
     // key, since a provider keeps one key's copies in commit order.
     const id = change.type === `delete` ? change.id : change.row.id
     if (
-      withhold ||
+      (withhold && !this.draining) ||
       this.withheld.some((entry) => this.options.log || entry.id === id)
     )
       this.withheld.push({ feed, own: withhold, id })
@@ -252,14 +268,17 @@ export class ControlledMutationProvider implements MutationProvider {
   // The oracle's side.
 
   plan(plan: WritePlan): void {
+    this.onStep()
     this.plans.push(plan)
   }
 
   release(): void {
+    this.onStep()
     this.held.shift()?.()
   }
 
   deliver(): void {
+    this.onStep()
     this.withheld.shift()?.feed()
     for (;;) {
       const index = this.withheld.findIndex(
@@ -274,7 +293,19 @@ export class ControlledMutationProvider implements MutationProvider {
     }
   }
 
+  /**
+   * Answers every held request and feeds every withheld copy, and from now
+   * on answers each request at once and withholds no copy, also for a
+   * request the adapter's queue sends only after these answers.
+   */
+  drain(): void {
+    this.draining = true
+    while (this.held.length > 0) this.release()
+    while (this.withheld.length > 0) this.deliver()
+  }
+
   foreignCommit(change: ProviderChange): void {
+    this.onStep()
     this.commit(change)
   }
 
@@ -316,6 +347,10 @@ function referenceCollection(
     turn = chained.catch(() => undefined)
     await confirmAll(await sent)
   }
+  // Mutation functions settled since the oracle's step began; the
+  // joint-settlement mutants act once a second one has.
+  let settledInStep = 0
+  provider.onStep = () => (settledInStep = 0)
   const answer = async (sent: Promise<void>): Promise<void> => {
     try {
       await sent
@@ -324,6 +359,8 @@ function referenceCollection(
       if (mutant === `wraps-rejection`)
         throw new Error(`wrapped`, { cause: error })
       throw error
+    } finally {
+      settledInStep++
     }
   }
   // MUT-7 (SQL): a write is confirmed when this sync run has applied the
@@ -332,7 +369,9 @@ function referenceCollection(
   // ones, so each write waits for its own commit, not for the highest seen.
   const applied = new Set<number>()
   let highest = 0
-  const confirmations = new Map<number, () => void>()
+  // A commit can have several waiters: the write, and under
+  // `chains-on-confirmation` the next write's turn.
+  let confirmations: Array<{ commit: number; resolve: () => void }> = []
   const isApplied = (commit: number) =>
     mutant === `confirms-by-high-water`
       ? highest >= commit
@@ -340,7 +379,7 @@ function referenceCollection(
   const confirmed = (commit: number): Promise<void> => {
     if (!confirms || mutant === `settles-on-answer` || isApplied(commit))
       return Promise.resolve()
-    return new Promise((resolve) => confirmations.set(commit, resolve))
+    return new Promise((resolve) => confirmations.push({ commit, resolve }))
   }
   const confirmAll = (commits: Array<number>) =>
     Promise.all(commits.map(confirmed)).then(() => undefined)
@@ -404,11 +443,11 @@ function referenceCollection(
           apply(change)
           applied.add(commitSequence)
           highest = Math.max(highest, commitSequence)
-          for (const [commit, resolve] of confirmations)
-            if (isApplied(commit)) {
-              confirmations.delete(commit)
-              resolve()
-            }
+          const ready = confirmations.filter(({ commit }) => isApplied(commit))
+          confirmations = confirmations.filter(
+            (entry) => !ready.includes(entry),
+          )
+          for (const { resolve } of ready) resolve()
         }
         return provider.subscribe((change, commitSequence) => {
           if (mutant === `applies-copy-late`)
@@ -469,7 +508,35 @@ function referenceCollection(
         }),
       ),
   })
-  return collection
+  return { collection, jointSettlement: () => settledInStep > 1 }
+}
+
+/** The view subscribers see under a joint-settlement mutant. */
+function jointSettlementView(
+  view: ObservedCollection,
+  mutant: `drops-joint-settlement` | `replays-joint-settlement`,
+  jointSettlement: () => boolean,
+): ObservedCollection {
+  return Object.assign(Object.create(view) as ObservedCollection, {
+    subscribeChanges: ((callback, options) =>
+      view.subscribeChanges((changes) => {
+        if (!jointSettlement()) return callback(changes)
+        if (mutant === `drops-joint-settlement`) return
+        callback(changes)
+        const updates = changes.filter(
+          (change) => change.type === `update` && change.previousValue,
+        )
+        if (updates.length === 0) return
+        callback(
+          updates.map((change) => ({
+            ...change,
+            value: change.previousValue!,
+            previousValue: change.value,
+          })),
+        )
+        callback(updates)
+      }, options)) satisfies ObservedCollection[`subscribeChanges`],
+  })
 }
 
 const sqlMutants = new Set<ReferenceMutationMutant | undefined>([
@@ -514,16 +581,21 @@ export function referenceMutationDriver(
         { json, sql, log, inOrder },
         mutant === `echoes-authored-row`,
       )
-      const collection = referenceCollection(provider, mutant, {
-        sql,
-        confirms,
-        application,
+      const { collection, jointSettlement } = referenceCollection(
+        provider,
+        mutant,
+        { sql, confirms, application },
+      )
+      const view = observedView(collection, {
+        row: (row) => row,
+        key: (key) => key as number,
       })
       return {
-        collection: observedView(collection, {
-          row: (row) => row,
-          key: (key) => key as number,
-        }),
+        collection:
+          mutant === `drops-joint-settlement` ||
+          mutant === `replays-joint-settlement`
+            ? jointSettlementView(view, mutant, jointSettlement)
+            : view,
         base: () => collection.base.values(),
         writer: {
           insert: (row) => collection.insert(row),
@@ -537,6 +609,7 @@ export function referenceMutationDriver(
           delete: (id) => collection.delete(id),
         },
         provider,
+        drain: () => provider.drain(),
       }
     },
   }

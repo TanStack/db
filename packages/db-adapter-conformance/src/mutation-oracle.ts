@@ -270,8 +270,11 @@ export interface MutationFixture {
   writer: MutationWriter
   provider: MutationProvider
   /**
-   * Answers every held request and delivers every withheld copy. The check
-   * calls it before cleanup, so no write outlives the history waiting on one.
+   * Starts teardown: answers every held request and delivers every withheld
+   * copy, and from then on answers each request at once and withholds no
+   * copy, also for a write that reaches the provider only later from the
+   * adapter's queue. The check calls it before cleanup, also after a
+   * violation, so no write outlives the history waiting on the provider.
    */
   drain?: () => void | Promise<void>
   /** The adapter's propagation step, awaited before every comparison. */
@@ -693,6 +696,17 @@ function initialModel(
   seed: ReadonlyArray<ConformanceRow>,
   domain: Pick<MutationDriver, `capabilities` | `undefinedField`>,
 ): MutationModel {
+  // A changed-fields request cannot carry a removal a JSON provider drops:
+  // the provider would keep the field. The model does not define that
+  // provider, so a driver must say how it sends a removal.
+  if (
+    domain.capabilities.has(`field-updates`) &&
+    domain.undefinedField === `absent`
+  )
+    throw new Error(
+      `field-updates with undefinedField 'absent' cannot send a removed ` +
+        `field; declare undefinedField 'null' or 'own'`,
+    )
   const provider = new Map(seed.map((row) => [row.id, rowValue(row)]))
   return {
     undefinedField: domain.undefinedField ?? `own`,
@@ -844,16 +858,20 @@ function decide(state: MutationModel, write: PendingWrite): void {
   }
   if (write.type === `delete`) state.provider.delete(write.id)
   else {
-    const copy = rowValue(copyOf(state, write))
-    state.provider.set(write.id, copy)
-    if (write.plan.rewrite !== `none` && copy !== write.value) state.rewritten++
+    // A merged update keeps a stored field it does not name: the provider's
+    // row held `note` before this write, and the authored row has none.
+    const stored = state.provider.get(write.id)
     if (
       state.mergedUpdates &&
       write.type === `update` &&
-      !Object.hasOwn(rowOf(write.id, write.value!), `note`) &&
-      Object.hasOwn(storedFields(state, write), `note`)
+      stored !== undefined &&
+      Object.hasOwn(rowOf(write.id, stored), `note`) &&
+      !Object.hasOwn(rowOf(write.id, write.value!), `note`)
     )
       state.mergeKept++
+    const copy = rowValue(copyOf(state, write))
+    state.provider.set(write.id, copy)
+    if (write.plan.rewrite !== `none` && copy !== write.value) state.rewritten++
   }
   // A copy is withheld by its own plan or waits behind an undelivered one:
   // any earlier one from a log, an earlier one for its key otherwise, since
@@ -1121,45 +1139,78 @@ function stepStart(state: MutationModel): StepStart {
 }
 
 /**
- * The writes a step settled, and each row's values while they settle in any
- * order: the public rows with any subset of them settled. Settlements at one
- * step are in no order a law fixes, so a publication may show any of these.
+ * How many writes a step settled. Writes that settle at one step settle in an
+ * order no law fixes, so the publication check then follows each row on its
+ * own (`rowFollowsSettlement`).
  */
-function settlementValues(
+function settledAtStep(state: MutationModel, start: StepStart): number {
+  return [...start.pending, ...state.writes.slice(start.writes)].filter(
+    (write) => state.settlements[write.index] !== `pending`,
+  ).length
+}
+
+/** Every order of `items`. */
+function orders<T>(items: ReadonlyArray<T>): Array<Array<T>> {
+  if (items.length <= 1) return [[...items]]
+  return items.flatMap((item, index) =>
+    orders([...items.slice(0, index), ...items.slice(index + 1)]).map(
+      (rest) => [item, ...rest],
+    ),
+  )
+}
+
+/**
+ * Whether a row's published values follow one order in which the step's
+ * writes on that row could settle. For each order of those writes, the row's
+ * path is its value before the step, its value with the step's writes
+ * pending, its value after each of them settles, and the model's final
+ * value. The published values must be that path with some values skipped,
+ * as one publication can carry several settlements, and must end at the
+ * final value. A value off every path, a value that returns, or a missing
+ * final publication fails.
+ */
+function rowFollowsSettlement(
   state: MutationModel,
   start: StepStart,
-): { settled: number; values: Map<number, Set<string | null>> } {
+  id: number,
+  before: string | null,
+  published: ReadonlyArray<string | null>,
+): boolean {
   const pending = [...start.pending, ...state.writes.slice(start.writes)]
-  const settled = pending.filter(
-    (write) => state.settlements[write.index] !== `pending`,
+  const own = pending.filter(
+    (write) => write.id === id && state.settlements[write.index] !== `pending`,
   )
-  const values = new Map<number, Set<string | null>>()
-  for (let mask = 0; mask < 1 << settled.length; mask++) {
-    const done = new Set(settled.filter((_, bit) => mask & (1 << bit)))
-    const still = pending.filter((write) => !done.has(write))
-    // Held rows and the applied rows change only when nothing is pending.
-    const rows =
-      still.length === 0
-        ? state.applied
-        : fold(
-            fold(start.applied, [
-              ...start.heldRows,
-              ...pending.filter(
-                (write) =>
-                  done.has(write) &&
-                  state.settlements[write.index] === `fulfilled`,
-              ),
-            ]),
-            still,
-          )
-    const ids = new Set([...rows.keys(), ...start.applied.keys()])
-    for (const id of [...ids, ...pending.map((write) => write.id)]) {
-      const set = values.get(id) ?? new Set()
-      set.add(rows.get(id) ?? null)
-      values.set(id, set)
-    }
-  }
-  return { settled: settled.length, values }
+  const final = new Map(visible(state)).get(id) ?? null
+  const valueWith = (done: ReadonlyArray<PendingWrite>) =>
+    fold(
+      fold(start.applied, [
+        ...start.heldRows,
+        ...done.filter(
+          (write) => state.settlements[write.index] === `fulfilled`,
+        ),
+      ]),
+      pending.filter((write) => !done.includes(write)),
+    ).get(id) ?? null
+  const observed = [before, ...published].filter(
+    (value, index, all) => index === 0 || value !== all[index - 1],
+  )
+  if (observed.at(-1) !== final) return false
+  return orders(own).some((order) => {
+    const path = [
+      before,
+      ...order.map((_, settledCount) =>
+        valueWith(order.slice(0, settledCount)),
+      ),
+      valueWith(order),
+      final,
+    ]
+    // The observed values, in order, appear along the path.
+    let at = 0
+    return observed.every((value) => {
+      while (at < path.length && path[at] !== value) at++
+      return at < path.length
+    })
+  })
 }
 
 /**
@@ -1420,15 +1471,29 @@ export async function checkMutationHistory(
         ? {}
         : { value: requestValue(request.row) }),
     }))
-    if (JSON.stringify(requests) !== JSON.stringify(state.requests))
+    if (JSON.stringify(requests) !== JSON.stringify(state.requests)) {
+      // Timing and content fail differently: a log that extends the owed one
+      // has an extra or early request, a log the owed one extends misses or
+      // delays one, and any other difference is a request's content.
+      const prefix = (
+        shorter: ReadonlyArray<unknown>,
+        longer: ReadonlyArray<unknown>,
+      ) =>
+        JSON.stringify(shorter) ===
+        JSON.stringify(longer.slice(0, shorter.length))
       throw violation(
-        requests.length > state.requests.length
-          ? `MUT-10/MUT-13 (provider requests)`
-          : `MUT-8 (provider requests)`,
+        requests.length > state.requests.length &&
+          prefix(state.requests, requests)
+          ? `MUT-10/MUT-13 (extra or early request)`
+          : requests.length < state.requests.length &&
+              prefix(requests, state.requests)
+            ? `MUT-10/MUT-13 (missing or late request)`
+            : `MUT-8 (provider requests)`,
         stepIndex,
         state.requests,
         requests,
       )
+    }
     const quiescent = state.pending.length === 0
     const rows = rowsOf(collection.values())
     if (!sameRows(rows, visible(state)))
@@ -1493,27 +1558,24 @@ export async function checkMutationHistory(
     }
     published = got.at(-1) ?? published
     // Writes that settle at one step settle in an order no law fixes. Then
-    // each row may show only a value it has with some of them settled, and
-    // changes at most once per settled write and once for the step's own
-    // optimistic state; an earlier synced value or an extra change still
-    // shows.
-    const { settled, values } = settlementValues(state, from)
+    // each row must follow one order of its own writes' settlements and end
+    // at the model's final rows; an earlier synced value, a value that
+    // returns, or a missing publication still shows.
+    const valueIn = (rows: RowState, id: number) =>
+      rows.find(([key]) => key === id)?.[1] ?? null
+    const ids = new Set(
+      [start, ...got, visible(state)].flatMap((rows) => rows.map(([id]) => id)),
+    )
     const ok =
-      settled > 1
-        ? [...values].every(([id, allowed]) => {
-            const path = [start, ...got].map(
-              (rows) => rows.find(([key]) => key === id)?.[1] ?? null,
-            )
-            const changes = path.filter(
-              (value, index) => index > 0 && value !== path[index - 1],
-            ).length
-            return (
-              path.every((value) => allowed.has(value)) &&
-              changes <= settled + 1
-            )
-          }) &&
-          [...got.flatMap((rows) => rows.map(([id]) => id))].every((id) =>
-            values.has(id),
+      settledAtStep(state, from) > 1
+        ? [...ids].every((id) =>
+            rowFollowsSettlement(
+              state,
+              from,
+              id,
+              valueIn(start, id),
+              got.map((rows) => valueIn(rows, id)),
+            ),
           )
         : got.length === owed.length &&
           got.every((rows, index) => sameRows(rows, owed[index]!))
@@ -1649,8 +1711,16 @@ export async function checkMutationHistory(
   try {
     publications?.stop()
     await fixture.drain?.()
+    // Teardown answers every request, also one the adapter's queue sends
+    // only now, so every write settles before cleanup (ORC-010).
+    await settle(fixture, cut)
+    const outlived = cut.unsettled()
     await collection.cleanup()
     await settle(fixture, cut)
+    if (outlived > 0)
+      cleanupErrors.push(
+        new Error(`${outlived} writes were still pending after drain`),
+      )
     if (primary === undefined && detached.found().length > 0) {
       primary = violation(
         `HEALTH-5`,
@@ -1700,14 +1770,85 @@ export function mutationProperty(
     try {
       await checkMutationHistory(driver, history, { reach: reach?.reach })
     } catch (error) {
-      const law =
+      // A violation whose cleanup also failed arrives as its cause; it keeps
+      // its law, so shrinking stays on it (ORC-010).
+      const violation =
         error instanceof ConformanceViolation
-          ? error.law
+          ? error
+          : (error as { cause?: unknown } | undefined)?.cause
+      const law =
+        violation instanceof ConformanceViolation
+          ? violation.law
           : `failure outside the comparison`
       target ??= law
       if (law === target) throw error
     }
   })
+}
+
+/**
+ * Calibration of the check's cleanup (ORC-010): a violation found while a
+ * held write waits in the adapter's queue still reaches the caller. The
+ * history holds two inserts; an adapter that orders its writes keeps the
+ * second in its queue until the first is answered. The returned driver's
+ * request log gains a request no write made once both writes are made, so
+ * the next comparison fails, and cleanup must answer the first insert and
+ * then the second, which reaches the provider only during teardown. Run the
+ * history through `checkMutationHistory`: it must reject with
+ * `MUT-10/MUT-13 (extra or early request)`, and a hang is the failure.
+ */
+export function queuedHeldWritesCalibration(driver: MutationDriver): {
+  driver: MutationDriver
+  history: MutationHistory
+} {
+  if (!driver.capabilities.has(`held-writes`))
+    throw new Error(`${driver.adapter} declares no held writes`)
+  const write = (id: number): WriteStep => ({
+    kind: `write`,
+    type: `insert`,
+    id,
+    title: `a`,
+    outcome: `accept`,
+    held: true,
+    echoHeld: false,
+    rewrite: `none`,
+  })
+  return {
+    history: { seed: [], steps: [write(1), write(2)] },
+    driver: {
+      ...driver,
+      async create(seed) {
+        const fixture = await driver.create(seed)
+        let writes = 0
+        const count =
+          <T extends Array<unknown>, R>(made: (...args: T) => R) =>
+          (...args: T): R => {
+            writes++
+            return made(...args)
+          }
+        const { provider, writer } = fixture
+        return {
+          ...fixture,
+          writer: {
+            insert: count(writer.insert),
+            update: count(writer.update),
+            delete: count(writer.delete),
+          },
+          provider: new Proxy(provider, {
+            get(target, key) {
+              if (key === `requests`)
+                return () => [
+                  ...target.requests(),
+                  ...(writes >= 2 ? [{ type: `delete`, id: 4 }] : []),
+                ]
+              const value: unknown = Reflect.get(target, key, target)
+              return typeof value === `function` ? value.bind(target) : value
+            },
+          }),
+        }
+      },
+    },
+  }
 }
 
 // Exported for calibration tests: the model's prediction for a history.
