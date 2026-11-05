@@ -53,7 +53,7 @@ function send(pkg, message) {
 /** Sends a check to the package's daemon, starting the daemon if needed. */
 export async function requestDaemon(pkg, argv) {
   try {
-    return await send(pkg, { argv })
+    return await send(pkg, { argv, cwd: process.cwd() })
   } catch (error) {
     if (![`ENOENT`, `ECONNREFUSED`].includes(error.code)) throw error
   }
@@ -66,7 +66,7 @@ export async function requestDaemon(pkg, argv) {
   for (let waited = 0; ; waited += 100) {
     await new Promise((r) => setTimeout(r, 100))
     try {
-      return await send(pkg, { argv })
+      return await send(pkg, { argv, cwd: process.cwd() })
     } catch (error) {
       if (![`ENOENT`, `ECONNREFUSED`].includes(error.code) || waited > 60_000)
         throw error
@@ -108,7 +108,8 @@ async function serve(pkg) {
         let stdout = ``
         let exitCode = 0
         try {
-          const options = parseArgs(message.argv)
+          // Paths are the caller's, so they resolve against its directory.
+          const options = parseArgs(message.argv, message.cwd)
           if (options.pkg !== pkg)
             throw new Error(`this daemon serves ${pkg}, not ${options.pkg}`)
           stdout = `${await session.check(options, store, (line) => stderr.push(`${line}\n`))}\n`

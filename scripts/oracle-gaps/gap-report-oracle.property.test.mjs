@@ -161,7 +161,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fc from 'fast-check'
 import { declareOracle } from '../../packages/db/tests/oracle-declaration.ts'
@@ -228,11 +228,15 @@ function runCli(dir, files, { seed = 1, daemon = false } = {}) {
   writeFixture(dir, files)
   const out = join(dir, daemon ? `out-daemon` : `out`)
   rmSync(out, { recursive: true, force: true })
+  // The CLI runs from the repository root. A daemon check names its paths
+  // relative to there, as an author types them, and the daemon must read
+  // them as the CLI's caller meant them.
+  const path = (absolute) => (daemon ? relative(repo, absolute) : absolute)
   const args = [
     join(here, `index.mjs`),
     ...(daemon ? [`--daemon`] : []),
     `--package`,
-    dir,
+    path(dir),
     `--source`,
     `${SOURCE},${LIB}`,
     `--seed`,
@@ -242,9 +246,10 @@ function runCli(dir, files, { seed = 1, daemon = false } = {}) {
     `--contexts`,
     `4`,
     `--out`,
-    out,
+    path(out),
   ]
-  if (files[AUTHORED] !== undefined) args.push(`--mutants`, join(dir, `mutants`))
+  if (files[AUTHORED] !== undefined)
+    args.push(`--mutants`, path(join(dir, `mutants`)))
   const env = cleanEnv()
   const child = spawnSync(process.execPath, args, {
     cwd: repo,

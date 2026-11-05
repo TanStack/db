@@ -5,7 +5,11 @@ import { availableParallelism } from 'node:os'
 import { resolve } from 'node:path'
 
 const flags = new Set([`daemon`, `stop-daemon`])
-export function parseArgs(argv) {
+/**
+ * The options in `argv`. Paths are resolved against `cwd`, the caller's
+ * working directory, which the daemon receives with each request.
+ */
+export function parseArgs(argv, cwd = process.cwd()) {
   const args = {}
   for (let i = 0; i < argv.length; i += 1) {
     const [key, inline] = argv[i].replace(/^--/, ``).split(`=`)
@@ -14,7 +18,7 @@ export function parseArgs(argv) {
   if (!args.package) throw new Error(`--package is required`)
   // Test reports name files by their real path (on macOS, /tmp is
   // /private/tmp), so the package path is resolved the same way.
-  const pkg = realpathSync(resolve(args.package))
+  const pkg = realpathSync(resolve(cwd, args.package))
   if (args[`stop-daemon`]) return { stop: true, pkg }
   if (!args.source) throw new Error(`--package and --source are required`)
   return {
@@ -29,7 +33,7 @@ export function parseArgs(argv) {
     sources: args.source.split(`,`),
     seed: args.seed,
     diffBase: args[`diff-base`],
-    out: resolve(args.out ?? `/tmp/oracle-gaps`),
+    out: resolve(cwd, args.out ?? `/tmp/oracle-gaps`),
     only: args.only ? new Set(args.only.split(`,`)) : undefined,
     // A fixed-seed random sample of this many mutants per source file, for
     // surveys across many modules.
@@ -38,7 +42,7 @@ export function parseArgs(argv) {
     // need Vitest's default limits, which would make each hang cost seconds.
     testTimeout: Number(args[`test-timeout`] ?? 15000),
     // A directory of authored mutants (see loadAuthored).
-    mutants: args.mutants ? resolve(args.mutants) : undefined,
+    mutants: args.mutants ? resolve(cwd, args.mutants) : undefined,
   }
 }
 
