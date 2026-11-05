@@ -380,7 +380,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/includes-work-counter-oracle.test.ts`,
     `includes-work`,
-    `correlated-links join-free join-targets`,
+    `correlated-links join-free join-targets projection-payload`,
   ],
   [
     `db/tests/query/includes-publication-oracle.test.ts`,
@@ -540,7 +540,12 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/join-result-key-oracle.property.test.ts`,
     `join-result-key`,
-    `pairs`,
+    `pairs whole-source`,
+  ],
+  [
+    `db/tests/query/public-container-copy-oracle.test.ts`,
+    `query`,
+    `public-container-copy`,
   ],
   [
     `db/tests/query/group-result-key-oracle.property.test.ts`,
@@ -904,6 +909,10 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [
+    `includes-work.projection-payload`,
+    `nested source payloads need no metadata descriptor scans \\(random or replayed\\)`,
+  ],
   ...[
     `reference`,
     `neon-realtime`,

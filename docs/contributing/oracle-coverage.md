@@ -572,7 +572,7 @@ that test identifiers must copy production's private data structures.
 
 | Indexed predicate filtering | Complete for bounded dotted-path collision | An independent row filter checks direct predicates and public callback predicates for a dotted scalar field beside a nested path, with and without an index. Selected-field ordering checks the same distinction through `$selected`. |
 | WHERE predicate publication | Complete for bounded predicate and sync-transaction grammar | The contract, Kleene reference evaluator, snapshot and change-history grammar, three subscriber consumers plus direct snapshot, and per-commit key-set refinement check are literate. A fixed same-key update checks live-row and direct-subscriber payloads; a focused descriptor boundary checks stored-row prefilter safety. Generated cleanup and restart histories for filtered subscribers remain open. |
-| Joined result keys | Complete for bounded two-source key grammar | The contract, nested-loop pair model, delimiter-, number-like, infinite, and `NaN` key grammar, public join driver, and per-checkpoint pair and key-count check are literate. Joins over subqueries, more than two sources, custom `getKey`, and optimistic mutations remain outside this owner. |
+| Joined result keys | Complete for bounded two-source key and whole-source receiving grammars | The nested-loop pair model retains delimiter-, typed, infinite and `NaN` keys. The November 5 extension crosses whole-source selection and spreads, direct/QueryRef receivers, all four join kinds, either selected side and authored collisions. Each of 192 finite histories and fixed/random 80-history campaigns compares root Collections, include facades, toArray and materialize at six cuts. Published `$key` equals the actual default pair or explicit custom key; the other three fields retain source attribution. Inline authored fields and multiplicity remain unchanged. Value-only updates and rejoining preserve key sets. The 4,608 declared receiving states must each reach once. More than two sources, arbitrary nested projection/QueryRef depth, custom-key functions outside the generated key grammar, arbitrary optimistic overlap, frameworks and real providers remain outside this owner. |
 | Grouped result keys | [Grouped result key oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/group-result-key-oracle.property.test.ts) | A grouped live-query Collection gives each group one key of the Collection key type, a string or a number, whatever the group value. Maintainer decision (2026-10-27): grouped keys match the declared key type rather than widening it to nullish keys. Group values come from strings, numbers, `NaN`, `null`, `undefined`, booleans, a bigint, strings that print like those values, and strings in the reserved `\u0000tanstack-db:` namespace; histories move, delete, and insert rows. After preload and each synced change, the (group value, count) pairs equal an independent partition by type and value, every key is a string or number, no two groups share a key, and a group that survives a change keeps its key. Reach (minimum 5, per campaign of 80): a nullish group published (32 to 38), a group value published beside a string that prints like it (18 to 21), and a key kept across a change (49 to 53). RED on the parent commit: keys `undefined`, `null`, `false`, and `10n`. Mutants that encode with `String(value)` (lookalike keys collide) or that encode only nullish values (boolean keys) fail. Encoding only the internal D2 key is equivalent in this domain, because the Collection keys rows by the public group key. A focused witness in `collection.test.ts` checks that `sync.write` rejects `undefined`, `null`, boolean, and bigint keys before staging them, and that a later valid write commits alone. A sync adapter that writes such a key breaks its contract, so this is a fail-fast invariant witness under AGENTS.md ("Separate Valid Edge Cases from Contract Contradictions"), not a generated owner; SortedMap never receives these keys. Not covered: Dates, `-0`, objects, and multi-field groups, whose values the aggregate select oracle owns; real sync adapters, since the source is a controlled mock. |
 | D2 Index storage | Complete for bounded prefix grammar | The contract, plain-`Map` multiset model, prefixed and unprefixed value grammar, `Index` driver, and per-addition `get`/`has` check are literate. Compaction, presence tracking, and structural payloads remain outside this owner. |
 | Pooled live queries | Complete for bounded eq-filter grammar | The contract, independent `eq` model, live-query Collection second formulation, sync/optimistic/mount/cleanup-restart grammar, observer driver, and per-step refinement check are literate. On-demand and persisted sources, `DbClient`, Suspense, and every clause beyond `eq` conjuncts keep the live-query Collection. |
@@ -760,6 +760,39 @@ RIGHT joins, facade projection metadata and inline values live in
 nested projection histories beyond these two QueryRef levels, every join kind under source changes, framework
 receiving paths or provider behavior.
 
+The whole-source receiving grammar keeps `NaN` source keys on sync paths
+but does not target them with ordinary optimistic updates. A setup probe with
+left keys `[NaN, "b]", "a"]`, right keys `["a", 1, NaN]`, two matching
+rows per side, and `left.update(NaN, row => { row.label = "held" })` throws
+`KeyUpdateNotAllowedError` although its key did not change: mutation admission
+compares keys with `!==`. This separate Collection mutation-admission gap
+belongs to the **Collection lifecycle / mutation startup** entry
+(`packages/db/tests/collection-mutation-startup.test.ts`; fixed tests with no
+independent admission oracle, tracked in #2264). It needs a SameValueZero key
+witness across unchanged-key optimistic updates. The failure occurs during
+admission before the joined update checkpoint, outside this repair claim.
+
+The November 5 pair-identity decision separates joined `$key` from source
+attribution. The selected source retains `$origin`, `$hasPendingWrites` and
+`$collectionId`; the result owns its actual pair or explicit custom key. The
+join-result-key owner now checks fanout, source attribution and authored inline
+values together through root, QueryRef and materialized receivers. This owner
+retains its custom-key, nullable facade and source-spread controls under that
+approved rule. Inline `$key` remains authored.
+
+The prep review adds 102 histories for implicit single-source/joined output and
+functional direct-source returns after inherited inline materialization.
+Direct/QueryRef receivers, each source's held write, every authored collision,
+and absent/array/singleton input distinguish source attribution from output
+attribution. All 72 path/source/checkpoint states reach their required minimum;
+408 comparisons check complete row values and physical entry keys at preload,
+held mutation, settlement without confirmation, and a later remote write.
+The unchanged implementation fails 56 of the full owner's 1,706 tests while
+all 1,604 prior tests pass. Restoring namespace-sidecar loss or implicit joined
+source attribution fails the extended comparison. These eager-source histories
+do not establish framework timing, rejected-write combinations or arbitrary
+include depth. See the [prep-review evidence](oracle-reviews/2026-11-05-boundary-only-prep-review.md).
+
 The attribution driver compares both authored rows, every ordinary field and
 all four virtual fields, then deletes the non-first row. Half its histories
 configure independent projected keys; default-key differential evidence remains
@@ -798,8 +831,12 @@ and nonempty child receiving cuts. Six lifetime and four inline-value hostile
 controls reject wrong observations. See [chunk 5](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md).
 Functional callback-input observations have a separate receiving boundary in
 `virtual-row-fields-input-oracle.test.ts`, sharing the existing source metadata
-judgment. The maintainer extended O12 on 2026-10-30 from fn.select to fn.where
-and fn.having while preserving authored inline output. Thirty-three authoring
+judgment. The maintainer's 2026-11-05 boundary-only decision supersedes O12's
+October 28/30 callback-normalization policy. Intermediate callback inputs,
+inline values and Effect outputs retain authored fields, including explicit
+reserved-name overrides. Direct source rows retain genuine metadata. Published
+Collection metadata attribution remains with the publication owner above.
+Thirty-three authoring
 descriptions cross seven QueryRef/join/union paths, five callback forms
 (select, where, having, where-select, having-select), and root, wrapped child,
 direct child and real Effect receivers. Flat union children require a named
@@ -828,16 +865,20 @@ The union optimizer clones branch IR: counters establish original-key reuse
 for FROM/JOIN, while union checks propagation/transparency without claiming
 that cache hit. This receiver supplies no Effect-root metadata attribution law.
 
-The owner has 4,923 tests. Before callback production edits, it rejected 1,102
-metadata input comparisons on the reviewed implementation; 3,821 tests passed.
-All 22,502 callback, inline and compiler states reached. The repaired owner
-passes. Final mutants reject a WHERE-only repair (551 comparisons), enabling
-normalization for every predicate pipeline (696 authored-output comparisons),
-and dropping the selected-row cache mode (26 comparisons). Earlier path-specific
-FROM/JOIN/union normalization mutants each failed 112 compiler comparisons.
-The real Effect receiver additionally rejects 203 metadata comparisons on the
-actual PR base. That receiving evidence does not retroactively supply the
-historical selection repair's initial pre-edit gate.
+The owner retains all 4,923 original tests and adds one symbol checker control, with 20,720 callback states, 594 inline/rejection
+states and 1,188 compiler states. Before the boundary-only production edits,
+the revised independent model rejected 4,106 comparisons on unchanged code;
+all declared states reached once, including real Effect and Collection
+receivers. Predicate membership follows the authored value. Complete nested
+ordinary values remain strict, including nested reserved names. The only
+root-metadata omission in the common input comparison is an actual published
+flat-union Collection root; the publication owner judges that attribution.
+See the [boundary-only implementation record](oracle-reviews/2026-11-05-boundary-only-metadata.md)
+for GREEN, hostile mutants, source bindings and limits. The
+[historical runtime repair record](oracle-reviews/callback-metadata.md)
+preserves the earlier policy's evidence and lossless review audit; those
+callback-normalization expectations are retired by the maintainer decision,
+not inferred from production output.
 
 The ordered-work owner, `ordered-work-oracle.property.test.ts`, adds 144 finite
 histories through `ordered-compiler-cache-driver.ts`. Two compilation orders,
@@ -946,6 +987,89 @@ file, span and code. Seven hostile controls challenge value enrichment,
 nullability, one-branch readonly loss, nested any/metadata/modifiers and Date
 metadata any. Their rejection requires failed type-law constraints, not syntax
 or setup errors. The normal test:oracles command selects this owner.
+
+The 2026-11-05 boundary-only implementation extends the primary owner above
+with 48 authored collision/path/selection states and 18 grouping/collision
+neighbors for every one of the 24 source descriptions. Actual contextual
+where/having/select, inline and Collection types use one declared-shape law;
+all new states reach 24 times. The extended owner rejects 24 consumers before
+the type repair and passes all 33 checks afterward. Publication replaces
+reserved names instead of intersecting authored collisions. Flat union HAVING
+also retains its documented `$selected` context in the expected type. The
+[implementation record](oracle-reviews/2026-11-05-boundary-only-metadata.md)
+binds RED/GREEN, mutants and source evidence. This revises the primary owner's
+ordinary projection policy; the chunk-24 account below remains historical and
+does not imply that its companion files exist on this base revision.
+
+The prep review extends this same owner with 48 structured-reference states,
+12 structured selected-context states, 48 grouping-boundary states and 12
+visible-aggregate depth/collision states. Structured WHERE/SELECT and grouped
+HAVING judge authored reserved names and field values; direct-source controls
+retain genuine metadata. Empty callbacks/helpers before/after selection,
+accumulated grouping and an explicitly typed `groupKeys` context distinguish
+empty grouping from erasing an existing group. Aggregate depths 0/7/8/9/10/16
+distinguish removal of the old depth-eight cutoff from moving it one level.
+Intermediate QueryRef, inline and published result types use the shared shape
+law. The repaired owner passes all 33 checks, and isolated context-enrichment,
+selected-context-enrichment, unconditional-grouping and depth-cutoff mutants
+fail only native type constraints. See the
+[prep-review evidence](oracle-reviews/2026-11-05-boundary-only-prep-review.md)
+for pre-edit RED, corrected carrier expectations, reach and source bindings.
+
+The CI follow-up adds three conditional inline-wrapper choices to all 24
+source descriptions: array/array, array/materialized array, and array/singleton.
+Each legal consumer runs public construction before native type comparison at
+the QueryRef functional input and Collection result. Wrapper choice must expose
+materialized values, with singleton absence preserved. The unchanged mapping
+fails 24 consumers with TS2344 only; the distributing mapping passes all 33
+checks. A restored-mapping mutant rejects the same shape assertions. This
+owner does not yet judge arbitrary unions of opaque, scalar and include wrappers.
+The publication owner also adds grouped and ungrouped aggregates through direct
+and QueryRef receivers, with held inserts, settlement and later remote inserts.
+Counts change while projection metadata belongs to the output Collection.
+Single-field wrong-source observations calibrate every metadata assertion.
+See the [CI evidence](oracle-reviews/2026-11-05-boundary-only-ci-review.md).
+
+The dynamic-emptiness follow-up extends this same owner with 15 grouping-list
+forms, each crossed with six authored collision choices and all 24 source
+descriptions. Mutable arrays, readonly arrays and empty-or-one tuple unions
+construct both empty and nonempty return values, through callbacks and
+`groupKeys`. The independent declared-shape law gives these lists an optional
+missing `$key`. Statically empty lists retain no generated key, statically
+nonempty tuples retain a required key, and accumulated definite grouping stays
+required. QueryRef callback, inline array and published Collection types use
+the same comparison. The original concrete witness was
+`const keys: Array<PublicRef<{ id: number }>['id']> = []`, consumed through
+QueryRef `fn.select(({ inner }) => inner.$key)`. Here `PublicRef` names the
+public `Ref` export. The original inference accepted a required key while a
+runtime probe observed no `$key` property. Its nonempty neighbor observes the
+generated key. This was an enforcement gap, not an accepted product limitation.
+The extended native owner rejects the unchanged implementation before repair.
+Always-required, omit-all-array-keys and erase-prior-grouping mutants each fail
+native shape constraints. This closes the declared-list inference gap within
+the generated forms; explicit `any` erasure, including a helper with only its
+context type argument supplied, retains the existing compatibility behavior.
+The follow-up model refactor derives this key law from each call's declared
+possibilities rather than storing a final keyed answer per case. All 24 generated
+consumer programs remain byte-identical, and a last-call-only rival fails native
+constraints. See the dynamic-grouping evidence in the
+[high-review record](oracle-reviews/2026-11-05-boundary-only-high-review.md).
+
+The high review adds 27 function/conditional forms with aggregate and ordinary
+controls to this same public-type owner, for all 24 source descriptions.
+Inferred expressions now retain type-only aggregate provenance through function
+arguments and conditional conditions, branches and defaults. Ten nested coalesce
+wrappers distinguish propagation from a shallow repair. The shared shape/value
+law checks generated intermediate keys and scalar values. Unchanged production
+rejects 35 native constraints on the selected source description; the repair
+passes all 33 owner checks, with all 313 declared states reached 24 times.
+Ignoring provenance restores the native constraint failures. Transpiled builder
+JavaScript is unchanged. This repairs `gt(count(row.id), 0)`, wrapped coalesce
+and the other admitted inferred forms. Explicit widening to `BasicExpression`
+and the existing six-or-more-pair `caseWhen` any fallback erase input facts and
+remain outside this inference claim. The owner needs generated explicit-erasure
+contracts before promising recovery of those facts. No runtime key loss is
+accepted. See the [high-review evidence](oracle-reviews/2026-11-05-boundary-only-high-review.md).
 
 Chunk 24 extends this same owner with `virtual-row-fields-receiver-types-oracle.ts`
 and the native compiler support `virtual-row-fields-receiver-types-support.ts`.
@@ -1100,6 +1224,40 @@ at the window edge on a checkpoint without a refill; a child compile error after
 the parent's `orderBy` still leaves the parent's auto-index (owner: compiler
 tests), and needs a focused witness that the index does not outlive a failed
 compile.
+
+The same owner checks ordinary nested source payload work. Its block-count
+grammar (0–40, with fixed 0/1/20/40 cases) crosses fourteen paths: source,
+join, QueryRef, union, implicit and functional selection, direct predicates,
+projected QueryRef WHERE/HAVING, and correlated inline, callback, implicit,
+Collection and grouped HAVING paths. Each checks the full selected document
+and its identity at preload and two synced replacements. Both singular and
+batch descriptor APIs count discovery inside source payload containers, which
+must be zero. Each fixed/random campaign executes twelve inputs; all fourteen
+states must be reached inside every input: 336 path histories and 1,008 public
+checkpoints. This measures metadata discovery, not hashing, arbitrary user
+callbacks, proxy traps or elapsed latency.
+
+The prep review separates expected payload content from the object supplied to
+production. The shared checker independently reconstructs content from block
+count and tick, and separately checks source reference identity. Mutating the
+source's tick at the initial checkpoint falsely passed the earlier checker;
+the revised checker rejects that mutation on all fourteen paths in each
+campaign. The grammar, work budget, checkpoints and fixed/fresh run counts stay
+the same. See the [prep-review evidence](oracle-reviews/2026-11-05-boundary-only-prep-review.md).
+
+The [initial repair](oracle-reviews/2026-11-05-nested-row-performance.md)
+covered seven paths. The
+[policy exploration](oracle-reviews/2026-11-05-metadata-policy-exploration.md)
+exposed remaining QueryRef predicate and correlated scans. Those paths are now
+in the owner's grammar. Their unchanged-production RED reached actual public
+checkpoints before rejecting 2/2/6/12/6/6 scans even on empty documents.
+A subsequent valid grouped HAVING fixture rejected two scans before that
+production path changed. Compiler-owned metadata now travels outside alias
+values, and materialization resolves only compiled include paths. Value laws
+remain with the route-context, metadata-input and publication owners. Existing
+budgets and unrelated semantic comparisons are preserved. See the
+[implementation evidence](oracle-reviews/2026-11-05-boundary-only-metadata.md)
+for mutants, measurements and remaining limits.
 
 The ordered-lifecycle owner also crosses deletion and retargeting of the first
 window's join marker after that window is public but the live-query Collection
@@ -4145,6 +4303,17 @@ boundary. Track the generalized repairs here instead of accumulating isolated
 regressions. Completion requires an executable owner, a production-path witness,
 a hostile wrong-answer control, and an explicit statement of remaining limits.
 
+- [ ] **Unchanged `NaN` keys at optimistic mutation admission.** With an eager
+      Collection keyed by `row.id`, preload a row whose `id` is `NaN`, then
+      call `update(NaN, row => { row.label = "held" })`. Admission throws
+      `KeyUpdateNotAllowedError` because it compares the unchanged keys with
+      `!==`. The November 5 joined-source grammar found the witness before its
+      joined update checkpoint and retains `NaN` sync-key coverage separately.
+      Owner: Collection lifecycle / mutation startup
+      (`packages/db/tests/collection-mutation-startup.test.ts`; no independent
+      admission oracle, tracked in #2264). Needed witness: unchanged-key
+      mutation admission across numeric/string keys and SameValueZero `NaN`.
+      This sibling remains open outside the joined-result identity repair.
 - [ ] **Offset-only providers under a joined ordered window.** A provider that
       honors `offset` and ignores `cursor` gets a wrong window at preload under a
       LEFT-joined filter: the ordered loader repeats a continuation `offset`
@@ -5417,7 +5586,56 @@ failed-write histories still check restoration of prior intent. This bound
 does not remove the existing linear merge traversal for each real write or
 establish elapsed-time performance.
 
+## Public-container cleanup copies
+
+`packages/db/tests/query/public-container-copy-oracle.test.ts` owns array copy
+shape at resolver return, under the architecture's descriptor/prototype
+preservation law. Each fixed/fresh input exhausts 24 structural programs:
+shallow root cleanup, generic nested cleanup, compiled root cleanup and compiled
+include-path replacement; native, derived and null array prototypes; changed
+and unchanged values. Sparse sizes zero through eight, locked lengths,
+accessors, hidden properties and user symbols vary without weakening identity
+or descriptor comparisons. The original code loses derived/null prototypes in
+six changed cells; a shared-shell prototype mutant fails all eight changed
+derived/null cells. Every state reaches once per generated input. The ordinary
+`public-container-copy.test.ts` remains supplemental reference-key, cycle,
+sharing and record-descriptor coverage. This component owner does not establish
+framework/provider receiving behavior, arbitrary graph topology, or Collection
+publication descriptor policy. Opaque-payload scan work remains with the
+includes-work owner; Collection attribution remains with virtual-row-fields.
+
 ## Compound joins
+
+The high review extends the route-context owner with independent join source
+keys and matched fan-out: four join kinds, plain/QueryRef inputs on either side,
+and numeric/string/mixed keys (48 finite programs). Three parents share or
+separate routes. Initial rows, main departure/reentry and child departure use an
+independent flat join at all three include forms. All 576 declared path/cut
+states reach once, with 1,728 parent/form/cut comparisons. Original production
+and an unmatched-only key repair both fail in public-key reduction after legal
+admission. Pair identities repair projected join rows; the publication owner
+also preserves source keys for whole-source selections at matched/unmatched
+cuts. This extension uses eager synchronous sources and filters child-absent
+rows. It does not prove arbitrary full-join absence shapes, async loading,
+provider/framework timing or exact key serialization. See the
+[high-review evidence](oracle-reviews/2026-11-05-boundary-only-high-review.md).
+
+The route-context transport owner
+(`packages/db/tests/query/includes-context-transport-oracle.test.ts`) also
+crosses FROM/JOIN QueryRef placement, expression/direct functional return, and
+array/materialized inherited inputs. Each of eight cells checks three parents
+(disjoint and shared routes), all three outer materialization forms, and six
+cuts: initial, parent move, child move, grandchild update, empty grandchild
+result and reactivation. All 432 public comparison states reach once; the
+eight functional callback-group states reach at least once. The independent
+model recomputes child/grandchild membership from source arrays. Missing
+grandchildren remain observable as `undefined`, rather than being normalized
+to an empty array. Unchanged production fails six of 202 tests, with all 192
+prior tests passing. Namespace-sidecar and joined-include-descriptor mutants
+fail the extended owner; repaired behavior also keeps callbacks free of private
+symbols. This covers eager synchronous source writes, not async demand,
+callback counts, ordering or metadata attribution. See the
+[prep-review evidence](oracle-reviews/2026-11-05-boundary-only-prep-review.md).
 
 [The replacement evidence record](oracle-reviews/2026-10-05-compound-joins.md)
 records RED admission on main, GREEN refinement, and hostile-mutant failures.
@@ -7473,3 +7691,26 @@ requests while joined work defers a reentrant pass, then check the real
 subscription receiving path. This remains separate from PR #2346's observer
 metadata-sharing and discarded-publication scope. The test, grammar and run
 budget remain unchanged; a green later random campaign does not close it.
+
+## Compiler group reduction boundary
+
+`packages/db/tests/query/compiler/group-by-pipeline-oracle.test.ts` retains the
+independent batch model formerly embedded in the ordinary
+`group-by-pipeline.test.ts`. Thirty finite histories cross explicit/implicit
+groups, no/plain/wrapped selection and five HAVING forms. Each compares keyed
+selected values after empty startup, population, a member move/value change,
+emptying and reentry: 150 comparison checkpoints, with each checkpoint declared
+and reached in every history. Checker calibrations reject a lost group, wrong
+key, wrong value and duplicate weight. Supplemental pending-state and admission
+examples remain in the ordinary file.
+
+Authority: the existing aggregate/group laws and the maintainer's 2026-11-05
+boundary-only metadata decision. Group reduction has no source Collection
+attribution; Collection publication supplies that metadata. The retired reducer
+pending/origin/Collection-ID expectations are therefore removed from this
+component judgment. The primary `virtual-row-fields-oracle.test.ts` continues
+to own genuine published metadata; no public comparison is weakened. The
+component covers numeric keys/sums and synchronous D2 graph drains, without
+correlated routes, public events, provider schedules or general aggregate shapes.
+The public aggregate-select and grouped-result-key owners retain those wider
+value/key contracts and their stated limits.

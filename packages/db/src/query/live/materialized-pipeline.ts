@@ -7,6 +7,10 @@ import {
   reduce,
   serializeValue,
 } from '@tanstack/db-ivm'
+import {
+  createPublicContainerShell,
+  stripInternalCallbackMetadata,
+} from '../compiler/route-metadata.js'
 import { codedMessage, devBuild } from '../../error-message.js'
 import {
   canonicalizeByPublicKey,
@@ -38,11 +42,18 @@ export type BucketRow = readonly [
   order: string | undefined,
 ]
 
+/** Resolves only compiler-authored include paths; source payloads are opaque. */
+export type ValueResolver = (
+  value: unknown,
+  resolveFacade: (value: unknown) => unknown,
+) => unknown
+
 export type BucketFacadeCompilation = {
   edgeId: string
   rows: IStreamBuilder<[string, BucketRow]>
   activeBuckets: IStreamBuilder<[string, true]>
   hasOrderBy: boolean
+  resolve?: ValueResolver
 }
 
 export const BUCKET_FACADE_REF = Symbol(`bucketFacadeRef`)
@@ -57,6 +68,7 @@ export type BucketFacadeRef = {
 export type MaterializedCompilation = {
   pipeline: ResultStream
   facades: Array<BucketFacadeCompilation>
+  resolve: ValueResolver
 }
 
 export type MaterializedRootCompilation = {
@@ -66,6 +78,7 @@ export type MaterializedRootCompilation = {
    * then carry no facade references or private route state to resolve.
    */
   facades: Array<BucketFacadeCompilation> | undefined
+  resolve?: ValueResolver
 }
 
 type BuiltRelations = WeakMap<
@@ -147,6 +160,7 @@ function materializeRelation(
         rows: activeBucketRows,
         activeBuckets,
         hasOrderBy: include.hasOrderBy,
+        resolve: child.resolve,
       })
       pipeline = attachCollectionInclude(
         pipeline,
@@ -166,7 +180,11 @@ function materializeRelation(
     }
   }
 
-  const result = { pipeline, facades }
+  const result = {
+    pipeline,
+    facades,
+    resolve: compileValueResolver(compilation.includes ?? []),
+  }
   built.set(compilation, { ...built.get(compilation), [scope]: result })
   return result
 }
@@ -420,4 +438,62 @@ function setNestedValue(
 
   target[path[path.length - 1]!] = value
   return root
+}
+
+// Materialization introduces references only at statically known include paths.
+// Walking an application document to rediscover those paths adds work unrelated
+// to the query. Build one resolver per relation and touch those paths only.
+function compileValueResolver(
+  includes: ReadonlyArray<IncludesCompilationResult>,
+  scalarField?: string,
+): ValueResolver {
+  const fields = includes.flatMap((include) => {
+    if (scalarField !== undefined && include.resultPath[0] !== scalarField)
+      return []
+    const path =
+      scalarField === undefined
+        ? include.resultPath
+        : include.resultPath.slice(1)
+    const child = compileValueResolver(
+      include.childCompilationResult.includes ?? [],
+      include.scalarField,
+    )
+    return [{ path, include, child }]
+  })
+  return (value, resolveFacade) => {
+    let result = stripInternalCallbackMetadata(value)
+    for (const { path, include, child } of fields) {
+      result = replaceIncludePath(result, path, 0, (included) => {
+        if (include.materialization === `collection`)
+          return resolveFacade(included)
+        if (include.materialization === `concat`) return included
+        if (include.materialization === `singleton`)
+          return child(included, resolveFacade)
+        if (!Array.isArray(included)) return included
+        const values = included.map((row) => child(row, resolveFacade))
+        return values.some((row, index) => row !== included[index])
+          ? values
+          : included
+      })
+    }
+    return result
+  }
+}
+
+function replaceIncludePath(
+  value: unknown,
+  path: ReadonlyArray<string>,
+  index: number,
+  replace: (value: unknown) => unknown,
+): unknown {
+  if (index === path.length) return replace(value)
+  if (value === null || typeof value !== `object`) return value
+  const key = path[index]!
+  const descriptor = Object.getOwnPropertyDescriptor(value, key)
+  if (!descriptor || !(`value` in descriptor)) return value
+  const next = replaceIncludePath(descriptor.value, path, index + 1, replace)
+  if (Object.is(next, descriptor.value)) return value
+  const descriptors = Object.getOwnPropertyDescriptors(value)
+  descriptors[key] = { ...descriptor, value: next }
+  return Object.defineProperties(createPublicContainerShell(value), descriptors)
 }

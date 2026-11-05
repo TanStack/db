@@ -5,6 +5,7 @@ export { recordOracleReplay } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `query.public-container-copy`,
   `pagination.limit-admission-replay-pending-negative`,
   `pagination.limit-admission-replay-pending-valid`,
   `pagination.limit-admission-builder-negative`,
@@ -322,6 +323,7 @@ const staticOracleProperties = [
   `query-identity.equality-partition`,
   `where-predicate.publication`,
   `join-result-key.pairs`,
+  `join-result-key.whole-source`,
   `group-result-key.groups`,
   `pooled-live-query.publication`,
   `flat-change-tracking.equivalence`,
@@ -398,6 +400,7 @@ const staticOracleProperties = [
   `includes-query-shape.correlation`,
   `includes-query-shape.multiplicity`,
   `includes-query-shape.nullable`,
+  `includes-work.projection-payload`,
   `includes-work.correlated-links`,
   `includes-work.join-free`,
   `includes-work.join-targets`,

@@ -5,7 +5,8 @@
  * (sync status, source, selection state) without being part of the persisted data model.
  *
  * Virtual properties are prefixed with `$` to distinguish them from user data fields.
- * User schemas should not include `$`-prefixed fields as they are reserved.
+ * The four virtual field names are reserved at published Collection row roots.
+ * Intermediate projections, callback inputs and inline values keep authored fields.
  */
 
 /**
