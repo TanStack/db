@@ -19,6 +19,17 @@
  * property's `reached` part or, as the framework's default, through the
  * driver's `observe("reach", state)`. A `slow` spec's driver takes about
  * 300 ms per history, so a small `timeout` fails every test that runs one.
+ * A spec with a `probe` binds `saw-0` to the production probe `synthetic#saw-0`
+ * and predicts that a history enters it when it holds a 0. The driver calls
+ * that probe first, with a condition: `agree` calls it with `true` when the
+ * history holds a 0 and `false` otherwise, `always` calls it with `true` in
+ * every history, `never` calls it with `false` in every history, `unreached`
+ * never calls it, and `late` calls it as `agree` does and once more, with
+ * `true`, from a timer it does not await. With `overReport`, the spec also reports `saw-0`
+ * as reached in every history, so only the agreement can keep its count
+ * right. `predict` is passed when the spec binds a probe, unless
+ * `predictMode` is `missing`; with `extra` it is passed although no state is
+ * bound.
  *
  * The synthetic ids come from a fixed pool, registered in oracle-config.
  */
@@ -66,6 +77,14 @@ export type SyntheticSpec = {
   timeout?: number
   /** Registers under an id no oracle configuration knows. */
   unregistered?: boolean
+  /** How the driver calls the probe bound to `saw-0`; absent, no probe. */
+  probe?: `agree` | `always` | `never` | `unreached` | `late`
+  /** Reports `saw-0` as reached in every history. */
+  overReport?: boolean
+  /** Calls an unbound probe on every run, entering it on every other one, so only determinism sees it. */
+  noisyProbe?: boolean
+  /** `missing` omits `predict` for a bound probe; `extra` passes it unbound. */
+  predictMode?: `missing` | `extra`
 }
 
 /** The synthetic language: one to three items, mostly ordinary ones. */
@@ -78,10 +97,37 @@ export const syntheticArbitrary: fc.Arbitrary<SyntheticHistory> = fc.array(
 )
 
 const allStates = [`saw-0`, `saw-1`, `saw-2`]
+const syntheticProbe = `synthetic#saw-0`
 let nonce = 0
+let noise = 0
 
-const reachedStates = (history: SyntheticHistory) =>
+const enteredStates = (history: SyntheticHistory) =>
   allStates.filter((state) => history.includes(Number(state.slice(4))))
+const reachedStates = (spec: SyntheticSpec) => (history: SyntheticHistory) =>
+  spec.overReport
+    ? [...new Set([...enteredStates(history), `saw-0`])]
+    : enteredStates(history)
+
+/**
+ * The condition the synthetic driver passes to the probe for this history, or
+ * undefined when it makes no call.
+ */
+const probeCondition = (
+  spec: SyntheticSpec,
+  history: SyntheticHistory,
+): boolean | undefined => {
+  switch (spec.probe) {
+    case `always`:
+      return true
+    case `never`:
+      return false
+    case `agree`:
+    case `late`:
+      return history.includes(0)
+    default:
+      return undefined
+  }
+}
 
 /**
  * The synthetic driver. `mutant` records a 3 in place of the first item, the
@@ -99,8 +145,35 @@ function syntheticDriver(spec: SyntheticSpec, mutant = false) {
         `${JSON.stringify({ id: spec.id, test: expect.getState().currentTestName ?? ``, history })}\n`,
       )
     if (spec.slow) await new Promise((resolve) => setTimeout(resolve, 300))
+    const condition = probeCondition(spec, history)
+    if (condition !== undefined)
+      process.env.NODE_ENV !== `production` &&
+        (
+          globalThis as {
+            __oracleProbe?: (name: string, condition: unknown) => void
+          }
+        ).__oracleProbe?.(`synthetic#saw-0`, condition)
+    if (spec.noisyProbe)
+      process.env.NODE_ENV !== `production` &&
+        (
+          globalThis as {
+            __oracleProbe?: (name: string, condition: unknown) => void
+          }
+        ).__oracleProbe?.(`synthetic#noise`, noise++ % 2 === 0)
+    // Production work the driver does not await, calling its probe after its history.
+    if (spec.probe === `late` && history.includes(0))
+      setTimeout(
+        () =>
+          process.env.NODE_ENV !== `production` &&
+          (
+            globalThis as {
+              __oracleProbe?: (name: string, condition: unknown) => void
+            }
+          ).__oracleProbe?.(`synthetic#saw-0`, true),
+        0,
+      )
     if (spec.reachVia === `observe`)
-      for (const state of reachedStates(history)) observe(`reach`, state)
+      for (const state of reachedStates(spec)(history)) observe(`reach`, state)
     for (const [index, item] of history.entries()) {
       observe(`item ${index}`, mutant && index === 0 ? 3 : item)
       if (item === 6)
@@ -162,7 +235,15 @@ export function syntheticProperty(spec: SyntheticSpec): void {
   const parts = {
     model: () => undefined,
     // Without `reached`, the framework counts the driver's `reach` records.
-    ...(spec.reachVia === `reached` ? { reached: reachedStates } : {}),
+    ...(spec.reachVia === `reached` ? { reached: reachedStates(spec) } : {}),
+    ...((spec.probe && spec.predictMode !== `missing`) ||
+    spec.predictMode === `extra`
+      ? {
+          predict: (history: SyntheticHistory) => ({
+            'saw-0': history.includes(0),
+          }),
+        }
+      : {}),
     driver: syntheticDriver(spec),
     calibrations: syntheticCalibrations(spec),
     ...(spec.timeout !== undefined ? { timeout: spec.timeout } : {}),
@@ -185,13 +266,20 @@ export function syntheticProperty(spec: SyntheticSpec): void {
     })
     return
   }
+  // With a probe, `saw-0` is a probe-bound state wherever it is declared.
+  const declare = (state: string) =>
+    spec.probe && state === `saw-0`
+      ? { name: state, probe: syntheticProbe }
+      : state
   oracleProperty({
     id,
     law,
     histories: {
       arbitrary: syntheticArbitrary,
-      states: spec.states,
-      measured: allStates.filter((state) => !spec.states.includes(state)),
+      states: spec.states.map(declare),
+      measured: allStates
+        .filter((state) => !spec.states.includes(state))
+        .map(declare),
       runs: spec.source.runs,
       fixedSeeds: [spec.source.seed],
       constructed: spec.constructed.map(({ name, prefix, enters }) => ({

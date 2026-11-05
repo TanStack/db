@@ -1,11 +1,11 @@
 /**
  * An `oracleProperty` keeps its parts' jobs separate (oracle rubric, ORC-003):
  * the driver touches production and the environment, and the model, the
- * check, and the reach classifier are functions of the history and the
- * recorded trace. A model that reads a clock or draws a random number gives a
+ * check, the reach classifier, and the state prediction are functions of the
+ * history and the recorded trace. A model that reads a clock or draws a random number gives a
  * different expectation for the same history, so a failure stops replaying
  * and the expectation is no longer independent of when it ran. This rule
- * reports a `model`, `check`, or `reached` part that reads a clock, draws
+ * reports a `model`, `check`, `reached`, or `predict` part that reads a clock, draws
  * ambient randomness, or schedules a timer, directly or through a function
  * declared in the same file.
  *
@@ -16,7 +16,7 @@
 
 import { findVariable } from '../registration.js'
 
-const pureParts = new Set([`model`, `check`, `reached`])
+const pureParts = new Set([`model`, `check`, `reached`, `predict`])
 const ambientMembers = new Set([
   `Date.now`,
   `Math.random`,
@@ -156,7 +156,9 @@ export default {
                   ? `verdict`
                   : part === `reached`
                     ? `set of reached states`
-                    : `expectation`,
+                    : part === `predict`
+                      ? `state prediction`
+                      : `expectation`,
             },
           })
         }

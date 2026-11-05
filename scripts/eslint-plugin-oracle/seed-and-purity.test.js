@@ -77,5 +77,11 @@ ruleTester.run(`pure-model`, pureModel, {
         `const reached = () => { setTimeout(() => {}); return [] }; oracleProperty({ id: 'x', model: () => 1, check: () => pass, reached })`,
       errors: [{ messageId: `impure` }],
     },
+    {
+      code:
+        header +
+        `oracleProperty({ id: 'x', model: () => 1, check: () => pass, predict: () => ({ s: Math.random() > 0.5 }) })`,
+      errors: [{ messageId: `impure` }],
+    },
   ],
 })

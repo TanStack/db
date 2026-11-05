@@ -53,6 +53,28 @@
  *   can name, such as "a failure while the seed is active", comes from
  *   `reached(history, trace, expected)` instead. Each campaign prints how many
  *   histories entered each declared state, including none (ORC-015).
+ * - A **state probe** binds a declared state, written `{ name, probe }` in
+ *   `states` or `measured`, to a production probe. Production calls
+ *   `process.env.NODE_ENV !== 'production' && globalThis.__oracleProbe?.("package#name", condition)`
+ *   where it decides whether it enters that state; `condition` is truthy when
+ *   production enters it. The framework collects the calls each history makes
+ *   inside that history's async context, and never shows them to the model or
+ *   the check. Two laws read them. A probe is **reached** in a history when
+ *   it was called at all, whatever its condition. A probe-bound state is
+ *   **entered** in a history when its probe was called with a truthy
+ *   condition. `predict(plan)` says, from the plan alone, whether the history
+ *   enters each probe-bound state. A history whose prediction disagrees with
+ *   its entries, in either direction, violates law `reach agreement` at
+ *   checkpoint `states`, after a driver error and the check's own violation,
+ *   so it shrinks and replays like any violation. A predicted entry that does
+ *   not happen says why: its probe was never reached, or it was reached with a
+ *   false condition, which need different fixes. A probe-bound state counts as
+ *   reached only where the prediction and the entry agree, whatever `reached`
+ *   or the driver's `reach` records say. Two calibrations per probe force its
+ *   entry to be true and to be false; the check must reject both. The
+ *   determinism test compares the probe calls each run makes. A call that
+ *   arrives after its history's driver settled throws where it happens: the
+ *   driver must await the work it starts.
  * - A **constructed history** is built from a generated history so that it
  *   reaches states that the laws need, and it names those declared states.
  *   Every campaign runs every constructed history once as an example, and a
@@ -105,6 +127,7 @@
  * oracle test whose parts are its arguments, when its options are an object
  * literal with a `check`. The property is its own declaration.
  */
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { appendFileSync } from 'node:fs'
 import { isDeepStrictEqual } from 'node:util'
 import fc from 'fast-check'
@@ -328,6 +351,13 @@ export interface ConstructedHistory<History> {
   build: (generated: History) => History
 }
 
+/**
+ * A declared state: its name, or its name and the production probe that marks
+ * it (`package#name`). A probe-bound state's reach is the agreement between
+ * the property's `predict` and the probe's entries.
+ */
+export type DeclaredState = string | { name: string; probe: string }
+
 export interface GeneratedHistories<History> {
   arbitrary: fc.Arbitrary<History>
   /**
@@ -335,12 +365,12 @@ export interface GeneratedHistories<History> {
    * constructed history, so every campaign reaches it. Each campaign reports
    * how many histories entered each one, including none.
    */
-  states?: ReadonlyArray<string>
+  states?: ReadonlyArray<DeclaredState>
   /**
    * States that are counted but not required. A reached state outside
    * `states` and `measured` fails, so a misspelled state cannot pass unseen.
    */
-  measured?: ReadonlyArray<string>
+  measured?: ReadonlyArray<DeclaredState>
   /** The base run budget of each campaign, scaled by the run multiplier. */
   runs: number
   /** One fixed-seed campaign per seed, beside the random campaign. */
@@ -402,6 +432,11 @@ export interface OraclePropertyOptions<History, Expected, Plan = History> {
     expected: Expected,
   ) => Verdict
   calibrations?: ReadonlyArray<Calibration<History, Plan>>
+  /**
+   * Whether the history enters each probe-bound state, from the plan alone:
+   * a prediction never sees the trace, so it cannot follow production.
+   */
+  predict?: (plan: Plan) => Readonly<Record<string, boolean>>
   /** Each registered test's limit in milliseconds; 120 seconds by default. */
   timeout?: number
 }
@@ -410,11 +445,72 @@ declare global {
   // Installed by the gap report's test setup, absent otherwise.
   var __oracleObserve:
     ((checkpoint: string, value: unknown) => void) | undefined
+  // Production probes call this in development builds; see `probes`.
+  var __oracleProbe:
+    | ((name: string, condition: unknown) => void)
+    | undefined
+  // Installed by the gap report's test setup, absent otherwise. It receives
+  // every law violation the framework raises, so a mutant's kill is
+  // classified by the law that rejected it rather than by its message.
+  // Installed by the gap report's test setup, absent otherwise. Each
+  // registered test reports its route before it runs.
+  var __oracleRoute: ((route: string) => void) | undefined
+  var __oracleVerdict:
+    | ((verdict: { property: string; law: string; checkpoint: string }) => void)
+    | undefined
 }
+
+/** The probe calls one history made: which probes it reached and which it entered. */
+interface ProbeRecord {
+  reached: ReadonlySet<string>
+  entered: ReadonlySet<string>
+}
+/** A history's probe record, open until its driver settles. */
+interface ProbeWindow {
+  reached: Set<string>
+  entered: Set<string>
+  open: boolean
+}
+const probeWindows = new AsyncLocalStorage<ProbeWindow>()
+// Outside any history, such as in an ordinary test, a probe does nothing. A
+// call that arrives after its history's driver settled throws where it
+// arrives: the driver did not await work that production started.
+globalThis.__oracleProbe = (name, condition) => {
+  const window = probeWindows.getStore()
+  if (!window) return
+  if (!window.open)
+    throw new Error(
+      `probe ${name} was called after its history ended. The driver must await the work it starts, so every probe call belongs to one history.`,
+    )
+  window.reached.add(name)
+  if (condition) window.entered.add(name)
+}
+
+/** A calibration's forced entry: the probe is reached, and its entry is forced to the stated value. */
+interface ForcedProbe {
+  probe: string
+  entered: boolean
+}
+const agreementLaw = `reach agreement`
+
+/** A property's options with the probes its declared states bind, by state. */
+type BoundOptions<History, Expected, Plan> = OraclePropertyOptions<
+  History,
+  Expected,
+  Plan
+> & { probes?: ReadonlyMap<string, string> }
+
+const stateName = (state: DeclaredState) =>
+  typeof state === `string` ? state : state.name
 
 /** One test that a property registers. */
 interface PropertyTest {
   name: string
+  /**
+   * The test's route, which the gap report reads to tell a reproducible kill
+   * from a random-only one or a framework check (`__oracleRoute`).
+   */
+  route: string
   run: () => Promise<void>
   /** Path replays this test runs during; empty stands aside during every one. */
   replays: ReadonlyArray<string>
@@ -427,6 +523,10 @@ export function oracleProperty<History, Expected, Plan = History>(
   // entries exist; an enumerated source has no random campaign to check it.
   assertRegisteredOracleProperty(options.id)
   const { id, histories } = options
+  if (Array.isArray(histories) && options.predict)
+    throw new Error(
+      `${id}: \`predict\` needs probe-bound states, which only a generated source declares.`,
+    )
   recordRegistration(id, options.law, histories)
   // The tests are built as data first, so every one registers unconditionally
   // (oracle/no-disabled).
@@ -437,7 +537,10 @@ export function oracleProperty<History, Expected, Plan = History>(
     for (const test of tests)
       oracleReplayTest(it, ...test.replays)(
         test.name,
-        test.run,
+        () => {
+          globalThis.__oracleRoute?.(test.route)
+          return test.run()
+        },
         options.timeout ?? 120_000,
       )
   })
@@ -474,6 +577,7 @@ function enumeratedTest<History, Expected, Plan>(
     const name = options.label?.(history) ?? JSON.stringify(history)
     return {
       name,
+      route: `enumerated`,
       replays: [],
       run: async () => {
         const { verdict } = await runOne(options, history)
@@ -498,8 +602,24 @@ async function recordTrace<Plan>(
   plan: Plan,
 ): Promise<Array<Observation>> {
   const observations: Array<Observation> = []
-  await driver(plan, (checkpoint, value) => {
-    observations.push({ checkpoint, value })
+  const window: ProbeWindow = {
+    reached: new Set(),
+    entered: new Set(),
+    open: true,
+  }
+  await probeWindows.run(window, () =>
+    driver(plan, (checkpoint, value) => {
+      observations.push({ checkpoint, value })
+    }),
+  )
+  window.open = false
+  // The probe calls a history makes are part of what a deterministic driver repeats.
+  observations.push({
+    checkpoint: `probes`,
+    value: {
+      reached: [...window.reached].sort(),
+      entered: [...window.entered].sort(),
+    },
   })
   return observations
 }
@@ -529,11 +649,12 @@ function traceText(value: unknown): string {
 }
 
 function determinismTest<History, Expected, Plan>(
-  options: OraclePropertyOptions<History, Expected, Plan>,
+  options: BoundOptions<History, Expected, Plan>,
   histories: () => ReadonlyArray<{ name: string; history: History }>,
 ): PropertyTest {
   return {
     name: `determinism`,
+    route: `determinism`,
     replays: [],
     run: async () => {
       for (const { name, history } of histories()) {
@@ -572,17 +693,22 @@ function determinismTest<History, Expected, Plan>(
 
 /** Runs one history: the driver records, the model predicts, the check judges. */
 async function runOne<History, Expected, Plan>(
-  options: OraclePropertyOptions<History, Expected, Plan>,
+  options: BoundOptions<History, Expected, Plan>,
   history: History,
   driver: OraclePropertyOptions<
     History,
     Expected,
     Plan
   >[`driver`] = options.driver,
+  forced?: ForcedProbe,
 ): Promise<{ verdict: Verdict; reached: Set<string> }> {
   const plan = planOf(options, history)
-  const { observations, driverError } = await recordGuarded(driver, plan)
-  return judge(options, plan, observations, driverError)
+  const { observations, driverError, probes } = await recordGuarded(
+    driver,
+    plan,
+    forced,
+  )
+  return judge(options, plan, observations, driverError, probes)
 }
 
 /** Runs the driver and keeps an error that escapes it beside the trace. */
@@ -592,34 +718,56 @@ async function recordGuarded<Plan>(
     observe: (checkpoint: string, value: unknown) => void,
   ) => Promise<void> | void,
   plan: Plan,
+  forced?: ForcedProbe,
 ): Promise<{
   observations: Array<Observation>
   driverError?: { error: unknown }
+  probes: ProbeRecord
 }> {
   const observations: Array<Observation> = []
-  try {
-    await driver(plan, (checkpoint, value) => {
-      observations.push({ checkpoint, value })
-      globalThis.__oracleObserve?.(checkpoint, value)
-    })
-  } catch (error) {
-    return { observations, driverError: { error } }
+  const window: ProbeWindow = {
+    reached: new Set(),
+    entered: new Set(),
+    open: true,
   }
-  return { observations }
+  const close = (): ProbeRecord => {
+    window.open = false
+    // A forced entry is a call with that condition, so the probe is reached.
+    if (forced) {
+      window.reached.add(forced.probe)
+      if (forced.entered) window.entered.add(forced.probe)
+      else window.entered.delete(forced.probe)
+    }
+    return window
+  }
+  try {
+    await probeWindows.run(window, () =>
+      driver(plan, (checkpoint, value) => {
+        observations.push({ checkpoint, value })
+        globalThis.__oracleObserve?.(checkpoint, value)
+      }),
+    )
+  } catch (error) {
+    return { observations, driverError: { error }, probes: close() }
+  }
+  return { observations, probes: close() }
 }
 
 /** The model predicts and the check judges a recorded trace. */
 function judge<History, Expected, Plan>(
-  options: OraclePropertyOptions<History, Expected, Plan>,
+  options: BoundOptions<History, Expected, Plan>,
   plan: Plan,
   observations: ReadonlyArray<Observation>,
   driverError?: { error: unknown },
+  probes: ProbeRecord = { reached: new Set(), entered: new Set() },
 ): { verdict: Verdict; reached: Set<string> } {
   let expected: Expected
   let verdict: Verdict
+  let predicted: Readonly<Record<string, boolean>> = {}
   try {
     expected = options.model(plan, observations)
     verdict = options.check(plan, observations, expected)
+    predicted = options.predict?.(plan) ?? {}
   } catch (error) {
     // A partial trace the model or check cannot read is still a setup error.
     throw driverError ? driverError.error : error
@@ -640,6 +788,22 @@ function judge<History, Expected, Plan>(
         .filter((entry) => entry.checkpoint === `reach`)
         .map((entry) => String(entry.value)),
   )
+  // Agreement: the model's prediction and the probes' entries name the same
+  // probe-bound states. Only an agreed entry counts as reach.
+  for (const [state, probe] of options.probes ?? []) {
+    const predicts = predicted[state] === true
+    const entered = probes.entered.has(probe)
+    reached.delete(state)
+    if (predicts && entered) reached.add(state)
+    if (predicts === entered || verdict.kind === `violation`) continue
+    verdict = violation(
+      `states`,
+      predicts
+        ? `the model predicts that this history enters "${state}", but probe ${probe} ${probes.reached.has(probe) ? `was reached with a false condition` : `was never reached`}`
+        : `probe ${probe} was entered, but the model predicts that this history does not enter "${state}"`,
+      agreementLaw,
+    )
+  }
   return { verdict, reached }
 }
 
@@ -651,56 +815,84 @@ const lawOf = (verdict: Extract<Verdict, { kind: `violation` }>) =>
  * wrong answer applies, and requires the check to report the named law.
  */
 function calibrationTests<History, Expected, Plan>(
-  options: OraclePropertyOptions<History, Expected, Plan>,
+  options: BoundOptions<History, Expected, Plan>,
   candidates: () => ReadonlyArray<{ name: string; history: History }>,
 ): Array<PropertyTest> {
   const { id } = options
-  return (options.calibrations ?? []).map((calibration) => ({
-    name: `calibration: ${calibration.name}`,
-    replays: [],
-    run: async () => {
-      const seen: Array<string> = []
-      for (const { name, history } of candidates()) {
-        const plan = planOf(options, history)
-        if (`corrupt` in calibration) {
-          const { observations, driverError } = await recordGuarded(
-            options.driver,
-            plan,
-          )
-          const corrupted = calibration.corrupt(observations, plan)
-          if (corrupted === undefined) continue
-          // A calibration is meaningful only where the true trace passes, so
-          // a candidate whose clean trace fails, or whose driver throws, is
-          // skipped; that history fails in its own test.
+  // Each probe-bound state also gets two forced-entry calibrations.
+  const forcedCalibrations = [...(options.probes ?? [])].flatMap(
+    ([state, probe]) =>
+      [true, false].map((entered) => ({
+        name: `probe ${probe} forced ${entered ? `entered` : `not entered`} (state "${state}")`,
+        law: agreementLaw,
+        forced: { probe, entered },
+      })),
+  )
+  return [...(options.calibrations ?? []), ...forcedCalibrations].map(
+    (calibration) => ({
+      name: `calibration: ${calibration.name}`,
+      route: `forced` in calibration ? `probe calibration` : `calibration`,
+      replays: [],
+      run: async () => {
+        const seen: Array<string> = []
+        for (const { name, history } of candidates()) {
+          const plan = planOf(options, history)
+          if (`corrupt` in calibration) {
+            const { observations, driverError, probes } = await recordGuarded(
+              options.driver,
+              plan,
+            )
+            const corrupted = calibration.corrupt(observations, plan)
+            if (corrupted === undefined) continue
+            // A calibration is meaningful only where the true trace passes, so
+            // a candidate whose clean trace fails, or whose driver throws, is
+            // skipped; that history fails in its own test.
+            if (
+              driverError ||
+              judge(options, plan, observations, undefined, probes).verdict
+                .kind !== `pass`
+            )
+              continue
+            const wrong = judge(
+              options,
+              plan,
+              corrupted,
+              undefined,
+              probes,
+            ).verdict
+            if (wrong.kind === `violation` && lawOf(wrong) === calibration.law)
+              return
+            throw new Error(
+              `${id}: calibration "${calibration.name}" corrupted the trace of "${name}", but the check ${wrong.kind === `pass` ? `passed it` : `reported law "${lawOf(wrong)}"`}. It must report law "${calibration.law}".`,
+            )
+          }
+          // The real driver's trace of the candidate must pass first.
+          const clean = await recordGuarded(options.driver, plan)
           if (
-            driverError ||
-            judge(options, plan, observations).verdict.kind !== `pass`
+            clean.driverError ||
+            judge(options, plan, clean.observations, undefined, clean.probes)
+              .verdict.kind !== `pass`
           )
             continue
-          const wrong = judge(options, plan, corrupted).verdict
-          if (wrong.kind === `violation` && lawOf(wrong) === calibration.law)
-            return
-          throw new Error(
-            `${id}: calibration "${calibration.name}" corrupted the trace of "${name}", but the check ${wrong.kind === `pass` ? `passed it` : `reported law "${lawOf(wrong)}"`}. It must report law "${calibration.law}".`,
-          )
+          const { verdict } =
+            `forced` in calibration
+              ? await runOne(
+                  options,
+                  history,
+                  options.driver,
+                  calibration.forced,
+                )
+              : await runOne(options, history, calibration.driver)
+          if (verdict.kind === `pass`) continue
+          if (lawOf(verdict) === calibration.law) return
+          seen.push(`"${name}" reported law "${lawOf(verdict)}"`)
         }
-        // The real driver's trace of the candidate must pass first.
-        const clean = await recordGuarded(options.driver, plan)
-        if (
-          clean.driverError ||
-          judge(options, plan, clean.observations).verdict.kind !== `pass`
+        throw new Error(
+          `${id}: calibration "${calibration.name}" found no history whose clean trace passes and where the check reports law "${calibration.law}"${seen.length ? `; ${seen.slice(0, 3).join(`, `)}` : ``}. Add a passing fixed or constructed history that reaches the state its wrong answer changes.`,
         )
-          continue
-        const { verdict } = await runOne(options, history, calibration.driver)
-        if (verdict.kind === `pass`) continue
-        if (lawOf(verdict) === calibration.law) return
-        seen.push(`"${name}" reported law "${lawOf(verdict)}"`)
-      }
-      throw new Error(
-        `${id}: calibration "${calibration.name}" found no history whose clean trace passes and where the check reports law "${calibration.law}"${seen.length ? `; ${seen.slice(0, 3).join(`, `)}` : ``}. Add a passing fixed or constructed history that reaches the state its wrong answer changes.`,
-      )
-    },
-  }))
+      },
+    }),
+  )
 }
 
 function failure<History>(
@@ -710,6 +902,11 @@ function failure<History>(
   rerun: string,
 ): OracleViolation {
   const { id, law } = options
+  globalThis.__oracleVerdict?.({
+    property: id,
+    law: lawOf(verdict),
+    checkpoint: verdict.checkpoint,
+  })
   const error = new OracleViolation(
     [
       `${id} violated at checkpoint "${verdict.checkpoint}"${verdict.law ? ` (law: ${verdict.law})` : ``}.`,
@@ -737,21 +934,32 @@ function rerunByName(name: string): string {
 }
 
 function generatedTests<History, Expected, Plan>(
-  options: OraclePropertyOptions<History, Expected, Plan>,
+  unbound: OraclePropertyOptions<History, Expected, Plan>,
   source: GeneratedHistories<History>,
 ): Array<PropertyTest> {
-  const { id } = options
+  const { id } = unbound
+  const declaredStates = [...(source.states ?? []), ...(source.measured ?? [])]
+  const probes = new Map(
+    declaredStates.flatMap((state) =>
+      typeof state === `string` ? [] : [[state.name, state.probe] as const],
+    ),
+  )
+  if (probes.size > 0 !== (unbound.predict !== undefined))
+    throw new Error(
+      `${id}: a probe-bound state needs \`predict\`, and \`predict\` needs a probe-bound state. Declare the state as { name, probe }.`,
+    )
+  const options: BoundOptions<History, Expected, Plan> =
+    probes.size > 0 ? { ...unbound, probes } : unbound
+  const required = (source.states ?? []).map(stateName)
   const constructions = source.constructed ?? []
   const declared =
     source.states || source.measured
-      ? new Set([...(source.states ?? []), ...(source.measured ?? [])])
+      ? new Set(declaredStates.map(stateName))
       : undefined
   const named = new Set(
     constructions.flatMap((construction) => construction.enters),
   )
-  const unconstructed = (source.states ?? []).filter(
-    (state) => !named.has(state),
-  )
+  const unconstructed = required.filter((state) => !named.has(state))
   if (unconstructed.length > 0)
     throw new Error(
       `${id}: no constructed history enters ${unconstructed.join(`, `)}. A required state needs a constructed history; a state that is only counted belongs in \`measured\`.`,
@@ -770,8 +978,7 @@ function generatedTests<History, Expected, Plan>(
         )
   for (const construction of constructions) {
     const undeclared = construction.enters.filter(
-      (state) =>
-        declared !== undefined && !(source.states ?? []).includes(state),
+      (state) => declared !== undefined && !required.includes(state),
     )
     if (undeclared.length > 0)
       throw new Error(
@@ -868,6 +1075,7 @@ function generatedTests<History, Expected, Plan>(
   }
   const fixedCampaigns = source.fixedSeeds.map((seed): PropertyTest => ({
     name: `fixed seed ${seed}`,
+    route: `fixed seed`,
     replays: [],
     run: () =>
       runCampaign(`fixed seed ${seed}`, seed, (examples) =>
@@ -881,6 +1089,7 @@ function generatedTests<History, Expected, Plan>(
   // rebuilds the same constructed histories, which the replay path counts.
   const randomCampaign: PropertyTest = {
     name: `random seed`,
+    route: `random seed`,
     replays: [id],
     run: () => {
       // One call selects and logs the seed; a replay reads that log line.
@@ -892,6 +1101,7 @@ function generatedTests<History, Expected, Plan>(
   }
   const fixedTests = (source.fixed ?? []).map((fixed): PropertyTest => ({
     name: `fixed history: ${fixed.name}`,
+    route: `fixed history`,
     replays: [],
     run: async () => {
       if (!source.arbitrary.canShrinkWithoutContext(fixed.history))

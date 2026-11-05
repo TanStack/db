@@ -26,6 +26,21 @@
  *   mutant driver) fails with the named law.
  * - `determinism`: the determinism test runs every fixed and constructed history
  *   and three generated ones, and fails for a driver whose trace changes.
+ * - `agreement`: for a probe-bound state, a history whose `predict` says it
+ *   enters the state while the history does not enter it, or does not enter
+ *   it while the history does, violates law `reach agreement` at checkpoint
+ *   `states`, after a driver error and a law violation and before a
+ *   constructed history's missed state. A history enters the state when its
+ *   probe was called with a truthy condition, and a probe is reached when it
+ *   was called at all. A predicted entry that fails says why: the probe was
+ *   never reached, or it was reached with a false condition. The state counts
+ *   as reached only where the prediction and the entry agree, whatever the
+ *   property's own reach reports. The property registers two forced-entry
+ *   calibrations, which pass exactly when a candidate whose clean trace passes
+ *   disagrees with the forced entry. A probe-bound state without `predict`, or
+ *   `predict` without one, fails to load. A call after its history ended is an
+ *   unhandled error of the run, and a driver whose probe records differ between
+ *   two runs fails the determinism test.
  * - `timeout`: a property's `timeout` limits every test it registers.
  * - `replay`: replaying a failing campaign's seed and path runs only that
  *   property's random campaign, starts from the counterexample itself, and
@@ -35,7 +50,8 @@
  *   property, the seed it runs, and no other test logs one; a replay tool
  *   reads that line.
  *
- * Authority: the contract in the header of `oracle-property.ts`; the
+ * Authority: the contract in the header of `oracle-property.ts`, including
+ * its state probes (user decision of 2026-11-04 adopting differential reach); the
  * maintainer decisions of 2026-11-03 on calibration candidates, failure
  * precedence, and determinism scope; and the oracle rubric's replay
  * (ORC-007), calibration (ORC-006), and declared-reach (ORC-015) rules.
@@ -46,7 +62,9 @@
  * (its constructed histories) first, in order. A replay or rerun probe covers
  * every failing campaign but only the first violating fixed or enumerated history of each
  * property. The gap report's observation hook, `forwardCut`, `withinTurns`,
- * and `differs` have no law here.
+ * and `differs` have no law here. Only generated sources bind a probe, and only
+ * `saw-0`. A late probe is judged by whether the run reports it, not by which
+ * test Vitest blames.
  */
 import { spawnSync } from 'node:child_process'
 import {
@@ -96,6 +114,11 @@ type Draft = {
   calibrations: Array<(typeof calibrationKinds)[number]>
   /** An id no oracle configuration registers. */
   unregistered: boolean
+  /** How the driver calls the probe bound to `saw-0`; `none` binds no probe. */
+  probe: `none` | `agree` | `always` | `never` | `unreached` | `late`
+  overReport: boolean
+  noisyProbe: boolean
+  predictMode: `match` | `missing` | `extra`
 }
 type Suite = { drafts: Array<Draft> }
 
@@ -169,6 +192,34 @@ const draft: fc.Arbitrary<Draft> = fc.record({
     { weight: 9, arbitrary: fc.constant(false) },
     { weight: 1, arbitrary: fc.constant(true) },
   ),
+  probe: fc.oneof(
+    { weight: 5, arbitrary: fc.constant(`none` as const) },
+    { weight: 2, arbitrary: fc.constant(`agree` as const) },
+    {
+      weight: 2,
+      arbitrary: fc.constantFrom(
+        `always` as const,
+        `never` as const,
+        `unreached` as const,
+        `late` as const,
+      ),
+    },
+  ),
+  overReport: fc.oneof(
+    { weight: 4, arbitrary: fc.constant(false) },
+    { weight: 1, arbitrary: fc.constant(true) },
+  ),
+  noisyProbe: fc.oneof(
+    { weight: 9, arbitrary: fc.constant(false) },
+    { weight: 1, arbitrary: fc.constant(true) },
+  ),
+  predictMode: fc.oneof(
+    { weight: 12, arbitrary: fc.constant(`match` as const) },
+    {
+      weight: 1,
+      arbitrary: fc.constantFrom(`missing` as const, `extra` as const),
+    },
+  ),
 })
 const suite: fc.Arbitrary<Suite> = fc.record({
   drafts: fc.array(draft, { minLength: 1, maxLength: 2 }),
@@ -221,6 +272,10 @@ function resolveSuite({ drafts }: Suite): Plan {
         nondeterministic: d.nondeterministic,
         reachVia: d.reachVia,
         ...(d.unregistered ? { unregistered: true } : {}),
+        ...(generated && d.probe !== `none` ? { probe: d.probe } : {}),
+        ...(d.overReport ? { overReport: true } : {}),
+        ...(d.noisyProbe ? { noisyProbe: true } : {}),
+        ...(d.predictMode !== `match` ? { predictMode: d.predictMode } : {}),
         ...(d.timing === `slow` ? { slow: true, timeout: 100 } : {}),
         calibrations: d.calibrations.map((kind, at) => ({
           name: `cal-${at}`,
@@ -258,11 +313,15 @@ type Kind =
   | `timeout`
 type Outcome = {
   kind: Kind
-  law?: `three` | `four`
+  law?: `three` | `four` | `reach agreement`
   /** A violation whose driver threw afterwards carries that error. */
   cause?: `driver`
+  /** The checkpoint a framework-made violation names. */
+  checkpoint?: string
+  /** For a predicted entry that did not happen: whether the probe was called. */
+  diagnosis?: `never-reached` | `false-condition`
 }
-type LogEntry = { id: string; test: string; history: SyntheticHistory }
+type LogEntry ={ id: string; test: string; history: SyntheticHistory }
 
 const allowed = (item: number) => [0, 1, 2, 3, 4, 6].includes(item)
 const member = (history: SyntheticHistory) =>
@@ -285,8 +344,90 @@ function verdictOf(history: SyntheticHistory): Outcome {
 }
 const statesOf = (history: SyntheticHistory) =>
   allStates.filter((state) => history.includes(Number(state.slice(4))))
-const reaches = (history: SyntheticHistory, states: ReadonlyArray<string>) =>
-  states.every((state) => statesOf(history).includes(state))
+const reaches = (
+  spec: SyntheticSpec,
+  history: SyntheticHistory,
+  states: ReadonlyArray<string>,
+) => states.every((state) => reachedOf(spec, history).includes(state))
+// Model law for a probe-bound `saw-0`: the model predicts entry when the
+// history holds a 0. The synthetic driver calls its probe by its mode (the
+// fixture says how), with a condition. A history enters the state when the
+// probe is called with a truthy condition; the probe is reached when it is
+// called at all. A disagreement violates `reach agreement` once the history has
+// no driver error and no law violation of its own.
+const agreementLaw = `reach agreement`
+const syntheticProbe = `synthetic#saw-0`
+const predictsZero = (history: SyntheticHistory) => history.includes(0)
+// The condition of the driver's call in this history, or undefined when it
+// makes no call.
+const callFor = (spec: SyntheticSpec, history: SyntheticHistory) => {
+  switch (spec.probe) {
+    case `always`:
+      return true
+    case `never`:
+      return false
+    case `agree`:
+    case `late`:
+      return predictsZero(history)
+    default:
+      return undefined
+  }
+}
+// A forced calibration forces entry, and a forced entry is a call with that
+// condition, so it is reached.
+const reachedFor = (
+  spec: SyntheticSpec,
+  history: SyntheticHistory,
+  forced?: boolean,
+) => forced !== undefined || callFor(spec, history) !== undefined
+const enteredFor = (
+  spec: SyntheticSpec,
+  history: SyntheticHistory,
+  forced?: boolean,
+) => forced ?? callFor(spec, history) === true
+function judged(
+  spec: SyntheticSpec,
+  history: SyntheticHistory,
+  forced?: boolean,
+): Outcome {
+  const verdict = verdictOf(history)
+  if (verdict.kind !== `pass` || !spec.probe) return verdict
+  const predicts = predictsZero(history)
+  if (enteredFor(spec, history, forced) === predicts)
+    return verdict
+  // A predicted entry that did not happen says whether the probe was called.
+  return {
+    kind: `violation`,
+    law: agreementLaw,
+    checkpoint: `states`,
+    ...(predicts
+      ? {
+          diagnosis: reachedFor(spec, history, forced)
+            ? `false-condition`
+            : `never-reached`,
+        }
+      : {}),
+  }
+}
+// A probe-bound `saw-0` counts only where prediction and entry agree. An
+// over-reporting spec claims `saw-0` in every history; only the agreement can
+// take that claim back.
+const reachedOf = (spec: SyntheticSpec, history: SyntheticHistory) =>
+  [
+    ...new Set([...statesOf(history), ...(spec.overReport ? [`saw-0`] : [])]),
+  ].filter(
+    (state) =>
+      !spec.probe ||
+      state !== `saw-0` ||
+      (predictsZero(history) && enteredFor(spec, history)),
+  )
+const forcedCalibrationNames = (spec: SyntheticSpec) =>
+  spec.probe
+    ? [true, false].map(
+        (entered) =>
+          `calibration: probe ${syntheticProbe} ${entered ? `forced entered` : `forced not entered`} (state "saw-0")`,
+      )
+    : []
 const label = (history: SyntheticHistory) => `items ${history.join(` | `)}`
 const isCampaign = (name: string) =>
   name.startsWith(`fixed seed`) || name === `random seed`
@@ -320,6 +461,13 @@ function predictSpec(
   const generated = spec.source.kind === `generated`
   // Every source, enumerated or generated, must name a registered property.
   if (spec.unregistered) return { loads: false }
+  // `predict` and a probe-bound state come together, and only a generated
+  // source declares states.
+  if (
+    (spec.probe && spec.predictMode === `missing`) ||
+    (!spec.probe && spec.predictMode === `extra`)
+  )
+    return { loads: false }
   if (generated) {
     const declared = new Set(spec.states)
     const entered = new Set(
@@ -344,6 +492,7 @@ function predictSpec(
   const all = [
     ...names,
     ...spec.calibrations.map(({ name }) => `calibration: ${name}`),
+    ...forcedCalibrationNames(spec),
     `determinism`,
   ]
   // A slow driver outlives the 100 ms limit in every test that runs a
@@ -357,7 +506,7 @@ function predictSpec(
   // the corruption applies to every candidate.
   const calibrate = (name: string, kind: (typeof calibrationKinds)[number]) => {
     const used = ran(`calibration: ${name}`).find(
-      (history) => verdictOf(history).kind === `pass`,
+      (history) => judged(spec, history).kind === `pass`,
     )
     if (!used) return { kind: `calibration-none` } as Outcome
     if (kind === `right` || kind === `driver`)
@@ -371,11 +520,14 @@ function predictSpec(
   // fails it even without fixed or constructed histories.
   const determinism = (): Outcome => {
     const histories = ran(`determinism`).filter((_, at) => at % 2 === 0)
+    // An unbound probe that enters on every other run changes only the probe
+    // records a run keeps, which the determinism test also compares.
+    const varies = spec.nondeterministic || spec.noisyProbe === true
     for (const history of histories) {
       if (history.includes(6)) return { kind: `setup` }
-      if (spec.nondeterministic) return { kind: `determinism` }
+      if (varies) return { kind: `determinism` }
     }
-    if (spec.nondeterministic && generated) return { kind: `determinism` }
+    if (varies && generated) return { kind: `determinism` }
     return { kind: `pass` }
   }
   // A driver error decides a history first, then a law violation, then a
@@ -389,10 +541,10 @@ function predictSpec(
     )
       return { kind: `constructed-membership` }
     for (const [at, history] of ran(test).entries()) {
-      const { cause: _shrinkable, ...verdict } = verdictOf(history)
+      const { cause: _shrinkable, ...verdict } = judged(spec, history)
       if (verdict.kind !== `pass`) return verdict
       const construction = spec.constructed[at]
-      if (construction && !reaches(history, construction.enters))
+      if (construction && !reaches(spec, history, construction.enters))
         return { kind: `constructed-reach` }
     }
     return { kind: `pass` }
@@ -404,14 +556,14 @@ function predictSpec(
     tests.set(names[0]!, campaign(names[0]!))
     tests.set(`random seed`, campaign(`random seed`))
     for (const fixedHistory of spec.fixed) {
-      const verdict = verdictOf(fixedHistory.history)
+      const verdict = judged(spec, fixedHistory.history)
       tests.set(
         `fixed history: ${fixedHistory.name}`,
         !member(fixedHistory.history)
           ? { kind: `fixed-membership` }
           : verdict.kind !== `pass`
             ? verdict
-            : !reaches(fixedHistory.history, fixedHistory.enters ?? [])
+            : !reaches(spec, fixedHistory.history, fixedHistory.enters ?? [])
               ? { kind: `fixed-reach` }
               : { kind: `pass` },
       )
@@ -419,6 +571,22 @@ function predictSpec(
   }
   for (const { name, kind } of spec.calibrations)
     tests.set(`calibration: ${name}`, calibrate(name, kind))
+  // A forced-probe calibration needs a candidate whose clean trace passes and
+  // whose prediction differs from the forced probe; the check must then report
+  // reach agreement.
+  for (const [at, name] of forcedCalibrationNames(spec).entries()) {
+    const forced = at === 0
+    tests.set(
+      name,
+      ran(name).some(
+        (history) =>
+          judged(spec, history).kind === `pass` &&
+          predictsZero(history) !== forced,
+      )
+        ? { kind: `pass` }
+        : { kind: `calibration-none` },
+    )
+  }
   tests.set(`determinism`, determinism())
   // The determinism and calibration tests build constructed histories too, so a
   // constructed history outside the language fails them the same way it fails a campaign.
@@ -441,8 +609,9 @@ function predictSpec(
         Object.fromEntries(
           allStates.map((state) => [
             state,
-            ran(name).filter((history) => statesOf(history).includes(state))
-              .length,
+            ran(name).filter((history) =>
+              reachedOf(spec, history).includes(state),
+            ).length,
           ]),
         ),
       )
@@ -480,6 +649,17 @@ function suiteModel(
   return new Map(plan.specs.map((spec) => [spec.id, predictSpec(spec, logged)]))
 }
 
+// A late spec calls its probe again, unawaited, after every history holding a
+// 0 that a loaded property ran, and each such firing throws.
+const lateProbeOwed = (plan: Plan, logged: ReadonlyArray<LogEntry>) =>
+  plan.specs.some(
+    (spec) =>
+      spec.probe === `late` &&
+      spec.predictMode !== `missing` &&
+      !spec.unregistered &&
+      logged.some((entry) => entry.id === spec.id && entry.history.includes(0)),
+  )
+
 // The self-oracle's own reach: states of the framework that its laws are
 // about. Each fixed history names the state it witnesses, so every one is reached on
 // every run; campaigns count them.
@@ -501,6 +681,13 @@ const frameworkStates = [
   `observed-reach`,
   `timeout`,
   `random-campaign`,
+  `agreement-violation`,
+  `agreement-never-reached`,
+  `agreement-false-condition`,
+  `reached-not-entered`,
+  `forced-probe-calibration-applied`,
+  `late-probe-error`,
+  `over-reported-reach`,
 ] as const
 
 function frameworkReach(
@@ -526,6 +713,16 @@ function frameworkReach(
       if (outcome.kind === `timeout`) reached.add(`timeout`)
       if (name === `random seed`) reached.add(`random-campaign`)
       if (outcome.kind === `determinism`) reached.add(`determinism-caught`)
+      if (outcome.law === agreementLaw) reached.add(`agreement-violation`)
+      if (outcome.diagnosis === `never-reached`)
+        reached.add(`agreement-never-reached`)
+      if (outcome.diagnosis === `false-condition`)
+        reached.add(`agreement-false-condition`)
+      if (
+        forcedCalibrationNames(spec).includes(name) &&
+        outcome.kind === `pass`
+      )
+        reached.add(`forced-probe-calibration-applied`)
       const failure = {
         'constructed-reach': `constructed-reach-failure`,
         'fixed-reach': `fixed-reach-failure`,
@@ -548,6 +745,24 @@ function frameworkReach(
     if (spec.reachVia === `observe` && owed.reach.size > 0)
       reached.add(`observed-reach`)
   }
+  if (lateProbeOwed(plan, run?.log ?? [])) reached.add(`late-probe-error`)
+  // A history whose probe is reached without entering the state passes the
+  // agreement wherever the model predicts no entry, so the state is reached.
+  for (const spec of plan.specs)
+    if (
+      spec.probe &&
+      expected.get(spec.id)!.loads &&
+      (run?.log ?? []).some(
+        (entry) =>
+          entry.id === spec.id &&
+          reachedFor(spec, entry.history) &&
+          !enteredFor(spec, entry.history),
+      )
+    )
+      reached.add(`reached-not-entered`)
+  for (const spec of plan.specs)
+    if (spec.overReport && spec.probe && expected.get(spec.id)!.loads)
+      reached.add(`over-reported-reach`)
   if (trace.some(({ checkpoint }) => checkpoint === `replay`))
     reached.add(`replay-probe`)
   if (trace.some(({ checkpoint }) => checkpoint === `rerun`))
@@ -584,10 +799,16 @@ type ReportedFile = {
   errors: Array<ReportedError>
   tests: Array<ReportedTest>
 }
-type Report = { files: Array<ReportedFile>; stdout: string }
+type Report = {
+  files: Array<ReportedFile>
+  stdout: string
+  unhandled: Array<ReportedError>
+}
 type Failure = {
   kind: Kind | `other`
   law?: string
+  checkpoint?: string
+  diagnosis?: `never-reached` | `false-condition`
   cause?: `driver`
   counterexample?: string
   seed?: number
@@ -610,6 +831,8 @@ type SuiteRun = {
     }
   >
   log: Array<LogEntry>
+  /** The run's unhandled errors, by message. */
+  unhandled: Array<string>
 }
 type ProbeRun = {
   id: string
@@ -645,6 +868,12 @@ function classify(error: ReportedError | undefined): Failure {
   const counterexample = /Counterexample: (.*)/.exec(outer)?.[1]
   const rerun = /Rerun: -t ("(?:[^"\\]|\\.)*")/.exec(text)?.[1]
   const law = /\(law: ([^)]+)\)/.exec(text)?.[1]
+  const checkpoint = /violated at checkpoint "([^"]+)"/.exec(text)?.[1]
+  const diagnosis = /was never reached/.test(text)
+    ? (`never-reached` as const)
+    : /was reached with a false condition/.test(text)
+      ? (`false-condition` as const)
+      : undefined
   const cause =
     inner.name === `OracleViolation` &&
     (inner.cause?.message ?? ``).includes(`synthetic driver failed`)
@@ -679,6 +908,8 @@ function classify(error: ReportedError | undefined): Failure {
   return {
     kind,
     ...(law ? { law } : {}),
+    ...(checkpoint ? { checkpoint } : {}),
+    ...(diagnosis ? { diagnosis } : {}),
     ...(cause ? { cause } : {}),
     ...(seed !== undefined ? { seed: Number(seed) } : {}),
     ...(path !== undefined ? { path } : {}),
@@ -732,10 +963,10 @@ function runVitest(
     )
   // The framework prints reach counts straight to stdout, past Vitest's
   // console capture, so they arrive in the child's own output.
-  const { files: reported } = JSON.parse(readFileSync(report, `utf8`)) as {
-    files: Array<ReportedFile>
-  }
-  return { files: reported, stdout: run.stdout }
+  const { files: reported, unhandled } = JSON.parse(
+    readFileSync(report, `utf8`),
+  ) as { files: Array<ReportedFile>; unhandled?: Array<ReportedError> }
+  return { files: reported, stdout: run.stdout, unhandled: unhandled ?? [] }
 }
 
 const short = (id: string, name: string) => name.replace(`${id} > `, ``)
@@ -775,7 +1006,11 @@ async function driveSuite(
       return file
     })
     const report = runVitest(directory, files, { SELF_ORACLE_LOG: log })
-    const run: SuiteRun = { files: {}, log: readLog(log) }
+    const run: SuiteRun = {
+      files: {},
+      log: readLog(log),
+      unhandled: report.unhandled.map((error) => error.message ?? ``),
+    }
     for (const [index, spec] of plan.specs.entries()) {
       const reported = report.files.find((file) => file.file === files[index])
       // A passing campaign prints `<id> <campaign> reach {...}`.
@@ -940,6 +1175,9 @@ function checkSuite(
       if (
         observedKind !== outcome.kind ||
         (outcome.law !== undefined && failure?.law !== outcome.law) ||
+        (outcome.checkpoint !== undefined &&
+          failure?.checkpoint !== outcome.checkpoint) ||
+        failure?.diagnosis !== outcome.diagnosis ||
         (!isCampaign(test.name) && failure?.cause !== outcome.cause)
       )
         return violation(
@@ -990,7 +1228,7 @@ function checkSuite(
       }
       if (failure?.counterexample && outcome.law) {
         const shrunk = JSON.parse(failure.counterexample) as [SyntheticHistory]
-        if (verdictOf(shrunk[0]).law !== outcome.law)
+        if (judged(spec, shrunk[0]).law !== outcome.law)
           return violation(
             `run`,
             `${spec.id} "${test.name}" reported counterexample ${failure.counterexample}, which does not violate law ${outcome.law}`,
@@ -1033,6 +1271,18 @@ function checkSuite(
         `rerun`,
       )
   }
+  // A late probe surfaces as an unhandled error of the run.
+  const late = run.unhandled.some((message) =>
+    message.includes(`was called after its history ended`),
+  )
+  if (late !== lateProbeOwed(plan, run.log))
+    return violation(
+      `run`,
+      late
+        ? `the run reported a late probe that no late spec owed`
+        : `a late spec called its probe after its history, but the run reported no error`,
+      `agreement`,
+    )
   for (const { checkpoint, probe } of probes) {
     const probed = checkpoint === `replay` ? `random seed` : probe.target
     const others = probe.states.filter(
@@ -1098,6 +1348,10 @@ const generatedDraft = (overrides: Partial<Draft>): Draft => ({
   timing: `normal`,
   calibrations: [],
   unregistered: false,
+  probe: `none`,
+  overReport: false,
+  noisyProbe: false,
+  predictMode: `match`,
   ...overrides,
 })
 const fixedHistory = (
@@ -1237,6 +1491,79 @@ oracleProperty({
           reachVia: `observe`,
           constructed: [{ prefix: [0, 0, 0], enters: [`saw-0`] }],
         }),
+      ),
+      fixedHistory(
+        `an agreeing state probe passes and its forced calibrations apply`,
+        [`forced-probe-calibration-applied`],
+        generatedDraft({ probe: `agree`, fixed: [at([0]), at([1])] }),
+      ),
+      fixedHistory(
+        `a probe entered without the prediction violates reach agreement`,
+        [`agreement-violation`],
+        generatedDraft({ probe: `always`, fixed: [at([1])] }),
+      ),
+      fixedHistory(
+        `a predicted state reached with a false condition violates reach agreement`,
+        [`agreement-violation`, `agreement-false-condition`],
+        generatedDraft({
+          probe: `never`,
+          constructed: [{ prefix: [0], enters: [`saw-0`] }],
+        }),
+      ),
+      fixedHistory(
+        `a predicted state whose probe is never reached violates reach agreement`,
+        [`agreement-violation`, `agreement-never-reached`],
+        generatedDraft({
+          probe: `unreached`,
+          constructed: [{ prefix: [0], enters: [`saw-0`] }],
+        }),
+      ),
+      fixedHistory(
+        `a probe reached with a false condition is not entered`,
+        [`reached-not-entered`],
+        generatedDraft({ probe: `agree`, fixed: [at([1])] }),
+      ),
+      fixedHistory(
+        `a law violation outranks a probe that disagrees`,
+        [`campaign-violation`],
+        generatedDraft({ probe: `always`, fixed: [at([3])] }),
+      ),
+      fixedHistory(
+        `only agreement counts a probe-bound state as reached`,
+        [`over-reported-reach`, `fixed-reach-failure`],
+        generatedDraft({
+          probe: `agree`,
+          overReport: true,
+          fixed: [{ history: [1], enters: [`saw-0`] }],
+        }),
+      ),
+      fixedHistory(
+        `a probe-bound state needs predict`,
+        [`registration-error`],
+        generatedDraft({ probe: `agree`, predictMode: `missing` }),
+      ),
+      fixedHistory(
+        `predict needs a probe-bound state`,
+        [`registration-error`],
+        generatedDraft({ predictMode: `extra` }),
+      ),
+      fixedHistory(
+        `predict on an enumerated source fails to load`,
+        [`registration-error`],
+        {
+          ...generatedDraft({ predictMode: `extra` }),
+          source: { kind: `enumerated`, histories: [[0]] },
+        },
+      ),
+      fixedHistory(
+        `the determinism test compares the probes a driver records`,
+        [`determinism-caught`],
+        generatedDraft({ noisyProbe: true, fixed: [at([1])] }),
+      ),
+      fixedHistory(
+        `a probe called after its history ended is an error`,
+        [`late-probe-error`],
+        generatedDraft({ probe: `late`, fixed: [at([0])] }),
       ),
       fixedHistory(
         `a property timeout limits every test it registers`,
