@@ -155,6 +155,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import {
+  cpSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -224,7 +225,7 @@ const cleanEnv = () =>
  * daemon (law 9). A file of an earlier state that this state lacks is
  * removed.
  */
-function runCli(dir, files, { seed = 1, daemon = false } = {}) {
+function runCli(dir, files, { seed = 1, daemon = false, cli = here } = {}) {
   writeFixture(dir, files)
   const out = join(dir, daemon ? `out-daemon` : `out`)
   rmSync(out, { recursive: true, force: true })
@@ -233,7 +234,7 @@ function runCli(dir, files, { seed = 1, daemon = false } = {}) {
   // them as the CLI's caller meant them.
   const path = (absolute) => (daemon ? relative(repo, absolute) : absolute)
   const args = [
-    join(here, `index.mjs`),
+    join(cli, `index.mjs`),
     ...(daemon ? [`--daemon`] : []),
     `--package`,
     path(dir),
@@ -317,26 +318,50 @@ function runCli(dir, files, { seed = 1, daemon = false } = {}) {
  * `restart` or `revert`) keeps its first cold result.
  */
 function incremental(dir, plan, cli, observe, states) {
+  // The history runs its own copy of the CLI, beside this one so that its
+  // relative imports resolve, and the `cli` edit changes the copy's wording.
+  const copy = mkdtempSync(join(here, `..`, `oracle-gaps-mutant-cli-`))
+  cpSync(here, copy, {
+    recursive: true,
+    filter: (path) => !/\.scratch-|node_modules/.test(path),
+  })
+  const reportFile = join(copy, `report.mjs`)
+  const reportText = readFileSync(reportFile, `utf8`)
+  const RUN_LINE = '`Run ${run.id}. Inputs: ${run.inputs}.`'
+  if (!reportText.includes(RUN_LINE))
+    throw new Error(`the cli edit no longer finds the summary's run line`)
   const cold = new Map()
-  const fingerprint = (files, seed) => JSON.stringify([files, seed])
-  cold.set(fingerprint(fixtureFiles(plan), 1), cli)
-  // A cold result without what the report names as its run, so that two
-  // states compare by what they report.
+  const fingerprint = (files, state) =>
+    JSON.stringify([files, state.seed, state.cliEdited])
+  cold.set(fingerprint(fixtureFiles(plan), initialState(plan)), cli)
+  // A cold result without the run identity, which every edit changes, so
+  // that two states compare by what they report.
   const result = (run) =>
     JSON.stringify([
       run.exit,
       run.refusal,
-      run.report && { ...run.report, run: undefined, summary: undefined },
+      run.report && {
+        ...run.report,
+        run: undefined,
+        summary: run.report.summary.replace(/^Run \w+/m, `Run`),
+      },
     ])
   const trail = [initialState(plan)]
   let previous = cli
   const checkAt = (step) => {
     const state = trail.at(-1)
+    writeFileSync(
+      reportFile,
+      state.cliEdited
+        ? reportText.replace(RUN_LINE, '`Run ${run.id} (edited). Inputs: ${run.inputs}.`')
+        : reportText,
+    )
     const files = fixtureFiles(resolveHistory(state.history), state)
-    const key = fingerprint(files, state.seed)
-    if (!cold.has(key)) cold.set(key, runCli(dir, files, { seed: state.seed }))
+    const key = fingerprint(files, state)
+    if (!cold.has(key))
+      cold.set(key, runCli(dir, files, { seed: state.seed, cli: copy }))
     const coldRun = cold.get(key)
-    const daemon = runCli(dir, files, { seed: state.seed, daemon: true })
+    const daemon = runCli(dir, files, { seed: state.seed, daemon: true, cli: copy })
     observe(`incremental`, {
       step,
       cold: {
@@ -348,7 +373,12 @@ function incremental(dir, plan, cli, observe, states) {
         exit: daemon.exit,
         refusal: daemon.refusal,
         report: daemon.report,
-        stderr: daemon.stderr,
+        // The first line of a failure, for the message, without the paths
+        // of this history's scratch package and CLI copy.
+        stderr: daemon.stderr
+          ?.split(`\n`)[0]
+          .replaceAll(copy, `<cli>`)
+          .replaceAll(dir, `<package>`),
       },
     })
     const reused = daemon.evidence?.reused ?? 0
@@ -367,7 +397,7 @@ function incremental(dir, plan, cli, observe, states) {
   const stop = () =>
     spawnSync(
       process.execPath,
-      [join(here, `index.mjs`), `--stop-daemon`, `--package`, dir],
+      [join(copy, `index.mjs`), `--stop-daemon`, `--package`, dir],
       { cwd: repo, encoding: `utf8`, timeout: 60_000, env: cleanEnv() },
     )
   try {
@@ -381,6 +411,7 @@ function incremental(dir, plan, cli, observe, states) {
     }
   } finally {
     stop()
+    rmSync(copy, { recursive: true, force: true })
   }
 }
 
@@ -985,6 +1016,7 @@ oracleProperty({
             `owns`,
             `authored`,
             `newOracle`,
+            `cli`,
             `restart`,
           ],
         }),

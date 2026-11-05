@@ -50,10 +50,15 @@ function send(pkg, message) {
   })
 }
 
-/** Sends a check to the package's daemon, starting the daemon if needed. */
+/**
+ * Sends a check to the package's daemon, starting the daemon if needed. A
+ * daemon whose own code has changed since it started declines the check and
+ * exits, and a new one, which runs the current code, takes it.
+ */
 export async function requestDaemon(pkg, argv) {
   try {
-    return await send(pkg, { argv, cwd: process.cwd() })
+    const reply = await send(pkg, { argv, cwd: process.cwd() })
+    if (!reply.restart) return reply
   } catch (error) {
     if (![`ENOENT`, `ECONNREFUSED`].includes(error.code)) throw error
   }
@@ -84,7 +89,10 @@ export async function stopDaemon(pkg) {
 }
 
 async function serve(pkg) {
-  const { openSession } = await import(`./check.mjs`)
+  const { codeIdentity, openSession } = await import(`./check.mjs`)
+  // The CLI's code as this process loaded it. A process cannot reload its
+  // modules, so a daemon whose code changed must not run another check.
+  const code = codeIdentity()
   const { diskStore } = await import(`./evidence.mjs`)
   const { parseArgs } = await import(`./args.mjs`)
   const store = await diskStore(stateDirOf(pkg))
@@ -104,6 +112,8 @@ async function serve(pkg) {
         // The reply waits until the daemon has closed, so a daemon started
         // next finds the evidence on disk and no warm context in its way.
         if (message.stop) await shutdown(connection)
+        if (codeIdentity() !== code)
+          await shutdown(connection, { restart: true })
         const stderr = []
         let stdout = ``
         let exitCode = 0
@@ -126,14 +136,14 @@ async function serve(pkg) {
       })
     })
   })
-  async function shutdown(connection) {
+  async function shutdown(connection, reply = { exitCode: 0 }) {
     server.close()
     rmSync(socket, { force: true })
     await session.close()
     await store.close()
     if (connection)
       await new Promise((r) =>
-        connection.end(`${JSON.stringify({ exitCode: 0 })}\n`, r),
+        connection.end(`${JSON.stringify(reply)}\n`, r),
       )
     process.exit(0)
   }

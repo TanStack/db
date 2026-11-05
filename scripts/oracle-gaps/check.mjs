@@ -70,6 +70,14 @@ const ownFiles = [
   `../../packages/db/tests/oracle-property.ts`,
 ].map((file) => join(here, file))
 
+/** A hash of this CLI's own code and the framework it reads. */
+export function codeIdentity() {
+  const hash = createHash(`sha1`)
+  for (const file of ownFiles)
+    hash.update(`${file}\0${existsSync(file) ? readFileSync(file) : ``}\0`)
+  return hash.digest(`hex`)
+}
+
 /** Hashes of files by content, memoized by size and modification time. */
 function fileHashes() {
   const memo = new Map()
@@ -645,17 +653,18 @@ export default mergeConfig(base, {
  */
 function identityOf(options, authored, testFiles, oracleCount) {
   const hash = createHash(`sha1`)
-  const files = [
-    ...options.sources.map((file) => join(options.pkg, file)),
-    ...testFiles,
-    ...ownFiles,
-  ].sort()
-  // Files are named relative to the package or to this CLI, so the same
-  // inputs in another checkout have the same identity.
+  // Files are named relative to the package or to this CLI, and taken in
+  // the order of those names, so the same inputs in another checkout, or
+  // the same CLI in another directory, have the same identity.
   const name = (file) =>
     file.startsWith(`${options.pkg}/`)
       ? file.slice(options.pkg.length + 1)
       : `cli:${relativePath(here, file)}`
+  const files = [
+    ...options.sources.map((file) => join(options.pkg, file)),
+    ...testFiles,
+    ...ownFiles,
+  ].sort((a, b) => (name(a) < name(b) ? -1 : name(a) > name(b) ? 1 : 0))
   for (const file of files)
     if (existsSync(file))
       hash.update(`${name(file)}\0${readFileSync(file, `utf8`)}\0`)

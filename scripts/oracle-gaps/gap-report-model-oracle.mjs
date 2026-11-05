@@ -128,8 +128,10 @@ const testCase = fc.record({
 // Law 9's edits. Each content edit changes what some evidence depends on:
 // a test file, a source statement, the source's line numbers, an owns list,
 // the authored mutant, a helper module that only file b imports, the seed
-// (file a judges only under seed 1), or the set of oracle files. `restart`
-// stops the daemon, and `revert` returns to the state before the last step.
+// (file a judges only under seed 1), the set of oracle files, or the CLI's
+// own code (`cli` changes the summary's wording in the copy of the CLI that
+// the history runs). `restart` stops the daemon, and `revert` returns to the
+// state before the last step.
 const edits = [
   `test`,
   `source`,
@@ -139,6 +141,7 @@ const edits = [
   `helper`,
   `seed`,
   `newOracle`,
+  `cli`,
   `restart`,
   `revert`,
 ]
@@ -1367,6 +1370,7 @@ const initialState = (plan) => ({
   strict: true,
   seed: 1,
   newOracle: false,
+  cliEdited: false,
 })
 
 /** The fixture package's files in one state. */
@@ -1487,6 +1491,7 @@ function applyEdit(state, edit) {
   if (edit === `helper`) return { ...state, strict: !state.strict }
   if (edit === `seed`) return { ...state, seed: state.seed === 1 ? 2 : 1 }
   if (edit === `newOracle`) return { ...state, newOracle: !state.newOracle }
+  if (edit === `cli`) return { ...state, cliEdited: !state.cliEdited }
   return state
 }
 
