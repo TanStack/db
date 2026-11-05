@@ -48,4 +48,5 @@ export default [
     },
   },
   oraclePlugin.configs.recommended,
+  oraclePlugin.configs.production,
 ]

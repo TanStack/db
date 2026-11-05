@@ -1,5 +1,6 @@
 import noDisabled from './rules/no-disabled.js'
 import noUnitTest from './rules/no-unit-test.js'
+import probeForm from './rules/probe-form.js'
 import pureModel from './rules/pure-model.js'
 import replayableSeed from './rules/replayable-seed.js'
 
@@ -30,6 +31,7 @@ const plugin = {
     'no-disabled': noDisabled,
     'no-unit-test': noUnitTest,
     'pure-model': pureModel,
+    'probe-form': probeForm,
     'replayable-seed': replayableSeed,
   },
 }
@@ -44,6 +46,22 @@ plugin.configs = {
       'oracle/no-unit-test': `error`,
       'oracle/pure-model': `error`,
       'oracle/replayable-seed': `error`,
+    },
+  },
+  // Production source, not oracle files: a state probe is the only development
+  // code that the production build must not carry (AGENTS.md, probe form).
+  production: {
+    name: `oracle/production`,
+    files: [
+      `packages/*/src/**/*.ts`,
+      `packages/*/src/**/*.tsx`,
+      `packages/*/src/**/*.js`,
+      `packages/*/src/**/*.jsx`,
+      `packages/*/src/**/*.mjs`,
+    ],
+    plugins: { oracle: plugin },
+    rules: {
+      'oracle/probe-form': `error`,
     },
   },
 }
