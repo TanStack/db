@@ -88,6 +88,16 @@ const authoredPaths = [
 ] as const
 const authoredKinds = [`structured`, `functional`] as const
 const groupedForms = [`keys-first`, `keys-last`, `aggregate`] as const
+type GroupingCall = `empty` | `possible` | `nonempty`
+// Grouping accumulates expressions. One definitely nonempty call guarantees a
+// generated key; otherwise an admitted empty list makes that key optional.
+// These facts describe declared inputs, independently of production contexts.
+function groupingKeyFor(calls: ReadonlyArray<GroupingCall>) {
+  if (calls.includes(`nonempty`)) return true
+  if (calls.includes(`possible`)) return `optional`
+  return false
+}
+
 // Empty callbacks are legal no-ops. Accumulation distinguishes an empty final
 // call from erasing real grouping that an earlier call established.
 const groupingBoundaries = [
@@ -95,49 +105,49 @@ const groupingBoundaries = [
     name: `empty-callback-first`,
     expressions: `.groupBy(() => [])`,
     before: true,
-    keyed: false,
+    calls: [`empty`],
   },
   {
     name: `empty-callback-last`,
     expressions: `.groupBy(() => [])`,
     before: false,
-    keyed: false,
+    calls: [`empty`],
   },
   {
     name: `empty-wrapper-first`,
     expressions: `.groupBy(groupKeys(() => []))`,
     before: true,
-    keyed: false,
+    calls: [`empty`],
   },
   {
     name: `empty-wrapper-last`,
     expressions: `.groupBy(groupKeys(() => []))`,
     before: false,
-    keyed: false,
+    calls: [`empty`],
   },
   {
     name: `one-then-empty`,
     expressions: `.groupBy(groupKeys(({ groupSource }) => groupSource.id)).groupBy(() => [])`,
     before: true,
-    keyed: true,
+    calls: [`nonempty`, `empty`],
   },
   {
     name: `empty-then-one`,
     expressions: `.groupBy(() => []).groupBy(groupKeys(({ groupSource }) => groupSource.id))`,
     before: true,
-    keyed: true,
+    calls: [`empty`, `nonempty`],
   },
   {
     name: `callback-one`,
     expressions: `.groupBy(groupKeys(() => [])).groupBy(({ groupSource }) => [groupSource.id])`,
     before: true,
-    keyed: true,
+    calls: [`empty`, `nonempty`],
   },
   {
     name: `explicit-context-key`,
     expressions: `.groupBy(groupKeys<ContextFromSource<{ groupSource: typeof rows }>>(({ groupSource }) => groupSource.id))`,
     before: true,
-    keyed: true,
+    calls: [`nonempty`],
   },
   ...[`callback`, `wrapper`].flatMap((form) =>
     [`mutable`, `readonly`, `union`].flatMap((list) =>
@@ -154,7 +164,10 @@ const groupingBoundaries = [
           name: `possible-${form}-${list}-${nonempty ? `one` : `empty`}`,
           expressions: `${form === `callback` ? `.groupBy(groupKeys(() => []))` : ``}.groupBy(${form === `wrapper` ? `groupKeys(${callback})` : callback})`,
           before: true,
-          keyed: `optional`,
+          calls:
+            form === `callback`
+              ? ([`empty`, `possible`] as const)
+              : ([`possible`] as const),
         } as const
       }),
     ),
@@ -163,19 +176,19 @@ const groupingBoundaries = [
     name: `nonempty-tuple-wrapper`,
     expressions: `.groupBy(groupKeys(({ groupSource }): readonly [PublicRef<Row>['id']] => [groupSource.id]))`,
     before: true,
-    keyed: true,
+    calls: [`nonempty`],
   },
   {
     name: `one-then-possible`,
     expressions: `.groupBy(groupKeys(({ groupSource }) => groupSource.id)).groupBy((): ReadonlyArray<PublicRef<Row>['id']> => [])`,
     before: true,
-    keyed: true,
+    calls: [`nonempty`, `possible`],
   },
   {
     name: `possible-then-one`,
     expressions: `.groupBy((): ReadonlyArray<PublicRef<Row>['id']> => []).groupBy(groupKeys(({ groupSource }) => groupSource.id))`,
     before: true,
-    keyed: true,
+    calls: [`possible`, `nonempty`],
   },
 ] as const
 // Seven through nine are neighboring depths around the former cutoff. Sixteen
@@ -576,7 +589,8 @@ function consumerSource(
         ? `${base}${grouping.expressions}${selection}`
         : `${base}${selection}${grouping.expressions}`
       const declared = `{ id: ${shape.key}${collision.fields.replaceAll(` as const`, ``).replaceAll(`, $`, `; $`)} }`
-      const expected = `${declared}${grouping.keyed && collision.name !== `key` && collision.name !== `all` ? ` & { readonly $key${grouping.keyed === `optional` ? `?` : ``}: string | number }` : ``}`
+      const keyed = groupingKeyFor(grouping.calls)
+      const expected = `${declared}${keyed && collision.name !== `key` && collision.name !== `all` ? ` & { readonly $key${keyed === `optional` ? `?` : ``}: string | number }` : ``}`
       addWitness(
         `grouping-boundary/${grouping.name}/${collision.name}`,
         `{
@@ -910,7 +924,7 @@ declareOracle({
     wrappedAggregateForms,
     wrappedAggregateKinds,
   ],
-  model: [consumerSource],
+  model: [consumerSource, groupingKeyFor],
   check: [checkConsumer, checkConsumerConstruction],
 })
 test.each(typeShapes)(

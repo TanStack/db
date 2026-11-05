@@ -777,3 +777,72 @@ on the dynamic-list inference boundary, but it repeats stale measurement and
 design questions without reconciling their recorded evidence. Hire with
 supervision for type-boundary review; do not rely on its broad readiness or
 performance conclusions. CI and readiness remain separate final-head gates.
+
+
+## d894ff6d8 follow-up: derive grouping expectations from calls
+
+Review 5792502724 covers d894ff6d8. Inline comment 4486373927 correctly finds
+that the grouping-boundary grammar stores final `keyed` answers on each case.
+The surrounding shape comparison is reusable, but this particular key-presence
+law remained a table of labelled consequences. The new independent reducer
+uses each call's declared possibilities: any definitely nonempty call requires
+a key, otherwise any possibly empty call permits an absent key, otherwise no
+call generates one. Empty carrier calls remain represented in the input.
+This enacts grouping accumulation without importing production context types
+or their conditional inference. The declared-shape authority does not change.
+
+This is an oracle model-structure repair, not a newly reproduced product defect.
+Source inspection establishes the hand-labelled outputs; no invented product
+RED supplies that fact. Before the edit, an AST capture records every generated
+consumer. After the edit, all 24 consumer programs, expected types, state lists
+and observation paths are byte-identical. The refactor narrows no comparison,
+changes no input history and preserves the earlier original/hostile-production
+RED evidence. A wrong reducer that lets only the last call establish definite
+grouping fails native TS2344 constraints at the shared QueryRef and inline
+comparisons. The repaired owner passes all 33 checks, and all 403 declared
+states reach 24 times. A separate full-source compile initially reports TS2345
+because the generated call array widens its literals to string. Explicit const
+annotations repair that test-harness typing. All 24 generated consumers remain
+byte-identical, as does minified oracle JavaScript. A fresh final-source consumer
+passes, and full DB source/test TypeScript has zero diagnostics. The initial
+harness diagnostic receives no product RED credit.
+All production sources remain identical to d894ff6d8, so shipped bytes and the
+fresh benchmark evidence on that head remain current for this test-only change.
+
+The independent model is now explicit beside the grouping grammar and is named
+in `declareOracle`. The earlier ORC audit continues to apply. ORC-002 and
+ORC-016 gain the reusable call-accumulation computation; ORC-006 adds the
+last-call calibration. The exact generated-consumer equivalence preserves
+ORC-004 reconstruction/range/exclusion, ORC-005 receiving checkpoints,
+ORC-013 neighbors and ORC-015 reach. No random budget, history or observation
+is removed. The existing explicit-erasure and installed-package limits remain.
+
+Final-head benchmark run 42113283043 compares merge
+2b00a3a76ecbd38c20844717fdc14e191a42c6d0, whose parents are 8feab6ea3 and
+d894ff6d8. The unchanged gate passes at 0.63x writes and 0.46x cold overall.
+Nested-document writes improve by 90.9% and hydration by 97.1%. A diagnostic
+issue-detail write case measures base 0.200682, 0.106460, 0.104528 ms versus
+candidate 0.189906, 0.121503, 0.180071 ms. The ranges overlap. That query's
+write mean changes by +2.6%, so neither query nor localized gate fails. This
+is finite noisy measurement, not a claim that every configuration is faster.
+The manifest binds the immutable remote reports and exact parent identities.
+
+| ID | Original claim or suggestion | Technical verdict and evidence | PR action / durable value |
+| --- | --- | --- | --- |
+| CRG01 | Inline: derive keyed results with a reusable law over grouping calls rather than hand-labelled outcomes. | Confirmed model-structure issue. The reducer preserves all 24 exact consumer programs and rejects a last-call-only rival with native constraints. The major functional-correctness label overstates the evidence: no new production counterexample was supplied. | fixed-now; primary public-type owner and this record. |
+| CRG02 | Review body repeats the call-classification/reducer request. | Same claim and proposed repair as CRG01. | duplicate of CRG01, preserving the body occurrence. |
+| CRG03 | Repeated default 80% docstring threshold requires more docstrings. | No repository authority establishes that requirement. | duplicate of CRE02 and the earlier refutation; optional documentation feedback remains preserved. |
+| CRG04 | Summary: a fresh d894ff6d benchmark is not reported. | Stale after remote run 42113283043 passes, with its diagnostic flag retained. | stale; exact reports and source identity remain bound here. |
+| CRG05 | The CSV is excluded and was not inspected. | Accurate reviewer evidence limit. The committed table and immutable reports remain available. | accepted-design for review scope, with no reduction of this PR's evidence obligation. |
+| CRG06 | Consider the local CodeRabbit CLI after repair. | Optional tooling suggestion. The native owner, compiler, equivalence and calibration runs already supply the requested validation. | already-fixed validation goal; preserve the optional tool suggestion without installing or invoking it. |
+| CRG07 | Automatic review is paused after reviewing d894ff6d8. | Accurate bot state. Its last covered semantic production head is d894ff6d8. | accepted-design for bot operation; later test-only changes are not claimed as a fresh bot review. |
+
+Loss accounting: seven occurrences = one fixed-now + two duplicates + one
+stale + one already-fixed + two accepted-design. The raw inline, full review
+body, summary qualifications and optional suggestion remain preserved. No
+confirmed-open, deferred or product-decision item remains in this review.
+The reviewer identifies a real oracle-law presentation defect and cites the
+right authority, but supplies only static evidence and repeats a stale timing
+claim. Hire with supervision for oracle-structure review. The final test-only
+change receives this self-review and native validation; the paused bot's
+covered head is reported separately from CI and final readiness.

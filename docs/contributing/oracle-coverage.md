@@ -1049,7 +1049,10 @@ Always-required, omit-all-array-keys and erase-prior-grouping mutants each fail
 native shape constraints. This closes the declared-list inference gap within
 the generated forms; explicit `any` erasure, including a helper with only its
 context type argument supplied, retains the existing compatibility behavior.
-See the dynamic-grouping evidence in the
+The follow-up model refactor derives this key law from each call's declared
+possibilities rather than storing a final keyed answer per case. All 24 generated
+consumer programs remain byte-identical, and a last-call-only rival fails native
+constraints. See the dynamic-grouping evidence in the
 [high-review record](oracle-reviews/2026-11-05-boundary-only-high-review.md).
 
 The high review adds 27 function/conditional forms with aggregate and ordinary

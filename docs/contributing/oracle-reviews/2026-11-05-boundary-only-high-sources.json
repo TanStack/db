@@ -473,5 +473,86 @@
       }
     ],
     "limits": "Finite inferred list forms; explicit any erasure including context-only groupKeys generic retains compatibility behavior; installed-package types are a separate receiving path."
+  },
+  "ciD894GroupingModel": {
+    "parentHead": "d894ff6d848f7dcdba170ef6fc7aabe8edeb2b89",
+    "review": 5792502724,
+    "inline": 4486373927,
+    "sourceSha256": {
+      "packages/db/tests/query/virtual-row-fields-types-oracle.test.ts": "2c7c149d340dfff3f876b66a6de03a5f57ec61330359a933c08e7d02742b11cf",
+      "docs/contributing/oracle-coverage.md": "14fe312392814f313d8c7128630a17c392059a4be57db9960b43dacfcb670223",
+      "docs/contributing/oracle-reviews/2026-11-05-boundary-only-high-review.md": "2cda18f0d2b5e798a18451a9c2843dcb23afaddb5bef652a0be0d57207c1e7dc"
+    },
+    "evidenceSha256": {
+      "d894-review-5792502724.md": "cd6f50f19c0f2d631279842dc1cffd5e904c2be580eedd8172370e6fc6087c81",
+      "d894-review-inline-4486373927.md": "42c0a878647e9e2b97669bd9d5cae13020d8539c7276be19fc95cda340420d55",
+      "d894-review-summary.md": "a5d28fd38a74a378769530617ca9053be943cf887fbd622fadad02d8c1e6c6f0",
+      "capture-grouping-model.mjs": "d3b64bd4380beb6c315e90e2cdb8e34c18c898fe5c4cb7bcb5073e0b616967c3",
+      "grouping-model-equivalence.json": "2e3832f897df6dc2ac52c631b98d67e96de8e2e73bd78d4fd651e28ac94993ad",
+      "run-grouping-model-calibration.py": "7f08495383636e69068bedd57860f52a26c98bebe18bb2ba7d79c4b84f927689",
+      "grouping-model-last-call-calibration.log": "4aa7aad8299f052f5eb9d73e368e499021c780487b94e5903392c8201bc85cd1",
+      "grouping-model-calibration.json": "a0eb57bf218ffca5aa48ac9018232edb9943195cba73fc65fc4da64c7eda3946",
+      "grouping-model-green.log": "e5ae14a7b52f70a1428d5bb86ecb926858d5ba109d8da77ca8e6b361e277c188",
+      "grouping-model-full-tsc.log": "1aa3b7fd7738d32c74cc614dcb0b967a99bf19b1ad3ccd63b59339244d67dcc5",
+      "grouping-model-full-tsc-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "grouping-model-focused-final.log": "0d338eb922b6531478e246457ca21de55122551efcd8c0beb5ce468d240614b3",
+      "grouping-model-literal-erasure.json": "076c5621ef63b375723ba65d0a0af9bf9d2baf47b9050962a7345272eba6940e",
+      "grouping-model-lint.log": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168",
+      "final-d894ff-ci-binding.json": "d0a62e745f4b01d0703fb27f223a2e824afd8620d2ffa52c28e0a91e3b252332"
+    },
+    "productionChanged": false,
+    "generatedConsumersIdentical": 24,
+    "nativeOwnerGreenChecks": 33,
+    "finalFocusedGreenChecks": 1,
+    "fullDbTscDiagnosticsAfterLiteralNarrowing": 0,
+    "initialHarnessTscDiagnostic": "TS2345 string[] needs literal narrowing; not product RED",
+    "calibration": {
+      "wrongModel": "last call decides definite grouping",
+      "exit": 1,
+      "diagnosticCodes": [
+        "TS2344"
+      ],
+      "nativeConstraintFailure": true
+    },
+    "benchmark": {
+      "head": "d894ff6d848f7dcdba170ef6fc7aabe8edeb2b89",
+      "merge": {
+        "parents": [
+          "8feab6ea3eaae4456f738da39fa93508ddd5cc01",
+          "d894ff6d848f7dcdba170ef6fc7aabe8edeb2b89"
+        ],
+        "sha": "2b00a3a76ecbd38c20844717fdc14e191a42c6d0"
+      },
+      "run": 42113283043,
+      "gate": "PASS",
+      "writeRatio": 0.63,
+      "coldRatio": 0.46,
+      "diagnosticWriteFlags": 1,
+      "hashes": {
+        "comparison.md": "19dd3fa82c54bc4bdf32e2eeda8ca935c69aac842d71418f5d8fc464ab3c9993",
+        "candidate.json": "1bdc716eac9a294270fe0b103015ebd1c7e9afb3db2d63e33e895a5e03b168a0",
+        "base.json": "e20d3576009092e3d4801f7b3e3d26690738d281ec0353f157c2969a2586b126"
+      },
+      "diagnosticCase": {
+        "identity": [
+          "issue detail + comments",
+          "selected issue comment insert",
+          "100",
+          "none",
+          "synced"
+        ],
+        "base": [
+          0.20068200000014258,
+          0.1064600000001974,
+          0.10452800000007301
+        ],
+        "candidate": [
+          0.18990600000006452,
+          0.12150300000007519,
+          0.1800709999999981
+        ]
+      }
+    },
+    "reviewPausedAfter": "d894ff6d848f7dcdba170ef6fc7aabe8edeb2b89"
   }
 }
