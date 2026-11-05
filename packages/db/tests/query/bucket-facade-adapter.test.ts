@@ -5,7 +5,10 @@ import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { eq } from '../../src/query/builder/functions.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
-import { BucketFacadeAdapter } from '../../src/query/live/bucket-facade-adapter.js'
+import {
+  BucketFacadeAdapter,
+  resolvePublicValue,
+} from '../../src/query/live/bucket-facade-adapter.js'
 import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
 import { BUCKET_FACADE_REF } from '../../src/query/live/materialized-pipeline.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
@@ -77,6 +80,7 @@ describe(`BucketFacadeAdapter`, () => {
           },
         ],
         () => {},
+        resolvePublicValue,
       )
       graph.finalize()
       const ref: BucketFacadeRef = {
@@ -140,6 +144,7 @@ describe(`BucketFacadeAdapter`, () => {
           },
         ],
         () => {},
+        resolvePublicValue,
       )
       graph.finalize()
       const bucketKey = `group`
@@ -226,6 +231,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
+      resolvePublicValue,
     )
     graph.finalize()
 
@@ -279,6 +285,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
+      resolvePublicValue,
     )
     graph.finalize()
 
@@ -454,6 +461,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
+      resolvePublicValue,
     )
     graph.finalize()
 
@@ -549,6 +557,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
+      resolvePublicValue,
     )
     graph.finalize()
 

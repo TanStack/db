@@ -39,7 +39,6 @@ type PublicContainer = {
     PropertyDescriptor & { child?: PublicContainer }
   >
   parents: Array<PublicContainer>
-  dirty?: true
   copy?: object
 }
 
@@ -225,8 +224,15 @@ function stripInternalMetadata(
 ): unknown {
   if (!isPublicContainer(value)) return value
   for (const key of keys)
-    if (Object.hasOwn(value, key))
-      return transformPublicContainers(value, (leaf) => leaf, keys, false)
+    if (Object.hasOwn(value, key)) {
+      const properties: Record<PropertyKey, PropertyDescriptor> =
+        Object.getOwnPropertyDescriptors(value)
+      for (const omitted of keys) delete properties[omitted]
+      return Object.defineProperties(
+        createPublicContainerShell(value),
+        properties,
+      )
+    }
   return value
 }
 
@@ -235,7 +241,6 @@ export function transformPublicContainers(
   value: unknown,
   transformLeaf: (value: unknown) => unknown,
   omittedKeys: ReadonlySet<PropertyKey>,
-  recursive = true,
 ): unknown {
   const rootReplacement = transformLeaf(value)
   if (!Object.is(rootReplacement, value)) return rootReplacement
@@ -244,8 +249,8 @@ export function transformPublicContainers(
   const containers = new Map<object, PublicContainer>()
   const queue: Array<PublicContainer> = []
   const markDirty = (container: PublicContainer) => {
-    if (container.dirty) return
-    container.dirty = true
+    if (container.copy) return
+    container.copy = createPublicContainerShell(container.value)
     queue.push(container)
   }
   const visit = (current: object): PublicContainer => {
@@ -268,7 +273,7 @@ export function transformPublicContainers(
       const child = descriptor.value
       descriptor.value = transformLeaf(child)
       if (!Object.is(descriptor.value, child)) markDirty(container)
-      else if (recursive && isPublicContainer(child)) {
+      else if (isPublicContainer(child)) {
         descriptor.child = visit(child)
         descriptor.child.parents.push(container)
       }
@@ -279,20 +284,25 @@ export function transformPublicContainers(
   for (const container of queue) {
     for (const parent of container.parents) markDirty(parent)
   }
-  const copy = (container: PublicContainer): object => {
-    if (!container.dirty) return container.value
-    if (container.copy) return container.copy
-    const result = Array.isArray(container.value)
-      ? []
-      : Object.create(Object.getPrototypeOf(container.value))
-    container.copy = result
+  // Every dirty container has a shell before linking children, so shared
+  // references and cycles point to the same copy without a second recursion.
+  for (const container of queue) {
     for (const key of Reflect.ownKeys(container.properties)) {
       const descriptor = container.properties[key]!
-      if (descriptor.child) descriptor.value = copy(descriptor.child)
+      if (descriptor.child)
+        descriptor.value = descriptor.child.copy ?? descriptor.child.value
     }
-    return Object.defineProperties(result, container.properties)
+    Object.defineProperties(container.copy!, container.properties)
   }
-  return copy(root)
+  return root.copy ?? value
+}
+
+/** Allocate a descriptor-copy target without losing array prototypes. */
+export function createPublicContainerShell(value: object): object {
+  const prototype = Object.getPrototypeOf(value)
+  return Array.isArray(value)
+    ? Object.setPrototypeOf([], prototype)
+    : Object.create(prototype)
 }
 
 export function isPublicContainer(value: unknown): value is object {

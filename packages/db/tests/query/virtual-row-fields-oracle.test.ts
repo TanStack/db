@@ -5,7 +5,8 @@
  * `$hasPendingWrites`, `$origin`, `$key`, and `$collectionId`. The output contract
  * established by `includes.test.ts` keeps inline `toArray` and `materialize`
  * selections in their selected shape instead of publishing each selected value
- * as a Collection row. Whole-row roots retain source metadata; ordinary
+ * as a Collection row. Whole-row roots retain source attribution; joined
+ * occurrences use the actual pair or explicit custom key for $key. Ordinary
  * projections receive the live-query Collection's metadata. An explicit
  * selected virtual name cannot replace source metadata at root publication.
  *
@@ -46,7 +47,7 @@
  * callback payloads and downstream metadata observations. Same-source overlap,
  * functional callback inputs remain separate work. The facade grammar below
  * adds shared/empty buckets, retirement and reactivation across child settlement.
- * The selected joined row is compared with the joined source's public row at
+ * The selected joined row's three attribution fields follow the source at
  * preload, pending-write, and settled cuts; a FROM-source selection, two
  * opposite spread orders, and an unmatched RIGHT join distinguish a
  * main-source, first-spread, or last-join shortcut. The
@@ -153,7 +154,8 @@ declareOracle({
   model: [expectsVirtualFields, sourceOwnsMetadata, expectedAttributedRows],
 })
 
-// The independent attribution law uses authoring shape, never selected values.
+// The independent non-key attribution law uses authoring shape, never selected
+// values. The published key is supplied separately by the receiving identity law.
 function sourceOwnsMetadata(shape: string): boolean {
   return shape === `structured-spread` || shape === `functional-direct`
 }
@@ -188,6 +190,9 @@ function expectedAttributedRows(
   sourceId: string,
   outputId: string,
   outputKey: (id: AttributionKey) => unknown,
+  // Single-source rows keep their source key. Joined rows use their actual
+  // default pair or explicit custom key (maintainer decision, November 5).
+  sourceKey: (id: AttributionKey) => AttributionKey = (id) => id,
 ) {
   return rows.map((row) => ({
     ordinary:
@@ -201,7 +206,7 @@ function expectedAttributedRows(
           ? { id: row.id, label: row.label }
           : { ...row },
     metadata: sourceOwnsMetadata(shape)
-      ? expectedSourceMetadata(row.id, sourceId, pending.has(row.id))
+      ? expectedSourceMetadata(sourceKey(row.id), sourceId, pending.has(row.id))
       : {
           $key: outputKey(row.id),
           $collectionId: outputId,
@@ -906,6 +911,9 @@ test.each(
           rows.id,
           live.id,
           outputKey,
+          joined || composition === `joined-query-ref`
+            ? (id) => (customKey ? id : (outputKey(id) as AttributionKey))
+            : (id) => id,
         ),
       )
       if (customKey)
@@ -1218,7 +1226,11 @@ test.each(
     )
     const owner = matched && !reverse ? right : left
     const key = owner === right ? `right` : `left`
-    const check = () => checkRootMetadata(live.toArray[0]!, owner.get(key)!)
+    const check = () =>
+      checkRootMetadata(live.toArray[0]!, {
+        ...owner.get(key)!,
+        $key: [...live.keys()][0],
+      })
     await checkWithCleanup(async () => {
       await live.preload()
       check()
@@ -2438,7 +2450,7 @@ function expectedNullableSelection(
   sourceId: string,
   facadeId: string,
   facadeKey: string | number,
-) {
+): { inline: Array<object>; facade: Array<object> } {
   const inline = match
     ? [
         {
@@ -2453,7 +2465,7 @@ function expectedNullableSelection(
   return {
     inline,
     facade: match
-      ? inline
+      ? inline.map((row) => ({ ...row, $key: facadeKey }))
       : [
           {
             $key: facadeKey,

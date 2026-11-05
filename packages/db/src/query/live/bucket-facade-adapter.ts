@@ -1,5 +1,4 @@
 import { output, serializeValue } from '@tanstack/db-ivm'
-import { isPlainObject } from '../../utils/type-guards.js'
 import { getOrCreate } from '../../utils/get-or-create.js'
 import { createCollection } from '../../collection/index.js'
 import {
@@ -73,8 +72,7 @@ export class BucketFacadeAdapter {
   private readonly activeBuckets = new Map<string, Set<string>>()
   private readonly entries = new Map<string, Map<string, FacadeEntry>>()
   private readonly retiredEntries = new Map<string, Map<string, FacadeEntry>>()
-  private resolvedValues = new WeakMap<object, unknown>()
-  private compiledResolvedValues = new WeakMap<
+  private resolvedValues = new WeakMap<
     ValueResolver,
     WeakMap<object, unknown>
   >()
@@ -84,7 +82,7 @@ export class BucketFacadeAdapter {
     private readonly parentId: string,
     private readonly compilations: Array<BucketFacadeCompilation>,
     onMessages: (count: number) => void,
-    private readonly resolveRoot?: ValueResolver,
+    private readonly resolveRoot: ValueResolver,
   ) {
     for (const compilation of compilations) {
       compilation.rows.pipe(
@@ -142,15 +140,27 @@ export class BucketFacadeAdapter {
           for (const change of changes.values()) {
             this.prepareChange(entry, change, compilation.resolve)
           }
-          this.beginWrite(
-            entry,
-            sync,
-            snapshot,
-            publications,
-            [...changes.values()].map(
-              ({ value: [publicKey] }) => publicKey as string | number,
-            ),
-          )
+          // Snapshot only a written facade and defer its events before its
+          // first write. Projected rows include held and still-open writes.
+          if (!snapshot.rows.has(entry)) {
+            snapshot.rows.set(
+              entry,
+              [...entry.collection._state.acceptedSyncedEntries()].map(
+                ([key, value]) => ({
+                  key,
+                  value,
+                  order: entry.order.get(value),
+                }),
+              ),
+            )
+            snapshot.written.set(entry, new Set())
+            publications.push(entry.collection._deferPublication())
+          }
+          for (const {
+            value: [key],
+          } of changes.values())
+            snapshot.written.get(entry)!.add(key as string | number)
+          sync.begin()
           for (const change of changes.values()) {
             this.applyChange(
               entry,
@@ -232,13 +242,11 @@ export class BucketFacadeAdapter {
 
   cleanup(): void {
     this.cleanedUp = true
-    for (const byBucket of this.entries.values()) {
-      for (const entry of byBucket.values()) {
-        void entry.dispose()
-      }
+    for (const entries of [this.entries, this.retiredEntries]) {
+      for (const byBucket of entries.values())
+        for (const entry of byBucket.values()) void entry.dispose()
+      entries.clear()
     }
-    this.entries.clear()
-    this.cleanupRetiredEntries()
     this.pending.clear()
     this.pendingActivity.clear()
     this.activeBuckets.clear()
@@ -267,14 +275,6 @@ export class BucketFacadeAdapter {
       change.value = row
     }
     rows.set(key, change)
-  }
-
-  private copyRows(entry: FacadeEntry): Array<SnapshotRow> {
-    // The projected synced rows include every queued sync write, held or
-    // still open; the visible rows can lag behind them.
-    return [...entry.collection._state.acceptedSyncedEntries()].map(
-      ([key, value]) => ({ key, value, order: entry.order.get(value) }),
-    )
   }
 
   private snapshot(): FacadeSnapshot {
@@ -350,16 +350,15 @@ export class BucketFacadeAdapter {
       sync.commit()
     }
 
+    // A rollback consumes its snapshot once. Keep the outer map identities,
+    // adopting their already-isolated bucket maps and sets without recopying.
     this.entries.clear()
-    for (const [edgeId, byBucket] of snapshot.entries) {
-      this.entries.set(edgeId, new Map(byBucket))
-    }
+    for (const [edgeId, byBucket] of snapshot.entries)
+      this.entries.set(edgeId, byBucket)
     this.activeBuckets.clear()
-    for (const [edgeId, buckets] of snapshot.activeBuckets) {
-      this.activeBuckets.set(edgeId, new Set(buckets))
-    }
+    for (const [edgeId, buckets] of snapshot.activeBuckets)
+      this.activeBuckets.set(edgeId, buckets)
     this.resolvedValues = new WeakMap()
-    this.compiledResolvedValues = new WeakMap()
 
     for (const entry of currentEntries) {
       if (!previousEntries.has(entry)) void entry.dispose()
@@ -377,27 +376,6 @@ export class BucketFacadeAdapter {
 
   private getActiveBuckets(edgeId: string): Set<string> {
     return getOrCreate(this.activeBuckets, edgeId, () => new Set())
-  }
-
-  /**
-   * Begin a facade write. Copy the facade's rows and defer its events before
-   * its first write in the flush, so a rollback reads only the facades the
-   * flush wrote.
-   */
-  private beginWrite(
-    entry: FacadeEntry,
-    sync: FacadeSync,
-    snapshot: FacadeSnapshot,
-    publications: Array<PublicationDeferral>,
-    keys: Array<string | number>,
-  ): void {
-    if (!snapshot.rows.has(entry)) {
-      snapshot.rows.set(entry, this.copyRows(entry))
-      snapshot.written.set(entry, new Set())
-      publications.push(entry.collection._deferPublication())
-    }
-    for (const key of keys) snapshot.written.get(entry)!.add(key)
-    sync.begin()
   }
 
   private retireEntry(edgeId: string, bucketKey: string): void {
@@ -525,53 +503,33 @@ export class BucketFacadeAdapter {
     entry.collection.getKeyFromItem({ $key: publicKey })
   }
 
-  private resolveValue(value: unknown, resolve?: ValueResolver): unknown {
-    if (resolve) {
-      if (value === null || typeof value !== `object`)
-        return resolve(value, (leaf) => this.resolveValue(leaf))
-      // The same relation value is validated, written, and compared as a prior
-      // snapshot. Resolver identity keeps different include paths independent.
-      const cache = getOrCreate(
-        this.compiledResolvedValues,
-        resolve,
-        () => new WeakMap<object, unknown>(),
-      )
-      if (cache.has(value)) return cache.get(value)
-      const result = resolve(value, (leaf) => this.resolveValue(leaf))
-      cache.set(value, result)
-      return result
-    }
-    if (value === null || typeof value !== `object`) return value
-    const cached = this.resolvedValues.get(value)
-    if (cached !== undefined) return cached
-    if (isBucketFacadeRef(value)) {
-      const { edgeId, bucketKey } = value[BUCKET_FACADE_REF]
-      const facade =
-        this.entries.get(edgeId)?.get(bucketKey)?.collection ??
-        this.retiredEntries.get(edgeId)?.get(bucketKey)?.collection ??
-        this.getEntry(edgeId, bucketKey).collection
-      this.resolvedValues.set(value, facade)
-      return facade
-    }
-    if (Array.isArray(value) || isPlainObject(value)) {
-      const result = transformPublicContainers(
-        value,
-        (leaf) => (isBucketFacadeRef(leaf) ? this.resolveValue(leaf) : leaf),
-        PRIVATE_RESULT_KEYS,
-      )
-      this.resolvedValues.set(value, result)
-      return result
-    }
-    return value
+  private resolveValue(
+    value: unknown,
+    resolve: ValueResolver = this.resolveRoot,
+  ): unknown {
+    if (value === null || typeof value !== `object`)
+      return resolve(value, this.resolveFacade)
+    // A resolver identifies the include paths; an immutable row identifies
+    // the snapshot. Validation, publication and prior-value reads share it.
+    const cache = getOrCreate(
+      this.resolvedValues,
+      resolve,
+      () => new WeakMap<object, unknown>(),
+    )
+    if (cache.has(value)) return cache.get(value)
+    const result = resolve(value, this.resolveFacade)
+    cache.set(value, result)
+    return result
   }
 
-  private cleanupRetiredEntries(): void {
-    for (const byBucket of this.retiredEntries.values()) {
-      for (const entry of byBucket.values()) {
-        void entry.dispose()
-      }
-    }
-    this.retiredEntries.clear()
+  private readonly resolveFacade = (leaf: unknown): unknown => {
+    if (!isBucketFacadeRef(leaf)) return leaf
+    const { edgeId, bucketKey } = leaf[BUCKET_FACADE_REF]
+    return (
+      this.entries.get(edgeId)?.get(bucketKey)?.collection ??
+      this.retiredEntries.get(edgeId)?.get(bucketKey)?.collection ??
+      this.getEntry(edgeId, bucketKey).collection
+    )
   }
 }
 
@@ -579,4 +537,11 @@ function isBucketFacadeRef(value: unknown): value is BucketFacadeRef {
   return (
     value !== null && typeof value === `object` && BUCKET_FACADE_REF in value
   )
+}
+
+export function resolvePublicValue(
+  value: unknown,
+  resolveFacade: (value: unknown) => unknown,
+): unknown {
+  return transformPublicContainers(value, resolveFacade, PRIVATE_RESULT_KEYS)
 }

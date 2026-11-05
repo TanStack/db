@@ -572,7 +572,7 @@ that test identifiers must copy production's private data structures.
 
 | Indexed predicate filtering | Complete for bounded dotted-path collision | An independent row filter checks direct predicates and public callback predicates for a dotted scalar field beside a nested path, with and without an index. Selected-field ordering checks the same distinction through `$selected`. |
 | WHERE predicate publication | Complete for bounded predicate and sync-transaction grammar | The contract, Kleene reference evaluator, snapshot and change-history grammar, three subscriber consumers plus direct snapshot, and per-commit key-set refinement check are literate. A fixed same-key update checks live-row and direct-subscriber payloads; a focused descriptor boundary checks stored-row prefilter safety. Generated cleanup and restart histories for filtered subscribers remain open. |
-| Joined result keys | Complete for bounded two-source key grammar | The contract, nested-loop pair model, delimiter-, number-like, infinite, and `NaN` key grammar, public join driver, and per-checkpoint pair and key-count check are literate. Joins over subqueries, more than two sources, custom `getKey`, and optimistic mutations remain outside this owner. |
+| Joined result keys | Complete for bounded two-source key and whole-source receiving grammars | The nested-loop pair model retains delimiter-, typed, infinite and `NaN` keys. The November 5 extension crosses whole-source selection and spreads, direct/QueryRef receivers, all four join kinds, either selected side and authored collisions. Each of 192 finite histories and fixed/random 80-history campaigns compares root Collections, include facades, toArray and materialize at six cuts. Published `$key` equals the actual default pair or explicit custom key; the other three fields retain source attribution. Inline authored fields and multiplicity remain unchanged. Value-only updates and rejoining preserve key sets. The 4,608 declared receiving states must each reach once. More than two sources, arbitrary nested projection/QueryRef depth, custom-key functions outside the generated key grammar, arbitrary optimistic overlap, frameworks and real providers remain outside this owner. |
 | Grouped result keys | [Grouped result key oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/group-result-key-oracle.property.test.ts) | A grouped live-query Collection gives each group one key of the Collection key type, a string or a number, whatever the group value. Maintainer decision (2026-10-27): grouped keys match the declared key type rather than widening it to nullish keys. Group values come from strings, numbers, `NaN`, `null`, `undefined`, booleans, a bigint, strings that print like those values, and strings in the reserved `\u0000tanstack-db:` namespace; histories move, delete, and insert rows. After preload and each synced change, the (group value, count) pairs equal an independent partition by type and value, every key is a string or number, no two groups share a key, and a group that survives a change keeps its key. Reach (minimum 5, per campaign of 80): a nullish group published (32 to 38), a group value published beside a string that prints like it (18 to 21), and a key kept across a change (49 to 53). RED on the parent commit: keys `undefined`, `null`, `false`, and `10n`. Mutants that encode with `String(value)` (lookalike keys collide) or that encode only nullish values (boolean keys) fail. Encoding only the internal D2 key is equivalent in this domain, because the Collection keys rows by the public group key. A focused witness in `collection.test.ts` checks that `sync.write` rejects `undefined`, `null`, boolean, and bigint keys before staging them, and that a later valid write commits alone. A sync adapter that writes such a key breaks its contract, so this is a fail-fast invariant witness under AGENTS.md ("Separate Valid Edge Cases from Contract Contradictions"), not a generated owner; SortedMap never receives these keys. Not covered: Dates, `-0`, objects, and multi-field groups, whose values the aggregate select oracle owns; real sync adapters, since the source is a controlled mock. |
 | D2 Index storage | Complete for bounded prefix grammar | The contract, plain-`Map` multiset model, prefixed and unprefixed value grammar, `Index` driver, and per-addition `get`/`has` check are literate. Compaction, presence tracking, and structural payloads remain outside this owner. |
 | Pooled live queries | Complete for bounded eq-filter grammar | The contract, independent `eq` model, live-query Collection second formulation, sync/optimistic/mount/cleanup-restart grammar, observer driver, and per-step refinement check are literate. On-demand and persisted sources, `DbClient`, Suspense, and every clause beyond `eq` conjuncts keep the live-query Collection. |
@@ -759,6 +759,26 @@ RIGHT joins, facade projection metadata and inline values live in
 `virtual-row-fields.test.ts`. This boundary does not establish arbitrary
 nested projection histories beyond these two QueryRef levels, every join kind under source changes, framework
 receiving paths or provider behavior.
+
+The whole-source receiving grammar keeps `NaN` source keys on sync paths
+but does not target them with ordinary optimistic updates. A setup probe with
+left keys `[NaN, "b]", "a"]`, right keys `["a", 1, NaN]`, two matching
+rows per side, and `left.update(NaN, row => { row.label = "held" })` throws
+`KeyUpdateNotAllowedError` although its key did not change: mutation admission
+compares keys with `!==`. This separate Collection mutation-admission gap
+belongs to the **Collection lifecycle / mutation startup** entry
+(`packages/db/tests/collection-mutation-startup.test.ts`; fixed tests with no
+independent admission oracle, tracked in #2264). It needs a SameValueZero key
+witness across unchanged-key optimistic updates. The failure occurs during
+admission before the joined update checkpoint, outside this repair claim.
+
+The November 5 pair-identity decision separates joined `$key` from source
+attribution. The selected source retains `$origin`, `$hasPendingWrites` and
+`$collectionId`; the result owns its actual pair or explicit custom key. The
+join-result-key owner now checks fanout, source attribution and authored inline
+values together through root, QueryRef and materialized receivers. This owner
+retains its custom-key, nullable facade and source-spread controls under that
+approved rule. Inline `$key` remains authored.
 
 The prep review adds 102 histories for implicit single-source/joined output and
 functional direct-source returns after inherited inline materialization.
@@ -4272,6 +4292,17 @@ boundary. Track the generalized repairs here instead of accumulating isolated
 regressions. Completion requires an executable owner, a production-path witness,
 a hostile wrong-answer control, and an explicit statement of remaining limits.
 
+- [ ] **Unchanged `NaN` keys at optimistic mutation admission.** With an eager
+      Collection keyed by `row.id`, preload a row whose `id` is `NaN`, then
+      call `update(NaN, row => { row.label = "held" })`. Admission throws
+      `KeyUpdateNotAllowedError` because it compares the unchanged keys with
+      `!==`. The November 5 joined-source grammar found the witness before its
+      joined update checkpoint and retains `NaN` sync-key coverage separately.
+      Owner: Collection lifecycle / mutation startup
+      (`packages/db/tests/collection-mutation-startup.test.ts`; no independent
+      admission oracle, tracked in #2264). Needed witness: unchanged-key
+      mutation admission across numeric/string keys and SameValueZero `NaN`.
+      This sibling remains open outside the joined-result identity repair.
 - [ ] **Offset-only providers under a joined ordered window.** A provider that
       honors `offset` and ignores `cursor` gets a wrong window at preload under a
       LEFT-joined filter: the ordered loader repeats a continuation `offset`
@@ -5543,6 +5574,24 @@ only before the first real `applyMutations` visits none. The neighboring
 failed-write histories still check restoration of prior intent. This bound
 does not remove the existing linear merge traversal for each real write or
 establish elapsed-time performance.
+
+## Public-container cleanup copies
+
+`packages/db/tests/query/public-container-copy-oracle.test.ts` owns array copy
+shape at resolver return, under the architecture's descriptor/prototype
+preservation law. Each fixed/fresh input exhausts 24 structural programs:
+shallow root cleanup, generic nested cleanup, compiled root cleanup and compiled
+include-path replacement; native, derived and null array prototypes; changed
+and unchanged values. Sparse sizes zero through eight, locked lengths,
+accessors, hidden properties and user symbols vary without weakening identity
+or descriptor comparisons. The original code loses derived/null prototypes in
+six changed cells; a shared-shell prototype mutant fails all eight changed
+derived/null cells. Every state reaches once per generated input. The ordinary
+`public-container-copy.test.ts` remains supplemental reference-key, cycle,
+sharing and record-descriptor coverage. This component owner does not establish
+framework/provider receiving behavior, arbitrary graph topology, or Collection
+publication descriptor policy. Opaque-payload scan work remains with the
+includes-work owner; Collection attribution remains with virtual-row-fields.
 
 ## Compound joins
 
@@ -7631,3 +7680,26 @@ requests while joined work defers a reentrant pass, then check the real
 subscription receiving path. This remains separate from PR #2346's observer
 metadata-sharing and discarded-publication scope. The test, grammar and run
 budget remain unchanged; a green later random campaign does not close it.
+
+## Compiler group reduction boundary
+
+`packages/db/tests/query/compiler/group-by-pipeline-oracle.test.ts` retains the
+independent batch model formerly embedded in the ordinary
+`group-by-pipeline.test.ts`. Thirty finite histories cross explicit/implicit
+groups, no/plain/wrapped selection and five HAVING forms. Each compares keyed
+selected values after empty startup, population, a member move/value change,
+emptying and reentry: 150 comparison checkpoints, with each checkpoint declared
+and reached in every history. Checker calibrations reject a lost group, wrong
+key, wrong value and duplicate weight. Supplemental pending-state and admission
+examples remain in the ordinary file.
+
+Authority: the existing aggregate/group laws and the maintainer's 2026-11-05
+boundary-only metadata decision. Group reduction has no source Collection
+attribution; Collection publication supplies that metadata. The retired reducer
+pending/origin/Collection-ID expectations are therefore removed from this
+component judgment. The primary `virtual-row-fields-oracle.test.ts` continues
+to own genuine published metadata; no public comparison is weakened. The
+component covers numeric keys/sums and synchronous D2 graph drains, without
+correlated routes, public events, provider schedules or general aggregate shapes.
+The public aggregate-select and grouped-result-key owners retain those wider
+value/key contracts and their stated limits.

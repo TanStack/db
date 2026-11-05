@@ -9,6 +9,9 @@ source by SHA256 and retains the experiment log hashes. Earlier records remain
 historical. Raw review and append-only scratch accounting are in
 `/tmp/db-prep-pr-2026-11-05/review-high-10-ledger.md` on the authoring host.
 
+The final amendment below supersedes historical source-key policy, size figures
+and readiness statements. Earlier experiment entries remain unchanged.
+
 ## Laws, experiments and inferences
 
 No new product decision is needed. The November 5 maintainer decision requires
@@ -79,7 +82,7 @@ repaired work claim and a rejected correctness explanation.
 | NR07 | builder/types.ts:275 treats wrapped aggregates as ordinary expressions, omitting generated keys. | Confirmed type defect, fixed-now. Preserve inferred aggregate provenance and unwrap scalar aggregate results. | Extended native public-type owner and explicit-erasure limits. |
 | NR08 | bucket-facade-adapter.ts:524 bypasses the resolution cache, repeating prepare/apply/previous-value resolution. | Confirmed, fixed-now. Cache by resolver and immutable row identity. Rollback clears both caches. | Facade lifecycle and rollback owners retain publication/next-use checks. |
 | NR09 | route-metadata.ts:207/91 has unused recursive wrapper parameters and an unused stripRouteMetadata export. | Confirmed production cleanup, fixed-now. Wrappers are shallow-only and the unused export is removed. The generic recursive walker remains useful. | Cycle/descriptor coverage invokes that generic walker directly. |
-| NR10 | route-metadata.ts:149 cleans plain Collection inputs and performs all six hasOwn probes after a hit. | Plain-source overhead confirmed, fixed-now through compile-time source classification. The after-hit allegation is refuted: ||= already short-circuited calls. | Keep parameterized Collection and QueryRef cleanup. New stripper returns at the first hit. |
+| NR10 | route-metadata.ts:149 cleans plain Collection inputs and performs all six hasOwn probes after a hit. | Plain-source overhead confirmed, fixed-now through compile-time source classification. The after-hit allegation is refuted: `\|\|=` already short-circuited calls. | Keep parameterized Collection and QueryRef cleanup. New stripper returns at the first hit. |
 | NR11 | Summary repeats grouped metadata qualification and wasted work. | Duplicate NR01. | Preserve both correctness qualification and work claim. |
 | NR12 | Summary repeats unmatched joined-subquery collisions. | Duplicate NR06. | Preserve public include collision consequence. |
 | NR13 | Summary names coalesce(sum(...)) and caseWhen inference. | Duplicate NR07. | Preserve those concrete forms in the wrapper grammar. |
@@ -213,3 +216,321 @@ Review accounting and local implementation verification are complete. Remote CI
 and the final pushed head require separate verification before a ready verdict.
 The full repository pnpm test command was not run. Earlier branch-wide review
 records and their accepted limits remain relevant.
+
+
+## Follow-up on bd3f574ec: shipped size and additional CI review
+
+This append-only amendment qualifies the earlier closure and size statements.
+The maintainer requires a net decrease in shipped JavaScript, rather than a
+net decrease in production source lines. The prior +337 gzip/+353 brotli DB
+measurement does not meet that requirement. Subsequent intermediate size
+measurements are experiments, not the final acceptance result.
+
+CodeRabbit review 5791093838 covers bd3f574ec. Every new occurrence is retained
+in the scratch ledger, including the full inline bodies. Its dispositions are:
+
+| Occurrence | Verdict and action | Surviving value |
+| --- | --- | --- |
+| 4485255659, NR10 table pipes split cells | Confirmed, fixed-now. Escape both pipes in the operator. | Readable lossless finding table. |
+| 4485255663, whole-source join fan-out collapses under source keys | Confirmed. The initial disposition was design-decision because the accepted source-key rule conflicted with contribution conservation. | Cross whole-source selections with one-to-many joins and observe every public include form. |
+| Mutable summary: 39.58% documentation versus 80%, 48 functions, four unsupported | Refuted as a repository requirement. No maintainer or repository rule establishes this threshold. | Add explanatory prose where a specific ambiguity warrants it. |
+| Mutable summary: aggregate-operator type provenance scope | Already evaluated with NR07. Generated native consumers require provenance and it emits no JavaScript. | Retain ordinary expression controls and explicit-erasure limits. |
+| Older mutable 4484649660: make cleanup callback async | Refuted on current source. checkWithCleanup accepts a synchronous callback or Promise<void>. Native type owner passes 33 checks. | Keep async cleanup support without unnecessary Promise creation. |
+
+The public probe for 4485255663 joins one child to two matches, selecting the
+whole child. Both toArray() and include() return one row with source key 10.
+This is executable evidence of lost join multiplicity, rather than a proposed
+implementation preference. The maintainer then approved pair keys for joined
+results, while retaining the source's origin, pending-write and Collection-ID
+attribution. This revises the source-key portion of the earlier decision and
+NR18's neighboring-law control. A joined row's identity represents the pair.
+The remaining source fields continue to describe attribution. The historical
+source-key RED above remains valid evidence of that earlier contract, but is
+not an obligation under the revised contract. The pair-key experiment and
+current readiness verdict are recorded below after enforcement is complete.
+
+### Copy-law sibling and independent evidence
+
+A new sibling defect loses an array's derived or null prototype during shallow
+cleanup and generic graph copying. Architecture's cleanup contract promises
+preserved prototypes, descriptors and user symbols without accessor execution.
+Existing ordinary tests varied null record prototypes but only native arrays.
+The metadata and payload-work owners judge different boundaries, so the new
+public-container-copy owner independently judges this copy relation.
+
+- **Law:** A necessary cleanup copy changes only the private keys or declared
+  include leaves, retaining prototype, descriptors, user symbols and source
+  immutability. An unchanged value retains identity.
+- **Reach:** Each generated input executes 24 programs: four resolver paths,
+  three array prototypes and changed/unchanged controls. Sizes range from zero
+  to eight, scalar values from -1 to 1, with sparse slots and locked-length
+  variation. Fixed seed 2355 and fresh seed 937318538 each reach every state
+  eight times, giving 384 comparisons in the combined run.
+- **RED:** Before the prototype production edit, the new owner rejects six
+  changed derived/null cells on shallow, generic and compiled-root paths.
+  Compiled declared-path controls already preserve prototypes. Direct replay
+  at seed 937318538, path 0 rejects the same six cells.
+- **GREEN:** The shared shell allocator preserves array prototypes. Focused
+  oracle, ordinary copy and facade checks pass 37/37, and direct replay passes.
+- **Mutant:** Replacing the shared array shell with [] fails all eight changed
+  derived/null cells, including the compiled include path, at prototype checks.
+- **Limits:** The observation is resolver return. This does not claim arbitrary
+  graph topology, cross-realm hosts, exotic built-ins, framework/provider
+  behavior or descriptor preservation at Collection publication.
+
+The model captures descriptors/prototypes before invoking production. It does
+not import production classification or copying helpers. The compiled path
+obtains its resolver through the real Query builder and materialization plan.
+Sparse slots, readonly named data, an accessor, hidden fields and a hidden user
+symbol distinguish tempting spread-based copies. Existing cycle/sharing tests
+remain supplemental. No test or run budget was removed. The first supplemental
+type attempt used an unavailable fast-check type and receives no type-GREEN
+credit. The corrected final native check passes all 85 checks with no errors.
+
+### Group-stage CI calibration
+
+Local execution reproduces the remote DB shard's 21 stale metadata expectations
+out of 35 component tests. Boundary-only publication retires that component's
+source-derived pending/origin/Collection-ID expectations. The old argument also
+occupied a different parameter after the reducer signature changed. This is an
+expectation/owner repair with unchanged production, not production-bug evidence.
+
+The renamed group-by-pipeline oracle retains all 30 explicit/implicit grouping,
+none/plain/wrapped selection and five-HAVING programs. Each compares empty,
+populated, member-move/value-change, empty-after-delete and reentry snapshots
+against the independent partition/sum model: 150 checked component snapshots.
+Four incorrect observations exercise the same checker: missing group, wrong
+key, wrong value and duplicate weight. All are rejected. Five ordinary source
+state/admission controls remain in the ordinary test file. Final component
+checks pass 39/39, and the unchanged public metadata owner passes 1,714/1,714.
+This does not relax any actual Collection metadata comparison or remove a
+random run budget. Limits remain numeric grouping/sums and synchronous D2
+drains, with public attribution and routes owned by their existing instruments.
+
+### Size experiments and latency observations
+
+The type-only caseWhen tuple signature removes the overload ladder while
+preserving the existing six-or-more-pair fallback. Removing redundant and/or
+overloads also emits identical JavaScript to bd3f574ec. A const-tuple inference
+experiment narrowed object branch fields, failed 24 native histories, and was
+rejected. The nonconst form passes the native owner. It is not a runtime size
+reduction by itself.
+
+Shallow cleanup no longer enters the generic graph walker. Generic graph copy
+allocates every dirty shell before descriptor replacement, retaining cycles
+and shared references. Facade resolution uses one resolver-indexed cache and
+a stable callback. Merging source metadata and routing into one alias-entry
+map was rejected because it adds allocation and lookup work to metadata-only
+QueryRefs without a measured benefit. Source-line savings do not justify that
+latency tradeoff.
+
+The measurement table now retains six runs, 504 rows, including the simplified
+working tree before the pair-key amendment and a third unchanged predecessor
+control. That candidate versus the third control measures 1.00x overall writes
+and 0.96x cold, with one diagnostic write flag and no gate failure. Every query
+geometric mean passes the unchanged gate. These observations do not establish
+zero overhead or a source-caused speedup. The candidate's reported Git SHA is
+bd3f574ec beneath uncommitted source; the companion manifest binds that source
+separately. Later semantic edits require their own verification.
+
+The current remote checks still cover bd3f574ec: 23 pass, while Minified DB
+public API, Test (db-1) and composite Test fail. The local mangle-cache and
+group-stage repairs address diagnosed causes, but do not establish remote
+success until the final changes are pushed and rerun.
+
+### Shipped JavaScript acceptance experiment
+
+Production callers always provide the compiled include resolver when creating
+facades. The internal BucketFacadeAdapter and generic resolver are absent from
+the public package exports. Requiring that existing dependency explicitly lets
+the generic recursive walker leave public-index bundles. Direct component
+receivers still pass the same helper explicitly. Its copy, cycle and reference
+checks remain intact. This is an internal dependency change, not a weakened
+public cleanup law.
+
+Before requiring the dependency, the modified direct receivers pass 58/58 on
+unchanged production defaults. Afterward, seven focused files pass 234/234,
+including real compiled callbacks and the fourteen-path opaque-payload work
+owner. Rollback retains outer Map identities, adopts already-isolated inner
+snapshot Maps/Sets once, and records written keys directly without temporary
+key arrays. A rejected outer-Map replacement failed the nested rollback
+receiver; the corrected implementation preserves that comparison. No oracle
+model, grammar, assertion or run budget is relaxed by these refactors.
+
+A generic copy's allocated shell now doubles as its dirty marker. Every dirty
+shell exists before descriptor links are filled, preserving shared references
+and cycles without a separate flag/allocation pass. Mangle-cache validation
+accepts 434 safe private names. The earlier source-only overload reduction is
+not counted as shipped-code removal.
+
+Immediately before the pair-key amendment, exact merge-base 8feab6ea3 versus
+working source measures:
+
+| Fixture | Base minified JS | Working JS | JS delta | Gzip delta | Brotli delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Full public export bundle | 363,269 | 363,084 | -185 | -108 | -184 |
+| Ordinary app | 316,001 | 315,702 | -299 | -185 | -147 |
+| App with includes | 324,489 | 324,935 | +446 | +57 | -38 |
+
+The full bundle and ordinary app meet the shipped-size requirement in this
+experiment. The includes fixture remains larger in raw JavaScript and gzip.
+All eight app scenarios were measured; the other seven shrink in gzip. The sum
+of all minified ESM JavaScript modules, including development branches,
+decreases from 728,187 to 726,627 bytes (-1,560). That distribution measure is
+distinct from an app's tree-shaken production bundle.
+
+Commands: `pnpm size:compare --packages db --base 8feab6ea3 --exact-base
+--rebuild`, plus the manifest-bound measure-shipped-js.mjs probe. Its production
+bundling premises and gzip/brotli values match the repository size script.
+The final pair-key source requires a final measurement below.
+
+The size-continuation ledger also preserves rejected ideas: const-tuple type
+inference, direct adoption of outer rollback Maps, a merged source-context map,
+and a proposed compiled-resolver representation rewrite. The first three have
+counterevidence above. The resolver rewrite was unnecessary after the explicit
+internal dependency removed the generic walker from shipped public bundles,
+and was not implemented. Accepted changes preserve existing public histories,
+comparisons and budgets. Type-only source deletion receives no shipped-size
+credit.
+
+
+## Final pair-key and shipped-size amendment
+
+The maintainer requires negative shipped JavaScript overall and explicitly
+chooses pair keys for joined results. The November 5 decision supersedes NR18's
+historical source-key requirement. Structured whole-source selections and direct
+functional source returns keep source origin, pending-write state and Collection
+ID; their published key identifies the joined result. Inline authored fields
+remain intact. Explicit custom keys retain congruent contributor reduction.
+
+### Joined occurrence evidence
+
+- **Law and authority:** Each default-key joined occurrence remains separately
+  observable. A published row's $key equals its actual Collection entry key.
+  Source attribution's other three fields remain genuine. Authority: the
+  maintainer's pair-key decision and architecture contribution conservation.
+- **Reach:** The primary join-result-key owner crosses all four join kinds,
+  selected side, direct/QueryRef composition, four projection forms, authored
+  collisions where applicable, and default/custom keys: 192 finite programs.
+  Each checks initial publication, held selected-source mutation, peer departure,
+  rejoin, settlement and remote update through root Collection, Collection
+  facade, toArray and materialize receivers. All 4,608 declared receiving states
+  reach at least once. Two 80-history campaigns add random and fixed inputs:
+  352 histories and 8,448 new comparisons in the normal run.
+- **RED:** Before the production amendment, the extended join and metadata
+  owners fail 219 of 1,914 tests. Missing required source IDs, invalid QueryRef
+  correlation and NaN admission setup failures receive no RED credit.
+- **GREEN:** The same two owners pass 1,914/1,914 on final production. The
+  generated public metadata judgment retains non-key attribution and authored
+  inline values. Custom keys intentionally differ from source IDs. Temporal
+  key-set checks preserve identity across value changes and departure/rejoin.
+- **Mutants:** Separately restoring source-key preference in routing and in
+  published metadata rejects 130/200 join tests each at the shared comparisons.
+  A direct replay of property join-result-key.whole-source, seed -540621864,
+  path 0:0:0:0:0 rejects restored source-key behavior and passes after byte-exact
+  source restoration. The captured trace selects the left whole row in a direct
+  inner join, with string and infinite source keys. Replay runs one selected
+  property and intentionally skips the other campaign and reach requirements.
+- **Limits:** Eager core/mock sources, two joined sources and bounded updates;
+  no provider-delivery or framework-scheduling claim. Arbitrary overlapping
+  writes, larger join chains and unbounded query shapes are not established.
+  The detailed reach log was truncated, so it is not a parseable exact-count
+  artifact. Finite enumeration and enforced reach assertions establish >=1 for
+  each declared state; no larger per-state count is claimed.
+
+Commands (from the worktree, each with at most two workers):
+
+```sh
+pnpm --dir packages/db exec vitest run tests/query/join-result-key-oracle.property.test.ts tests/query/virtual-row-fields-oracle.test.ts --maxWorkers=2 --coverage.enabled=false
+TANSTACK_DB_ORACLE_SEED=-540621864 TANSTACK_DB_ORACLE_PATH=0:0:0:0:0 TANSTACK_DB_ORACLE_PROPERTY=join-result-key.whole-source pnpm --dir packages/db exec vitest run tests/query/join-result-key-oracle.property.test.ts --maxWorkers=2 --coverage.enabled=false
+```
+
+The source-key preference is removed from the small metadata sidecar for joined
+rows. Publication supplies the actual result key; routed rows use their computed
+pair identity. This adds no recursive payload traversal.
+
+### Final source measurements and checks
+
+Exact merge-base 8feab6ea3 versus final working source:
+
+| Fixture | Base minified JS | Final JS | JS delta | Gzip delta | Brotli delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Full public export bundle | 363,269 | 363,114 | -155 | -94 | -85 |
+| Ordinary app | 316,001 | 315,735 | -266 | -170 | -158 |
+| App with includes | 324,489 | 324,968 | +479 | +73 | -18 |
+
+All emitted minified ESM JavaScript modules, with development branches retained,
+shrink from 728,187 to 726,520 bytes (-1,667). The shipped-size requirement is
+met overall. The includes fixture still grows in raw JS and gzip. Source-line
+negativity is not required and is not claimed. The size command remains
+`pnpm size:compare --packages db --base 8feab6ea3 --exact-base --rebuild`.
+
+The seventh retained local benchmark uses final production and identical
+candidate/predecessor harnesses: 84 cases, three fresh-fixture repetitions,
+100 writes and 20 warmups. Its 130-file source binding matches before and after
+execution. Against the third unchanged 708a58098 predecessor control, it measures
+0.91x overall writes and 0.80x cold, with no diagnostic flags and a PASS from the
+unchanged CI gate. The CSV now preserves seven runs / 588 cases. Earlier noisy
+and failed observations remain. This is evidence against a large regression
+in these cases, not a zero-overhead or precise speedup claim.
+
+Final local verification on the same production source:
+
+- DB shard 1: 198 files / 16,367 tests pass, with no type errors.
+- Affected runtime run: 16 files / 7,802 tests pass.
+- Full DB source/test tsc: zero diagnostics (12 GB heap).
+- Minified public API: 113 error names, index metadata, query rows and live
+  updates pass. Mangle-cache validation accepts 434 safe names.
+- Native type owner: 33 checks; supplemental type checks: 85. Builder functions
+  emit identical JavaScript to bd3f574ec.
+- Source size/build, scoped lint and direct replay pass. Final repository
+  lint/diff checks and remote CI are recorded after commit below.
+
+The complete repository pnpm test command was not run. A nonexistent optional
+changeset-checker script and an earlier tsc setup failure receive no check credit.
+
+### Final loss accounting
+
+NR01–NR15 preserve every raw finding and summary claim. Ten primary findings
+are fixed, with NR01's attribution half accepted-design and NR10's after-hit
+probe allegation refuted. NR16/17 siblings are fixed. NR18's historical source
+key law is superseded by the explicit pair-key decision; the replacement law is
+enforced above. Item accounting: 18 = 12 fixed-now + 5 duplicates + 1
+accepted-design. No original item is deferred or confirmed-open.
+
+CodeRabbit occurrences from review 5791093838/bd3f574ec: table pipes and whole
+source fan-out are fixed-now; the unconfigured docstring threshold and async
+callback requirement are refuted; aggregate provenance scope is already
+addressed. Five occurrences = 2 fixed-now + 2 refuted + 1 already-fixed.
+
+The size-continuation ledger preserves all simplifications: SS01 tuple types,
+SS02 shallow descriptors, SS03 all-shells-before-links, SS05 unified resolver
+cache, SS07 isolated inner rollback snapshots, SS08 inlined write setup, SS09
+shared cleanup loop, SS10 shell-as-dirty-marker and SS11 explicit resolver are
+accepted internal refactors. SS04 array prototypes and SS13 mangle-cache safety
+are fixed-now. SS06 outer Map replacement and SS12 merged source-context maps
+are rejected with counterevidence. SS14 is approved group-stage test calibration.
+SS15 remains an open Collection admission sibling outside the joined-result
+repair. SS16, an unneeded compiled-resolver representation rewrite, is rejected
+without implementation. Accounting: 16 = 9 internal refactors + 2 fixed-now + 3
+rejected proposals + 1 accepted-design + 1 confirmed-open outside this claim.
+No oracle run budget was deliberately lowered or removed.
+
+SS15's exact public witness is recorded in the coverage map under the Collection
+mutation-startup owner: an unchanged NaN key fails ordinary optimistic update
+admission before the joined observation cut. Sync NaN join histories remain.
+The update grammar uses a different matched row for optimistic mutation. This
+PR does not fix optimistic NaN admission or claim closure for it; that owner
+retains the trace and issue #2264 as its durable destination.
+
+Reviewer recommendation remains hire: high useful signal on types, keys and
+work, with source-only evidence and two partially incorrect explanations.
+All raw occurrences and rejected ideas have durable destinations. The bounded
+join/copy/type laws above have RED/GREEN and calibration evidence. PR readiness
+still requires the final pushed head's remote checks and new-review accounting;
+the old bd3f574ec check failures do not describe final-source CI.
+
+Final precommit checks: pnpm lint:changed, Prettier on all changed TS/JSON/MD,
+and git diff --check pass. PR prose has zero hard STE violations; the two
+advisories are the required checklist wording. No lowered/removed oracle
+budget report was emitted. Remote checks are still pending the new push.

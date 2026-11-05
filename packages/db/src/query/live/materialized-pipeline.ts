@@ -7,7 +7,10 @@ import {
   reduce,
   serializeValue,
 } from '@tanstack/db-ivm'
-import { stripInternalCallbackMetadata } from '../compiler/route-metadata.js'
+import {
+  createPublicContainerShell,
+  stripInternalCallbackMetadata,
+} from '../compiler/route-metadata.js'
 import { codedMessage, devBuild } from '../../error-message.js'
 import {
   canonicalizeByPublicKey,
@@ -492,10 +495,5 @@ function replaceIncludePath(
   if (Object.is(next, descriptor.value)) return value
   const descriptors = Object.getOwnPropertyDescriptors(value)
   descriptors[key] = { ...descriptor, value: next }
-  const copy = Array.isArray(value)
-    ? []
-    : Object.create(Object.getPrototypeOf(value))
-  if (Array.isArray(value))
-    Object.setPrototypeOf(copy, Object.getPrototypeOf(value))
-  return Object.defineProperties(copy, descriptors)
+  return Object.defineProperties(createPublicContainerShell(value), descriptors)
 }

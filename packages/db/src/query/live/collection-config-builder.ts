@@ -1198,7 +1198,7 @@ export class CollectionConfigBuilder<
             (count) => {
               syncState.messagesCount += count
             },
-            this.valueResolverCache,
+            this.valueResolverCache!,
           )
         : undefined
     if (bucketFacades) {

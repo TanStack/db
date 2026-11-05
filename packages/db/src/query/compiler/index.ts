@@ -1252,6 +1252,12 @@ function compileQueryInternal(
       for (const alias of metadataSource)
         if (row[alias] != null) metadata = getSourceMetadata(row, alias)
     }
+    // A source owns attribution, but a joined occurrence has its own identity.
+    // Collection publication supplies its computed or explicitly configured key.
+    if (query.join && metadata && `$key` in metadata) {
+      metadata = { ...metadata }
+      delete metadata.$key
+    }
     const finalResults = stripInternalRouteMetadata(
       isCollectionRoot
         ? attachVirtualPropsToSelected(selectedValue, metadata)
@@ -1267,11 +1273,7 @@ function compileQueryInternal(
         orderByIndex,
         route?.correlationKey,
         parentKeyStream ? (route?.parentContext ?? null) : undefined,
-        // Source-attributed join selections keep their source key. Other
-        // projections need the pair identity to distinguish fan-out rows.
-        parentKeyStream
-          ? ((query.join && metadata?.$key) ?? row[INCLUDES_PUBLIC_KEY] ?? key)
-          : undefined,
+        parentKeyStream ? (row[INCLUDES_PUBLIC_KEY] ?? key) : undefined,
         metadata,
       ],
     ] as unknown as [unknown, [any, string | undefined]]

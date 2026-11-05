@@ -62,9 +62,12 @@ Across their 36 cross-job pairs, absolute-direction overall ratios reach 2.76x
 for writes and 1.88x for hydration. Individual-case ratios reach 5.67x and
 4.87x, respectively. Never gate against absolute timings from a different job.
 
-The new three-repetition workflow still needs observed CI history. The initial
-30%/50% query margins exceed every query shift in this sample; repeated ranges
-supply a stricter consistency check for localized regressions. Revisit these
+The first remote three-repetition run
+[passes](https://github.com/TanStack/db/actions/runs/42087213348). It covers PR
+head 066d0dd26 through GitHub merge commit 88544ac64, before later review fixes.
+Additional same-code CI history is still needed to calibrate false positives.
+The initial 30%/50% query margins exceed every query shift in this sample;
+repeated ranges supply a consistency check for localized regressions. Revisit these
 margins with additional same-code paired runs, particularly after runner or Node
 changes. This finite historical sample does not prove a future noise ceiling.
 
@@ -93,3 +96,13 @@ small overhead unresolved; neither comparison is discarded. These diagnostic
 baselines use pre-2312 DB sources, whereas CI compares the PR's merge base.
 See the [prep-review record](../../docs/contributing/oracle-reviews/2026-11-05-boundary-only-prep-review.md)
 for the final source binding, gate outcomes and measurement limits.
+
+The [high-review measurement table](high-review-2026-11-05.csv) retains all seven
+later local runs (588 cases with three repetitions per case), including noisy
+unchanged controls and every candidate observation. A simplified working tree
+before the final pair-key amendment measures 1.00x writes and 0.96x cold against
+the third predecessor control, passing the unchanged gate with one diagnostic
+write flag. The final pair-key source measures 0.91x writes and 0.80x cold
+against the same control, passing with no diagnostic flags. These runs compare with predecessor 708a58098, not pre-2312 or the
+PR merge base. The [high-review record](../../docs/contributing/oracle-reviews/2026-11-05-boundary-only-high-review.md)
+binds source, work, size and law evidence and preserves all observed limits.

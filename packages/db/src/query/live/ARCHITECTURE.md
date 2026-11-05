@@ -377,8 +377,9 @@ facade references and cleans nested materialized rows along those paths only.
 Ordinary source payloads remain opaque, including in correlated queries and
 grouped HAVING. Clean values retain their references. Copies preserve property
 descriptors, prototypes and user symbols; discovering private state does not
-invoke accessors. Generic adapter callers without a compiled resolver retain
-the descriptor-preserving public-container walker.
+invoke accessors. The internal facade adapter requires an explicit resolver.
+Compiled queries supply their declared-path resolver; direct component drivers
+can supply the descriptor-preserving public-container walker.
 
 Internal clean references can be equality operands, not just render identities.
 A cleanup copy must not change a later `eq(projected.key, parent.key)` match.
@@ -393,7 +394,11 @@ decision, 2026-11-05, superseding the October 28/30 callback-normalization
 rules). Actual Collection row roots expose genuine computed `$key`, `$origin`,
 `$hasPendingWrites` and `$collectionId`. Structured whole-source selections and
 spreads retain source attribution; functional selections retain it only when
-returning the source row directly. Other published projections receive their
+returning the source row directly. Joined occurrences use their computed pair
+key for `$key`, or the explicit `getKey` result. Source attribution retains
+`$origin`, `$hasPendingWrites` and `$collectionId`; a source key cannot collapse
+several joined occurrences. Inline values keep their authored `$key` and
+multiplicity. Other published projections receive their
 output Collection's metadata. An authored reserved field cannot override that
 attribution.
 
@@ -697,7 +702,9 @@ select throws `IncludeOperatorRequiredError`. The include exposes one stable
 public Collection facade per active bucket in that edge:
 
 Facade rows obey the Collection virtual-field boundary. Structured whole-row
-selections and source spreads retain the selected source's metadata. Other
+selections and source spreads retain the selected source's attribution. Joined
+rows use pair keys for `$key`, preserving separate occurrences of one source
+row. The other three fields retain source attribution. Other
 projections receive the facade Collection's metadata. A functional selection
 preserves source metadata only by returning that source row directly; a new
 object, including a spread, receives its output Collection's metadata
