@@ -21,8 +21,16 @@ The nested-document case joins all open issues to 20-block documents and selects
 whole documents without a limit. Synced updates and optimistic updates with
 rollback run at all scales and index modes, like the existing flat cases.
 
-CI runs the same benchmark code on the candidate and merge base on one runner.
-It fails for either of these conditions:
+CI compares benchmark inputs before installing or measuring. Package versions,
+changelogs, and workspace dependency specifiers whose resolved `link:` target
+is unchanged do not affect that comparison. Runtime, dependency resolution,
+configuration, workflow, and harness changes still run the gate. A manual run
+always measures. Input-selection errors fail the job; branch names never grant
+an exemption. Run `node --test scripts/bench/inputs-changed.test.mjs` to check
+this selection.
+
+When inputs differ, CI runs the same benchmark code on the candidate and merge
+base on one runner. It fails for either of these conditions:
 
 - A query's geometric mean across its configurations increases by more than
   30% for writes, or 50% for cold hydration. Improvements in another query or
