@@ -10,9 +10,11 @@
  * is `globalThis`, optionally cast with `as`. Its name is a literal or a
  * template literal without substitutions, of the form `package#name`. It has
  * exactly two arguments, and the condition contains no assignment, update,
- * `new`, `delete`, `await`, `yield`, or function or class expression. A call
- * is allowed in the condition: a syntactic rule cannot prove that a call is
- * pure.
+ * `new`, `delete`, `await`, `yield`, function or class expression, or arrow
+ * function with a block body. An arrow with an expression body is allowed,
+ * and its body is held to the same rule, so a condition can scan a
+ * collection (maintainer decision, 2026-11-05). A call is allowed in the
+ * condition: a syntactic rule cannot prove that a call is pure.
  *
  * The law and its authority are in
  * scripts/eslint-plugin-oracle/probe-form-oracle.property.test.js, which also
@@ -24,8 +26,10 @@ const PROBE = `__oracleProbe`
 const NAME = /^[a-z][a-z0-9-]*#[a-zA-Z][a-zA-Z0-9.-]*$/
 const PRODUCTION = `production`
 
-// The expression kinds that the condition must not contain. A function, an
-// arrow, or a class expression can hide a mutation or an await.
+// The expression kinds that the condition must not contain. A function or a
+// class expression can hide a mutation or an await. An arrow cannot when its
+// body is an expression, which this check reads like the rest of the
+// condition; an arrow with a block body is refused in `containsForbidden`.
 const FORBIDDEN = new Set([
   `AssignmentExpression`,
   `UpdateExpression`,
@@ -33,7 +37,6 @@ const FORBIDDEN = new Set([
   `AwaitExpression`,
   `YieldExpression`,
   `FunctionExpression`,
-  `ArrowFunctionExpression`,
   `ClassExpression`,
 ])
 
@@ -51,6 +54,11 @@ function childrenOf(node) {
 function containsForbidden(node) {
   if (FORBIDDEN.has(node.type)) return true
   if (node.type === `UnaryExpression` && node.operator === `delete`) return true
+  if (
+    node.type === `ArrowFunctionExpression` &&
+    node.body.type === `BlockStatement`
+  )
+    return true
   return childrenOf(node).some(containsForbidden)
 }
 
@@ -145,7 +153,7 @@ function probeMentions(expression) {
   return [callee.property, ...receiver]
 }
 
-const message = `\`__oracleProbe\` may be called only as a state probe: one expression statement, \`process.env.NODE_ENV !== 'production' && globalThis.__oracleProbe?.('package#name', condition)\`, with a name literal of the form package#name and a condition that has no assignment, update, new, delete, await, yield, or function or class expression.`
+const message = `\`__oracleProbe\` may be called only as a state probe: one expression statement, \`process.env.NODE_ENV !== 'production' && globalThis.__oracleProbe?.('package#name', condition)\`, with a name literal of the form package#name and a condition that has no assignment, update, new, delete, await, yield, function or class expression, or arrow with a block body.`
 
 export default {
   meta: {

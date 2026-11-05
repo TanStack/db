@@ -12,8 +12,11 @@
  * string literal or a template literal without substitutions, and it names a
  * state as `package#name`. The statement has exactly two arguments,
  * and the condition contains no assignment, update, `new`, `delete`, `await`,
- * `yield`, or function or class expression. A call is allowed in a condition:
- * a lint cannot prove that a call is pure, which is a limit of this law.
+ * `yield`, function expression, class expression, or arrow function with a
+ * block body. An arrow function with an expression body is allowed, under the
+ * same rule for its body, so a condition can scan a collection
+ * (`rows.every((row) => …)`). A call is allowed in a condition: a lint cannot
+ * prove that a call is pure, which is a limit of this law.
  *
  * Authority: the maintainer's decision on the probe form, which replaces the
  * `devBuild()` guard ("this is a standalone framework now so we can't use the
@@ -152,10 +155,15 @@ const LEGAL_CONDITIONS = [
   { text: `!flag`, calls: false },
   { text: `-input`, calls: false },
   { text: `void 0`, calls: false },
+  // Arrows with an expression body (maintainer decision, 2026-11-05).
+  { text: `items.every((item) => item > 0)`, calls: true, arrow: true },
+  { text: `items.some(([a, b]) => a === b && typeof a === 'string')`, calls: true, arrow: true },
+  { text: `(() => flag)()`, calls: true, arrow: true },
 ]
 
 // Each expression is a forbidden form: an assignment, an update, `new`,
-// `delete`, `await`, `yield`, a function, an arrow, or a class expression.
+// `delete`, `await`, `yield`, a function or class expression, an arrow with a
+// block body, or an arrow whose expression body holds a forbidden form.
 // The generated program is an async generator, so `await` and `yield` parse.
 const FORBIDDEN_CONDITIONS = [
   `(flag = true)`,
@@ -166,7 +174,9 @@ const FORBIDDEN_CONDITIONS = [
   `delete obj.key`,
   `(await flag)`,
   `(yield input)`,
-  `(() => flag)()`,
+  `(() => { return flag })()`,
+  `items.every((item) => (item = 1))`,
+  `items.some((item) => item++)`,
   `(function () { return flag })()`,
   `(class {})`,
 ]
@@ -387,6 +397,7 @@ const LEGAL_SUBSTATES = [
   `legal:template-name`,
   `legal:guard-parens`,
   `legal:call-condition`,
+  `legal:arrow-condition`,
 ]
 const STATES = [...Object.keys(MODEL), ...LEGAL_SUBSTATES]
 const reach = createOracleReach(PROPERTY, STATES, { minimum: 1 })
@@ -400,6 +411,7 @@ function recordStates(program) {
     if (site.quote === '`') reach.reach(`legal:template-name`)
     if (site.guardParens) reach.reach(`legal:guard-parens`)
     if (site.cond.calls) reach.reach(`legal:call-condition`)
+    if (site.cond.arrow) reach.reach(`legal:arrow-condition`)
   }
 }
 

@@ -86,16 +86,20 @@ export class MultiSet<T> {
     // Keyed multisets hold [string | number key, value] pairs. Their values are
     // compared by reference, which avoids hashing. Join tuples (values of
     // length 2) are unpacked so ['A', null] and [null, 'X'] stay distinct.
-    if (
-      inner.every(
-        ([data]) =>
-          Array.isArray(data) &&
-          data.length === 2 &&
-          (typeof data[0] === `string` || typeof data[0] === `number`),
-      )
-    ) {
-      return consolidateKeyed(inner)
-    }
+    const keyed = inner.every(
+      ([data]) =>
+        Array.isArray(data) &&
+        data.length === 2 &&
+        (typeof data[0] === `string` || typeof data[0] === `number`),
+    )
+    // Development-only oracle probe; a production build removes it.
+    process.env.NODE_ENV !== `production` &&
+      (
+        globalThis as {
+          __oracleProbe?: (name: string, condition: unknown) => void
+        }
+      ).__oracleProbe?.(`db-ivm#keyed-identity`, keyed)
+    if (keyed) return consolidateKeyed(inner)
 
     // Unkeyed data of a single primitive type is its own identity, and the
     // result holds the Map key, so -0 becomes 0. Anything else is compared
@@ -107,9 +111,36 @@ export class MultiSet<T> {
       primitiveType ??= type
       return type !== primitiveType
     })
-    return requireHash
-      ? consolidateBy(inner, hash)
-      : consolidateBy(inner, (data) => data, true)
+    process.env.NODE_ENV !== `production` &&
+      (
+        globalThis as {
+          __oracleProbe?: (name: string, condition: unknown) => void
+        }
+      ).__oracleProbe?.(`db-ivm#primitive-identity`, !requireHash)
+    if (!requireHash) return consolidateBy(inner, (data) => data, true)
+    process.env.NODE_ENV !== `production` &&
+      (
+        globalThis as {
+          __oracleProbe?: (name: string, condition: unknown) => void
+        }
+      ).__oracleProbe?.(`db-ivm#structural-identity`, true)
+    // The pairs-without-key scan runs only in development builds, where the
+    // probe's condition is evaluated.
+    process.env.NODE_ENV !== `production` &&
+      (
+        globalThis as {
+          __oracleProbe?: (name: string, condition: unknown) => void
+        }
+      ).__oracleProbe?.(
+        `db-ivm#only-pairs-without-key`,
+        inner.every(
+          ([data]) =>
+            Array.isArray(data) &&
+            data.length === 2 &&
+            !(typeof data[0] === `string` || typeof data[0] === `number`),
+        ),
+      )
+    return consolidateBy(inner, hash)
   }
 
   extend(other: MultiSet<T> | MultiSetArray<T>): void {
@@ -147,6 +178,19 @@ function consolidateKeyed<T>(inner: MultiSetArray<T>): MultiSet<T> {
       let bySecond = byFirst.get(value[0])
       if (!bySecond) byFirst.set(value[0], (bySecond = new Map()))
       entry = bySecond.get(value[1])
+      // Development-only oracle probes; a production build removes them.
+      process.env.NODE_ENV !== `production` &&
+        (
+          globalThis as {
+            __oracleProbe?: (name: string, condition: unknown) => void
+          }
+        ).__oracleProbe?.(`db-ivm#records-merged`, entry !== undefined)
+      process.env.NODE_ENV !== `production` &&
+        (
+          globalThis as {
+            __oracleProbe?: (name: string, condition: unknown) => void
+          }
+        ).__oracleProbe?.(`db-ivm#join-tuples-merged`, entry !== undefined)
       if (!entry) {
         bySecond.set(value[1], (entry = [data, 0]))
         entries.push(entry)
@@ -155,6 +199,12 @@ function consolidateKeyed<T>(inner: MultiSetArray<T>): MultiSet<T> {
       let byValue = leaves.get(key)
       if (!byValue) leaves.set(key, (byValue = new Map()))
       entry = byValue.get(value)
+      process.env.NODE_ENV !== `production` &&
+        (
+          globalThis as {
+            __oracleProbe?: (name: string, condition: unknown) => void
+          }
+        ).__oracleProbe?.(`db-ivm#records-merged`, entry !== undefined)
       if (!entry) {
         byValue.set(value, (entry = [data, 0]))
         entries.push(entry)
@@ -179,6 +229,13 @@ function consolidateBy<T>(
   for (const [data, multiplicity] of inner) {
     const identity = identityOf(data)
     const entry = consolidated.get(identity)
+    // Development-only oracle probe; a production build removes it.
+    process.env.NODE_ENV !== `production` &&
+      (
+        globalThis as {
+          __oracleProbe?: (name: string, condition: unknown) => void
+        }
+      ).__oracleProbe?.(`db-ivm#records-merged`, entry !== undefined)
     if (entry) entry[1] += multiplicity
     else consolidated.set(identity, [data, multiplicity])
   }
