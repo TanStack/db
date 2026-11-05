@@ -1415,13 +1415,18 @@ type SameAggregateAncestor<T, TAncestors extends ReadonlyArray<unknown>> = {
     : false
 }[number]
 
-type ContainsAggregate<T, TAncestors extends ReadonlyArray<unknown> = []> =
+export type ContainsAggregate<
+  T,
+  TAncestors extends ReadonlyArray<unknown> = [],
+> =
   IsAny<T> extends true
     ? false
     : T extends Aggregate
       ? true
-      : T extends BasicExpression
-        ? false
+      : T extends BasicExpression | CaseWhenWrapper
+        ? T extends { readonly __hasAggregate: true }
+          ? true
+          : false
         : typeof RefBrand extends keyof T
           ? false
           : T extends {
@@ -1435,11 +1440,16 @@ type ContainsAggregate<T, TAncestors extends ReadonlyArray<unknown> = []> =
             ? false
             : true extends SameAggregateAncestor<T, TAncestors>
               ? false
-              : IsPlainObject<T> extends true
-                ? true extends ContainsAggregate<T[keyof T], [...TAncestors, T]>
-                  ? true
+              : T extends ReadonlyArray<infer TItem>
+                ? ContainsAggregate<TItem, [...TAncestors, T]>
+                : IsPlainObject<T> extends true
+                  ? true extends ContainsAggregate<
+                      T[keyof T],
+                      [...TAncestors, T]
+                    >
+                    ? true
+                    : false
                   : false
-                : false
 
 export type WithResult<
   TContext extends Context,

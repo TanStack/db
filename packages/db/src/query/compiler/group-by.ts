@@ -48,7 +48,6 @@ import type {
   SelectValueExpression,
 } from '../ir.js'
 import type { NamespacedAndKeyedStream, NamespacedRow } from '../../types.js'
-import type { VirtualOrigin } from '../../virtual-props.js'
 
 const RAW_REPRESENTATIVE = Symbol(`raw_group_representative`)
 
@@ -60,7 +59,6 @@ function createInternalGroupFields(groupCount: number, selectClause?: Select) {
   while (aliases.some((alias) => alias.startsWith(prefix))) prefix += `_`
 
   return {
-    virtual: `${prefix}virtual`,
     route: `${prefix}route`,
     exactInputs: `${prefix}exact_inputs`,
     correlationIdentity: `${prefix}correlation_identity`,
@@ -80,11 +78,6 @@ function createInternalGroupFields(groupCount: number, selectClause?: Select) {
       (_, i) => `${prefix}key_ref_${i}`,
     ),
   }
-}
-
-type RowVirtualMetadata = {
-  hasPendingWrites: boolean
-  hasLocal: boolean
 }
 
 type Representative<T> = {
@@ -261,33 +254,6 @@ function getGroupEvaluationRow(
   }
 }
 
-function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
-  let hasPendingWrites = false
-  let hasLocal = false
-
-  for (const [alias, value] of Object.entries(row as Record<string, unknown>)) {
-    if (alias === `$selected`) continue
-    if (value === null || typeof value !== `object`) continue
-    const asRecord = value as Record<string, unknown>
-    const hasPendingWritesProp = `$hasPendingWrites` in asRecord
-    const hasOriginProp = `$origin` in asRecord
-    if (!hasPendingWritesProp && !hasOriginProp) {
-      continue
-    }
-    if (asRecord.$hasPendingWrites === true) {
-      hasPendingWrites = true
-    }
-    if (asRecord.$origin === `local`) {
-      hasLocal = true
-    }
-  }
-
-  return {
-    hasPendingWrites,
-    hasLocal,
-  }
-}
-
 /**
  * Processes the GROUP BY clause with optional HAVING and SELECT
  * Works with the new $selected structure from early SELECT processing
@@ -301,36 +267,14 @@ export function processGroupBy(
   havingClauses?: Array<Having>,
   selectClause?: Select,
   fnHavingClauses?: Array<(row: any) => any>,
-  aggregateCollectionId?: string,
   mainSource?: string,
   sanitizeCallbackRows = false,
 ): NamespacedAndKeyedStream {
   const fields = createInternalGroupFields(groupByClause.length, selectClause)
-  const virtualAggregates: Record<string, any> = {
-    [fields.virtual]: {
-      preMap: ([, row]: [string, NamespacedRow]) => getRowVirtualMetadata(row),
-      reduce: (values: Array<[RowVirtualMetadata, number]>) => {
-        const group: RowVirtualMetadata = {
-          hasPendingWrites: false,
-          hasLocal: false,
-        }
-        for (const [metadata, multiplicity] of values) {
-          if (multiplicity <= 0) continue
-          if (metadata.hasPendingWrites) group.hasPendingWrites = true
-          if (metadata.hasLocal) group.hasLocal = true
-        }
-        return group
-      },
-    },
-  }
+  const aggregates: Record<string, any> = {}
 
   if (mainSource) {
-    addCorrelationRouteAggregate(
-      virtualAggregates,
-      mainSource,
-      fields,
-      valueIdentity,
-    )
+    addCorrelationRouteAggregate(aggregates, mainSource, fields, valueIdentity)
   }
 
   const singleGroup = groupByClause.length === 0
@@ -388,7 +332,6 @@ export function processGroupBy(
   }
 
   // Create aggregate functions for any aggregated columns in the SELECT clause
-  const aggregates: Record<string, any> = virtualAggregates
   const wrappedAggExprs: Record<string, (data: any) => any> = {}
   const aggCounter = { value: 0 }
 
@@ -527,14 +470,7 @@ export function processGroupBy(
         ...(aggregatedRow as Record<string, any>),
         $selected: finalResults,
       }
-      const virtual = (aggregatedRow as Record<string, any>)[fields.virtual] as
-        RowVirtualMetadata | undefined
-      resultRow.$hasPendingWrites = virtual?.hasPendingWrites ?? false
-      resultRow.$origin = (
-        virtual?.hasLocal ? `local` : `remote`
-      ) satisfies VirtualOrigin
       resultRow.$key = publicKey
-      resultRow.$collectionId = aggregateCollectionId ?? resultRow.$collectionId
       if (mainSource && correlationKey !== undefined) {
         attachPublicGroupKey(resultRow, publicKey)
         attachRouteMetadata(
@@ -590,7 +526,7 @@ export function processGroupBy(
         filter(([, row]) => {
           const namespacedRow = getGroupEvaluationRow(row, fields)
           const callbackRow = sanitizeCallbackRows
-            ? stripInternalCallbackMetadata(namespacedRow, false)
+            ? stripInternalCallbackMetadata(namespacedRow)
             : namespacedRow
           return toBooleanPredicate(fnHaving(callbackRow))
         }),

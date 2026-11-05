@@ -1024,16 +1024,21 @@ by this public-type oracle; it needs a conditional/optional-key type law and
 generated empty/nonempty runtime choices before a broader claim. The repair
 above establishes statically empty lists, not arbitrary dynamic grouping.
 
-Static inference limit, owned by this primary public-type oracle: when an
-aggregate is entirely inside an expression that erases aggregate provenance,
-a missing generated `$key` is not inferred for its intermediate value. For
-example, `select(({ row }) => ({ positive: gt(count(row.id), 0) }))` generates
-one keyed group at runtime, while a QueryRef callback's `group.$key` is absent
-from its inferred shape unless grouping is explicit. The existing inline type
-path also had this omission. Closing that inference class needs expression
-provenance and a wrapped-aggregate grammar dimension; the present authored-value
-and publication-type claim does not establish complete group-key inference.
-No runtime key loss is accepted by this change.
+The high review adds 27 function/conditional forms with aggregate and ordinary
+controls to this same public-type owner, for all 24 source descriptions.
+Inferred expressions now retain type-only aggregate provenance through function
+arguments and conditional conditions, branches and defaults. Ten nested coalesce
+wrappers distinguish propagation from a shallow repair. The shared shape/value
+law checks generated intermediate keys and scalar values. Unchanged production
+rejects 35 native constraints on the selected source description; the repair
+passes all 33 owner checks, with all 313 declared states reached 24 times.
+Ignoring provenance restores the native constraint failures. Transpiled builder
+JavaScript is unchanged. This repairs `gt(count(row.id), 0)`, wrapped coalesce
+and the other admitted inferred forms. Explicit widening to `BasicExpression`
+and the existing six-or-more-pair `caseWhen` any fallback erase input facts and
+remain outside this inference claim. The owner needs generated explicit-erasure
+contracts before promising recovery of those facts. No runtime key loss is
+accepted. See the [high-review evidence](oracle-reviews/2026-11-05-boundary-only-high-review.md).
 
 Chunk 24 extends this same owner with `virtual-row-fields-receiver-types-oracle.ts`
 and the native compiler support `virtual-row-fields-receiver-types-support.ts`.
@@ -5540,6 +5545,20 @@ does not remove the existing linear merge traversal for each real write or
 establish elapsed-time performance.
 
 ## Compound joins
+
+The high review extends the route-context owner with independent join source
+keys and matched fan-out: four join kinds, plain/QueryRef inputs on either side,
+and numeric/string/mixed keys (48 finite programs). Three parents share or
+separate routes. Initial rows, main departure/reentry and child departure use an
+independent flat join at all three include forms. All 576 declared path/cut
+states reach once, with 1,728 parent/form/cut comparisons. Original production
+and an unmatched-only key repair both fail in public-key reduction after legal
+admission. Pair identities repair projected join rows; the publication owner
+also preserves source keys for whole-source selections at matched/unmatched
+cuts. This extension uses eager synchronous sources and filters child-absent
+rows. It does not prove arbitrary full-join absence shapes, async loading,
+provider/framework timing or exact key serialization. See the
+[high-review evidence](oracle-reviews/2026-11-05-boundary-only-high-review.md).
 
 The route-context transport owner
 (`packages/db/tests/query/includes-context-transport-oracle.test.ts`) also

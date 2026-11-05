@@ -88,12 +88,6 @@ export function getNamespacedRouteMetadata(
   )
 }
 
-export function stripRouteMetadata<T extends object>(value: T): T {
-  const result = { ...value } as T & Record<PropertyKey, unknown>
-  delete result[ROUTE_METADATA]
-  return result
-}
-
 export function attachRouteMetadataToResult(
   value: unknown,
   correlationKey: unknown,
@@ -141,12 +135,14 @@ export function wrapInputRow(
   alias: string,
   row: unknown,
   metadata?: RowMetadata | null,
+  hasInternalState = true,
 ): NamespacedRow {
+  if (!hasInternalState) return { [alias]: row } as NamespacedRow
   const scalar = getRoutedScalarMetadata(row)
   const route = scalar ?? getRouteMetadata(row)
   const namespaced = {
     ...getParentContextValue(route?.parentContext),
-    [alias]: scalar ? scalar.value : stripInternalCallbackMetadata(row, false),
+    [alias]: scalar ? scalar.value : stripInternalCallbackMetadata(row),
   } as NamespacedRow
   if (route)
     attachRouteMetadata(namespaced, route.correlationKey, route.parentContext)
@@ -203,34 +199,35 @@ export function mergeSourceContext(
       }
 }
 
-/** Remove private route state, descending only when the compilation can nest it. */
-export function stripInternalRouteMetadata(
-  value: unknown,
-  recursive = true,
-): unknown {
-  return stripInternalMetadata(value, INTERNAL_ROUTE_KEYS, recursive)
+/** Restore namespace state after resolving its public include paths. */
+export function restoreInternalRouteMetadata(
+  target: Record<PropertyKey, unknown>,
+  source: object,
+): void {
+  for (const key of INTERNAL_ROUTE_KEYS)
+    if (Object.hasOwn(source, key))
+      target[key] = (source as Record<PropertyKey, unknown>)[key]
+}
+
+/** Remove private route state from a known result root. */
+export function stripInternalRouteMetadata(value: unknown): unknown {
+  return stripInternalMetadata(value, INTERNAL_ROUTE_KEYS)
 }
 
 /** Remove compiler-owned keys before invoking user code, at the known scope. */
-export function stripInternalCallbackMetadata(
-  value: unknown,
-  recursive = true,
-): unknown {
-  return stripInternalMetadata(value, INTERNAL_CALLBACK_KEYS, recursive)
+export function stripInternalCallbackMetadata(value: unknown): unknown {
+  return stripInternalMetadata(value, INTERNAL_CALLBACK_KEYS)
 }
 
 function stripInternalMetadata(
   value: unknown,
   keys: ReadonlySet<PropertyKey>,
-  recursive: boolean,
 ): unknown {
-  if (!recursive) {
-    if (!isPublicContainer(value)) return value
-    let hasMetadata = false
-    for (const key of keys) hasMetadata ||= Object.hasOwn(value, key)
-    if (!hasMetadata) return value
-  }
-  return transformPublicContainers(value, (leaf) => leaf, keys, recursive)
+  if (!isPublicContainer(value)) return value
+  for (const key of keys)
+    if (Object.hasOwn(value, key))
+      return transformPublicContainers(value, (leaf) => leaf, keys, false)
+  return value
 }
 
 /** Copy only paths changed by a leaf transform or an omitted private key. */

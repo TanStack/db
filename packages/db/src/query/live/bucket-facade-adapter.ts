@@ -74,6 +74,10 @@ export class BucketFacadeAdapter {
   private readonly entries = new Map<string, Map<string, FacadeEntry>>()
   private readonly retiredEntries = new Map<string, Map<string, FacadeEntry>>()
   private resolvedValues = new WeakMap<object, unknown>()
+  private compiledResolvedValues = new WeakMap<
+    ValueResolver,
+    WeakMap<object, unknown>
+  >()
   private cleanedUp = false
 
   constructor(
@@ -355,6 +359,7 @@ export class BucketFacadeAdapter {
       this.activeBuckets.set(edgeId, new Set(buckets))
     }
     this.resolvedValues = new WeakMap()
+    this.compiledResolvedValues = new WeakMap()
 
     for (const entry of currentEntries) {
       if (!previousEntries.has(entry)) void entry.dispose()
@@ -521,7 +526,21 @@ export class BucketFacadeAdapter {
   }
 
   private resolveValue(value: unknown, resolve?: ValueResolver): unknown {
-    if (resolve) return resolve(value, (leaf) => this.resolveValue(leaf))
+    if (resolve) {
+      if (value === null || typeof value !== `object`)
+        return resolve(value, (leaf) => this.resolveValue(leaf))
+      // The same relation value is validated, written, and compared as a prior
+      // snapshot. Resolver identity keeps different include paths independent.
+      const cache = getOrCreate(
+        this.compiledResolvedValues,
+        resolve,
+        () => new WeakMap<object, unknown>(),
+      )
+      if (cache.has(value)) return cache.get(value)
+      const result = resolve(value, (leaf) => this.resolveValue(leaf))
+      cache.set(value, result)
+      return result
+    }
     if (value === null || typeof value !== `object`) return value
     const cached = this.resolvedValues.get(value)
     if (cached !== undefined) return cached

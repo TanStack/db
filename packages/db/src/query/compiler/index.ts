@@ -83,6 +83,7 @@ import {
   getSourceMetadata,
   getSourceRouting,
   isPublicContainer,
+  restoreInternalRouteMetadata,
   stripInternalCallbackMetadata,
   stripInternalRouteMetadata,
   wrapInputRow,
@@ -670,7 +671,6 @@ function compileQueryInternal(
         filter(([_key, namespacedRow]) => {
           const callbackRow = stripInternalCallbackMetadata(
             namespacedRow,
-            false,
           ) as NamespacedRow
           return toBooleanPredicate(fnWhere(callbackRow))
         }),
@@ -1029,12 +1029,13 @@ function compileQueryInternal(
       map(([key, [value]]) => {
         // Resolution cleans public values, while this internal namespace must
         // keep its route and genuine source attribution through the callback.
-        const row: NamespacedRow & Record<PropertyKey, unknown> = {
-          ...value,
-          ...((resolveInput
-            ? resolveInput(value, (leaf) => leaf)
-            : value) as NamespacedRow),
-        }
+        const resolved = resolveInput
+          ? resolveInput(value, (leaf) => leaf)
+          : value
+        const row = (
+          resolved === value ? { ...value } : resolved
+        ) as NamespacedRow & Record<PropertyKey, unknown>
+        restoreInternalRouteMetadata(row, value)
         delete row[INCLUDES_ROUTING]
         return [key, row]
       }),
@@ -1056,7 +1057,6 @@ function compileQueryInternal(
       map(([key, namespacedRow]) => {
         const callbackRow = stripInternalCallbackMetadata(
           namespacedRow,
-          false,
         ) as NamespacedRow
         const selectResults = query.fnSelect!(callbackRow)
         validateFnSelectResult(selectResults)
@@ -1153,7 +1153,6 @@ function compileQueryInternal(
       query.having,
       query.select,
       query.fnHaving,
-      mainCollectionId,
       groupByMainSource,
       sourceCarriesInternalRouteState || includesRoutingFns.length > 0,
     )
@@ -1181,14 +1180,12 @@ function compileQueryInternal(
         filter(([_key, namespacedRow]) => {
           const callbackRow = stripInternalCallbackMetadata(
             namespacedRow,
-            false,
           ) as NamespacedRow
           // $selected is compiler-created context at this stage. A flat
           // union's implicit selection can still hold namespace sidecars at
           // its root; remove them without visiting authored payloads.
           const selected = stripInternalCallbackMetadata(
             callbackRow.$selected,
-            false,
           ) as Record<string, unknown>
           return fnHaving(
             selected === callbackRow.$selected
@@ -1237,6 +1234,7 @@ function compileQueryInternal(
     // Grouping supplies a public key even before Collection publication.
     // Authored fields still win at intermediate boundaries, including null.
     const selectedValue =
+      !isCollectionRoot &&
       (grouped || selectAggregate) &&
       isPublicContainer(selected) &&
       !(`$key` in selected)
@@ -1256,14 +1254,8 @@ function compileQueryInternal(
     }
     const finalResults = stripInternalRouteMetadata(
       isCollectionRoot
-        ? attachVirtualPropsToSelected(
-            selectedValue,
-            metadata ?? {},
-            true,
-            undefined,
-          )
+        ? attachVirtualPropsToSelected(selectedValue, metadata)
         : selectedValue,
-      false,
     )
     const route = parentKeyStream
       ? getNamespacedRouteMetadata(row, mainSource)
@@ -1275,7 +1267,11 @@ function compileQueryInternal(
         orderByIndex,
         route?.correlationKey,
         parentKeyStream ? (route?.parentContext ?? null) : undefined,
-        parentKeyStream ? (row[INCLUDES_PUBLIC_KEY] ?? key) : undefined,
+        // Source-attributed join selections keep their source key. Other
+        // projections need the pair identity to distinguish fan-out rows.
+        parentKeyStream
+          ? ((query.join && metadata?.$key) ?? row[INCLUDES_PUBLIC_KEY] ?? key)
+          : undefined,
         metadata,
       ],
     ] as unknown as [unknown, [any, string | undefined]]
@@ -1700,7 +1696,7 @@ function processFromClause(
 
     return {
       alias,
-      pipeline: wrapInputWithAlias(input, alias),
+      pipeline: wrapInputWithAlias(input, alias, from.type === `queryRef`),
       collectionId,
       sources: { [alias]: input },
       sourceIncludes,
@@ -1739,11 +1735,11 @@ function processFromClause(
     const routedBranch =
       parentKeyStream && !isParentRouted
         ? parameterizeByParentRoutes(
-            wrapInputWithAlias(input, alias),
+            wrapInputWithAlias(input, alias, source.type === `queryRef`),
             parentKeyStream,
             valueIdentity,
           )
-        : wrapInputWithAlias(input, alias)
+        : wrapInputWithAlias(input, alias, source.type === `queryRef`)
     const branch = routedBranch.pipe(
       map(([key, row]) => {
         const branchKey = `${alias}:${encodeKeyForUnionBranch(key)}`
@@ -1873,7 +1869,7 @@ function processUnionAll(
           : row
         return [
           branchKey,
-          isPublicContainer(routedRow)
+          metadata != null && isPublicContainer(routedRow)
             ? Object.assign(copySelectedRow(routedRow), {
                 [ROW_METADATA]: metadata ?? null,
               })
@@ -1902,11 +1898,17 @@ function processUnionAll(
 function wrapInputWithAlias(
   input: KeyedStream,
   alias: string,
+  hasInternalState = true,
 ): NamespacedAndKeyedStream {
   return input.pipe(
     map(([key, row, metadata]: [...InputRow, unknown?]) => [
       key,
-      wrapInputRow(alias, row, metadata as RowMetadata | null | undefined),
+      wrapInputRow(
+        alias,
+        row,
+        metadata as RowMetadata | null | undefined,
+        hasInternalState,
+      ),
     ]),
   )
 }
@@ -1948,41 +1950,24 @@ function copySelectedRow(
 }
 
 function attachVirtualPropsToSelected(
-  selected: any,
-  row: Record<string, any>,
-  isCollectionRoot: boolean,
-  metadataSources: ReadonlyArray<string> | undefined,
-): any {
+  selected: unknown,
+  metadata: RowMetadata | null,
+): unknown {
   if (!isPublicContainer(selected)) return selected
-
-  const selectedRecord = selected as Record<PropertyKey, any>
-  // Union output is already a branch row, rather than an aliased source.
-  const source =
-    metadataSources === undefined
-      ? row
-      : metadataSources.reduce<unknown>(
-          (prior, alias) => row[alias] ?? prior,
-          undefined,
-        )
-  const sourceRecord =
-    isCollectionRoot && source !== null && typeof source === `object`
-      ? (source as Record<PropertyKey, any>)
-      : undefined
+  const selectedRecord = selected as Record<PropertyKey, unknown>
   let result = selectedRecord
   for (const prop of VIRTUAL_PROP_NAMES) {
-    // A root projection cannot replace source metadata. Other projections
-    // only inherit a missing virtual property from their namespace.
-    const reset = isCollectionRoot && prop in selectedRecord
-    if (!reset && (selectedRecord[prop] != null || !(prop in row))) continue
-    const owner = reset ? sourceRecord : row
-    const present = owner !== undefined && prop in owner
-    const value = present ? owner[prop] : undefined
-    if (reset && present && selectedRecord[prop] === value) continue
+    const present = metadata !== null && prop in metadata
+    if (
+      present
+        ? prop in selectedRecord && selectedRecord[prop] === metadata[prop]
+        : !(prop in selectedRecord)
+    )
+      continue
     if (result === selectedRecord) result = copySelectedRow(selectedRecord)
-    if (present) result[prop] = value
+    if (present) result[prop] = metadata[prop]
     else delete result[prop]
   }
-
   return result
 }
 

@@ -7,7 +7,7 @@
  * retain their authored shape. The maintainer’s 2026-11-05 boundary-only
  * decision also preserves authored collisions in QueryRef callback inputs and
  * structured refs. Empty grouping contributes no key; a nonempty grouping or
- * visible aggregate contributes a missing key, including nested aggregates.
+ * aggregate contributes a missing key, including nested and wrapped aggregates.
  * Nullable whole-row selections are absent or
  * complete; facade rows always receive required metadata. WithoutVirtualProps
  * distributes over discriminated row unions.
@@ -143,6 +143,36 @@ const groupingBoundaries = [
 const aggregateDepths = [0, 7, 8, 9, 10, 16] as const
 // Conditional inline fields are legal authoring choices. Array/array forms
 // distinguish wrapper identity from value shape; singleton forms retain absence.
+const wrappedAggregateForms = [
+  `coalesce`,
+  `case-scalar`,
+  `case-object`,
+  `case-default`,
+  `case-condition`,
+  `eq`,
+  `gt`,
+  `gte`,
+  `lt`,
+  `lte`,
+  `and`,
+  `or`,
+  `not`,
+  `isNull`,
+  `isUndefined`,
+  `inArray`,
+  `like`,
+  `ilike`,
+  `upper`,
+  `lower`,
+  `length`,
+  `concat`,
+  `add`,
+  `subtract`,
+  `multiply`,
+  `divide`,
+  `nested`,
+] as const
+const wrappedAggregateKinds = [`aggregate`, `ordinary`] as const
 const inlineChoices = [
   `array-array`,
   `array-materialized`,
@@ -154,6 +184,9 @@ const authoredStates = authoredCollisions.flatMap(({ name }) =>
   ),
 )
 const states = [
+  ...wrappedAggregateForms.flatMap((form) =>
+    wrappedAggregateKinds.map((kind) => `wrapped-aggregate/${form}/${kind}`),
+  ),
   ...inlineChoices.map((choice) => `inline-choice/${choice}`),
   ...authoredStates,
   ...authoredStates.map((state) => `structured-refs/${state}`),
@@ -519,7 +552,7 @@ function consumerSource(
     }
   }
   // A count directly present under ordinary records is still an aggregate of
-  // this selection. Query helpers and wrapped expressions remain other laws.
+  // this selection. Query helpers stop traversal into a separate query scope.
   for (const depth of aggregateDepths) {
     for (const collision of authoredCollisions.filter(
       ({ name }) => name === `none` || name === `key`,
@@ -582,9 +615,82 @@ function consumerSource(
     }`,
     )
   }
+  // The current grouped-intermediate contract supplies a missing generated
+  // key for visible and wrapped aggregates alike. Ordinary controls retain
+  // their authored shape. The expression's value does not choose key ownership.
+  for (const form of wrappedAggregateForms) {
+    for (const kind of wrappedAggregateKinds) {
+      const aggregate = kind === `aggregate`
+      const argument = aggregate ? `count(item.id)` : `rows.size`
+      const text = `concat(${argument})`
+      let expression: string
+      let value: string
+      if (form === `coalesce` || form === `nested`) {
+        expression = `coalesce(${argument}, 0)`
+        if (form === `nested`)
+          for (let i = 0; i < 10; i++) expression = `coalesce(${expression}, 0)`
+        value = `number`
+      } else if (form === `case-scalar` || form === `case-default`) {
+        expression =
+          form === `case-default`
+            ? `caseWhen(false, 0, ${argument})`
+            : `caseWhen(true, ${argument}, 0)`
+        value = `number`
+      } else if (form === `case-object`) {
+        expression = `caseWhen(true, { n: ${argument} }, { n: 0 })`
+        value = `{ n: number }`
+      } else if (form === `case-condition`) {
+        expression = `caseWhen(gt(${argument}, 0), { n: 1 }, { n: 0 })`
+        value = `{ n: number }`
+      } else if ([`eq`, `gt`, `gte`, `lt`, `lte`].includes(form)) {
+        expression = `${form}(${argument}, 0)`
+        value = `boolean`
+      } else if (form === `and` || form === `or`) {
+        expression = `${form}(true, gt(${argument}, 0), true)`
+        value = `boolean`
+      } else if (
+        form === `not` ||
+        form === `isNull` ||
+        form === `isUndefined`
+      ) {
+        expression = `${form}(${argument})`
+        value = `boolean`
+      } else if (form === `inArray`) {
+        expression = `inArray(${argument}, [0, 1])`
+        value = `boolean`
+      } else if (form === `like` || form === `ilike`) {
+        expression = `${form}(${text}, 'a')`
+        value = `boolean`
+      } else if (form === `upper` || form === `lower` || form === `length`) {
+        expression = `${form}(${text})`
+        value = form === `length` ? `number` : `string`
+      } else if (form === `concat`) {
+        expression = `concat(${text}, 'b')`
+        value = `string`
+      } else {
+        expression = `${form}(${argument}, 1)`
+        value = form === `divide` ? `number | null` : `number`
+      }
+      const expected = `{ value: ${value}${aggregate ? `; readonly $key: string | number` : ``} }`
+      addWitness(
+        `wrapped-aggregate/${form}/${kind}`,
+        `{
+        const inner = new Query().from({ item: rows }).select(({ item }) => ({ value: ${expression} }));
+        const query = new Query().from({ wrapped: inner }).fn.select(({ wrapped }) => {
+          type WrappedObservation = Assert<SameShape<Normalize<Omit<typeof wrapped, 'value'>>, Normalize<Omit<${expected}, 'value'>>>>;
+          type WrappedValue = Assert<${value.startsWith(`{`) ? `SameShape` : `Equal`}<typeof wrapped.value, ${value}>>;
+          return { checked: true };
+        });
+        const published = createLiveQueryCollection({ query: inner });
+        type WrappedPublication = Assert<SameShape<Normalize<Omit<typeof published.toArray[number], 'value'>>, Normalize<Omit<Published<${expected}>, 'value'>>>>;
+        type PublishedValue = Assert<${value.startsWith(`{`) ? `SameShape` : `Equal`}<typeof published.toArray[number]['value'], ${value}>>;
+      }`,
+      )
+    }
+  }
   return {
     source: `
-    import { BTreeIndex, Query, count, createCollection, createLiveQueryCollection, eq, groupKeys, include, materialize, toArray } from '@tanstack/db';
+    import { BTreeIndex, Query, caseWhen, coalesce, max, gt, gte, lt, lte, and, or, not, isNull, isUndefined, inArray, like, ilike, upper, lower, length, concat, add, subtract, multiply, divide, count, createCollection, createLiveQueryCollection, eq, groupKeys, include, materialize, toArray } from '@tanstack/db';
     import type { ContextFromSource, Ref as PublicRef, WithoutVirtualProps } from '@tanstack/db';
     type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
     type Assert<T extends true> = T;
@@ -735,7 +841,7 @@ async function checkConsumerConstruction(source: string): Promise<void> {
     const construct = new Function(
       `api`,
       `exports`,
-      `const { BTreeIndex, Query, count, createCollection, createLiveQueryCollection, eq, groupKeys, include, materialize, toArray } = api;\n${outputText}`,
+      `const { BTreeIndex, Query, caseWhen, coalesce, max, gt, gte, lt, lte, and, or, not, isNull, isUndefined, inArray, like, ilike, upper, lower, length, concat, add, subtract, multiply, divide, count, createCollection, createLiveQueryCollection, eq, groupKeys, include, materialize, toArray } = api;\n${outputText}`,
     )
     construct(api, {})
   }, cleanups)
@@ -759,6 +865,8 @@ declareOracle({
     groupingBoundaries,
     aggregateDepths,
     inlineChoices,
+    wrappedAggregateForms,
+    wrappedAggregateKinds,
   ],
   model: [consumerSource],
   check: [checkConsumer, checkConsumerConstruction],

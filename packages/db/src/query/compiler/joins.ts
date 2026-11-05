@@ -31,6 +31,7 @@ import { getLazyLoadTargets } from './lazy-targets.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
 import { queriesMatchForCaching } from './query-equivalence.js'
 import {
+  INCLUDES_PUBLIC_KEY,
   attachRouteMetadata,
   attachRouteMetadataToResult,
   getNamespacedRouteMetadata,
@@ -337,6 +338,7 @@ export function processJoins(
             joinedSource,
             row,
             metadata as RowMetadata | null | undefined,
+            routeJoinedSource || joinClause.from.type === `queryRef`,
           ),
           joinedSource,
           `joined`,
@@ -455,7 +457,11 @@ export function processJoins(
 
     return mainPipeline.pipe(
       joinOperator(joinedPipeline, joinClause.type as JoinType),
-      processJoinResults(joinedSource, mainAliases),
+      processJoinResults(
+        joinedSource,
+        mainAliases,
+        parentKeyStream !== undefined,
+      ),
     )
   }
 
@@ -677,6 +683,7 @@ function encodeNonFiniteKey(_: string, value: unknown): unknown {
 function processJoinResults(
   joinedSource: string,
   mainAliases: ReadonlyArray<string>,
+  parentRouted: boolean,
 ): (
   pipeline: IStreamBuilder<
     [key: string, [JoinInputValue | undefined, JoinInputValue | undefined]]
@@ -695,7 +702,7 @@ function processJoinResults(
         // must not expose an ancestor with the same alias.
         const mergedNamespacedRow = {
           ...(mainNamespacedRow ?? joinedNamespacedRow),
-        } as NamespacedRow
+        } as NamespacedRow & Record<PropertyKey, unknown>
         if (main == null)
           for (const alias of mainAliases) delete mergedNamespacedRow[alias]
         if (joinedNamespacedRow)
@@ -715,6 +722,24 @@ function processJoinResults(
           encodeNonFiniteKey,
         )
 
+        // A join contributes one row per pair, including an absent outer side.
+        // Inherited source keys name only one member of that pair.
+        if (parentRouted)
+          mergedNamespacedRow[INCLUDES_PUBLIC_KEY] = JSON.stringify(
+            [
+              (mainNamespacedRow as Record<PropertyKey, unknown> | undefined)?.[
+                INCLUDES_PUBLIC_KEY
+              ] ??
+                mainKey ??
+                null,
+              (
+                joinedNamespacedRow as Record<PropertyKey, unknown> | undefined
+              )?.[INCLUDES_PUBLIC_KEY] ??
+                joinedKey ??
+                null,
+            ],
+            encodeNonFiniteKey,
+          )
         return [resultKey, mergedNamespacedRow] as [string, NamespacedRow]
       }),
     )

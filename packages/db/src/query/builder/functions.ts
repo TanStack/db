@@ -6,8 +6,20 @@ import { registerWrapper } from './wrapper-identity.js'
 import type { BasicExpression } from '../ir'
 import type { IncludesRuntime } from '../live/includes-runtime.js'
 import type { RefProxy } from './ref-proxy.js'
-import type { Context, RefLeaf, StringifiableScalar } from './types.js'
+import type {
+  ContainsAggregate,
+  Context,
+  RefLeaf,
+  StringifiableScalar,
+} from './types.js'
 import type { BaseQueryBuilder, QueryBuilder } from './index.js'
+
+// Aggregate provenance is a type-only fact. Wrapping an expression must not
+// hide the implicit group from a downstream QueryRef's result type.
+type WithAggregate<TResult, TInputs> =
+  true extends ContainsAggregate<TInputs>
+    ? TResult & { readonly __hasAggregate: true }
+    : TResult
 
 type StringRef =
   RefLeaf<string> | RefLeaf<string | null> | RefLeaf<string | undefined>
@@ -54,14 +66,18 @@ type ExtractCaseWhenValue<T> =
 type CaseWhenResult<
   TValues extends Array<CaseWhenValue>,
   THasDefault extends boolean,
-> = TValues[number] extends ExpressionLike
-  ? BasicExpression<
-      ExtractType<TValues[number]> | (THasDefault extends true ? never : null)
-    >
-  : CaseWhenWrapper<
-      | ExtractCaseWhenValue<TValues[number]>
-      | (THasDefault extends true ? never : undefined)
-    >
+  TConditions = never,
+> = WithAggregate<
+  TValues[number] extends ExpressionLike
+    ? BasicExpression<
+        ExtractType<TValues[number]> | (THasDefault extends true ? never : null)
+      >
+    : CaseWhenWrapper<
+        | ExtractCaseWhenValue<TValues[number]>
+        | (THasDefault extends true ? never : undefined)
+      >,
+  [TValues, TConditions]
+>
 
 // Helper type to extract the underlying type from various expression types
 type ExtractType<T> =
@@ -69,7 +85,7 @@ type ExtractType<T> =
     ? U
     : T extends RefLeaf<infer U>
       ? U
-      : T extends BasicExpression<infer U>
+      : T extends BasicExpression<infer U> | Aggregate<infer U>
         ? U
         : T
 
@@ -138,6 +154,10 @@ type DivideReturnType = BasicExpression<number | null>
 
 // Operators
 
+export function eq<L extends ExpressionLike, R extends ExpressionLike>(
+  left: L & (true extends ContainsAggregate<[L, R]> ? unknown : never),
+  right: R,
+): WithAggregate<BasicExpression<boolean>, [L, R]>
 export function eq<T>(
   left: ComparisonOperand<T>,
   right: ComparisonOperand<T>,
@@ -151,6 +171,10 @@ export function eq(left: any, right: any): BasicExpression<boolean> {
   return new Func(`eq`, [toExpression(left), toExpression(right)])
 }
 
+export function gt<L extends ExpressionLike, R extends ExpressionLike>(
+  left: L & (true extends ContainsAggregate<[L, R]> ? unknown : never),
+  right: R,
+): WithAggregate<BasicExpression<boolean>, [L, R]>
 export function gt<T>(
   left: ComparisonOperand<T>,
   right: ComparisonOperand<T>,
@@ -164,6 +188,10 @@ export function gt(left: any, right: any): BasicExpression<boolean> {
   return new Func(`gt`, [toExpression(left), toExpression(right)])
 }
 
+export function gte<L extends ExpressionLike, R extends ExpressionLike>(
+  left: L & (true extends ContainsAggregate<[L, R]> ? unknown : never),
+  right: R,
+): WithAggregate<BasicExpression<boolean>, [L, R]>
 export function gte<T>(
   left: ComparisonOperand<T>,
   right: ComparisonOperand<T>,
@@ -177,6 +205,10 @@ export function gte(left: any, right: any): BasicExpression<boolean> {
   return new Func(`gte`, [toExpression(left), toExpression(right)])
 }
 
+export function lt<L extends ExpressionLike, R extends ExpressionLike>(
+  left: L & (true extends ContainsAggregate<[L, R]> ? unknown : never),
+  right: R,
+): WithAggregate<BasicExpression<boolean>, [L, R]>
 export function lt<T>(
   left: ComparisonOperand<T>,
   right: ComparisonOperand<T>,
@@ -190,6 +222,10 @@ export function lt(left: any, right: any): BasicExpression<boolean> {
   return new Func(`lt`, [toExpression(left), toExpression(right)])
 }
 
+export function lte<L extends ExpressionLike, R extends ExpressionLike>(
+  left: L & (true extends ContainsAggregate<[L, R]> ? unknown : never),
+  right: R,
+): WithAggregate<BasicExpression<boolean>, [L, R]>
 export function lte<T>(
   left: ComparisonOperand<T>,
   right: ComparisonOperand<T>,
@@ -204,6 +240,9 @@ export function lte(left: any, right: any): BasicExpression<boolean> {
 }
 
 // Overloads for and() - support 2 or more arguments
+export function and<
+  T extends [ExpressionLike, ExpressionLike, ...Array<ExpressionLike>],
+>(...args: T): WithAggregate<BasicExpression<boolean>, T>
 export function and(
   left: ExpressionLike,
   right: ExpressionLike,
@@ -226,6 +265,9 @@ export function and(
 }
 
 // Overloads for or() - support 2 or more arguments
+export function or<
+  T extends [ExpressionLike, ExpressionLike, ...Array<ExpressionLike>],
+>(...args: T): WithAggregate<BasicExpression<boolean>, T>
 export function or(
   left: ExpressionLike,
   right: ExpressionLike,
@@ -247,19 +289,32 @@ export function or(
   )
 }
 
+export function not<T extends ExpressionLike>(
+  value: T,
+): WithAggregate<BasicExpression<boolean>, T>
 export function not(value: ExpressionLike): BasicExpression<boolean> {
   return new Func(`not`, [toExpression(value)])
 }
 
 // Null/undefined checking functions
+export function isUndefined<T extends ExpressionLike>(
+  value: T,
+): WithAggregate<BasicExpression<boolean>, T>
 export function isUndefined(value: ExpressionLike): BasicExpression<boolean> {
   return new Func(`isUndefined`, [toExpression(value)])
 }
 
+export function isNull<T extends ExpressionLike>(
+  value: T,
+): WithAggregate<BasicExpression<boolean>, T>
 export function isNull(value: ExpressionLike): BasicExpression<boolean> {
   return new Func(`isNull`, [toExpression(value)])
 }
 
+export function inArray<L extends ExpressionLike, R extends ExpressionLike>(
+  left: L,
+  right: R,
+): WithAggregate<BasicExpression<boolean>, [L, R]>
 export function inArray(
   value: ExpressionLike,
   array: ExpressionLike,
@@ -267,6 +322,10 @@ export function inArray(
   return new Func(`in`, [toExpression(value), toExpression(array)])
 }
 
+export function like<L extends StringLike, R extends StringLike>(
+  left: L,
+  right: R,
+): WithAggregate<BasicExpression<boolean>, [L, R]>
 export function like(
   left: StringLike,
   right: StringLike,
@@ -275,6 +334,10 @@ export function like(left: any, right: any): BasicExpression<boolean> {
   return new Func(`like`, [toExpression(left), toExpression(right)])
 }
 
+export function ilike<L extends StringLike, R extends StringLike>(
+  left: L,
+  right: R,
+): WithAggregate<BasicExpression<boolean>, [L, R]>
 export function ilike(
   left: StringLike,
   right: StringLike,
@@ -286,26 +349,37 @@ export function ilike(
 
 export function upper<T extends ExpressionLike>(
   arg: T,
-): StringFunctionReturnType<T> {
-  return new Func(`upper`, [toExpression(arg)]) as StringFunctionReturnType<T>
+): WithAggregate<StringFunctionReturnType<T>, T> {
+  return new Func(`upper`, [toExpression(arg)]) as WithAggregate<
+    StringFunctionReturnType<T>,
+    T
+  >
 }
 
 export function lower<T extends ExpressionLike>(
   arg: T,
-): StringFunctionReturnType<T> {
-  return new Func(`lower`, [toExpression(arg)]) as StringFunctionReturnType<T>
+): WithAggregate<StringFunctionReturnType<T>, T> {
+  return new Func(`lower`, [toExpression(arg)]) as WithAggregate<
+    StringFunctionReturnType<T>,
+    T
+  >
 }
 
 export function length<T extends ExpressionLike>(
   arg: T,
-): NumericFunctionReturnType<T> {
-  return new Func(`length`, [toExpression(arg)]) as NumericFunctionReturnType<T>
+): WithAggregate<NumericFunctionReturnType<T>, T> {
+  return new Func(`length`, [toExpression(arg)]) as WithAggregate<
+    NumericFunctionReturnType<T>,
+    T
+  >
 }
 
 export function concat<T extends StringifiableScalar>(
   arg: ToArrayWrapper<T>,
 ): ConcatToArrayWrapper<T>
-export function concat(...args: Array<ExpressionLike>): BasicExpression<string>
+export function concat<T extends Array<ExpressionLike>>(
+  ...args: T
+): WithAggregate<BasicExpression<string>, T>
 export function concat(
   ...args: Array<ExpressionLike | ToArrayWrapper<any>>
 ): BasicExpression<string> | ConcatToArrayWrapper<any> {
@@ -347,10 +421,12 @@ type HasGuaranteedNonNull<T extends Array<ExpressionLike>> = {
   : true
 
 // coalesce() return type: union of all non-null arg types; null included unless a guaranteed non-null arg exists
-type CoalesceReturnType<T extends Array<ExpressionLike>> =
+type CoalesceReturnType<T extends Array<ExpressionLike>> = WithAggregate<
   HasGuaranteedNonNull<T> extends true
     ? BasicExpression<CoalesceArgTypes<T>>
-    : BasicExpression<CoalesceArgTypes<T> | null>
+    : BasicExpression<CoalesceArgTypes<T> | null>,
+  T
+>
 
 export function coalesce<T extends [ExpressionLike, ...Array<ExpressionLike>]>(
   ...args: T
@@ -407,12 +483,16 @@ export function coalesce<T extends [ExpressionLike, ...Array<ExpressionLike>]>(
 export function caseWhen<C1 extends ExpressionLike, V1 extends CaseWhenValue>(
   condition1: C1,
   value1: V1,
-): CaseWhenResult<[V1], false>
+): CaseWhenResult<[V1], false, [C1]>
 export function caseWhen<
   C1 extends ExpressionLike,
   V1 extends CaseWhenValue,
   D extends CaseWhenValue,
->(condition1: C1, value1: V1, defaultValue: D): CaseWhenResult<[V1, D], true>
+>(
+  condition1: C1,
+  value1: V1,
+  defaultValue: D,
+): CaseWhenResult<[V1, D], true, [C1]>
 export function caseWhen<
   C1 extends ExpressionLike,
   V1 extends CaseWhenValue,
@@ -423,7 +503,7 @@ export function caseWhen<
   value1: V1,
   condition2: C2,
   value2: V2,
-): CaseWhenResult<[V1, V2], false>
+): CaseWhenResult<[V1, V2], false, [C1, C2]>
 export function caseWhen<
   C1 extends ExpressionLike,
   V1 extends CaseWhenValue,
@@ -436,7 +516,7 @@ export function caseWhen<
   condition2: C2,
   value2: V2,
   defaultValue: D,
-): CaseWhenResult<[V1, V2, D], true>
+): CaseWhenResult<[V1, V2, D], true, [C1, C2]>
 export function caseWhen<
   C1 extends ExpressionLike,
   V1 extends CaseWhenValue,
@@ -451,7 +531,7 @@ export function caseWhen<
   value2: V2,
   condition3: C3,
   value3: V3,
-): CaseWhenResult<[V1, V2, V3], false>
+): CaseWhenResult<[V1, V2, V3], false, [C1, C2, C3]>
 export function caseWhen<
   C1 extends ExpressionLike,
   V1 extends CaseWhenValue,
@@ -468,7 +548,7 @@ export function caseWhen<
   condition3: C3,
   value3: V3,
   defaultValue: D,
-): CaseWhenResult<[V1, V2, V3, D], true>
+): CaseWhenResult<[V1, V2, V3, D], true, [C1, C2, C3]>
 export function caseWhen<
   C1 extends ExpressionLike,
   V1 extends CaseWhenValue,
@@ -487,7 +567,7 @@ export function caseWhen<
   value3: V3,
   condition4: C4,
   value4: V4,
-): CaseWhenResult<[V1, V2, V3, V4], false>
+): CaseWhenResult<[V1, V2, V3, V4], false, [C1, C2, C3, C4]>
 export function caseWhen<
   C1 extends ExpressionLike,
   V1 extends CaseWhenValue,
@@ -508,7 +588,7 @@ export function caseWhen<
   condition4: C4,
   value4: V4,
   defaultValue: D,
-): CaseWhenResult<[V1, V2, V3, V4, D], true>
+): CaseWhenResult<[V1, V2, V3, V4, D], true, [C1, C2, C3, C4]>
 export function caseWhen<
   C1 extends ExpressionLike,
   V1 extends CaseWhenValue,
@@ -531,7 +611,7 @@ export function caseWhen<
   value4: V4,
   condition5: C5,
   value5: V5,
-): CaseWhenResult<[V1, V2, V3, V4, V5], false>
+): CaseWhenResult<[V1, V2, V3, V4, V5], false, [C1, C2, C3, C4, C5]>
 export function caseWhen<
   C1 extends ExpressionLike,
   V1 extends CaseWhenValue,
@@ -556,7 +636,7 @@ export function caseWhen<
   condition5: C5,
   value5: V5,
   defaultValue: D,
-): CaseWhenResult<[V1, V2, V3, V4, V5, D], true>
+): CaseWhenResult<[V1, V2, V3, V4, V5, D], true, [C1, C2, C3, C4, C5]>
 export function caseWhen<
   C1 extends ExpressionLike,
   V1 extends CaseWhenValue,
@@ -617,41 +697,41 @@ export function caseWhen(...args: Array<CaseWhenValue>): any {
 export function add<T1 extends ExpressionLike, T2 extends ExpressionLike>(
   left: T1,
   right: T2,
-): BinaryNumericReturnType {
+): WithAggregate<BinaryNumericReturnType, [T1, T2]> {
   return new Func(`add`, [
     toExpression(left),
     toExpression(right),
-  ]) as BinaryNumericReturnType
+  ]) as WithAggregate<BinaryNumericReturnType, [T1, T2]>
 }
 
 export function subtract<T1 extends ExpressionLike, T2 extends ExpressionLike>(
   left: T1,
   right: T2,
-): BinaryNumericReturnType {
+): WithAggregate<BinaryNumericReturnType, [T1, T2]> {
   return new Func(`subtract`, [
     toExpression(left),
     toExpression(right),
-  ]) as BinaryNumericReturnType
+  ]) as WithAggregate<BinaryNumericReturnType, [T1, T2]>
 }
 
 export function multiply<T1 extends ExpressionLike, T2 extends ExpressionLike>(
   left: T1,
   right: T2,
-): BinaryNumericReturnType {
+): WithAggregate<BinaryNumericReturnType, [T1, T2]> {
   return new Func(`multiply`, [
     toExpression(left),
     toExpression(right),
-  ]) as BinaryNumericReturnType
+  ]) as WithAggregate<BinaryNumericReturnType, [T1, T2]>
 }
 
 export function divide<T1 extends ExpressionLike, T2 extends ExpressionLike>(
   left: T1,
   right: T2,
-): DivideReturnType {
+): WithAggregate<DivideReturnType, [T1, T2]> {
   return new Func(`divide`, [
     toExpression(left),
     toExpression(right),
-  ]) as DivideReturnType
+  ]) as WithAggregate<DivideReturnType, [T1, T2]>
 }
 
 // Aggregates

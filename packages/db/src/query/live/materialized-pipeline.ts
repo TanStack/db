@@ -458,7 +458,7 @@ function compileValueResolver(
     return [{ path, include, child }]
   })
   return (value, resolveFacade) => {
-    let result = stripInternalCallbackMetadata(value, false)
+    let result = stripInternalCallbackMetadata(value)
     for (const { path, include, child } of fields) {
       result = replaceIncludePath(result, path, 0, (included) => {
         if (include.materialization === `collection`)

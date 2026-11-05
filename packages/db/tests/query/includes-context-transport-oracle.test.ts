@@ -2975,3 +2975,213 @@ describe(`parent route after inherited inline input materialization`, () => {
       runMaterializedInputCell(cell))
   }
 })
+
+/**
+ * An unmatched RIGHT/FULL joined QueryRef must not donate its source key to
+ * the whole joined result. Contribution conservation owes one public child
+ * per distinct projected contribution, including multiple matches on one side. Source key domains are independent:
+ * a joined key may equal the key of a different, matched main row.
+ *
+ * This finite grammar crosses inner/left/right/full joins with plain and QueryRef inputs.
+ * Three parents supply shared and disjoint routes. Initial collision, main
+ * departure/reentry, and joined departure compare every public form against a
+ * flat independent join. It judges rows and stable distinct membership, without
+ * prescribing generated key serialization or callback timing.
+ */
+const outerJoinKeyGrammar = (
+  [`inner`, `left`, `right`, `full`] as const
+).flatMap((join) =>
+  [false, true].flatMap((mainRef) =>
+    [false, true].flatMap((joinedRef) =>
+      ([`numbers`, `strings`, `mixed`] as const).map((keys) => ({
+        join,
+        mainRef,
+        joinedRef,
+        keys,
+      })),
+    ),
+  ),
+)
+type OuterKeyRow = { id: number; link: number; parentGroup: number }
+function expectedOuterJoinKeyRows(
+  mains: ReadonlyArray<OuterKeyRow>,
+  children: ReadonlyArray<OuterKeyRow>,
+  group: number,
+  join: (typeof outerJoinKeyGrammar)[number][`join`],
+) {
+  return children
+    .filter((child) => child.parentGroup === group)
+    .flatMap((child) => {
+      const matched = mains.filter((main) => main.link === child.link)
+      return (
+        matched.length
+          ? matched
+          : join === `right` || join === `full`
+            ? [undefined]
+            : []
+      ).map((main) => ({
+        id: child.id,
+        mainId: main?.id,
+      }))
+    })
+    .sort((a, b) => a.id - b.id)
+}
+function checkOuterJoinKeyRows(
+  observed: Iterable<{ id: unknown; mainId: unknown }>,
+  expected: ReturnType<typeof expectedOuterJoinKeyRows>,
+) {
+  expect(
+    [...observed]
+      .map(({ id, mainId }) => ({ id, mainId }))
+      .sort((a, b) => Number(a.id) - Number(b.id)),
+  ).toEqual(expected)
+}
+declareOracle({
+  grammar: [outerJoinKeyGrammar],
+  model: [expectedOuterJoinKeyRows],
+  check: [checkOuterJoinKeyRows],
+})
+test(`rejects missing and duplicated joined contributions`, () => {
+  const mains = [{ id: 10, link: 10, parentGroup: 1 }]
+  const children = [
+    { id: 20, link: 10, parentGroup: 1 },
+    { id: 21, link: 10, parentGroup: 1 },
+    { id: 10, link: 30, parentGroup: 1 },
+  ]
+  for (const join of [`inner`, `left`, `right`, `full`] as const) {
+    const expected = expectedOuterJoinKeyRows(mains, children, 1, join)
+    checkOuterJoinKeyRows(expected, expected)
+    for (const wrong of [expected.slice(1), [...expected, expected[0]!]])
+      expect(() => checkOuterJoinKeyRows(wrong, expected)).toThrow()
+  }
+})
+test.each(outerJoinKeyGrammar)(
+  `preserves outer-join child identities across independent source keys: %j`,
+  async ({ join, mainRef, joinedRef, keys }) => {
+    const cuts = [`initial`, `main-departed`, `main-returned`, `child-departed`]
+    const reach = createOracleReach(
+      `outer join independent source keys`,
+      cuts.flatMap((cut) =>
+        materializationForms.map((form) => `${cut}/${form}`),
+      ),
+    )
+    reach.beginHistory()
+    const parents = createGrammarCollection(`outer-key-parents`, [
+      { id: 1, group: 1 },
+      { id: 2, group: 2 },
+      { id: 3, group: 1 },
+    ])
+    let modelMains: Array<OuterKeyRow> = [{ id: 10, link: 10, parentGroup: 1 }]
+    let modelChildren: Array<OuterKeyRow> = [
+      { id: 20, link: 10, parentGroup: 1 },
+      { id: 21, link: 10, parentGroup: 1 },
+      { id: 10, link: 30, parentGroup: 1 },
+      { id: 30, link: 50, parentGroup: 2 },
+    ]
+    const mains = createControlledCollection(`outer-key-mains`, modelMains, {
+      autoIndex: `eager`,
+      getKey: (row) => (keys === `strings` ? String(row.id) : row.id),
+    })
+    const children = createControlledCollection(
+      `outer-key-children`,
+      modelChildren,
+      {
+        autoIndex: `eager`,
+        getKey: (row) => (keys === `numbers` ? row.id : String(row.id)),
+      },
+    )
+    const live = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ parent: parents.collection }).select(({ parent }) => {
+          const mainQuery = q
+            .from({ main: mains.collection })
+            .select(({ main }) => ({
+              id: main.id,
+              link: main.link,
+              parentGroup: main.parentGroup,
+            }))
+          const joinedQuery = q
+            .from({ child: children.collection })
+            .select(({ child }) => ({
+              id: child.id,
+              link: child.link,
+              parentGroup: child.parentGroup,
+            }))
+          // Runtime source kinds vary independently. This driver uses only their
+          // shared ordinary fields; the native type owner checks inference.
+          const base = q.from({
+            main: (mainRef
+              ? mainQuery
+              : mains.collection) as unknown as typeof mains.collection,
+          })
+          const source = {
+            child: (joinedRef
+              ? joinedQuery
+              : children.collection) as unknown as typeof children.collection,
+          }
+          const joined =
+            join === `inner`
+              ? base.innerJoin(source, ({ main, child }) =>
+                  eq(main.link, child.link),
+                )
+              : join === `left`
+                ? base.leftJoin(source, ({ main, child }) =>
+                    eq(main.link, child.link),
+                  )
+                : join === `right`
+                  ? base.rightJoin(source, ({ main, child }) =>
+                      eq(main.link, child.link),
+                    )
+                  : base.fullJoin(source, ({ main, child }) =>
+                      eq(main.link, child.link),
+                    )
+          // Full-join optionality is a conservative shared carrier for the
+          // runtime grammar; the model still checks actual absence and values.
+          const typedJoin = joined as ReturnType<
+            typeof base.fullJoin<typeof source>
+          >
+          const selected = typedJoin
+            .where(({ child }) => eq(child.parentGroup, parent.group))
+            .select(({ main, child }) => ({ id: child.id, mainId: main.id }))
+          return { id: parent.id, ...includeInEveryForm(selected) }
+        }),
+    })
+    const compare = (cut: string) => {
+      for (const parent of parents.collection.toArray) {
+        const expected = expectedOuterJoinKeyRows(
+          modelMains,
+          modelChildren,
+          parent.group,
+          join,
+        )
+        const forms = live.get(parent.id)!
+        const values = readEveryForm(forms, (rows) => [...rows])
+        for (const form of materializationForms) {
+          checkOuterJoinKeyRows(values[form], expected)
+          reach.reach(`${cut}/${form}`)
+        }
+      }
+    }
+    await runWithCleanup(live, [parents, mains, children], async () => {
+      await live.preload()
+      compare(`initial`)
+      const original = modelMains[0]!
+      modelMains = []
+      mains.write(`delete`, original)
+      compare(`main-departed`)
+      modelMains = [original]
+      mains.write(`insert`, original)
+      compare(`main-returned`)
+      const removed = modelChildren.find(({ id }) => id === 10)!
+      modelChildren = modelChildren.filter(({ id }) => id !== 10)
+      children.write(`delete`, removed)
+      compare(`child-departed`)
+      reach.assertReached()
+      if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`)
+        console.log(
+          `outer-key reach ${JSON.stringify({ join, mainRef, joinedRef, keys })}`,
+          Object.fromEntries(reach.counts()),
+        )
+    })
+  },
+)
