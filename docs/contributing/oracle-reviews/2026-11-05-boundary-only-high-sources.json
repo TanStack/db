@@ -304,5 +304,38 @@
       "mutantExit": 1,
       "restoredExit": 0
     }
+  },
+  "ci1498Followup": {
+    "parentHead": "1498a8101934558a3ce3832b9854a800f9cc0c81",
+    "productionChanged": false,
+    "sourceSha256": {
+      "packages/db/tests/oracle-replay-manifest.ts": "11b40ea1de5bca1c84013fd76287e5e19e735869d245471b9891ec2be57d42c5",
+      "packages/db/tests/query/bucket-facade-adapter.test.ts": "341e85a9f41e0e03cbb766b92f80bc392e553c24f2cc123e4d87ffb06512a504"
+    },
+    "evidenceSha256": {
+      "shipped-ci-dist-red.log": "07459a4b736c57254b25845396e0ca2b9cb1a3da261ab75d9eed5194757e7fc8",
+      "shipped-ci-dist-green.log": "3c02c1c1e6b603b989b7bdef3d45dff0861281c91e42acedfc768ec461d109ca",
+      "shipped-ci-flat-driver-source.log": "b813a08ad8c72c87e84614a878e3e058193b3ad05ede372b24822eb0fdfdc04b",
+      "shipped-ci-replay-local.log": "d457b17554c39673271ac04847349fdba42f0c0e4df61c343e8f40792ad814b6",
+      "shipped-ci-replay-registration-red.log": "d8cccaef27ab22afa5b4d0c8aa41f2414a623206e50b4d12c5e2e6f58e77a71e",
+      "shipped-ci-replay-registration-green.log": "7b214a630d1a33d93235b23cef426ea10c302d57f68fe02d7f1359995d016863",
+      "shipped-ci-guarded-join-replay.log": "863d794a09d501209fb5a794274405333420821f3b0548278526ba733e29187a",
+      "shipped-ci-guarded-copy-replay.log": "35d885141b0a2e6df12bf47b085214d3eb0d775c172d89d2b641ea2f0b4407ca",
+      "shipped-ci-benchmark-full.log": "ce6e5988e81743dbf1cc39d588f206c3b3529dc37dad6d924d5b44105628936c",
+      "shipped-ci-repair-lint.log": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168"
+    },
+    "benchmarkReportSha256": {
+      "base.json": "9769a30fc51e2eebc22dab943653fc3f14bbf9c6d1b3b12ded59c3419ab8b64a",
+      "candidate.json": "c1f3bb73f8467bc400f754682e361ffb9310d6fd656feb9f0be0470535a248e7",
+      "comparison.md": "09a252cfed9a5fd866ec6a69f8f3cb545678ff0c5518dcf944a70738d7c79361"
+    },
+    "ciTableSha256": "139da3c4625b40c9b089e96cc523359ac30bd73739fc398ea3ab543417384da3",
+    "benchmarkRun": 42105504239,
+    "benchmarkGate": "FAIL; retained localized cold case, no threshold change",
+    "benchmarkMerge": "1df2469a5a341dc845610a2d0cf244cadb9d2cea",
+    "benchmarkParents": [
+      "8feab6ea3eaae4456f738da39fa93508ddd5cc01",
+      "1498a8101934558a3ce3832b9854a800f9cc0c81"
+    ]
   }
 }

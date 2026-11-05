@@ -106,3 +106,11 @@ write flag. The final pair-key source measures 0.91x writes and 0.80x cold
 against the same control, passing with no diagnostic flags. These runs compare with predecessor 708a58098, not pre-2312 or the
 PR merge base. The [high-review record](../../docs/contributing/oracle-reviews/2026-11-05-boundary-only-high-review.md)
 binds source, work, size and law evidence and preserves all observed limits.
+
+The later [1498a8101 CI run](https://github.com/TanStack/db/actions/runs/42105504239)
+measures 0.63x overall writes and 0.51x cold, but fails the localized cold gate
+for comment counts at 1,000 rows without indexes in optimistic mode: 7.266 ms
+base median versus 17.383 ms candidate. All three candidate samples exceed the
+base range and both floors. The [CI table](boundary-only-ci-2026-11-05.csv)
+retains both remote pairs (1,008 repetition rows). Thresholds remain unchanged;
+the high-review record tracks the repeatability investigation.

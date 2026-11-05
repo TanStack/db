@@ -540,7 +540,12 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/join-result-key-oracle.property.test.ts`,
     `join-result-key`,
-    `pairs`,
+    `pairs whole-source`,
+  ],
+  [
+    `db/tests/query/public-container-copy-oracle.test.ts`,
+    `query`,
+    `public-container-copy`,
   ],
   [
     `db/tests/query/group-result-key-oracle.property.test.ts`,

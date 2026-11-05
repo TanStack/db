@@ -5,10 +5,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { eq } from '../../src/query/builder/functions.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
-import {
-  BucketFacadeAdapter,
-  resolvePublicValue,
-} from '../../src/query/live/bucket-facade-adapter.js'
+import { BucketFacadeAdapter } from '../../src/query/live/bucket-facade-adapter.js'
 import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
 import { BUCKET_FACADE_REF } from '../../src/query/live/materialized-pipeline.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
@@ -17,10 +14,17 @@ import type { SyncConfig } from '../../src/types.js'
 import type {
   BucketFacadeRef,
   BucketRow,
+  ValueResolver,
 } from '../../src/query/live/materialized-pipeline.js'
 import type { Context } from '../../src/query/builder/types.js'
 
 type FacadeSync = Parameters<SyncConfig<Record<string, unknown>>[`sync`]>[0]
+
+// These direct component fixtures have flat rows and root facade references,
+// with no nested include paths or compiler metadata to clean. Keep their
+// resolver in the driver; unused generic helpers are absent from built dist.
+const resolveFlatFacadeValue: ValueResolver = (value, resolveFacade) =>
+  resolveFacade(value)
 
 class ThrowingBuildIndex extends BasicIndex<number> {
   throwBeforeBuild = false
@@ -80,7 +84,7 @@ describe(`BucketFacadeAdapter`, () => {
           },
         ],
         () => {},
-        resolvePublicValue,
+        resolveFlatFacadeValue,
       )
       graph.finalize()
       const ref: BucketFacadeRef = {
@@ -144,7 +148,7 @@ describe(`BucketFacadeAdapter`, () => {
           },
         ],
         () => {},
-        resolvePublicValue,
+        resolveFlatFacadeValue,
       )
       graph.finalize()
       const bucketKey = `group`
@@ -231,7 +235,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
-      resolvePublicValue,
+      resolveFlatFacadeValue,
     )
     graph.finalize()
 
@@ -285,7 +289,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
-      resolvePublicValue,
+      resolveFlatFacadeValue,
     )
     graph.finalize()
 
@@ -461,7 +465,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
-      resolvePublicValue,
+      resolveFlatFacadeValue,
     )
     graph.finalize()
 
@@ -557,7 +561,7 @@ describe(`BucketFacadeAdapter`, () => {
         },
       ],
       () => {},
-      resolvePublicValue,
+      resolveFlatFacadeValue,
     )
     graph.finalize()
 

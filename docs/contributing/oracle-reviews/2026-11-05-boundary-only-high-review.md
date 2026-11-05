@@ -534,3 +534,49 @@ Final precommit checks: pnpm lint:changed, Prettier on all changed TS/JSON/MD,
 and git diff --check pass. PR prose has zero hard STE violations; the two
 advisories are the required checklist wording. No lowered/removed oracle
 budget report was emitted. Remote checks are still pending the new push.
+
+## CI follow-up on 1498a8101
+
+Two test-integration gaps are confirmed and repaired without production changes.
+The minified job passes cache validation, build, public API, client-only bundles
+and production error text, then fails 14 direct facade tests against dist. The
+build correctly omits the unused generic resolver export. The direct driver
+injected that missing export. Its flat row/root-reference fixtures now supply
+their explicit flat resolver. No assertion or fixture value changes; generic
+copy and nested compiled receiving owners remain. Local dist RED reproduces the
+14 failures. After driver repair, all six dist files / 367 tests pass, and all
+15 source component tests pass. The initial local attempt used stale dist and
+is a setup failure, not RED evidence; rebuilding precedes the valid RED.
+
+The replay lane also exposes missing manifest owners for the two newly
+registered properties. Existing replay tests reject exactly that gap: full
+local RED is 116 passed / one failed, and the focused owner check fails.
+Registering join-result-key.whole-source and query.public-container-copy repairs
+the portfolio. All 69 manifest judgments pass. Guarded direct replays of both
+properties report the exact requested owner, seed/path, one execution and
+nonzero completed runs. No replay guard, comparison or run budget changes.
+
+The new remote benchmark is not green. Run
+[42105504239](https://github.com/TanStack/db/actions/runs/42105504239) reports
+0.63x overall writes / 0.51x cold, but its localized gate rejects comment-count
+cold hydration at 1,000 rows, no indexes, optimistic mode. Base cold samples are
+8.597094, 7.248325 and 7.265830 ms; candidate samples are 17.483109, 17.383462
+and 16.623491 ms. Every candidate exceeds the complete base range by the
+unchanged relative/absolute floors. The median increases 139.2%, from 7.266 to
+17.383 ms. The query's geometric means still improve 9.7% writes / 13.5% cold;
+this cannot cancel the case failure. No sample is discarded or called noise
+without repeated evidence. The next source-identical benchmark will test
+repeatability; these two test-driver repairs do not change production or harness.
+All 504 new repetition rows remain in
+[the CI table](../../../scripts/bench/boundary-only-ci-2026-11-05.csv), alongside
+the earlier remote pair. The manifest binds the downloaded complete JSONs and
+report. PR readiness remains unproven while this localized failure is unresolved.
+
+Loss accounting adds CI01 (dist driver) and CI02 (replay registration), both
+fixed-now with the evidence above. CI03 (localized cold timing) remains
+confirmed-open pending the source-identical repeat. Earlier review occurrences
+remain accounted for: GitHub re-associated async-callback and gate-wording
+comments, but the current helper accepts void or Promise and the current report
+already says every repetition. The mutable summary still covers bd3f574ec and
+is not fresh review evidence for 1498a8101. The bot marks both original table
+pipes and whole-source fan-out comments addressed by 1498a81.
