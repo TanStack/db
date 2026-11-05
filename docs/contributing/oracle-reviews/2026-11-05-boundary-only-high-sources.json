@@ -381,5 +381,97 @@
       "scripts/bench/boundary-only-ci-2026-11-05.csv": "8fb75b62b8a6bca11d4cb84720a9babe425e98d03daadfbe13b07a3ee248fd3e",
       "scripts/bench/query-fixture-isolation-2026-11-05.csv": "3cacc3aadaa9a1bffb9342ff177d604be6a3368a6eb1fde515340685d79357fc"
     }
+  },
+  "ciEb9DynamicGrouping": {
+    "parentHead": "eb9ba9acab93878233572addbf6358a8df6c046c",
+    "codeRabbitReview": 5792245070,
+    "benchmark": {
+      "head": "eb9ba9acab93878233572addbf6358a8df6c046c",
+      "merge": "b2ac23b7d4117eacdc666d1c2c22464171b8e3d9",
+      "base": "8feab6ea3eaae4456f738da39fa93508ddd5cc01",
+      "run": 42109495232,
+      "hashes": {
+        "base.json": "deb3825d664de3d80da526c5b27612178427a29879d9e459375b76f27e9da349",
+        "candidate.json": "c963e366ac34b002543e9be3c94988b42b5cb12a7fc0523f1261e60b03030bb1",
+        "comparison.md": "92ef1eeb730e1194fb3df8e3b7d5bcd89a4f64b324a64bd66621a8ba00f67ef3"
+      }
+    },
+    "benchmarkGate": "PASS with unchanged thresholds; CI03 fixed-now",
+    "sourceSha256": {
+      "packages/db/src/query/builder/index.ts": "be0bf49dfb455ba50acb71c0842dea9b6072cb44d2b85aa924d366b53b76542f",
+      "packages/db/src/query/builder/types.ts": "9351a58461c87abfdea575bc538bcf826e80b06aecd728fa27d24523ff9123c2",
+      "packages/db/src/query/builder/group-keys.ts": "4cc21b47a53efca7d7e3f3afa8c6869ad8ee55ca0bf4671205a1cc2e8a225f18",
+      "packages/db/tests/query/virtual-row-fields-types-oracle.test.ts": "dfe2f13f0eb7199a023ac541f838106daba7db03a4c9de6737024562667d0f09",
+      "scripts/bench/boundary-only-ci-2026-11-05.csv": "38d7e11892c0fd66e59cdb1bf6ae117ee85e7194d28b7a614f27a2395a0c4a5a",
+      "docs/contributing/oracle-coverage.md": "aa05fa8d161bde5b54ea217328573e16aa86ae6d24def444a4a6a3b615205330",
+      "docs/contributing/oracle-reviews/2026-11-05-boundary-only-high-review.md": "ad6ff3d951e02a4763efef7367ff400bbd6c80a5d85689ac0c306ca35c456b4c"
+    },
+    "evidenceSha256": {
+      "dynamic-group-native-red.log": "1038c933de2374d18dbbbc31f0cb7dce2fef601d7e38777fb6244ae8cfb01a30",
+      "dynamic-group-native-red2.log": "873f136ca54ccd2aadd61b004cfcad18eb04d1798ea88e367f48e24501bcfdf8",
+      "dynamic-group-native-green1.log": "034d53ff64c496f5a21ec28c580b6dbd30aea721dc5a81ea9b35e10dfe205bee",
+      "dynamic-group-focused-green2.log": "0e79fdce3c9c480dbbb6bc073e51d411b9ea166aa400f09242c5916586307840",
+      "dynamic-group-native-green-final.log": "b11ad0c48b45b338d2518a58adfa113bd2d426b98a81f7210111248c2097f174",
+      "dynamic-group-full-tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "dynamic-group-runtime-before.log": "32a8ae0aab5ea0e2fe03a8fb2fa3a20273b8e1d74095e40604cce46b66aaf99d",
+      "dynamic-group-runtime.mts": "dfaf2821fac9fbad2d596ae37d49f510030982d775ab285931526dcce657caa9",
+      "dynamic-group-erased-js.json": "abaf4174534f9d07539bb19b287eb53b043ce1e173a6a1f1902995124f186827",
+      "dynamic-group-mutants.json": "3d6f7f793b961b5c430b24630c1c470c74c707e85506fa186afe66d4b8c7bf5f",
+      "run-dynamic-group-mutants.py": "d35e0203b262e9bcf3068fe344d9024119126b5fdf415c150b6d4b4578023df5",
+      "dynamic-group-always-required.log": "29bcf93805feab717885c6a52387dbac95e605584d20be71df63486d4ca79b6e",
+      "dynamic-group-omit-array-key.log": "72fb3cabfd5d8e10992a63828d2058598221dcb0af8a0e176b73ee6214726ccd",
+      "dynamic-group-erase-prior.log": "12e162825e16f76891ef235b7b927c422c795e33dc273b4a88123c1b4befc29d",
+      "dynamic-group-lint.log": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168",
+      "dynamic-group-doc-format.log": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20",
+      "eb9ba9-review-5792245070.md": "68023bb05f877a2328e6931b3c81620c55d02864f230c26d7cb9ddfe2f51eb31",
+      "eb9ba9-review-mutable-final.md": "2916a94d8f41a34608ecee61c9bf312f7902fb6e03755324edfde9cabbe31cd9",
+      "shipped-ci-poll35.log": "16a2f499b16f3488a24e10f22545ba28f055a90eeb696e2b2850e03d1a7cb3fd",
+      "final-eb9ba9-ci-binding.json": "54017a22511c43755f5c726de37d3e8680760425f86b705a68ee1eab1cb454c7"
+    },
+    "nativeRed": {
+      "failed": 24,
+      "passed": 9,
+      "declaredStates": 403,
+      "stateReachCounts": [
+        24
+      ],
+      "initialConstructionFailureNotRedEvidence": true
+    },
+    "nativeGreen": {
+      "files": 3,
+      "checks": 68,
+      "ownerChecks": 33,
+      "supplementalChecks": 35,
+      "diagnostics": 0
+    },
+    "fullDbTscDiagnostics": 0,
+    "shippedJavaScriptChanged": false,
+    "mutants": [
+      {
+        "name": "dynamic-group-always-required",
+        "exit": 1,
+        "diagnosticCodes": [
+          "TS2344"
+        ],
+        "nativeConstraintFailure": true
+      },
+      {
+        "name": "dynamic-group-omit-array-key",
+        "exit": 1,
+        "diagnosticCodes": [
+          "TS2344"
+        ],
+        "nativeConstraintFailure": true
+      },
+      {
+        "name": "dynamic-group-erase-prior",
+        "exit": 1,
+        "diagnosticCodes": [
+          "TS2344"
+        ],
+        "nativeConstraintFailure": true
+      }
+    ],
+    "limits": "Finite inferred list forms; explicit any erasure including context-only groupKeys generic retains compatibility behavior; installed-package types are a separate receiving path."
   }
 }

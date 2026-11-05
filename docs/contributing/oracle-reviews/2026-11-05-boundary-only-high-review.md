@@ -662,3 +662,118 @@ known gate failure in its merge-risk conclusion. It does not independently
 establish readiness or warrant hiring for performance diagnosis. No new
 behavioral finding requires an oracle change. The original high review's
 correctness and efficiency findings remain accounted for in the earlier ledger.
+
+
+## eb9ba9aca follow-up: passing CI and dynamic grouping types
+
+The corrected benchmark passes the unchanged gate on remote run 42109495232.
+Candidate merge b2ac23b7d4117eacdc666d1c2c22464171b8e3d9 has parents
+8feab6ea3eaae4456f738da39fa93508ddd5cc01 and
+eb9ba9acab93878233572addbf6358a8df6c046c. Overall ratios are 0.62x writes
+and 0.49x cold, with no regression flags. Nested-document writes improve by
+91.0% and hydration by 97.1% across configurations. The former failing case
+has base repetitions 5.695476, 5.509726, 5.676848 ms and candidate repetitions
+6.471167, 8.893417, 4.791310 ms. Their ranges overlap. This passes the gate,
+but does not establish zero overhead. All 504 observations join the retained
+historical passes and failures in boundary-only-ci-2026-11-05.csv. CI03 is now
+fixed-now; the preceding pending description remains a historical observation.
+
+### Type law and test gap
+
+CodeRabbit review 5792245070, covering eb9ba9aca, identifies a real remaining
+inference gap. A broad declared group-key array admits an empty value. The
+public type must admit the missing generated key at the QueryRef and inline
+boundaries. Nonempty grouping or aggregates still contribute a required key.
+Authored key fields remain authored, and Collection publication supplies its
+required metadata. Authority is the existing boundary-only decision and the
+public-type owner's declared-shape law, not the old overload's output. The
+coverage map already named the witness but did not authorize it as a product
+limitation. The repair location is the type inference and the missing grammar.
+
+The pre-edit oracle extension adds 15 list forms across six authored-field
+choices and 24 source descriptions. Callback and helper forms cross mutable,
+readonly and empty-or-one tuple declarations with empty and nonempty values.
+A statically nonempty tuple and both accumulation orders provide neighbors.
+The existing shared model constructs expected shapes from those declarations.
+The actual public construction runs before TypeScript checks QueryRef callback,
+inline receiving and Collection publication types. No separate pinned expected
+answer or production grouping classifier computes the model.
+
+A corrected runtime probe confirms that the empty list exposes no own `$key`
+and the nonempty list exposes key 1, through both QueryRef and inline results.
+The first attempted native RED fails during construction because the bare
+nonempty callback did not bring the grouping compiler. It receives no RED
+credit. Adding an empty `groupKeys` carrier admits the same callback grammar.
+The corrected pre-edit run fails all 24 generated consumers with TS2344 shape
+constraints, while nine calibration/admission checks pass. It runs on eb9ba9aca
+before the first production edit. The first repair attempt still fails the
+mutable-array and tuple-union distinctions. The final helper tests the whole
+declared return type for empty-only and possibly-empty values. Intersection
+preserves any earlier definite grouping. Const inference retains literal tuple
+facts. These are type-only changes: all three modified builder files emit
+byte-identical JavaScript against eb9ba9aca. The measured shipped-size deltas
+therefore remain -155 full-export bytes and -1,667 emitted minified ESM bytes.
+
+### Evidence and limits
+
+- **Law:** The declared key-list possibilities determine missing-key optionality.
+  Authored keys and actual Collection metadata retain their separate rules.
+- **Reach:** All changed grouping-list/collision states run under each of the
+  24 source descriptions, with actual construction and three receiving types.
+  State counts and exact commands are bound in the adjacent source manifest.
+- **RED:** `pnpm --dir packages/db exec vitest run tests/query/virtual-row-fields-types-oracle.test.ts --maxWorkers=2`
+  gives 24 failed / nine passed on the unchanged parent after setup correction.
+- **GREEN:** The same native owner and supplemental type checks pass after the
+  repair. Full DB source/test TypeScript reports zero diagnostics.
+- **Mutant:** Requiring keys for all possible lists, omitting keys for all arrays,
+  and erasing earlier definite grouping each fail TS2344 shape constraints in
+  the same generated consumer. None fails admission, parsing or setup.
+- **Limits:** This finite grammar covers the declared list forms above through
+  source public types. It does not recover facts erased to `any`, including
+  the existing explicit-context-only helper generic. Built declarations and
+  installed-package consumers remain separate receiving paths. Runtime timing
+  is unchanged because the emitted JavaScript is identical. No oracle budget
+  or performance threshold decreases.
+
+ORC audit: ORC-001/002 authority and independent declared-shape judgment remain
+above; ORC-003 prose, grammar, production construction and comparison stay in
+the owner. ORC-004 reconstruction covers the original empty-array witness;
+removing list form, runtime choice, wrapper or accumulation axes loses a distinct
+legal neighbor. Key/value/optionality/union source axes retain their earlier
+roles. Illegal non-record facades and optionless indexes remain admission
+controls. ORC-005 observes all three named public receiving types after legal
+construction, with source facts present at inference. ORC-006 and ORC-013 use
+the three isolated wrong designs. ORC-007 does not apply to exhaustive finite
+consumer generation; there is no random campaign. ORC-008 does not apply to a
+stateless type law. ORC-009 uses existing grouping and publication terms.
+ORC-010 retains diagnostics and existing cleanup. ORC-011 uses runtime empty
+and nonempty observations as a separate formulation of key presence, without
+claiming runtime performance from types. ORC-012 binds this review to the
+manifest's sources and evidence. ORC-014 uses the actual TypeScript compiler,
+public construction and receiving paths rather than a controlled compiler.
+ORC-015 retains declared reach; ORC-016 uses the shared shape model for every
+new finite input. No ordinary type examples enter the oracle.
+
+### Loss audit and reviewer assessment
+
+The raw review body, mutable summary, inline comments and conversation comments
+were inspected together. The seven source-order occurrences remain distinct:
+
+| ID | Original claim or suggestion | Technical verdict and evidence | PR action / durable value |
+| --- | --- | --- | --- |
+| CRE01 | Possibly-empty readonly array callbacks incorrectly require `$key`; only scalar/nonempty lists should require it. | Confirmed by runtime and native RED. Optional missing keys preserve both empty and nonempty outcomes; accumulation and authored-key neighbors reject narrow repairs. | fixed-now; existing public-type owner, coverage map and this record. |
+| CRE02 | Docstring coverage is 45%, below a required 80%; add missing docstrings. | No repository authority establishes that bot default as a requirement. | duplicate of CRF01 and the earlier refutation; optional documentation feedback remains preserved. |
+| CRE03 | The current head lacks fresh remote performance evidence and the localized gate remains unresolved. | Stale after remote run 42109495232 passes unchanged thresholds. The bot's supplied context ended before that result. | stale; retain the exact fresh run and both earlier failures. |
+| CRE04 | Reviewers should confirm joined pair keys are intended. | The maintainer explicitly selected pair keys with the other three source-attribution fields retained. | duplicate of CRF04; decision and generated joined-identity evidence remain above. |
+| CRE05 | Reviewers should confirm aggregate provenance, caseWhen and select type changes are necessary. | The prior native RED/GREEN establishes the wrapped-aggregate and value-type gaps. | duplicate of CRF05; preserve the type evidence and explicit-erasure limits. |
+| CRE06 | Ignored measurement CSVs were excluded and not inspected. | Accurate evidence limit in the review's context, not a code defect. The manifest and versioned tables retain the observations. | accepted-design for that review's evidence scope, without reducing this PR's measurement obligation. |
+| CRE07 | Suggested reviewer `kevin-dp`. | Optional routing suggestion, without a technical claim. | accepted-design as optional routing feedback; no assignment or message sent. |
+
+Loss accounting: seven occurrences = one fixed-now + three duplicates + one
+stale + two accepted-design. No confirmed-open, deferred or design-decision item
+remains in this review. The original ten findings and all sibling findings
+retain their earlier ledger entries. The fresh review is accurate and useful
+on the dynamic-list inference boundary, but it repeats stale measurement and
+design questions without reconciling their recorded evidence. Hire with
+supervision for type-boundary review; do not rely on its broad readiness or
+performance conclusions. CI and readiness remain separate final-head gates.

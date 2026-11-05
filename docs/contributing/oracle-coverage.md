@@ -1030,19 +1030,27 @@ Counts change while projection metadata belongs to the output Collection.
 Single-field wrong-source observations calibrate every metadata assertion.
 See the [CI evidence](oracle-reviews/2026-11-05-boundary-only-ci-review.md).
 
-Grouping inference remains bounded by the declared key-list type. A callback
-annotated as a broad array can return an empty list at runtime while the general
-overload still promises a generated key. The concrete trace is
-`const keys: Array<PublicRef<{ id: number }>['id']> = []`, followed by
-`new Query().from({ source: rows }).groupBy(groupKeys(() => keys)).select(({ source }) => ({ id: source.id }))`,
-consumed through QueryRef `fn.select(({ inner }) => inner.$key)`.
-Here `PublicRef` names the public `Ref` export. An executed native/runtime probe
-accepts `const key: string | number = inner.$key` with zero diagnostics but
-observes `undefined` and no `$key` property before publication. This is a
-pre-existing dynamic-emptiness inference limit, owned
-by this public-type oracle; it needs a conditional/optional-key type law and
-generated empty/nonempty runtime choices before a broader claim. The repair
-above establishes statically empty lists, not arbitrary dynamic grouping.
+The dynamic-emptiness follow-up extends this same owner with 15 grouping-list
+forms, each crossed with six authored collision choices and all 24 source
+descriptions. Mutable arrays, readonly arrays and empty-or-one tuple unions
+construct both empty and nonempty return values, through callbacks and
+`groupKeys`. The independent declared-shape law gives these lists an optional
+missing `$key`. Statically empty lists retain no generated key, statically
+nonempty tuples retain a required key, and accumulated definite grouping stays
+required. QueryRef callback, inline array and published Collection types use
+the same comparison. The original concrete witness was
+`const keys: Array<PublicRef<{ id: number }>['id']> = []`, consumed through
+QueryRef `fn.select(({ inner }) => inner.$key)`. Here `PublicRef` names the
+public `Ref` export. The original inference accepted a required key while a
+runtime probe observed no `$key` property. Its nonempty neighbor observes the
+generated key. This was an enforcement gap, not an accepted product limitation.
+The extended native owner rejects the unchanged implementation before repair.
+Always-required, omit-all-array-keys and erase-prior-grouping mutants each fail
+native shape constraints. This closes the declared-list inference gap within
+the generated forms; explicit `any` erasure, including a helper with only its
+context type argument supplied, retains the existing compatibility behavior.
+See the dynamic-grouping evidence in the
+[high-review record](oracle-reviews/2026-11-05-boundary-only-high-review.md).
 
 The high review adds 27 function/conditional forms with aggregate and ordinary
 controls to this same public-type owner, for all 24 source descriptions.

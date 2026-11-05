@@ -84,6 +84,7 @@ import type {
   SingleSource,
   Source,
   WhereCallback,
+  WithGrouping,
   WithResult,
   WithoutBareSubquery,
 } from './types.js'
@@ -746,14 +747,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    *   .select(({orders}) => ({ status: orders.status }))
    * ```
    */
-  groupBy(
-    keys:
-      | GroupByCallback<TContext, ReadonlyArray<never>>
-      | GroupKeys<TContext, ReadonlyArray<never>>,
-  ): QueryBuilder<TContext>
-  groupBy(
-    keys: GroupByCallback<TContext> | GroupKeys<TContext>,
-  ): QueryBuilder<TContext & { hasGrouping: true }>
+  groupBy<const TKeys>(
+    keys: GroupByCallback<TContext, TKeys> | GroupKeys<TContext, TKeys>,
+  ): QueryBuilder<WithGrouping<TContext, TKeys>>
   groupBy(
     keys: GroupByCallback<TContext> | GroupKeys<TContext>,
   ): QueryBuilder<TContext> | QueryBuilder<TContext & { hasGrouping: true }> {

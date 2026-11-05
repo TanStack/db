@@ -8,6 +8,8 @@
  * decision also preserves authored collisions in QueryRef callback inputs and
  * structured refs. Empty grouping contributes no key; a nonempty grouping or
  * aggregate contributes a missing key, including nested and wrapped aggregates.
+ * A declared key list that may be empty contributes an optional missing key.
+ * Prior definite grouping and aggregates retain their required generated key.
  * Nullable whole-row selections are absent or
  * complete; facade rows always receive required metadata. WithoutVirtualProps
  * distributes over discriminated row unions.
@@ -134,6 +136,44 @@ const groupingBoundaries = [
   {
     name: `explicit-context-key`,
     expressions: `.groupBy(groupKeys<ContextFromSource<{ groupSource: typeof rows }>>(({ groupSource }) => groupSource.id))`,
+    before: true,
+    keyed: true,
+  },
+  ...[`callback`, `wrapper`].flatMap((form) =>
+    [`mutable`, `readonly`, `union`].flatMap((list) =>
+      [false, true].map((nonempty) => {
+        const key = `PublicRef<Row>['id']`
+        const declared =
+          list === `mutable`
+            ? `Array<${key}>`
+            : list === `readonly`
+              ? `ReadonlyArray<${key}>`
+              : `readonly [] | readonly [${key}]`
+        const callback = `({ groupSource }): ${declared} => [${nonempty ? `groupSource.id` : ``}]`
+        return {
+          name: `possible-${form}-${list}-${nonempty ? `one` : `empty`}`,
+          expressions: `${form === `callback` ? `.groupBy(groupKeys(() => []))` : ``}.groupBy(${form === `wrapper` ? `groupKeys(${callback})` : callback})`,
+          before: true,
+          keyed: `optional`,
+        } as const
+      }),
+    ),
+  ),
+  {
+    name: `nonempty-tuple-wrapper`,
+    expressions: `.groupBy(groupKeys(({ groupSource }): readonly [PublicRef<Row>['id']] => [groupSource.id]))`,
+    before: true,
+    keyed: true,
+  },
+  {
+    name: `one-then-possible`,
+    expressions: `.groupBy(groupKeys(({ groupSource }) => groupSource.id)).groupBy((): ReadonlyArray<PublicRef<Row>['id']> => [])`,
+    before: true,
+    keyed: true,
+  },
+  {
+    name: `possible-then-one`,
+    expressions: `.groupBy((): ReadonlyArray<PublicRef<Row>['id']> => []).groupBy(groupKeys(({ groupSource }) => groupSource.id))`,
     before: true,
     keyed: true,
   },
@@ -524,8 +564,10 @@ function consumerSource(
       )
     }
   }
-  // The model uses declared key-list emptiness, not the query's inferred
-  // grouping marker. Every receiver applies the same declared-shape law.
+  // The model uses the possibilities in the declared list, independently of
+  // the inferred context marker. A broad list admits empty and nonempty values,
+  // so its generated key is optional. Each form constructs both runtime choices.
+  // Prior definite grouping remains definite when a later list may be empty.
   for (const grouping of groupingBoundaries) {
     for (const collision of authoredCollisions) {
       const base = `new Query().from({ groupSource: rows })`
@@ -534,7 +576,7 @@ function consumerSource(
         ? `${base}${grouping.expressions}${selection}`
         : `${base}${selection}${grouping.expressions}`
       const declared = `{ id: ${shape.key}${collision.fields.replaceAll(` as const`, ``).replaceAll(`, $`, `; $`)} }`
-      const expected = `${declared}${grouping.keyed && collision.name !== `key` && collision.name !== `all` ? ` & { readonly $key: string | number }` : ``}`
+      const expected = `${declared}${grouping.keyed && collision.name !== `key` && collision.name !== `all` ? ` & { readonly $key${grouping.keyed === `optional` ? `?` : ``}: string | number }` : ``}`
       addWitness(
         `grouping-boundary/${grouping.name}/${collision.name}`,
         `{

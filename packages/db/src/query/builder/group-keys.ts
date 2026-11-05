@@ -11,7 +11,7 @@ export interface GroupKeys<TContext extends Context, TKeys = any> {
   grouping: Grouping
 }
 
-export function groupKeys<TContext extends Context = any, TKeys = any>(
+export function groupKeys<TContext extends Context = any, const TKeys = any>(
   callback: (
     refs: Parameters<OperatorCallback<TContext, GroupByCallback<TContext>>>[0],
   ) => TKeys,

@@ -644,6 +644,17 @@ export type GroupByCallback<TContext extends Context, TKeys = any> = (
   refs: RefsForContext<TContext>,
 ) => TKeys
 
+// A declared list can admit an empty value. Preserve earlier definite grouping
+// while recording that this call alone may contribute no grouping expressions.
+export type WithGrouping<TContext extends Context, TKeys> =
+  IsAny<TKeys> extends true
+    ? TContext & { hasGrouping: true }
+    : [TKeys] extends [ReadonlyArray<never>]
+      ? TContext
+      : [] extends TKeys
+        ? TContext & { hasGrouping?: true }
+        : TContext & { hasGrouping: true }
+
 /**
  * A callback that an operator value receives before the query supplies its
  * context. Without noImplicitAny, TypeScript skips that inference and the
@@ -1198,10 +1209,13 @@ type ResultValue<TContext extends Context> = TContext[`hasResult`] extends true
 // QueryRef sources and inline materialization expose the authored selection.
 // Grouping alone contributes a missing public key; it supplies no Collection
 // attribution and never replaces an explicitly authored field.
-type WithGroupKey<T> = T extends object
+type WithGroupKey<T, Optional extends boolean = false> = T extends object
   ? `$key` extends keyof T
     ? T
-    : T & { readonly $key: string | number }
+    : T &
+        (Optional extends true
+          ? { readonly $key?: string | number }
+          : { readonly $key: string | number })
   : T
 
 export type GetRawResult<TContext extends Context> =
@@ -1210,7 +1224,9 @@ export type GetRawResult<TContext extends Context> =
       ? WithGroupKey<TContext[`result`]>
       : TContext[`hasAggregate`] extends true
         ? WithGroupKey<TContext[`result`]>
-        : TContext[`result`]
+        : `hasGrouping` extends keyof TContext
+          ? WithGroupKey<TContext[`result`], true>
+          : TContext[`result`]
     : ResultValue<TContext>
 
 // Inline materialization bypasses a child Collection, so selected child values
