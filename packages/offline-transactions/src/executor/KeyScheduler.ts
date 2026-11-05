@@ -5,11 +5,17 @@ export class KeyScheduler {
   private activeTransactionId: string | undefined
 
   schedule(transaction: OfflineTransaction): boolean {
-    if (
-      this.pendingTransactions.some((pending) => pending.id === transaction.id)
-    ) {
-      return false
-    }
+    const duplicate = this.pendingTransactions.some(
+      (pending) => pending.id === transaction.id,
+    )
+    // Development-only oracle probe; a production build removes it.
+    process.env.NODE_ENV !== `production` &&
+      (
+        globalThis as {
+          __oracleProbe?: (name: string, condition: unknown) => void
+        }
+      ).__oracleProbe?.(`offline-transactions#duplicate-schedule`, duplicate)
+    if (duplicate) return false
     this.pendingTransactions.push(transaction)
     // Sort by creation time to maintain FIFO order
     this.pendingTransactions.sort(
