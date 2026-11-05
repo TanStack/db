@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict'
 import { execSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { cpus, platform, release } from 'node:os'
@@ -49,6 +50,27 @@ type Comment = {
   updateTick: number
 }
 
+// A rich-text body: a row whose value is a deep tree rather than a few scalars.
+type IssueDocument = {
+  id: number
+  issueId: number
+  blocks: Array<DocumentBlock>
+  updateTick: number
+}
+
+type DocumentBlock = {
+  id: string
+  kind: `paragraph` | `heading` | `list`
+  text: string
+  marks: Array<{
+    type: `bold` | `link`
+    from: number
+    to: number
+    attrs: { href?: string }
+  }>
+  attrs: { indent: number; align: `left` | `center` }
+}
+
 type ManualSyncUtils<T extends object, TKey extends string | number> = {
   begin: Parameters<SyncConfig<T, TKey>[`sync`]>[0][`begin`]
   write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
@@ -67,9 +89,11 @@ type Fixture = {
   issues: ManualCollection<Issue, number>
   users: ManualCollection<User, number>
   comments: ManualCollection<Comment, number>
+  documents: ManualCollection<IssueDocument, number>
   issueById: Map<number, Issue>
   userById: Map<number, User>
   commentById: Map<number, Comment>
+  documentById: Map<number, IssueDocument>
   visibleIssueId: number
   selectedIssueId: number
   nextCommentId: number
@@ -85,6 +109,7 @@ type BenchmarkOptions = {
   commentCount?: number
   warmup: number
   iterations: number
+  repetitions: number
   outDir: string
   outFile?: string
 }
@@ -124,6 +149,8 @@ type RunResult = {
   sourceIndexMode: SourceIndexMode
   mutationMode: MutationMode
   coldHydrateMs: number
+  coldHydrateSamplesMs: Array<number>
+  writeMedianSamplesMs: Array<number>
   writeSummary: Summary
 }
 
@@ -143,6 +170,7 @@ type QueryCase = {
     iteration: number,
     mutationMode: MutationMode,
   ) => WriteResult
+  verify?: (fixture: Fixture, query: BenchmarkCollection) => void
 }
 
 const defaultOptions: BenchmarkOptions = {
@@ -152,6 +180,7 @@ const defaultOptions: BenchmarkOptions = {
   mutationModes: [`synced`, `optimistic`],
   warmup: 10,
   iterations: 50,
+  repetitions: 1,
   outDir: `.tmp/perf`,
 }
 
@@ -163,6 +192,9 @@ const defaultCustomScale: FixtureScale = {
 }
 
 const options = parseArgs(process.argv.slice(2), defaultOptions)
+
+const BLOCKS_PER_DOCUMENT = 20
+const BLOCK_KINDS = [`heading`, `paragraph`, `paragraph`, `list`] as const
 
 const queryCases: Array<QueryCase> = [
   {
@@ -303,6 +335,41 @@ const queryCases: Array<QueryCase> = [
       ) as unknown as BenchmarkCollection,
     write: insertSelectedIssueComment,
   },
+  {
+    name: `open issues + documents`,
+    scenario: `visible document update`,
+    // Every open issue with its whole document and no limit, so each output row
+    // carries a nested tree into result finalization.
+    createQuery: ({ issues, documents }) =>
+      createLiveQueryCollection((q) =>
+        q
+          .from({ issue: issues })
+          .where(({ issue }) => eq(issue.status, `open`))
+          .join({ document: documents }, ({ issue, document }) =>
+            eq(issue.id, document.issueId),
+          )
+          .select(({ issue, document }) => ({
+            id: issue.id,
+            title: issue.title,
+            document,
+          })),
+      ) as unknown as BenchmarkCollection,
+    write: updateVisibleDocument,
+    verify: (fixture, query) => {
+      assert.equal(
+        query.size,
+        [...fixture.issueById.values()].filter(
+          (issue) => issue.status === `open`,
+        ).length,
+      )
+      const row = query.toArray.find(({ id }) => id === fixture.visibleIssueId)
+      assert.ok(row, `the updated document must be visible`)
+      assert.deepEqual(
+        row.document,
+        fixture.documents.get(fixture.visibleIssueId),
+      )
+    },
+  },
 ]
 
 const scales = resolveScales(options)
@@ -312,7 +379,39 @@ for (const scale of scales) {
     const runOptions = createRunOptions(options, scale, sourceIndexMode)
     for (const mutationMode of options.mutationModes) {
       for (const queryCase of queryCases) {
-        results.push(await runCase(queryCase, mutationMode, runOptions))
+        const samples: Array<RunResult> = []
+        for (let repeat = 0; repeat < options.repetitions; repeat++) {
+          samples.push(await runCase(queryCase, mutationMode, runOptions))
+        }
+        results.push({
+          ...samples[0]!,
+          coldHydrateMs: summarize(
+            samples.map((sample) => sample.coldHydrateMs),
+          ).medianMs,
+          coldHydrateSamplesMs: samples.map((sample) => sample.coldHydrateMs),
+          writeMedianSamplesMs: samples.map(
+            (sample) => sample.writeSummary.medianMs,
+          ),
+          writeSummary: {
+            ...samples[0]!.writeSummary,
+            ...Object.fromEntries(
+              (
+                [
+                  `medianMs`,
+                  `p75Ms`,
+                  `p95Ms`,
+                  `minMs`,
+                  `maxMs`,
+                  `stddevMs`,
+                ] as const
+              ).map((metric) => [
+                metric,
+                summarize(samples.map((sample) => sample.writeSummary[metric]))
+                  .medianMs,
+              ]),
+            ),
+          },
+        })
       }
     }
   }
@@ -343,10 +442,12 @@ async function runCase(
   await query.preload()
   await flushMicrotasks()
   const coldHydrateMs = performance.now() - coldStart
+  queryCase.verify?.(fixture, query)
 
   for (let i = 0; i < options.warmup; i++) {
     const writeResult = queryCase.write(fixture, i, mutationMode)
     await flushMicrotasks()
+    if (i === options.warmup - 1) queryCase.verify?.(fixture, query)
     await cleanupWrite(writeResult)
   }
 
@@ -360,8 +461,10 @@ async function runCase(
     )
     await flushMicrotasks()
     samples.push(performance.now() - start)
+    if (i === options.iterations - 1) queryCase.verify?.(fixture, query)
     await cleanupWrite(writeResult)
   }
+  queryCase.verify?.(fixture, query)
 
   await cleanupFixture(fixture, query)
 
@@ -372,6 +475,8 @@ async function runCase(
     sourceIndexMode: options.sourceIndexMode,
     mutationMode,
     coldHydrateMs,
+    coldHydrateSamplesMs: [coldHydrateMs],
+    writeMedianSamplesMs: [summarize(samples).medianMs],
     writeSummary: summarize(samples),
   }
 }
@@ -468,6 +573,13 @@ function createFixture(options: BenchmarkRunOptions): Fixture {
     })
   }
 
+  const documentsData: Array<IssueDocument> = issuesData.map((issue) => ({
+    id: issue.id,
+    issueId: issue.id,
+    blocks: createDocumentBlocks(issue.id, random),
+    updateTick: 0,
+  }))
+
   const fixture = {
     seed: options.seed,
     issues: createManualCollection(
@@ -491,6 +603,15 @@ function createFixture(options: BenchmarkRunOptions): Fixture {
     issueById: new Map(issuesData.map((issue) => [issue.id, issue])),
     userById: new Map(usersData.map((user) => [user.id, user])),
     commentById: new Map(commentsData.map((comment) => [comment.id, comment])),
+    documents: createManualCollection(
+      `bench-documents`,
+      documentsData,
+      (document) => document.id,
+      options.sourceIndexMode,
+    ),
+    documentById: new Map(
+      documentsData.map((document) => [document.id, document]),
+    ),
     visibleIssueId,
     selectedIssueId,
     nextCommentId: options.commentCount + 1,
@@ -514,6 +635,70 @@ function applySourceIndexes(
   fixture.users.createIndex((user) => user.id)
   fixture.comments.createIndex((comment) => comment.issueId)
   fixture.comments.createIndex((comment) => comment.createdAt)
+  fixture.documents.createIndex((document) => document.issueId)
+}
+
+function createDocumentBlocks(
+  issueId: number,
+  random: () => number,
+): Array<DocumentBlock> {
+  const blocks: Array<DocumentBlock> = []
+  for (let index = 0; index < BLOCKS_PER_DOCUMENT; index++) {
+    const length = 40 + Math.floor(random() * 80)
+    blocks.push({
+      id: `${issueId}-${index}`,
+      kind: BLOCK_KINDS[index % BLOCK_KINDS.length]!,
+      text: `Block ${index} of issue ${issueId}`.padEnd(length, `.`),
+      marks: [
+        { type: `bold`, from: 0, to: 5, attrs: {} },
+        {
+          type: `link`,
+          from: 6,
+          to: 12,
+          attrs: { href: `https://example.com/${issueId}/${index}` },
+        },
+      ],
+      attrs: { indent: index % 3, align: index === 0 ? `center` : `left` },
+    })
+  }
+  return blocks
+}
+
+function updateVisibleDocument(
+  fixture: Fixture,
+  iteration: number,
+  mutationMode: MutationMode,
+): WriteResult {
+  const document = fixture.documentById.get(fixture.visibleIssueId)!
+  const [first, ...rest] = document.blocks
+  const next = {
+    ...document,
+    blocks: [{ ...first!, text: `Edited at tick ${iteration}` }, ...rest],
+    updateTick: iteration,
+  }
+  fixture.documentById.set(document.id, next)
+
+  if (mutationMode === `synced`) {
+    writeSync(fixture.documents, {
+      type: `update`,
+      value: next,
+    })
+    return
+  }
+
+  const transaction = writeOptimistic(() => {
+    fixture.documents.update(document.id, (draft) => {
+      draft.blocks = next.blocks
+      draft.updateTick = next.updateTick
+    })
+  })
+
+  return {
+    cleanup: () => {
+      transaction.rollback()
+      fixture.documentById.set(document.id, document)
+    },
+  }
 }
 
 function updateVisibleIssue(
@@ -706,6 +891,7 @@ async function cleanupFixture(
     fixture.issues.cleanup(),
     fixture.users.cleanup(),
     fixture.comments.cleanup(),
+    fixture.documents.cleanup(),
   ])
 }
 
@@ -744,6 +930,7 @@ function runtimeMetadata(
     mutationModes: options.mutationModes,
     warmup: options.warmup,
     iterations: options.iterations,
+    repetitions: options.repetitions,
     node: process.version,
     platform: `${platform()} ${release()}`,
     cpu: cpus()[0]?.model ?? `unknown`,
@@ -925,6 +1112,9 @@ function parseArgs(
         break
       case `iterations`:
         parsed.iterations = parsePositiveInteger(value, name)
+        break
+      case `repetitions`:
+        parsed.repetitions = parsePositiveInteger(value, name)
         break
       case `outDir`:
         parsed.outDir = value

@@ -15,6 +15,7 @@ import type {
   BucketFacadeCompilation,
   BucketFacadeRef,
   BucketRow,
+  ValueResolver,
 } from './materialized-pipeline.js'
 
 const PRIVATE_RESULT_KEYS = new Set<PropertyKey>([INCLUDES_ROUTING])
@@ -79,6 +80,7 @@ export class BucketFacadeAdapter {
     private readonly parentId: string,
     private readonly compilations: Array<BucketFacadeCompilation>,
     onMessages: (count: number) => void,
+    private readonly resolveRoot?: ValueResolver,
   ) {
     for (const compilation of compilations) {
       compilation.rows.pipe(
@@ -134,7 +136,7 @@ export class BucketFacadeAdapter {
           if (!sync || changes.size === 0) continue
 
           for (const change of changes.values()) {
-            this.prepareChange(entry, change)
+            this.prepareChange(entry, change, compilation.resolve)
           }
           this.beginWrite(
             entry,
@@ -146,7 +148,13 @@ export class BucketFacadeAdapter {
             ),
           )
           for (const change of changes.values()) {
-            this.applyChange(entry, sync, change, compilation.hasOrderBy)
+            this.applyChange(
+              entry,
+              sync,
+              change,
+              compilation.hasOrderBy,
+              compilation.resolve,
+            )
           }
           sync.commit()
         }
@@ -215,7 +223,7 @@ export class BucketFacadeAdapter {
   }
 
   resolve<T>(value: T): T {
-    return this.resolveValue(value) as T
+    return this.resolveValue(value, this.resolveRoot) as T
   }
 
   cleanup(): void {
@@ -482,6 +490,7 @@ export class BucketFacadeAdapter {
     sync: FacadeSync,
     change: PendingRow,
     hasOrderBy: boolean,
+    resolve?: ValueResolver,
   ): void {
     const [publicKey, value, nextOrder] = change.value
     const key = publicKey as string | number
@@ -494,20 +503,25 @@ export class BucketFacadeAdapter {
     // A key that nets to no change while absent gets no write.
     if (change.inserts === change.deletes && !present) return
     const orderChanged = present && entry.order.get(accepted) !== nextOrder
-    const row = { ...this.resolve(value), $key: key }
+    const row = { ...(this.resolveValue(value, resolve) as object), $key: key }
     if (nextOrder !== undefined) entry.order.set(row, nextOrder)
     sync.write({ type: present ? `update` : `insert`, value: row })
     if (hasOrderBy && orderChanged) sync.collection._markLayoutChange()
   }
 
   /** Resolve and validate every public key before opening a sync transaction. */
-  private prepareChange(entry: FacadeEntry, change: PendingRow): void {
+  private prepareChange(
+    entry: FacadeEntry,
+    change: PendingRow,
+    resolve?: ValueResolver,
+  ): void {
     const [publicKey, value] = change.value
-    this.resolve(value)
+    this.resolveValue(value, resolve)
     entry.collection.getKeyFromItem({ $key: publicKey })
   }
 
-  private resolveValue(value: unknown): unknown {
+  private resolveValue(value: unknown, resolve?: ValueResolver): unknown {
+    if (resolve) return resolve(value, (leaf) => this.resolveValue(leaf))
     if (value === null || typeof value !== `object`) return value
     const cached = this.resolvedValues.get(value)
     if (cached !== undefined) return cached

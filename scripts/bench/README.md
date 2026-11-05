@@ -1,0 +1,95 @@
+# Incremental query benchmark
+
+Run `pnpm --filter @tanstack/db-ivm build`, then:
+
+```sh
+node --import tsx scripts/bench/incremental-update.ts \
+  --iterations=100 --warmup=20 --repetitions=3 --outFile=candidate.json
+node --import tsx scripts/bench/compare-incremental-update.ts \
+  --base=base.json --candidate=candidate.json --failOnRegression=true
+node --test scripts/bench/compare-incremental-update.test.mjs
+```
+
+Each repetition creates fresh fixtures and queries, times their first preload,
+and measures writes after warmup. Reports retain all cold-load times and
+per-repetition write medians; displayed statistics are medians across repetitions.
+The nested-document case joins all open issues to 20-block documents and selects
+whole documents without a limit. Synced updates and optimistic updates with
+rollback run at all scales and index modes, like the existing flat cases.
+
+CI runs the same benchmark code on the candidate and merge base on one runner.
+It fails for either of these conditions:
+
+- A query's geometric mean across its configurations increases by more than
+  30% for writes, or 50% for cold hydration. Improvements in another query or
+  metric cannot cancel a regression.
+- One configuration's fastest candidate repetition exceeds its slowest base
+  repetition by more than 50%, and by more than 0.05ms for writes or 5ms for
+  hydration. Both sides must have at least three repetitions. This catches
+  persistent localized regressions without failing for one isolated outlier.
+
+The existing red/green per-case flags remain diagnostic: they have lower
+thresholds and do not by themselves fail CI. `--threshold` can raise the gate's
+relative thresholds. Missing cases, duplicate cases, invalid timings, or missing
+CI hydration observations fail instead of silently reducing the comparison.
+Reports and the job summary remain available when the gate fails.
+
+The [nested-row repair measurements](nested-row-repair-2026-11-05.csv) retain
+three repetitions for the pre-regression, regressed and repaired DB source.
+See the [repair evidence](../../docs/contributing/oracle-reviews/2026-11-05-nested-row-performance.md)
+for source controls, validation and limits.
+
+## CI variation measured on 2026-11-05
+
+The [measurement table](ci-variation-2026-11-05.csv) contains query rollups from
+ten paired runs with no changes to `packages/db/src` or `packages/db-ivm/src`.
+GitHub's compare API verified that premise (each response had fewer than its
+300-file limit). Download each `benchmark-reports` artifact with
+`gh run download RUN --repo TanStack/db --name benchmark-reports`; the table
+records the run, both exact reported SHAs, CPU and query. A run's page is
+`https://github.com/TanStack/db/actions/runs/RUN`.
+
+Each original report contains 72 cases, 100 writes and 20 warmups, using Node
+24.8.0. Within-job query geometric means span 0.895–1.100 for writes and
+0.851–1.203 for cold hydration. Individual case ratios are much noisier: cold
+outliers exceed 7x even without a runtime change. These ten pairs produced
+legacy per-case red flags in eight runs, although every query rollup stayed
+below the new gate. This is evidence for pooling and repetition, not a universal
+false-positive bound.
+
+Nine of those runs benchmark the identical base `8feab6ea3` on five CPU models.
+Across their 36 cross-job pairs, absolute-direction overall ratios reach 2.76x
+for writes and 1.88x for hydration. Individual-case ratios reach 5.67x and
+4.87x, respectively. Never gate against absolute timings from a different job.
+
+The new three-repetition workflow still needs observed CI history. The initial
+30%/50% query margins exceed every query shift in this sample; repeated ranges
+supply a stricter consistency check for localized regressions. Revisit these
+margins with additional same-code paired runs, particularly after runner or Node
+changes. This finite historical sample does not prove a future noise ceiling.
+
+## Approved boundary-only implementation
+
+The [initial suite measurements](boundary-only-suite-2026-11-05.csv) and
+[correlated probes](boundary-only-metadata-2026-11-05.csv) measure the approved
+policy implementation against pre-2312 DB sources with current dependencies.
+The full-suite geometric means are 0.88× writes and 0.91× cold; the nested
+query's are 0.913× writes and 1.019× cold. The
+[implementation record](../../docs/contributing/oracle-reviews/2026-11-05-boundary-only-metadata.md)
+explains source controls, descriptor-work evidence and remaining fixed costs.
+These are measurements of the implementation before the prep-review repairs.
+They do not establish zero overhead for every query.
+
+The [final bracketed measurements](boundary-only-prep-bracket-2026-11-05.csv)
+retain a pre-2312 run, the reviewed candidate, and another unchanged pre-2312
+run, in that order. All use the same current harness and dependencies, 100
+writes, 20 warmups and three repetitions across 84 cases. Candidate/base
+geometric means are 1.138× writes and 1.354× cold against the first baseline,
+then 1.038× and 1.051× against the second. The first comparison fails the
+issue-detail cold gate; the second passes. The unchanged baseline itself
+shifts by 1.096× writes and 1.288× cold. The nested query's candidate/base cold
+ratios are 1.396× and 1.157×. This exposes substantial run drift and leaves
+small overhead unresolved; neither comparison is discarded. These diagnostic
+baselines use pre-2312 DB sources, whereas CI compares the PR's merge base.
+See the [prep-review record](../../docs/contributing/oracle-reviews/2026-11-05-boundary-only-prep-review.md)
+for the final source binding, gate outcomes and measurement limits.

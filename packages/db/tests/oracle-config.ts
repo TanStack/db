@@ -398,6 +398,7 @@ const staticOracleProperties = [
   `includes-query-shape.correlation`,
   `includes-query-shape.multiplicity`,
   `includes-query-shape.nullable`,
+  `includes-work.projection-payload`,
   `includes-work.correlated-links`,
   `includes-work.join-free`,
   `includes-work.join-targets`,

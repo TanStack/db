@@ -4,7 +4,11 @@
  * Authority: VirtualRowProps and ARCHITECTURE.md, Nested materialization.
  * Published Collection roots and whole source rows carry four readonly virtual
  * fields. Inline projected objects, nested objects, arrays and opaque values
- * retain their authored shape. Nullable whole-row selections are absent or
+ * retain their authored shape. The maintainer’s 2026-11-05 boundary-only
+ * decision also preserves authored collisions in QueryRef callback inputs and
+ * structured refs. Empty grouping contributes no key; a nonempty grouping or
+ * visible aggregate contributes a missing key, including nested aggregates.
+ * Nullable whole-row selections are absent or
  * complete; facade rows always receive required metadata. WithoutVirtualProps
  * distributes over discriminated row unions.
  *
@@ -55,7 +59,110 @@ const inlineShapes = [
   `date`,
 ] as const
 const inlineForms = [`facade`, `toArray`, `materialize`, `findOne`] as const
+// Authored fields are data before publication. A single-field collision must
+// remain visible even when it does not resemble a complete metadata record.
+const authoredCollisions = [
+  { name: `none`, fields: `` },
+  { name: `key`, fields: `, $key: 'authored-key' as const` },
+  {
+    name: `collection`,
+    fields: `, $collectionId: 'authored-collection' as const`,
+  },
+  { name: `origin`, fields: `, $origin: 'authored-origin' as const` },
+  {
+    name: `pending`,
+    fields: `, $hasPendingWrites: 'authored-pending' as const`,
+  },
+  {
+    name: `all`,
+    fields: `, $key: 'authored-key' as const, $collectionId: 'authored-collection' as const, $origin: 'authored-origin' as const, $hasPendingWrites: 'authored-pending' as const`,
+  },
+] as const
+const authoredPaths = [
+  `query-ref`,
+  `nested-query-ref`,
+  `join`,
+  `union`,
+] as const
+const authoredKinds = [`structured`, `functional`] as const
+const groupedForms = [`keys-first`, `keys-last`, `aggregate`] as const
+// Empty callbacks are legal no-ops. Accumulation distinguishes an empty final
+// call from erasing real grouping that an earlier call established.
+const groupingBoundaries = [
+  {
+    name: `empty-callback-first`,
+    expressions: `.groupBy(() => [])`,
+    before: true,
+    keyed: false,
+  },
+  {
+    name: `empty-callback-last`,
+    expressions: `.groupBy(() => [])`,
+    before: false,
+    keyed: false,
+  },
+  {
+    name: `empty-wrapper-first`,
+    expressions: `.groupBy(groupKeys(() => []))`,
+    before: true,
+    keyed: false,
+  },
+  {
+    name: `empty-wrapper-last`,
+    expressions: `.groupBy(groupKeys(() => []))`,
+    before: false,
+    keyed: false,
+  },
+  {
+    name: `one-then-empty`,
+    expressions: `.groupBy(groupKeys(({ groupSource }) => groupSource.id)).groupBy(() => [])`,
+    before: true,
+    keyed: true,
+  },
+  {
+    name: `empty-then-one`,
+    expressions: `.groupBy(() => []).groupBy(groupKeys(({ groupSource }) => groupSource.id))`,
+    before: true,
+    keyed: true,
+  },
+  {
+    name: `callback-one`,
+    expressions: `.groupBy(groupKeys(() => [])).groupBy(({ groupSource }) => [groupSource.id])`,
+    before: true,
+    keyed: true,
+  },
+  {
+    name: `explicit-context-key`,
+    expressions: `.groupBy(groupKeys<ContextFromSource<{ groupSource: typeof rows }>>(({ groupSource }) => groupSource.id))`,
+    before: true,
+    keyed: true,
+  },
+] as const
+// Seven through nine are neighboring depths around the former cutoff. Sixteen
+// distinguishes supporting that one boundary from merely moving it one level.
+const aggregateDepths = [0, 7, 8, 9, 10, 16] as const
+const authoredStates = authoredCollisions.flatMap(({ name }) =>
+  authoredPaths.flatMap((path) =>
+    authoredKinds.map((kind) => `authored/${name}/${path}/${kind}`),
+  ),
+)
 const states = [
+  ...authoredStates,
+  ...authoredStates.map((state) => `structured-refs/${state}`),
+  ...authoredCollisions.flatMap(({ name }) =>
+    authoredKinds.map((kind) => `selected-context/${name}/${kind}`),
+  ),
+  ...groupedForms.flatMap((form) =>
+    authoredCollisions.map(({ name }) => `grouped/${form}/${name}`),
+  ),
+  ...groupingBoundaries.flatMap(({ name }) =>
+    authoredCollisions.map(
+      (collision) => `grouping-boundary/${name}/${collision.name}`,
+    ),
+  ),
+  ...aggregateDepths.flatMap((depth) =>
+    [`none`, `key`].map((collision) => `aggregate-depth/${depth}/${collision}`),
+  ),
   ...projections.flatMap((shape) =>
     compositions.map((composition) => `root/${shape}/${composition}`),
   ),
@@ -110,6 +217,13 @@ function composeQuery(query: string, peer: string, composition: string) {
   return query
 }
 
+function nestedRecord(depth: number, value: string): string {
+  let result = `{ total: ${value} }`
+  for (let index = depth - 1; index >= 0; index--)
+    result = `{ n${index}: ${result} }`
+  return result
+}
+
 /**
  * The independent type law is textual because TypeScript checks generated
  * consumers. Normalize distributes only the outer record; nested values retain
@@ -127,7 +241,7 @@ function consumerSource(
   const observed: Array<string> = []
   const addWitness = (state: string, source: string) => {
     if (!only || only.has(state)) {
-      witnesses.push(source)
+      witnesses.push(`// Oracle state: ${state}\n${source}`)
       observed.push(state)
     }
   }
@@ -212,14 +326,231 @@ function consumerSource(
       )
     }
   }
+  // Each legal syntax uses the same independent declared-shape judgment.
+  // Check callback inputs and inline values before checking publication's
+  // replacement of reserved names. Compiler acceptance is observed separately.
+  for (const collision of authoredCollisions) {
+    for (const path of authoredPaths) {
+      for (const kind of authoredKinds) {
+        const state = `authored/${collision.name}/${path}/${kind}`
+        const expected = `{ id: ${shape.key}; payload: Profile${shape.optional ? ` | undefined` : ``}${collision.fields.replaceAll(` as const`, ``).replaceAll(`, $`, `; $`)} }`
+        const base = `new Query().from({ authoredSource: rows }).${kind === `functional` ? `fn.select` : `select`}(({ authoredSource }) => ({ id: authoredSource.id, payload: authoredSource.profile${collision.fields} }))`
+        const query =
+          path === `query-ref`
+            ? `new Query().from({ value: ${base} })`
+            : path === `nested-query-ref`
+              ? `new Query().from({ value: new Query().from({ intermediate: ${base} }).select(({ intermediate }) => intermediate) })`
+              : path === `join`
+                ? `new Query().from({ anchor: rows }).innerJoin({ value: ${base} }, ({ anchor, value }) => eq(anchor.id, value.id))`
+                : `new Query().unionAll(${base})`
+        const callback = path === `union` ? `input` : `input.value`
+        const havingExpected =
+          path === `union`
+            ? `${expected} & { $selected: ${expected} }`
+            : expected
+        addWitness(
+          state,
+          `{
+          const query = ${query};
+          const checked = query.fn.where(input => {
+            type Observed = Assert<SameShape<Normalize<typeof ${callback}>, Normalize<${expected}>>>;
+            return true;
+          }).fn.having(input => {
+            type Observed = Assert<SameShape<Normalize<typeof ${callback}>, Normalize<${havingExpected}>>>;
+            return true;
+          }).fn.select(input => {
+            type Observed = Assert<SameShape<Normalize<typeof ${callback}>, Normalize<${expected}>>>;
+            return ${callback};
+          });
+          const published = createLiveQueryCollection({ query: checked });
+          type PublishedObservation = Assert<SameShape<Normalize<typeof published.toArray[number]>, Normalize<Published<${expected}>>>>;
+          const inline = createLiveQueryCollection({ query: new Query().from({ parent: rows }).select(({ parent }) => ({ id: parent.id, children: toArray(new Query().from({ typedChild: checked }).where(({ typedChild }) => eq(typedChild.id, parent.id))) })) });
+          type InlineObservation = Assert<SameShape<Normalize<typeof inline.toArray[number]['children'][number]>, Normalize<${expected}>>>;
+        }`,
+        )
+        // A whole Ref can unwrap its original value while individual fields
+        // still have wrong types. Read each authored reserved field into an
+        // ordinary output and separately check that absent names stay absent.
+        const names = [...collision.fields.matchAll(/(\$\w+):/g)].map(
+          (match) => match[1]!,
+        )
+        const expectedNames = names.length
+          ? names.map((name) => `'${name}'`).join(` | `)
+          : `never`
+        const selectedFields = names
+          .map((name) => `read_${name.slice(1)}: ${callback}.${name}`)
+          .join(`, `)
+        const expectedFields = collision.fields
+          .replaceAll(` as const`, ``)
+          .replaceAll(`, $`, `; read_`)
+        const reservedCheck = `type ReservedNames = Assert<Equal<Extract<keyof typeof ${callback}, '$key' | '$collectionId' | '$origin' | '$hasPendingWrites'>, ${expectedNames}>>;`
+        const selectBody = `${reservedCheck}
+            return { id: ${callback}.id, payload: ${callback}.payload${selectedFields ? `, ${selectedFields}` : ``} };`
+        const groupFields = [
+          `${callback}.id`,
+          `${callback}.payload`,
+          ...names.map((name) => `${callback}.${name}`),
+        ].join(`, `)
+        addWitness(
+          `structured-refs/${state}`,
+          `{
+          const query = ${query};
+          const filtered = query.where(input => {
+            ${reservedCheck}
+            return eq(1, 1);
+          });
+          const checked = filtered.select(input => { ${selectBody} });
+          const havingChecked = filtered.groupBy(groupKeys(input => [${groupFields}])).having(input => {
+            ${reservedCheck}
+            return eq(1, 1);
+          }).select(input => { ${selectBody} });
+          const published = createLiveQueryCollection({ query: checked });
+          const publishedHaving = createLiveQueryCollection({ query: havingChecked });
+          type Observed = Assert<SameShape<Normalize<typeof published.toArray[number]>, Normalize<Published<{ id: ${shape.key}; payload: Profile${shape.optional ? ` | undefined` : ``}${expectedFields} }>>>>;
+          type HavingObserved = Assert<SameShape<Normalize<typeof publishedHaving.toArray[number]>, Normalize<Published<{ id: ${shape.key}; payload: Profile${shape.optional ? ` | undefined` : ``}${expectedFields} }>>>>;
+        }`,
+        )
+      }
+    }
+  }
+  // $selected is the other structured ref root for an authored value. Its
+  // public Ref field carrier must retain each declared literal and no new names.
+  for (const collision of authoredCollisions) {
+    for (const kind of authoredKinds) {
+      const names = [...collision.fields.matchAll(/(\$\w+):\s*('.*?')/g)]
+      const expectedNames = names.length
+        ? names.map((match) => `'${match[1]}'`).join(` | `)
+        : `never`
+      const checks = names
+        .map(
+          (match) =>
+            `type Read_${match[1]!.slice(1)} = Assert<SameShape<typeof $selected.${match[1]}, PublicRef<{ value: ${match[2]} }>['value']>>;`,
+        )
+        .join(`\n`)
+      const fields = names
+        .map((match) => `${match[1]}: prepared.${match[1]}`)
+        .join(`, `)
+      const groupFields = [
+        `prepared.id`,
+        `prepared.payload`,
+        ...names.map((match) => `prepared.${match[1]}`),
+      ].join(`, `)
+      addWitness(
+        `selected-context/${collision.name}/${kind}`,
+        `{
+        const authored = new Query().from({ authoredSource: rows }).${kind === `functional` ? `fn.select` : `select`}(({ authoredSource }) => ({ id: authoredSource.id, payload: authoredSource.profile${collision.fields} }));
+        const query = new Query().from({ prepared: authored })
+          .groupBy(groupKeys(({ prepared }) => [${groupFields}]))
+          .select(({ prepared }) => ({ id: prepared.id, payload: prepared.payload${fields ? `, ${fields}` : ``} }))
+          .having(({ $selected }) => {
+            type ReservedNames = Assert<Equal<Extract<keyof typeof $selected, '$key' | '$collectionId' | '$origin' | '$hasPendingWrites'>, ${expectedNames}>>;
+            ${checks}
+            return eq(1, 1);
+          });
+        const published = createLiveQueryCollection({ query });
+        type Observed = Assert<SameShape<Normalize<typeof published.toArray[number]>, Normalize<Published<{ id: ${shape.key}; payload: Profile${shape.optional ? ` | undefined` : ``}${collision.fields.replaceAll(` as const`, ``).replaceAll(`, $`, `; $`)} }>>>>;
+      }`,
+      )
+    }
+  }
+  // Grouping generates a missing key independently of Collection enrichment.
+  // An explicitly authored key still wins before publication. These neighbors
+  // prevent the intermediate-value fix from removing aggregate QueryRef keys.
+  for (const form of groupedForms) {
+    for (const collision of authoredCollisions) {
+      const fields = collision.fields
+      const selected =
+        form === `aggregate`
+          ? `total: count(groupSource.id)`
+          : `id: groupSource.id`
+      const value = form === `aggregate` ? `total: number` : `id: ${shape.key}`
+      const expected = `{ ${value}${fields.replaceAll(` as const`, ``).replaceAll(`, $`, `; $`)} }${collision.name === `key` || collision.name === `all` ? `` : ` & { readonly $key: string | number }`}`
+      const base = `new Query().from({ groupSource: rows })`
+      const query =
+        form === `keys-first`
+          ? `${base}.groupBy(groupKeys(({ groupSource }) => groupSource.id)).select(({ groupSource }) => ({ ${selected}${fields} }))`
+          : `${base}.select(({ groupSource }) => ({ ${selected}${fields} }))${form === `keys-last` ? `.groupBy(groupKeys(({ groupSource }) => groupSource.id))` : ``}`
+      addWitness(
+        `grouped/${form}/${collision.name}`,
+        `{
+        const query = new Query().from({ grouped: ${query} }).fn.select(({ grouped }) => {
+          type Observed = Assert<SameShape<Normalize<typeof grouped>, Normalize<${expected}>>>;
+          return grouped;
+        });
+        const published = createLiveQueryCollection({ query });
+        type Observed = Assert<SameShape<Normalize<typeof published.toArray[number]>, Normalize<Published<${expected}>>>>;
+      }`,
+      )
+    }
+  }
+  // The model uses declared key-list emptiness, not the query's inferred
+  // grouping marker. Every receiver applies the same declared-shape law.
+  for (const grouping of groupingBoundaries) {
+    for (const collision of authoredCollisions) {
+      const base = `new Query().from({ groupSource: rows })`
+      const selection = `.select(({ groupSource }) => ({ id: groupSource.id${collision.fields} }))`
+      const query = grouping.before
+        ? `${base}${grouping.expressions}${selection}`
+        : `${base}${selection}${grouping.expressions}`
+      const declared = `{ id: ${shape.key}${collision.fields.replaceAll(` as const`, ``).replaceAll(`, $`, `; $`)} }`
+      const expected = `${declared}${grouping.keyed && collision.name !== `key` && collision.name !== `all` ? ` & { readonly $key: string | number }` : ``}`
+      addWitness(
+        `grouping-boundary/${grouping.name}/${collision.name}`,
+        `{
+        const inner = ${query};
+        const checked = new Query().from({ grouped: inner }).fn.select(({ grouped }) => {
+          type Observed = Assert<SameShape<Normalize<typeof grouped>, Normalize<${expected}>>>;
+          return grouped;
+        });
+        const published = createLiveQueryCollection({ query: checked });
+        type PublishedObservation = Assert<SameShape<Normalize<typeof published.toArray[number]>, Normalize<Published<${expected}>>>>;
+        const inline = createLiveQueryCollection({ query: new Query().from({ parent: rows }).select(({ parent }) => ({ id: parent.id, children: toArray(new Query().from({ typedChild: inner }).where(({ typedChild }) => eq(typedChild.id, parent.id))) })) });
+        type InlineObservation = Assert<SameShape<Normalize<typeof inline.toArray[number]['children'][number]>, Normalize<${expected}>>>;
+      }`,
+      )
+    }
+  }
+  // A count directly present under ordinary records is still an aggregate of
+  // this selection. Query helpers and wrapped expressions remain other laws.
+  for (const depth of aggregateDepths) {
+    for (const collision of authoredCollisions.filter(
+      ({ name }) => name === `none` || name === `key`,
+    )) {
+      const selection = nestedRecord(depth, `count(aggregateSource.id)`)
+      const declared = nestedRecord(depth, `number`)
+      const totalPath = [
+        ...Array.from({ length: depth }, (_, index) => `n${index}`),
+        `total`,
+      ].join(`.`)
+      const expected =
+        collision.name === `key`
+          ? `${declared} & { $key: 'authored-key' }`
+          : `${declared} & { readonly $key: string | number }`
+      addWitness(
+        `aggregate-depth/${depth}/${collision.name}`,
+        `{
+        const inner = new Query().from({ aggregateSource: rows }).select(({ aggregateSource }) => ({ ...${selection}${collision.fields} }));
+        const checked = new Query().from({ grouped: inner }).fn.select(({ grouped }) => {
+          type Observed = Assert<SameShape<Normalize<typeof grouped>, Normalize<${expected}>>>;
+          return grouped;
+        });
+        const published = createLiveQueryCollection({ query: checked });
+        type PublishedObservation = Assert<SameShape<Normalize<typeof published.toArray[number]>, Normalize<Published<${expected}>>>>;
+        const numericParents = new Query().from({ numericParent: rows }).select(() => ({ id: 1 }));
+        const inline = createLiveQueryCollection({ query: new Query().from({ parent: numericParents }).select(({ parent }) => ({ id: parent.id, children: toArray(new Query().from({ typedChild: inner }).where(({ typedChild }) => eq(typedChild.${totalPath}, parent.id))) })) });
+        type InlineObservation = Assert<SameShape<Normalize<typeof inline.toArray[number]['children'][number]>, Normalize<${expected}>>>;
+      }`,
+      )
+    }
+  }
   return {
     source: `
-    import { BTreeIndex, Query, createCollection, createLiveQueryCollection, eq, include, materialize, toArray } from '@tanstack/db';
-    import type { WithoutVirtualProps } from '@tanstack/db';
+    import { BTreeIndex, Query, count, createCollection, createLiveQueryCollection, eq, groupKeys, include, materialize, toArray } from '@tanstack/db';
+    import type { ContextFromSource, Ref as PublicRef, WithoutVirtualProps } from '@tanstack/db';
     type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
     type Assert<T extends true> = T;
     type Normalize<T> = T extends unknown ? { [K in keyof T]: T[K] } : never;
-    type Published<T> = T extends unknown ? T & { readonly $key: string | number; readonly $collectionId: string; readonly $origin: 'local' | 'remote'; readonly $hasPendingWrites: boolean } : never;
+    type Published<T> = T extends unknown ? Omit<T, '$key' | '$collectionId' | '$origin' | '$hasPendingWrites'> & { readonly $key: string | number; readonly $collectionId: string; readonly $origin: 'local' | 'remote'; readonly $hasPendingWrites: boolean } : never;
     type Missing<T> = T extends unknown ? { [K in keyof T]?: undefined } : never;
     type IsAny<T> = 0 extends (1 & T) ? true : false;
     type HasAny<T> = IsAny<T> extends true ? true : T extends Date ? true extends { [K in Exclude<keyof T, keyof Date>]-?: HasAny<T[K]> }[Exclude<keyof T, keyof Date>] ? true : false : T extends ReadonlyArray<infer V> ? HasAny<V> : T extends object ? true extends { [K in keyof T]-?: HasAny<T[K]> }[keyof T] ? true : false : false;
@@ -326,7 +657,7 @@ async function checkConsumerConstruction(source: string): Promise<void> {
     cleanups.unshift(() => collection.cleanup({ dependents: true }))
     return collection
   }
-  await checkWithCleanup(async () => {
+  await checkWithCleanup(() => {
     const parsedConsumer = ts.createSourceFile(
       filename,
       source,
@@ -365,7 +696,7 @@ async function checkConsumerConstruction(source: string): Promise<void> {
     const construct = new Function(
       `api`,
       `exports`,
-      `const { BTreeIndex, Query, createCollection, createLiveQueryCollection, eq, include, materialize, toArray } = api;\n${outputText}`,
+      `const { BTreeIndex, Query, count, createCollection, createLiveQueryCollection, eq, groupKeys, include, materialize, toArray } = api;\n${outputText}`,
     )
     construct(api, {})
   }, cleanups)
@@ -380,7 +711,15 @@ function checkConsumer(diagnostics: ReadonlyArray<ts.Diagnostic>): void {
   ).toBe(``)
 }
 declareOracle({
-  grammar: [typeShapes],
+  grammar: [
+    typeShapes,
+    authoredCollisions,
+    authoredPaths,
+    authoredKinds,
+    groupedForms,
+    groupingBoundaries,
+    aggregateDepths,
+  ],
   model: [consumerSource],
   check: [checkConsumer, checkConsumerConstruction],
 })

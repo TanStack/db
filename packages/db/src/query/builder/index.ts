@@ -587,12 +587,16 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     callback: (
       refs: RefsForContext<TContext>,
     ) => NonScalarSelectObject<TSelectObject>,
-  ): QueryBuilder<WithResult<TContext, ResultTypeFromSelect<TSelectObject>>>
+  ): QueryBuilder<
+    WithResult<TContext, ResultTypeFromSelect<TSelectObject>, TSelectObject>
+  >
   select<TSelectValue extends ScalarSelectValue>(
     callback: (
       refs: RefsForContext<TContext>,
     ) => WithoutBareSubquery<TSelectValue>,
-  ): QueryBuilder<WithResult<TContext, ResultTypeFromSelectValue<TSelectValue>>>
+  ): QueryBuilder<
+    WithResult<TContext, ResultTypeFromSelectValue<TSelectValue>, TSelectValue>
+  >
   select(
     callback: (
       refs: RefsForContext<TContext>,
@@ -743,8 +747,16 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    */
   groupBy(
+    keys:
+      | GroupByCallback<TContext, ReadonlyArray<never>>
+      | GroupKeys<TContext, ReadonlyArray<never>>,
+  ): QueryBuilder<TContext>
+  groupBy(
     keys: GroupByCallback<TContext> | GroupKeys<TContext>,
-  ): QueryBuilder<TContext> {
+  ): QueryBuilder<TContext & { hasGrouping: true }>
+  groupBy(
+    keys: GroupByCallback<TContext> | GroupKeys<TContext>,
+  ): QueryBuilder<TContext> | QueryBuilder<TContext & { hasGrouping: true }> {
     const callback = typeof keys === `function` ? keys : keys.callback
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(

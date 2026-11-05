@@ -590,7 +590,7 @@ export function processGroupBy(
         filter(([, row]) => {
           const namespacedRow = getGroupEvaluationRow(row, fields)
           const callbackRow = sanitizeCallbackRows
-            ? stripInternalCallbackMetadata(namespacedRow)
+            ? stripInternalCallbackMetadata(namespacedRow, false)
             : namespacedRow
           return toBooleanPredicate(fnHaving(callbackRow))
         }),

@@ -34,7 +34,10 @@ import {
 import type { LiveQueryInternalUtils } from './internal.js'
 import type { IncludesRuntime } from './includes-runtime.js'
 import type { BucketFacadeAdapter } from './bucket-facade-adapter.js'
-import type { materializeCompilation } from './materialized-pipeline.js'
+import type {
+  ValueResolver,
+  materializeCompilation,
+} from './materialized-pipeline.js'
 import type { WindowOptions } from '../compiler/index.js'
 import type { SchedulerContextId } from '../../scheduler.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
@@ -218,6 +221,7 @@ export class CollectionConfigBuilder<
   private pipelineCache: ResultStream | undefined
   public sourceWhereClausesCache:
     Map<string, BasicExpression<boolean>> | undefined
+  private valueResolverCache: ValueResolver | undefined
   private includesRuntimeCache: IncludesRuntime | undefined
   private bucketFacadesCache:
     ReturnType<typeof materializeCompilation>[`facades`] | undefined
@@ -1068,6 +1072,7 @@ export class CollectionConfigBuilder<
     this.inputsCache = undefined
     this.pipelineCache = undefined
     this.sourceWhereClausesCache = undefined
+    this.valueResolverCache = undefined
     this.bucketFacadesCache = undefined
     this.includesRuntimeCache = undefined
 
@@ -1131,6 +1136,8 @@ export class CollectionConfigBuilder<
         : { pipeline: compilation.pipeline, facades: undefined }
     this.pipelineCache = materialized.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
+    this.valueResolverCache =
+      `resolve` in materialized ? materialized.resolve : undefined
     this.bucketFacadesCache = materialized.facades
     this.includesRuntimeCache = includesRuntime
 
@@ -1191,6 +1198,7 @@ export class CollectionConfigBuilder<
             (count) => {
               syncState.messagesCount += count
             },
+            this.valueResolverCache,
           )
         : undefined
     if (bucketFacades) {

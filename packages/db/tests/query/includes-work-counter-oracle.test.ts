@@ -1,18 +1,30 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { beforeAll, describe, expect, it } from 'vitest'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRuns,
+} from '../oracle-config.js'
+import { createOracleReach } from '../oracle-reach.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {
+  Query,
   createLiveQueryCollection,
   eq,
+  groupKeys,
   inArray,
   include,
   materialize,
   toArray,
 } from '../../src/query/index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
+import { createControlledCollection } from './includes-oracle-helpers.js'
+import {
+  cleanupAfterOracle,
+  noPrimaryFailure,
+} from './includes-functional-projection-support.js'
 import {
   countSourceWork,
   createSourceCollection,
@@ -24,6 +36,7 @@ import {
 } from './includes-work-counter-support.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
+import type { Context, QueryBuilder } from '../../src/query/index.js'
 import type {
   SourceWork,
   WorkObservation,
@@ -1400,3 +1413,333 @@ describe(`includes work under an ordered parent window`, () => {
     )
   }
 })
+
+/**
+ * # Can an ordinary projection carry a large source payload without scanning it?
+ *
+ * Maintainer request (2026-11-05, issue 2355): restore nested-row performance
+ * and the boundary-only metadata decision: ordinary source payload containers
+ * stay opaque to compiler metadata discovery, including correlated queries.
+ * Result finalization and callback sanitation therefore owe zero descriptor
+ * scans of those containers. This is a work budget, not a latency guarantee.
+ * The neighboring route-context and virtual-row-input owners retain the laws
+ * for private routes, authored values and published metadata attribution.
+ *
+ * The grammar crosses source, join, QueryRef and union boundaries with explicit,
+ * implicit and functional selections, and zero through forty document blocks.
+ * Every history checks initial hydration and two full synced replacements. A
+ * model reconstructs the expected document from block count and tick, without
+ * retaining the document passed to production. A shared checker compares that
+ * value and the separate promise that the source document keeps its identity.
+ * Descriptor observations count only source payloads, excluding authored output
+ * wrappers. They do not measure hashing, user callbacks or adapter work.
+ */
+const payloadBoundaries = [
+  `source`,
+  `join`,
+  `query-ref`,
+  `union`,
+  `implicit`,
+  `functional`,
+  `predicate`,
+  `query-ref-where`,
+  `query-ref-having`,
+  `correlated-inline`,
+  `correlated-callback`,
+  `correlated-implicit`,
+  `correlated-collection`,
+  `correlated-group`,
+] as const
+
+declareOracle({
+  check: [expectPayloadWork, expectPayloadValue],
+  model: [expectedPayloadDocument],
+  grammar: [payloadBoundaries],
+})
+
+// The source payload must still contain its authored fields at publication.
+// Reconstructing them from the history inputs prevents an in-place production
+// mutation from changing the expected value along with the observation.
+function expectedPayloadDocument(blockCount: number, tick: number) {
+  return {
+    blocks: Array.from({ length: blockCount }, (_, id) => ({
+      id,
+      text: `block ${id} at ${tick}`,
+      attrs: { indent: id % 3, tick },
+    })),
+    tick,
+  }
+}
+
+function expectPayloadValue(
+  observed: ReadonlyArray<{ id: number; document: unknown }>,
+  sourceDocument: unknown,
+  blockCount: number,
+  tick: number,
+): void {
+  expect(observed.map(({ id, document }) => ({ id, document }))).toEqual([
+    { id: 1, document: expectedPayloadDocument(blockCount, tick) },
+  ])
+  expect(observed[0]!.document).toBe(sourceDocument)
+}
+
+async function expectPayloadWork(blockCount: number): Promise<void> {
+  const reach = createOracleReach(`projection-payload`, payloadBoundaries)
+  const failures: Array<unknown> = []
+  for (const boundary of payloadBoundaries) {
+    reach.beginHistory()
+    const payloads = new WeakSet<object>()
+    const makeDocument = (tick: number) => {
+      const blocks = Array.from({ length: blockCount }, (_, id) => {
+        const attrs = { indent: id % 3, tick }
+        const block = { id, text: `block ${id} at ${tick}`, attrs }
+        payloads.add(attrs)
+        payloads.add(block)
+        return block
+      })
+      const document = { blocks, tick }
+      payloads.add(blocks)
+      payloads.add(document)
+      return document
+    }
+    let document = makeDocument(0)
+    const source = createControlledCollection(`payload-source`, [
+      { id: 1, document },
+    ])
+    const joined = createControlledCollection(`payload-peer`, [{ id: 1 }])
+    const live = createLiveQueryCollection((q) => {
+      const rows = q.from({ row: source.collection })
+      const childValue = <TContext extends Context>(
+        query: QueryBuilder<TContext>,
+      ) =>
+        boundary === `correlated-collection` ? include(query) : toArray(query)
+      switch (boundary) {
+        case `source`:
+          return rows.select(({ row }) => ({
+            id: row.id,
+            document: row.document,
+          }))
+        case `join`:
+          return rows
+            .join({ peer: joined.collection }, ({ row, peer }) =>
+              eq(row.id, peer.id),
+            )
+            .select(({ row }) => ({ id: row.id, document: row.document }))
+        case `query-ref`:
+          return q
+            .from({
+              projected: rows.select(({ row }) => ({
+                id: row.id,
+                document: row.document,
+              })),
+            })
+            .select(({ projected }) => ({
+              id: projected.id,
+              document: projected.document,
+            }))
+        case `union`:
+          return q.unionAll(
+            rows.select(({ row }) => ({ id: row.id, document: row.document })),
+            q
+              .from({ other: source.collection })
+              .where(({ other }) => eq(other.id, 0))
+              .select(({ other }) => ({
+                id: other.id,
+                document: other.document,
+              })),
+          )
+        case `implicit`:
+          return rows
+        case `functional`:
+          return rows.fn.select(({ row }) => ({
+            id: row.id,
+            document: row.document,
+          }))
+        case `query-ref-where`:
+        case `query-ref-having`: {
+          const projected = rows.select(({ row }) => ({
+            id: row.id,
+            document: row.document,
+            $collectionId: `application`,
+          }))
+          const outer = q.from({ item: projected })
+          const filtered =
+            boundary === `query-ref-where`
+              ? outer.fn.where(({ item }) => item.id === 1)
+              : outer.fn.having(({ item }) => item.id === 1)
+          return filtered.select(({ item }) => ({
+            id: item.id,
+            document: item.document,
+          }))
+        }
+        case `correlated-inline`:
+        case `correlated-callback`:
+        case `correlated-implicit`:
+        case `correlated-collection`:
+        case `correlated-group`:
+          return q.from({ parent: joined.collection }).select(({ parent }) => {
+            const children = new Query()
+              .from({ child: source.collection })
+              .where(({ child }) => eq(child.id, parent.id))
+            const selected =
+              boundary === `correlated-group`
+                ? childValue(
+                    children
+                      .groupBy(
+                        groupKeys(({ child }) => [child.id, child.document]),
+                      )
+                      .fn.having(() => true)
+                      .select(({ child }) => ({
+                        id: child.id,
+                        document: child.document,
+                      })),
+                  )
+                : boundary === `correlated-implicit`
+                  ? childValue(children)
+                  : boundary === `correlated-callback`
+                    ? childValue(
+                        new Query()
+                          .from({
+                            item: new Query()
+                              .from({ raw: source.collection })
+                              .select(({ raw }) => ({
+                                id: raw.id,
+                                document: raw.document,
+                                $collectionId: `application`,
+                              })),
+                          })
+                          .where(({ item }) => eq(item.id, parent.id))
+                          .fn.select(({ item }) => ({
+                            id: item.id,
+                            document: item.document,
+                          })),
+                      )
+                    : childValue(
+                        children.select(({ child }) => ({
+                          id: child.id,
+                          document: child.document,
+                        })),
+                      )
+            return {
+              id: parent.id,
+              kids: selected,
+            }
+          })
+        case `predicate`:
+          return rows.fn
+            .where(({ row }) => row.id === 1)
+            .fn.having(({ row }) => row.id === 1)
+            .select(({ row }) => ({ id: row.id, document: row.document }))
+      }
+    })
+    let scans = 0
+    const getDescriptor = Object.getOwnPropertyDescriptor
+    const singularSpy = vi
+      .spyOn(Object, `getOwnPropertyDescriptor`)
+      .mockImplementation((value, key) => {
+        if (typeof value === `object` && value !== null && payloads.has(value))
+          scans++
+        return getDescriptor(value, key)
+      })
+    const getDescriptors = Object.getOwnPropertyDescriptors
+    const spy = vi
+      .spyOn(Object, `getOwnPropertyDescriptors`)
+      .mockImplementation((value) => {
+        if (typeof value === `object` && value !== null && payloads.has(value))
+          scans++
+        return getDescriptors(value)
+      })
+    let primaryFailure: unknown = noPrimaryFailure
+    try {
+      await live.preload()
+      for (const tick of [0, 1, 2]) {
+        if (tick > 0) {
+          document = makeDocument(tick)
+          source.write(`update`, { id: 1, document })
+        }
+        // The document has no compiler-owned state. Whole-value equality and
+        // reference identity remain meaningful at the public Collection cut.
+        const observed = (
+          boundary.startsWith(`correlated`)
+            ? live.toArray.flatMap((row) => {
+                const kids = (
+                  row as unknown as {
+                    kids:
+                      | Array<{ id: number; document: unknown }>
+                      | { toArray: Array<{ id: number; document: unknown }> }
+                  }
+                ).kids
+                return Array.isArray(kids) ? kids : kids.toArray
+              })
+            : live.toArray
+        ) as ReadonlyArray<{ id: number; document: unknown }>
+        if (tick === 0 && observed.length === 1) reach.reach(boundary)
+        expectPayloadValue(observed, document, blockCount, tick)
+        expect(
+          scans,
+          `${boundary}: source payload descriptor scans at tick ${tick}`,
+        ).toBe(0)
+      }
+    } catch (error) {
+      primaryFailure = error
+      failures.push(error)
+    } finally {
+      spy.mockRestore()
+      singularSpy.mockRestore()
+      await cleanupAfterOracle(primaryFailure, [
+        () => live.cleanup(),
+        () => source.collection.cleanup(),
+        () => joined.collection.cleanup(),
+      ])
+    }
+  }
+  reach.assertReached()
+  if (failures.length)
+    throw new AggregateError(
+      failures,
+      `payload work: ${failures.map(String).join(`; `)}`,
+    )
+}
+
+const payloadProperty = `includes-work.projection-payload`
+const payloadExamples: Array<[number]> = [[0], [1], [20], [40]]
+
+// This wrong observation preserves source identity while corrupting content.
+// The same comparison used at every public checkpoint must reject it, including
+// an empty payload whose only changed field is its root tick.
+it.each(payloadExamples)(
+  `rejects a source payload mutated in place (%i blocks)`,
+  (blockCount) => {
+    const document = expectedPayloadDocument(blockCount, 0)
+    document.tick = -1
+    expect(() =>
+      expectPayloadValue([{ id: 1, document }], document, blockCount, 0),
+    ).toThrow(/to deeply equal/)
+  },
+)
+
+for (const campaign of [
+  {
+    name: `fixed`,
+    options: {
+      numRuns: oracleRuns(8) + payloadExamples.length,
+      seed: 2355,
+      examples: payloadExamples,
+    },
+  },
+  {
+    name: `random or replayed`,
+    options: oraclePropertyOptions(8, payloadProperty, {
+      examples: payloadExamples,
+    }),
+  },
+]) {
+  const register =
+    campaign.name === `fixed`
+      ? oracleReplayTest(fcTest)
+      : oracleReplayTest(fcTest, payloadProperty)
+  register.prop([fc.integer({ min: 0, max: 40 })], campaign.options)(
+    `nested source payloads need no metadata descriptor scans (${campaign.name})`,
+    expectPayloadWork,
+  )
+}

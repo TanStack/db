@@ -1,18 +1,25 @@
+import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
 import { isPlainObject } from '../../utils/type-guards.js'
 import { getParentContextValue } from '../equality-value-identity.js'
 import type { NamespacedRow } from '../../types.js'
 
 const ROUTED_SCALAR_VALUE = Symbol(`tanstack_db_routed_scalar_value`)
-export const CALLBACK_INPUT = Symbol(`tanstack_db_callback_input`)
-export const CALLBACK_SELECTED = Symbol(`tanstack_db_callback_selected`)
 const ROUTE_METADATA = Symbol(`tanstack_db_route_metadata`)
 export const INCLUDES_PUBLIC_KEY = Symbol(`includesPublicKey`)
+export const SOURCE_METADATA = Symbol(`sourceMetadata`)
+const SOURCE_ROUTING = Symbol(`sourceRouting`)
+export const ROW_METADATA = Symbol(`rowMetadata`)
+export type RowMetadata = Partial<
+  Record<(typeof VIRTUAL_PROP_NAMES)[number], unknown>
+>
+
 export const INCLUDES_ROUTING = Symbol(`includesRouting`)
 const INTERNAL_ROUTE_KEYS = new Set<PropertyKey>([
   ROUTE_METADATA,
   INCLUDES_PUBLIC_KEY,
-  CALLBACK_INPUT,
-  CALLBACK_SELECTED,
+  SOURCE_METADATA,
+  ROW_METADATA,
+  SOURCE_ROUTING,
 ])
 const INTERNAL_CALLBACK_KEYS = new Set<PropertyKey>([
   ...INTERNAL_ROUTE_KEYS,
@@ -133,53 +140,97 @@ export function getRoutedScalarMetadata(
 export function wrapInputRow(
   alias: string,
   row: unknown,
-  callbackValue?: unknown,
+  metadata?: RowMetadata | null,
 ): NamespacedRow {
   const scalar = getRoutedScalarMetadata(row)
   const route = scalar ?? getRouteMetadata(row)
   const namespaced = {
     ...getParentContextValue(route?.parentContext),
-    [alias]: scalar
-      ? scalar.value
-      : route
-        ? stripRouteMetadata(row as Record<PropertyKey, unknown>)
-        : row,
+    [alias]: scalar ? scalar.value : stripInternalCallbackMetadata(row, false),
   } as NamespacedRow
   if (route)
     attachRouteMetadata(namespaced, route.correlationKey, route.parentContext)
-  if (scalar)
-    Object.assign(namespaced, { [INCLUDES_PUBLIC_KEY]: scalar.publicKey })
-  if (callbackValue !== undefined && callbackValue !== row)
-    Object.assign(namespaced, { [CALLBACK_INPUT]: { [alias]: callbackValue } })
+  if (route)
+    Object.assign(namespaced, {
+      [INCLUDES_PUBLIC_KEY]:
+        scalar?.publicKey ??
+        (row as Record<PropertyKey, unknown>)[INCLUDES_PUBLIC_KEY],
+    })
+  if (metadata !== undefined)
+    Object.assign(namespaced, { [SOURCE_METADATA]: { [alias]: metadata } })
+  if (row !== null && typeof row === `object` && INCLUDES_ROUTING in row)
+    Object.assign(namespaced, {
+      [SOURCE_ROUTING]: {
+        [alias]: (row as Record<PropertyKey, unknown>)[INCLUDES_ROUTING],
+      },
+    })
   return namespaced
 }
 
-/** A namespace keeps authored values beside its callback source overrides.
- * A one-element tuple denotes a flat union view: absent fields must disappear,
- * whereas named overrides replace only their own source aliases.
- */
-export function getCallbackInput<T extends object>(row: T): T {
-  const view = (row as Record<PropertyKey, unknown>)[CALLBACK_INPUT]
-  if (Array.isArray(view)) {
-    const result = { ...view[0] }
-    if (`$selected` in row) result.$selected = row.$selected
-    return result as T
+/** Attribution and include routing belong to the namespace, never source data. */
+export function getSourceMetadata(
+  row: Record<PropertyKey, unknown>,
+  alias: string,
+): RowMetadata | null {
+  const metadata = row[SOURCE_METADATA] as
+    Record<string, RowMetadata | null> | undefined
+  if (metadata && Object.hasOwn(metadata, alias)) return metadata[alias]!
+  const source = row[alias]
+  if (source == null || typeof source !== `object`) return null
+  const result: RowMetadata = {}
+  for (const name of VIRTUAL_PROP_NAMES)
+    if (name in source) result[name] = (source as Record<string, unknown>)[name]
+  return result
+}
+
+export function getSourceRouting(
+  row: Record<PropertyKey, unknown>,
+  alias: string,
+): unknown {
+  return (row[SOURCE_ROUTING] as Record<string, unknown> | undefined)?.[alias]
+}
+
+export function mergeSourceContext(
+  target: Record<PropertyKey, unknown>,
+  left: Record<PropertyKey, unknown> | undefined,
+  right: Record<PropertyKey, unknown> | undefined,
+): void {
+  for (const field of [SOURCE_METADATA, SOURCE_ROUTING])
+    if (left?.[field] || right?.[field])
+      target[field] = {
+        ...(left?.[field] as object | undefined),
+        ...(right?.[field] as object | undefined),
+      }
+}
+
+/** Remove private route state, descending only when the compilation can nest it. */
+export function stripInternalRouteMetadata(
+  value: unknown,
+  recursive = true,
+): unknown {
+  return stripInternalMetadata(value, INTERNAL_ROUTE_KEYS, recursive)
+}
+
+/** Remove compiler-owned keys before invoking user code, at the known scope. */
+export function stripInternalCallbackMetadata(
+  value: unknown,
+  recursive = true,
+): unknown {
+  return stripInternalMetadata(value, INTERNAL_CALLBACK_KEYS, recursive)
+}
+
+function stripInternalMetadata(
+  value: unknown,
+  keys: ReadonlySet<PropertyKey>,
+  recursive: boolean,
+): unknown {
+  if (!recursive) {
+    if (!isPublicContainer(value)) return value
+    let hasMetadata = false
+    for (const key of keys) hasMetadata ||= Object.hasOwn(value, key)
+    if (!hasMetadata) return value
   }
-  return view && typeof view === `object` ? { ...row, ...view } : row
-}
-
-/** Copy public containers while removing private route state at every depth. */
-export function stripInternalRouteMetadata(value: unknown): unknown {
-  return transformPublicContainers(value, (leaf) => leaf, INTERNAL_ROUTE_KEYS)
-}
-
-/** Remove every compiler-owned key before invoking user code. */
-export function stripInternalCallbackMetadata(value: unknown): unknown {
-  return transformPublicContainers(
-    value,
-    (leaf) => leaf,
-    INTERNAL_CALLBACK_KEYS,
-  )
+  return transformPublicContainers(value, (leaf) => leaf, keys, recursive)
 }
 
 /** Copy only paths changed by a leaf transform or an omitted private key. */
@@ -187,6 +238,7 @@ export function transformPublicContainers(
   value: unknown,
   transformLeaf: (value: unknown) => unknown,
   omittedKeys: ReadonlySet<PropertyKey>,
+  recursive = true,
 ): unknown {
   const rootReplacement = transformLeaf(value)
   if (!Object.is(rootReplacement, value)) return rootReplacement
@@ -219,7 +271,7 @@ export function transformPublicContainers(
       const child = descriptor.value
       descriptor.value = transformLeaf(child)
       if (!Object.is(descriptor.value, child)) markDirty(container)
-      else if (isPublicContainer(child)) {
+      else if (recursive && isPublicContainer(child)) {
         descriptor.child = visit(child)
         descriptor.child.parents.push(container)
       }

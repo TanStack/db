@@ -39,6 +39,15 @@ Live query results include computed, read-only virtual properties on every row:
 These props can be used in `where`, `select`, and `orderBy` clauses. They are added to
 query outputs automatically and should not be persisted back to storage.
 
+These metadata rules apply to published Collection row roots, including
+Collection-valued includes. Intermediate subquery projections, `.fn.select()`,
+`.fn.where()` and `.fn.having()` inputs, inline includes and Effect outputs keep
+their authored fields. For example, an intermediate projection with
+`$collectionId: 'application'` exposes that string to a downstream callback.
+Publishing that value as a Collection row supplies genuine computed metadata.
+Read source metadata before projection when you need the source's attribution.
+
+
 ## Table of Contents
 
 - [Creating Live Query Collections](#creating-live-query-collections)
