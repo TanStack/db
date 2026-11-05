@@ -1,0 +1,505 @@
+run,db_source,query,scenario,scale,source_index_mode,mutation_mode,repetition,cold_hydrate_ms,median_write_ms
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,100,none,synced,0,6.701416999999992,0.08720800000003237
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,100,none,synced,1,1.725750000000005,0.05841600000002245
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,100,none,synced,2,0.9095000000000368,0.03404199999999946
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,synced,0,0.8673750000000382,0.12345799999997098
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,synced,1,0.6548750000000041,0.09091599999999289
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,synced,2,0.6468339999999557,0.08004200000004857
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,100,none,synced,0,5.015334000000053,0.055833000000006905
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,100,none,synced,1,2.961332999999968,0.04337500000002592
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,100,none,synced,2,2.9861660000000256,0.039583000000050106
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,100,none,synced,0,5.915374999999983,0.0793329999999628
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,100,none,synced,1,2.713333999999975,0.07229200000000446
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,100,none,synced,2,2.700458000000026,0.060416000000032
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,synced,0,5.002125000000035,0.04891699999996035
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,synced,1,3.151374999999973,0.05083400000000893
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,synced,2,3.2722499999999854,0.055165999999985615
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,synced,0,0.44720899999998664,0.0352500000000191
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,synced,1,0.2600410000000011,0.03491700000000719
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,synced,2,0.3522500000000264,0.034166999999968084
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,100,none,synced,0,22.502834000000007,0.6132920000000013
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,100,none,synced,1,22.90599999999995,0.5625410000000102
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,100,none,synced,2,19.41979200000003,0.5464580000000296
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,100,none,optimistic,0,0.7370409999999765,0.031957999999917774
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,100,none,optimistic,1,0.6073750000000473,0.03045800000006693
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,100,none,optimistic,2,0.5392499999999245,0.028709000000048945
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,optimistic,0,0.5665000000000191,0.023291999999969448
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,optimistic,1,0.5385420000000067,0.0217089999999871
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,optimistic,2,0.5284580000000005,0.021208999999998923
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,100,none,optimistic,0,1.953416999999945,0.034832999999935055
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,100,none,optimistic,1,2.288958999999977,0.034416000000078384
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,100,none,optimistic,2,1.9586669999999913,0.03437500000006821
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,100,none,optimistic,0,1.8178749999999582,0.047584000000028936
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,100,none,optimistic,1,1.7097499999999854,0.05349999999998545
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,100,none,optimistic,2,1.9202089999999998,0.04808300000001964
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,optimistic,0,2.447334000000069,0.030624999999986358
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,optimistic,1,2.5387080000000424,0.03012499999999818
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,optimistic,2,2.2027919999999312,0.028999999999996362
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,optimistic,0,0.3484999999999445,0.03345799999999599
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,optimistic,1,0.6495830000000069,0.02800000000002001
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,optimistic,2,0.3305000000000291,0.025541999999973086
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,100,none,optimistic,0,22.062875000000076,0.81574999999998
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,100,none,optimistic,1,30.167625000000044,0.7260000000001128
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,100,none,optimistic,2,18.926375000000007,0.6792090000001281
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,synced,0,1.328125,0.030917000000044936
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,synced,1,0.5934580000000551,0.02920799999992596
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,synced,2,0.5347919999999249,0.026791999999886684
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,synced,0,0.5137079999999514,0.08620900000005349
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,synced,1,0.5476249999999254,0.07441599999992832
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,synced,2,0.4375830000001315,0.07229199999983393
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,100,manual,synced,0,1.540000000000191,0.03329200000007404
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,100,manual,synced,1,1.6123339999999189,0.03341699999987213
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,100,manual,synced,2,2.048583000000008,0.03212499999995089
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,synced,0,1.3676660000000993,0.05716600000005201
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,synced,1,1.3132500000001528,0.05633299999999508
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,synced,2,1.3172500000000582,0.056040999999822816
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,synced,0,1.7583750000001146,0.03791700000010678
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,synced,1,1.736167000000023,0.039290999999821
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,synced,2,1.9015830000000733,0.040334000000029846
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,synced,0,0.2626669999999649,0.031791999999995824
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,synced,1,0.23499999999989996,0.029541000000108397
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,synced,2,0.203125,0.028542000000015832
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,100,manual,synced,0,20.315333999999893,0.527667000000065
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,100,manual,synced,1,19.824540999999954,0.5408749999999145
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,100,manual,synced,2,22.255249999999933,0.5680419999998776
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,optimistic,0,2.7945830000003298,0.02804199999991397
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,optimistic,1,0.4780829999999696,0.027875000000221917
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,optimistic,2,0.5081669999999576,0.027875000000221917
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,optimistic,0,0.478458000000046,0.02483299999994415
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,optimistic,1,0.6264999999998508,0.023916000000099302
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,optimistic,2,0.49366600000030303,0.02437499999996362
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,100,manual,optimistic,0,2.1677919999997357,0.03658399999994799
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,100,manual,optimistic,1,1.942833999999948,0.037291000000095664
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,100,manual,optimistic,2,1.7500419999996666,0.03712499999983265
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,optimistic,0,1.825333000000228,0.0494579999999587
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,optimistic,1,1.5204579999999623,0.0492909999998119
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,optimistic,2,1.642041000000063,0.04908400000022084
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,0,2.2225829999997586,0.029250000000047294
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,1,2.232250000000022,0.03195899999991525
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,2,1.9057919999995647,0.030499999999847205
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,optimistic,0,0.2262500000001637,0.024874999999610736
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,optimistic,1,0.19179199999962293,0.025375000000167347
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,optimistic,2,0.19179200000007768,0.024875000000065484
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,100,manual,optimistic,0,21.759250000000065,0.7146250000000691
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,100,manual,optimistic,1,20.191959000000224,0.7261669999998048
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,100,manual,optimistic,2,21.795082999999977,0.7022079999997004
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,synced,0,2.964375000000018,0.02412499999991269
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,synced,1,2.586749999999938,0.02358300000014424
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,synced,2,2.3741250000002765,0.023333000000093307
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,synced,0,2.27441699999963,0.41429199999993216
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,synced,1,2.8347499999999854,0.3975420000001577
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,synced,2,2.2414159999998446,0.42787500000031287
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,1000,none,synced,0,11.753791999999976,0.03250000000025466
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,1000,none,synced,1,11.927958000000217,0.0314170000001468
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,1000,none,synced,2,14.100166000000172,0.03283300000020972
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,synced,0,4.2621250000001965,0.05670899999995527
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,synced,1,3.5901669999998376,0.05441599999994651
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,synced,2,3.7360829999997804,0.05366599999979371
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,synced,0,5.966042000000016,0.037624999999934516
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,synced,1,4.103625000000193,0.037083000000166066
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,synced,2,4.169750000000022,0.03541700000005221
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,synced,0,0.5169169999999212,0.028083000000151515
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,synced,1,0.4737920000002305,0.030125000000225555
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,synced,2,0.484375,0.0284590000001117
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,1000,none,synced,0,222.29337499999974,0.5450409999998556
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,1000,none,synced,1,201.70299999999997,0.5431669999998121
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,1000,none,synced,2,234.354417,0.5832919999998012
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,optimistic,0,2.598500000000058,0.028208000000631728
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,optimistic,1,2.6571670000002996,0.035750000000007276
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,optimistic,2,2.644749999999476,0.028374999999869033
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,optimistic,0,2.996291999999812,0.02275000000008731
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,optimistic,1,3.318583000000217,0.022249999999985448
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,optimistic,2,2.813833999999588,0.026834000000235392
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,1000,none,optimistic,0,13.824999999999818,0.04462500000045111
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,1000,none,optimistic,1,16.674417000000176,0.04562499999974534
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,1000,none,optimistic,2,14.060707999999977,0.038540999999895575
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,optimistic,0,4.584000000000742,0.046291999999994005
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,optimistic,1,4.148916999999528,0.04770900000039546
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,optimistic,2,4.069292000000132,0.04579199999989214
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,0,4.468292000000474,0.028749999999490683
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,1,5.121417000000292,0.028624999999919964
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,2,4.361665999999786,0.027791999999863037
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,optimistic,0,0.7541249999994761,0.024957999999969616
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,optimistic,1,0.7787079999998241,0.026749999999992724
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,optimistic,2,0.5294999999996435,0.027833000000100583
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,1000,none,optimistic,0,210.9602500000001,0.7376659999999902
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,1000,none,optimistic,1,217.9325829999998,0.7260420000002341
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,1000,none,optimistic,2,210.28037499999937,0.759541000000354
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,synced,0,0.7070000000003347,0.025834000000031665
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,synced,1,0.5504579999997077,0.025958000000173342
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,synced,2,0.5496249999996508,0.02545800000007148
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,synced,0,0.5742909999999029,0.10362499999973807
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,synced,1,0.5412500000002183,0.09799999999995634
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,synced,2,0.6404160000001866,0.09695800000008603
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,1000,manual,synced,0,1.6069589999997334,0.03304099999968457
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,1000,manual,synced,1,1.7625410000000556,0.032124999999723514
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,1000,manual,synced,2,1.7244590000000244,0.03254200000083074
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,synced,0,1.6756249999998545,0.0555000000003929
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,synced,1,1.7891659999995682,0.058374999999614374
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,synced,2,1.471958000000086,0.05304199999955017
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,synced,0,1.99737499999992,0.03745799999978772
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,synced,1,1.983249999999316,0.040208000000347965
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,synced,2,2.0806250000005093,0.039207999999234744
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,synced,0,0.3038750000005166,0.029125000000021828
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,synced,1,0.2490830000006099,0.03012499999931606
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,synced,2,0.23633299999983137,0.030165999999553605
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,1000,manual,synced,0,202.26229199999943,0.5496659999998883
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,1000,manual,synced,1,200.05854200000067,0.5511659999992844
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,1000,manual,synced,2,204.77562500000022,0.6084590000000389
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,optimistic,0,0.6608750000004875,0.026375000000371074
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,optimistic,1,0.6886670000003505,0.026874999999563443
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,optimistic,2,0.5655000000006112,0.027791999999863037
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,optimistic,0,0.6090839999997115,0.02437499999996362
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,optimistic,1,0.6757920000000013,0.023708000000624452
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,optimistic,2,0.550083000000086,0.022875000000567525
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,1000,manual,optimistic,0,1.6127089999999953,0.034082999999554886
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,1000,manual,optimistic,1,3.412000000000262,0.03375000000050932
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,1000,manual,optimistic,2,1.4979160000002594,0.033250000000407454
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,optimistic,0,1.5816249999998035,0.04699999999957072
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,optimistic,1,1.5750420000003942,0.04791699999987031
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,optimistic,2,1.8193750000000364,0.04770800000005693
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,0,1.9249579999996058,0.030542000000423286
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,1,2.219000000000051,0.03054100000008475
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,2,2.1457909999999174,0.03033400000003894
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,optimistic,0,0.24041699999997945,0.025958999999602383
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,optimistic,1,0.24566700000013952,0.025499999999738066
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,optimistic,2,0.3734580000000278,0.026332999999794993
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,1000,manual,optimistic,0,206.81362500000068,0.6922089999998207
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,1000,manual,optimistic,1,194.42799999999988,0.6877080000003843
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,1000,manual,optimistic,2,212.08608299999923,0.7769159999988915
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,synced,0,31.770166999998764,0.027334000000337255
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,synced,1,25.017791999998735,0.02599999999983993
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,synced,2,28.202916000000187,0.025958000000173342
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,synced,0,26.198041000001467,4.417790999999852
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,synced,1,27.211083000000144,4.112208000000464
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,synced,2,29.775125000000116,4.72466699999859
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,10000,none,synced,0,145.76575000000048,0.03575000000091677
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,10000,none,synced,1,132.864458,0.037333000000217
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,10000,none,synced,2,128.97875000000022,0.03333300000122108
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,synced,0,29.66412500000115,0.052958000000217
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,synced,1,29.848291999998764,0.05320900000151596
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,synced,2,37.940292000001136,0.051332999999431195
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,synced,0,31.110791999999492,0.035874999999577994
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,synced,1,33.103250000000116,0.03562500000043656
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,synced,2,31.925124999999753,0.03783300000031886
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,synced,0,2.2082080000000133,0.02974999999969441
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,synced,1,2.2160000000003492,0.03141699999832781
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,synced,2,2.1784579999985,0.02904100000159815
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,10000,none,synced,0,2177.923334000001,0.6734170000017912
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,10000,none,synced,1,2032.2476669999996,0.9651670000002923
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,10000,none,synced,2,2031.7561669999996,0.6268329999984417
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,optimistic,0,43.587500000001455,0.046875
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,optimistic,1,34.77179099999921,0.033250000000407454
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,optimistic,2,31.122332999999344,0.03250000000116415
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,optimistic,0,30.795458000000508,0.024375000000873115
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,optimistic,1,28.346957999998267,0.023249999998370185
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,optimistic,2,29.12858299999789,0.023375000000669388
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,10000,none,optimistic,0,135.1994169999998,0.03816699999879347
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,10000,none,optimistic,1,131.7744160000002,0.037000000000261934
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,10000,none,optimistic,2,118.76304200000232,0.03712499999892316
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,optimistic,0,30.706374999997934,0.06275000000096043
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,optimistic,1,30.49066699999821,0.05729100000098697
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,optimistic,2,29.333999999998923,0.05762499999764259
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,0,33.783542000001034,0.032959000000118976
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,1,38.862624999997934,0.03370799999902374
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,2,31.445707999999286,0.031124999997700797
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,optimistic,0,2.5763330000008864,0.028957999998965533
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,optimistic,1,3.546042000001762,0.029624999999214197
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,optimistic,2,2.729708999999275,0.029166000000259373
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,10000,none,optimistic,0,2157.172875,0.749707999999373
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,10000,none,optimistic,1,2060.355625,0.6974169999994047
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,10000,none,optimistic,2,2031.218334000001,0.7204170000004524
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,synced,0,1.4098749999975553,0.03049999999711872
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,synced,1,0.9011659999996482,0.029708000001846813
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,synced,2,1.0435410000027332,0.03033300000242889
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,synced,0,0.9786659999990661,0.36329200000182027
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,synced,1,0.8731670000015583,0.3204169999989972
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,synced,2,1.1919580000030692,0.3442079999986163
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,10000,manual,synced,0,2.0677920000016456,0.03454200000123819
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,10000,manual,synced,1,1.9689580000012938,0.03408299999864539
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,10000,manual,synced,2,2.1135829999984708,0.03449999999793363
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,synced,0,2.024916000002122,0.05774999999994179
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,synced,1,1.9179579999981797,0.06241600000066683
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,synced,2,2.022332999997161,0.06041700000059791
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,synced,0,7.856208000001061,0.040958000001410255
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,synced,1,6.624832999998034,0.04341700000077253
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,synced,2,2.57445799999914,0.04291600000215112
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,synced,0,0.39587500000197906,0.03441699999893899
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,synced,1,0.4026659999981348,0.03679099999862956
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,synced,2,0.3401659999981348,0.03329200000007404
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,10000,manual,synced,0,2046.8623750000006,0.5298340000008466
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,10000,manual,synced,1,2055.2518750000017,0.6748339999976452
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,10000,manual,synced,2,2058.203708000001,0.5679170000003069
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,optimistic,0,1.0328749999971478,0.028124999997089617
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,optimistic,1,0.8919999999998254,0.02708399999391986
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,optimistic,2,0.8601669999989099,0.02637499999400461
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,optimistic,0,0.8323329999984708,0.024459000000206288
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,optimistic,1,0.9392919999954756,0.031957999999576714
+local-node24.8/query-fixtures/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,optimistic,2,1.030333000002429,0.024832999995851424
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,10000,manual,optimistic,0,2.1482919999980368,0.03425000000424916
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,10000,manual,optimistic,1,1.918666999998095,0.033750000002328306
+local-node24.8/query-fixtures/base,8feab6ea3,list + author,visible author update,10000,manual,optimistic,2,2.0866670000032173,0.03395799999998417
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,optimistic,0,1.955207999999402,0.05774999999994179
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,optimistic,1,1.8244579999955022,0.059166999999433756
+local-node24.8/query-fixtures/base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,optimistic,2,2.3168749999967986,0.05920799999876181
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,0,2.3931250000023283,0.031083999994734768
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,1,2.394624999993539,0.031374999998661224
+local-node24.8/query-fixtures/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,2,2.4535829999949783,0.030249999996158294
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,optimistic,0,0.3399169999975129,0.02733299999817973
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,optimistic,1,0.4930000000022119,0.03125
+local-node24.8/query-fixtures/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,optimistic,2,0.36170799999672454,0.03087500000401633
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,10000,manual,optimistic,0,2104.327833000003,0.923917000000074
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,10000,manual,optimistic,1,2065.8627500000002,0.7395000000033178
+local-node24.8/query-fixtures/base,8feab6ea3,open issues + documents,visible document update,10000,manual,optimistic,2,2015.5080420000013,0.7420410000049742
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,100,none,synced,0,5.400374999999997,0.04620800000000713
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,100,none,synced,1,1.393540999999999,0.037833999999975276
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,100,none,synced,2,0.7487910000000397,0.025582999999983258
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,100,none,synced,0,1.4286670000000186,0.11745799999999917
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,100,none,synced,1,0.5155409999999847,0.08537499999999909
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,100,none,synced,2,0.5896250000000123,0.08658299999996188
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,100,none,synced,0,4.782459000000017,0.05870799999996734
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,100,none,synced,1,2.56329199999999,0.043250000000000455
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,100,none,synced,2,1.5141249999999786,0.03970800000001873
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,100,none,synced,0,4.626874999999984,0.0857499999999618
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,100,none,synced,1,2.484874999999988,0.06604199999998173
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,100,none,synced,2,1.8419589999999744,0.053625000000010914
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,100,none,synced,0,4.596167000000037,0.04366599999997334
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,100,none,synced,1,2.790416999999991,0.049167000000011285
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,100,none,synced,2,2.559791999999959,0.04762500000003911
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,100,none,synced,0,0.5057080000000269,0.03149999999999409
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,100,none,synced,1,0.3128340000000094,0.032417000000009466
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,100,none,synced,2,0.41662500000001046,0.030250000000023647
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,100,none,synced,0,1.0526249999999777,0.028999999999996362
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,100,none,synced,1,0.9731249999999818,0.02575000000001637
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,100,none,synced,2,1.0523749999999836,0.026250000000004547
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,100,none,optimistic,0,0.44754199999999855,0.026666999999974905
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,100,none,optimistic,1,0.44708300000002055,0.023374999999987267
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,100,none,optimistic,2,1.2978339999999662,0.02250000000003638
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,100,none,optimistic,0,0.4202910000000202,0.01845900000000711
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,100,none,optimistic,1,0.38287500000001273,0.017125000000078217
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,100,none,optimistic,2,0.48529099999996106,0.01675000000000182
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,100,none,optimistic,0,1.2017499999999472,0.033542000000011285
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,100,none,optimistic,1,1.2169999999999845,0.032166999999958534
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,100,none,optimistic,2,1.4245829999999842,0.030374999999935426
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,100,none,optimistic,0,1.2555419999999913,0.04470800000001418
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,100,none,optimistic,1,1.420541999999955,0.05450000000007549
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,100,none,optimistic,2,2.3382500000000164,0.04137500000001637
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,100,none,optimistic,0,2.309082999999987,0.03583299999991141
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,100,none,optimistic,1,3.792416000000003,0.028833000000076936
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,100,none,optimistic,2,2.172458000000006,0.026542000000063126
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,100,none,optimistic,0,0.3003330000000233,0.02283399999998892
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,100,none,optimistic,1,1.3834590000000162,0.022375000000010914
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,100,none,optimistic,2,0.2961249999999609,0.023250000000075488
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,100,none,optimistic,0,0.9106669999999895,0.1566250000000764
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,100,none,optimistic,1,0.8588330000000042,0.161583999999948
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,100,none,optimistic,2,0.7973749999999882,0.15991599999995287
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,100,manual,synced,0,1.1512920000000122,0.025666999999998552
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,100,manual,synced,1,0.5355829999999742,0.02345900000000256
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,100,manual,synced,2,0.473165999999992,0.02133400000002439
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,100,manual,synced,0,0.41583299999990686,0.08741599999996197
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,100,manual,synced,1,0.3368749999999636,0.07074999999997544
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,100,manual,synced,2,0.34770899999989524,0.06825000000003456
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,100,manual,synced,0,0.9570420000000013,0.028040999999916494
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,100,manual,synced,1,1.0238749999999754,0.027708999999958905
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,100,manual,synced,2,0.8345410000000584,0.03437500000006821
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,100,manual,synced,0,1.1284999999999172,0.04695800000001782
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,100,manual,synced,1,0.9715419999999995,0.04574999999999818
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,100,manual,synced,2,0.9597079999999778,0.05274999999994634
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,100,manual,synced,0,2.499541000000022,0.042374999999992724
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,100,manual,synced,1,1.6983339999999316,0.03395899999998164
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,100,manual,synced,2,1.4321669999999358,0.036166999999977634
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,100,manual,synced,0,0.3193340000000262,0.03166699999997036
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,100,manual,synced,1,0.20612499999992906,0.027540999999928317
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,100,manual,synced,2,0.16516699999999673,0.0257090000000062
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,100,manual,synced,0,0.9494170000000395,0.02358399999991434
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,100,manual,synced,1,0.7283750000000282,0.023458000000005086
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,100,manual,synced,2,0.9412080000000742,0.023000000000024556
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,100,manual,optimistic,0,0.37316600000008293,0.022334000000000742
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,100,manual,optimistic,1,0.3682499999999891,0.021292000000016742
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,100,manual,optimistic,2,0.4465420000000222,0.020957999999950516
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,100,manual,optimistic,0,0.34054200000002766,0.01766700000007404
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,100,manual,optimistic,1,0.4657080000000633,0.01716600000008839
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,100,manual,optimistic,2,0.5599579999999378,0.017749999999978172
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,100,manual,optimistic,0,0.9293340000000399,0.038082999999915046
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,100,manual,optimistic,1,1.0696660000000975,0.03712499999983265
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,100,manual,optimistic,2,1.3482500000000073,0.038291999999955806
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,100,manual,optimistic,0,1.369416000000001,0.058041000000002896
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,100,manual,optimistic,1,1.346667000000025,0.06179199999996854
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,100,manual,optimistic,2,1.4409159999997883,0.04824999999982538
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,0,1.964458999999806,0.03150000000005093
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,1,2.025624999999991,0.032709000000068045
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,2,1.7149580000000242,0.029499999999870852
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,100,manual,optimistic,0,0.22400000000016007,0.023582999999916865
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,100,manual,optimistic,1,0.20612500000015643,0.023124999999936335
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,100,manual,optimistic,2,0.19033300000000963,0.021875000000136424
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,100,manual,optimistic,0,0.7512910000000375,0.1628330000000915
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,100,manual,optimistic,1,0.7584160000001248,0.16570799999999508
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,100,manual,optimistic,2,0.7104170000000067,0.16883400000006077
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,1000,none,synced,0,2.944874999999911,0.019416000000092026
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,1000,none,synced,1,2.5001669999999194,0.01812500000005457
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,1000,none,synced,2,3.2516669999999976,0.025125000000116415
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,1000,none,synced,0,3.870666999999912,0.42658300000016425
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,1000,none,synced,1,2.2023329999999532,0.42391699999984667
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,1000,none,synced,2,2.10349999999994,0.4207499999999982
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,1000,none,synced,0,7.810625000000073,0.02633400000013353
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,1000,none,synced,1,7.615290999999843,0.025333000000046013
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,1000,none,synced,2,7.481291000000056,0.025374999999939973
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,1000,none,synced,0,2.9046659999999065,0.04383299999994961
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,1000,none,synced,1,2.9472079999998186,0.04254199999991215
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,1000,none,synced,2,2.8155409999999392,0.04137500000001637
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,1000,none,synced,0,3.440417000000025,0.02887500000019827
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,1000,none,synced,1,3.3400000000001455,0.029082999999900494
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,1000,none,synced,2,4.862249999999904,0.028750000000172804
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,1000,none,synced,0,0.45783400000004804,0.02433300000006966
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,1000,none,synced,1,0.4350839999999607,0.02500000000009095
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,1000,none,synced,2,0.4611250000000382,0.024750000000040018
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,1000,none,synced,0,6.642667000000074,0.023042000000032203
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,1000,none,synced,1,5.925666000000092,0.023374999999987267
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,1000,none,synced,2,5.899457999999868,0.022582999999940512
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,1000,none,optimistic,0,2.2461249999998927,0.02179200000000492
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,1000,none,optimistic,1,2.3769170000000486,0.020541999999977634
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,1000,none,optimistic,2,2.091583000000128,0.020166999999901236
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,1000,none,optimistic,0,2.04424999999992,0.01445800000010422
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,1000,none,optimistic,1,2.063417000000072,0.013999999999896318
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,1000,none,optimistic,2,2.3117919999999685,0.013832999999976892
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,1000,none,optimistic,0,9.63733400000001,0.027166000000079293
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,1000,none,optimistic,1,8.174875000000156,0.028416999999990367
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,1000,none,optimistic,2,8.098999999999933,0.0281249999998181
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,1000,none,optimistic,0,4.117291999999907,0.04104200000006131
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,1000,none,optimistic,1,3.547249999999849,0.03929100000004837
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,1000,none,optimistic,2,3.3429590000000644,0.03916699999990669
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,0,3.721083000000135,0.024625000000014552
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,1,3.5048750000000837,0.024458000000095126
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,2,4.485999999999876,0.025791000000026543
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,1000,none,optimistic,0,0.5105409999998756,0.023083000000042375
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,1000,none,optimistic,1,0.5682910000000447,0.02254100000004655
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,1000,none,optimistic,2,0.47429200000010496,0.02254100000004655
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,1000,none,optimistic,0,6.104207999999971,0.16245900000012625
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,1000,none,optimistic,1,10.59941600000002,0.16487499999993815
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,1000,none,optimistic,2,6.135416999999961,0.16483299999981682
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,1000,manual,synced,0,0.4318750000002183,0.0183750000001055
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,1000,manual,synced,1,0.4187090000000353,0.018708000000060565
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,1000,manual,synced,2,0.3771670000000995,0.01812500000005457
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,1000,manual,synced,0,0.34270799999967494,0.08954200000016499
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,1000,manual,synced,1,0.343333000000257,0.08249999999998181
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,1000,manual,synced,2,0.31004200000006676,0.08295900000030088
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,1000,manual,synced,0,1.8502090000001772,0.024790999999822816
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,1000,manual,synced,1,1.0156670000001213,0.02454200000011042
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,1000,manual,synced,2,0.8179159999999683,0.025166999999783002
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,1000,manual,synced,0,1.1563329999999041,0.04562499999974534
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,1000,manual,synced,1,1.3227079999996931,0.04733399999986432
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,1000,manual,synced,2,1.1327079999996386,0.04500000000007276
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,1000,manual,synced,0,1.4838329999997768,0.03370800000038798
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,1000,manual,synced,1,1.5360000000000582,0.03179199999976845
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,1000,manual,synced,2,1.4272080000000642,0.03212500000017826
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,1000,manual,synced,0,0.23795800000016243,0.02491699999973207
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,1000,manual,synced,1,0.2192920000002232,0.0255419999998594
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,1000,manual,synced,2,0.20804199999975026,0.027207999999973254
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,1000,manual,synced,0,5.656708999999864,0.02216699999962657
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,1000,manual,synced,1,5.450457999999799,0.021832999999787717
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,1000,manual,synced,2,5.907750000000306,0.022124999999959982
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,1000,manual,optimistic,0,0.3985419999999067,0.020207999999911408
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,1000,manual,optimistic,1,0.4322500000002947,0.020042000000103144
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,1000,manual,optimistic,2,0.3765410000000884,0.020042000000103144
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,1000,manual,optimistic,0,0.3991249999999127,0.016292000000248663
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,1000,manual,optimistic,1,0.4012920000000122,0.016040999999859196
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,1000,manual,optimistic,2,0.37370899999996254,0.016084000000319065
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,1000,manual,optimistic,0,0.9478330000001733,0.02562500000021828
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,1000,manual,optimistic,1,0.8658329999998386,0.025916999999935797
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,1000,manual,optimistic,2,2.3975420000001577,0.026624999999967258
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,1000,manual,optimistic,0,1.114875000000211,0.04312500000014552
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,1000,manual,optimistic,1,1.0924999999997453,0.042374999999992724
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,1000,manual,optimistic,2,1.0417499999998654,0.04054099999984828
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,0,2.4172920000000886,0.028542000000015832
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,1,1.7621250000001965,0.02704200000016499
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,2,1.4848749999996471,0.027791999999863037
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,1000,manual,optimistic,0,0.25025000000005093,0.022290999999768246
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,1000,manual,optimistic,1,0.19949999999971624,0.022333000000344327
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,1000,manual,optimistic,2,0.19312500000023647,0.022665999999844644
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,1000,manual,optimistic,0,5.1365420000001905,0.15066600000000108
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,1000,manual,optimistic,1,8.370625000000018,0.15399999999999636
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,1000,manual,optimistic,2,5.541000000000167,0.15229200000021592
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,10000,none,synced,0,29.13700000000017,0.019499999999879947
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,10000,none,synced,1,29.331208999999944,0.020292000000154076
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,10000,none,synced,2,28.17904200000021,0.020375000000058208
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,10000,none,synced,0,35.574249999999665,4.175582999999733
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,10000,none,synced,1,26.585042000000158,4.525916999999936
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,10000,none,synced,2,28.986916999999266,4.038749999999709
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,10000,none,synced,0,97.71075000000019,0.027417000000241387
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,10000,none,synced,1,94.45870800000012,0.02783400000043912
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,10000,none,synced,2,94.11912500000017,0.0273750000005748
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,10000,none,synced,0,35.47983299999942,0.046332999999322055
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,10000,none,synced,1,40.554291000000376,0.045208000000457105
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,10000,none,synced,2,35.886333999999806,0.054165999999895575
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,10000,none,synced,0,40.38850000000002,0.032374999999774445
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,10000,none,synced,1,30.64404099999956,0.030625000000327418
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,10000,none,synced,2,29.604959000000235,0.030209000000468222
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,10000,none,synced,0,1.9598340000002281,0.027291999999761174
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,10000,none,synced,1,2.0195409999996627,0.024875000000065484
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,10000,none,synced,2,1.9405000000006112,0.02599999999983993
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,10000,none,synced,0,71.25020800000038,0.02437499999996362
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,10000,none,synced,1,77.63012500000059,0.024875000000065484
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,10000,none,synced,2,63.26641699999982,0.02404099999967002
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,10000,none,optimistic,0,30.443624999999884,0.022958999999900698
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,10000,none,optimistic,1,29.203333000000384,0.023000000000138243
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,10000,none,optimistic,2,28.07849999999962,0.022458999999798834
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,10000,none,optimistic,0,31.655625000000327,0.016125000000101863
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,10000,none,optimistic,1,33.68287499999951,0.015750000000480213
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,10000,none,optimistic,2,28.992165999999997,0.015582999999423919
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,10000,none,optimistic,0,95,0.029666999999790278
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,10000,none,optimistic,1,102.36391700000058,0.031208999999762455
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,10000,none,optimistic,2,89.40654199999972,0.029042000000117696
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,10000,none,optimistic,0,29.94537499999933,0.045750000000225555
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,10000,none,optimistic,1,29.618375000000015,0.04537499999969441
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,10000,none,optimistic,2,30.482167000000118,0.04579199999989214
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,0,33.231416999999965,0.03245900000001711
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,1,33.56962500000009,0.026415999999699125
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,2,32.99491600000056,0.025459000000410015
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,10000,none,optimistic,0,2.2362920000005033,0.023250000000189175
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,10000,none,optimistic,1,3.5563750000001164,0.025292000000263215
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,10000,none,optimistic,2,2.6537500000004,0.023959000000104425
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,10000,none,optimistic,0,73.92504099999951,0.14950000000044383
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,10000,none,optimistic,1,67.97916700000042,0.1554999999998472
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,10000,none,optimistic,2,62.56720800000039,0.22320800000125018
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,10000,manual,synced,0,0.9164579999996931,0.020958999999493244
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,10000,manual,synced,1,0.7746250000000146,0.02141699999992852
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,10000,manual,synced,2,0.8370420000010199,0.020709000000351807
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,10000,manual,synced,0,1.2099160000016127,0.4212499999994179
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,10000,manual,synced,1,0.7462090000008175,0.3413330000003043
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,10000,manual,synced,2,0.7120410000006814,0.3101249999999709
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,10000,manual,synced,0,1.6806670000005397,0.02599999999983993
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,10000,manual,synced,1,1.2042920000003505,0.026667000000088592
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,10000,manual,synced,2,1.2790420000001177,0.025834000000031665
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,10000,manual,synced,0,1.6883749999997235,0.05120800000076997
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,10000,manual,synced,1,1.5116669999988517,0.05049999999937427
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,10000,manual,synced,2,1.4925830000011047,0.04837500000030559
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,10000,manual,synced,0,1.9554580000003625,0.034374999999272404
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,10000,manual,synced,1,1.7697909999988042,0.03466599999956088
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,10000,manual,synced,2,5.6698340000002645,0.033832999999503954
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,10000,manual,synced,0,0.4285409999993135,0.030167000000801636
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,10000,manual,synced,1,0.35320799999863084,0.02937500000007276
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,10000,manual,synced,2,0.33616600000095787,0.02900000000045111
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,10000,manual,synced,0,73.9350830000003,0.024500000001353328
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,10000,manual,synced,1,66.41491600000154,0.02433300000120653
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,10000,manual,synced,2,55.31366700000035,0.023708000000624452
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,10000,manual,optimistic,0,0.8540409999986878,0.02054099999986647
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,10000,manual,optimistic,1,0.9327079999984562,0.02449999999953434
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue update,10000,manual,optimistic,2,0.7909170000002632,0.023999999999432475
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,10000,manual,optimistic,0,0.7339169999995647,0.018916999999419204
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,10000,manual,optimistic,1,0.7490830000006099,0.01841700000113633
+local-node24.8/query-fixtures/current,f34738e69,list: newest 50 open,visible issue delete,10000,manual,optimistic,2,0.743916999999783,0.01745900000059919
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,10000,manual,optimistic,0,1.4563749999997526,0.028040999999575433
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,10000,manual,optimistic,1,1.7381249999998545,0.026416999999128166
+local-node24.8/query-fixtures/current,f34738e69,list + author,visible author update,10000,manual,optimistic,2,1.1662500000002183,0.027000000000043656
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,10000,manual,optimistic,0,1.5227500000000873,0.048499999998966814
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,10000,manual,optimistic,1,1.4076250000016444,0.04879199999959383
+local-node24.8/query-fixtures/current,f34738e69,list + comment count,visible issue comment insert,10000,manual,optimistic,2,1.42041700000118,0.04904100000021572
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,0,2.4952919999996084,0.029500000000552973
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,1,1.9350830000003043,0.029875000000174623
+local-node24.8/query-fixtures/current,f34738e69,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,2,1.9041660000002594,0.028500000000349246
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,10000,manual,optimistic,0,0.5224159999997937,0.02858400000150141
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,10000,manual,optimistic,1,0.3303329999998823,0.025791000000026543
+local-node24.8/query-fixtures/current,f34738e69,issue detail + comments,selected issue comment insert,10000,manual,optimistic,2,0.29620799999975134,0.024999999999636202
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,10000,manual,optimistic,0,62.80054200000086,0.15004200000112178
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,10000,manual,optimistic,1,62.94145799999933,0.16320900000027905
+local-node24.8/query-fixtures/current,f34738e69,open issues + documents,visible document update,10000,manual,optimistic,2,82.92175000000134,0.19824999999946158

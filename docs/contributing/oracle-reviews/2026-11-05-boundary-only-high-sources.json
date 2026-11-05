@@ -337,5 +337,49 @@
       "8feab6ea3eaae4456f738da39fa93508ddd5cc01",
       "1498a8101934558a3ce3832b9854a800f9cc0c81"
     ]
+  },
+  "ciF347FixtureIsolation": {
+    "parentHead": "f34738e6946525d5c94c857639a8870467ec162d",
+    "productionChanged": false,
+    "benchmarkRun": 42106831377,
+    "baseSource": "8feab6ea3eaae4456f738da39fa93508ddd5cc01",
+    "benchmarkGate": "FAIL same localized cold case on original harness; corrected local gate PASS; corrected CI pending",
+    "codeRabbitReview": 5792063975,
+    "codeRabbitCoveredHead": "f34738e6946525d5c94c857639a8870467ec162d",
+    "evidenceSha256": {
+      "hydration-base.cpuprofile": "406064a87cb47d0ff06e11ad79cca30dd9584e9d2aa8a51e3b2190666e14eb34",
+      "hydration-current.cpuprofile": "0655c822c374abc48b1f3a93eb7aff3f38742e15c1b18024a27ec7b19930f462",
+      "hydration-base.log": "11a754e8554309fda3c08de31cae1540efe77a86c6bb58565a0678ad34444c4d",
+      "hydration-current.log": "e7a9432d19071aa221c27fc66c4d0418c2a34425a8f26ce34ef95fe44810ade3",
+      "calibrated-base.json": "72bfd5ea4e0ed9b468fe3228d15fc84daacee0a8398c03b3e7baf38e08a7e546",
+      "calibrated-current.json": "e36d37fdb39987312746d8b29ae2ec76f9add13ff04ec4b411aee537b1fe6e3f",
+      "calibrated-base.log": "b1b9e525a8d29bef25828172640c3e4d8af6c29aa082bf38012a5c9be52fb892",
+      "calibrated-current.log": "1bb9f7eacd30033598004e14a26f02a95f86aa11a9eebd4676ae16021e82db03",
+      "needed-fixtures-base.json": "b85eb579447a22edc5ec14925486acb5785f8d85983e505bc37cfbdd2fc283d3",
+      "needed-fixtures-current.json": "59c137bd1a6885b7bcd1a49762fbe9ac5790204ddc4e71b8023b00a41f7199f4",
+      "gc-control-base.json": "a82fabaf8c107377c90f261a39826804739127e705e97539c5cf201046b647fa",
+      "gc-control-current.json": "b2c2f8a4a3e23f1bc97196738da5279f6b578b78fc8b6ec0c14583b6b3f0748c",
+      "query-fixtures-final-base-raw.json": "79decea2c088d96fc55812d679c1a51274c950a402dc2a9e486cde708d95bc1f",
+      "query-fixtures-final-base.json": "c6e557001e75c0a71b9bb7a369ac2bf5b33bff6dbf0cfeb9f31a11dff08e9a54",
+      "query-fixtures-final-current.json": "2a9f3d9d4ae0aafd9b1d0d1ec682de43660da4c7f1b0697b13f97a49efbd4968",
+      "query-fixtures-final-base.mts": "8ae934ed8203f3dfedb8aa1a41f4e93628d52da7ccbf6fdc9e77d1d6cd6287c4",
+      "query-fixtures-final-current.mts": "dbb4a692e775f9b28f4738344335512db17e554b3ebc9d85a973220fc6c719ca",
+      "query-fixtures-final-comparison.md": "4c40d4fb9e024e4cbce91d1867a6b7cb86b7897a1a92b1ab6842232670d6b99c",
+      "fixture-fidelity-old.log": "cc67f09b062e78aaf51e1fd25e09295fc1b769db1a925e199dfb4d3e83030763",
+      "fixture-fidelity-new.log": "2dc0182183abd3b130fef61857c97a5e155a70ea20c563471cabf2d52d0b001b",
+      "fixture-fidelity-result.log": "465b66653003afdbb1ce72f0f6b84d3b35ff987309c75bf363cbf858d414e979",
+      "query-fixtures-gate-tests.log": "a0b4524c5f9139b94e92a236dd7031ed06ea2bc0efee9cf2637204d6f553759f",
+      "f347-review-mutable.md": "832da56a9336078349ca8d771c2d5eb998ecf1407aaf861ba5de6225d753209f"
+    },
+    "remoteReportSha256": {
+      "base.json": "d0ca8afc8918a76a4fbbfd1dfee9311d326b4ef32f1f2b55af64df8bddd7998b",
+      "candidate.json": "79c54f76743739be86ef09cfb77e6ec9c3f1a1e0115cea459d8a7f84d64dc725",
+      "comparison.md": "c87115168f772fbddcd367ccfa8f004787c2ea2a90f9568aa6beb5616f211ccf"
+    },
+    "sourceSha256": {
+      "scripts/bench/incremental-update.ts": "866d2b1512279ce19519755778de8f32c1d2ecbf325c4997c359090ce3c96fb8",
+      "scripts/bench/boundary-only-ci-2026-11-05.csv": "8fb75b62b8a6bca11d4cb84720a9babe425e98d03daadfbe13b07a3ee248fd3e",
+      "scripts/bench/query-fixture-isolation-2026-11-05.csv": "3cacc3aadaa9a1bffb9342ff177d604be6a3368a6eb1fde515340685d79357fc"
+    }
   }
 }

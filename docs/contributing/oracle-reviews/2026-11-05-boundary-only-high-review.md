@@ -580,3 +580,85 @@ comments, but the current helper accepts void or Promise and the current report
 already says every repetition. The mutable summary still covers bd3f574ec and
 is not fresh review evidence for 1498a8101. The bot marks both original table
 pipes and whole-source fan-out comments addressed by 1498a81.
+
+## f34738e69 repeat and fixture isolation
+
+CI03 reproduces remotely on source-identical f34738e69, run
+[42106831377](https://github.com/TanStack/db/actions/runs/42106831377).
+Overall ratios are 0.62x writes / 0.51x cold. The same 1,000-row, unindexed,
+optimistic comment-count case fails. Base samples are 8.471143, 9.203844 and
+8.600227 ms; candidate samples are 14.805505, 19.699914 and 17.413126 ms.
+Every result is retained in the CI table, now 1,512 repetition rows. The dist
+and replay repairs pass remotely. This repeat is evidence against dismissing
+the localized failure as an isolated outlier.
+
+The CI runtime matters: local Node 24.19 missed this case, while Node 24.8
+reproduces it. In the original local CPU profile, base samples are 5.274, 4.086
+and 4.820 ms; candidate samples are 10.521, 8.918 and 7.954 ms. Sample windows
+are bounded by monotonic timestamps around the same preload. A separately
+calibrated inspector profile supplies the profile-clock offset; summing samples
+in those windows attributes 12.292 ms of candidate time to garbage collection,
+versus no sampled GC in the base windows. Non-GC work is not exactly equal, and
+sampling cannot establish exact function costs.
+
+Every fixture previously populated every issue's 20-block rich-text document,
+even for queries that never read documents. That creates substantial unrelated
+allocation before each timed hydration. A diagnostic full collection immediately
+before hydration, using those original complete fixtures, changes the formerly
+failing median to 5.618 ms base / 4.524 ms candidate. The diagnostic preserves
+source rows and query shape. It is not the committed measurement policy. An
+inspector-started profile also changes GC scheduling and does not reproduce the
+slowdown; its samples remain bound in the manifest rather than being discarded.
+
+The harness now populates document trees only for the document query. It still
+constructs the same issue, user and comment sources. A deterministic fixture
+audit compares all 42 scale/index/query configurations before and after this
+change: 126 source fingerprints are identical, all six document-case fixtures
+are identical, and the other 36 document fixtures are empty. The original
+nested-document query, result assertions, normal GC, writes, repetitions and
+regression thresholds remain. No production or oracle code changes. This is a
+benchmark fixture repair, so the appropriate instruments are source-data
+fingerprints, actual timed runs and existing gate tests; it changes no product
+law and needs no new product oracle.
+
+Both source trees run the corrected full harness under Node 24.8 sequentially.
+The exact base source archive is 8feab6ea3 and candidate production is f34738e69.
+The unchanged gate passes: 0.61x writes / 0.51x cold, with no diagnostic flags.
+The formerly failing optimistic case is 4.584000, 4.148917, 4.069292 ms base
+versus 4.117292, 3.547250, 3.342959 ms candidate. All 504 repetition observations
+are in query-fixture-isolation-2026-11-05.csv. The local archive runner reports
+its working-directory Git SHA; the original JSON is preserved, and a separate
+annotated report names its actual source archive for the comparator. No timing
+or case is edited. The manifest binds both reports and imported source paths.
+
+Limits: these controls identify fixture-dependent GC scheduling. They do not
+prove zero runtime overhead, bound every application's GC pauses, or replace a
+fresh remote measurement. CI03 remains confirmed-open until the corrected
+harness passes the unchanged gate on CI. The shipped-size evidence remains
+current because packages/db/src, packages/db-ivm/src and the mangle cache are
+unchanged. All 19 benchmark-gate tests pass, including hostile report and timing
+controls. No threshold or oracle budget changes.
+
+### New CodeRabbit review accounting
+
+Review 5792063975 covers f34738e69, from bd3f574ec. It contains no new inline
+code findings. Its raw body and mutable summary 6666306571 are preserved in the
+poll snapshot bound by the manifest. The following ledger includes the summary's
+qualifications, not only its formal warning:
+
+| ID | Original claim or suggestion | Technical verdict and evidence | PR action / durable value |
+| --- | --- | --- | --- |
+| CRF01 | Docstrings cover 45%, below a required 80%; add missing docstrings. | The bot reports its default, not a repository requirement; it says no repository configuration applied. No authoritative 80% rule exists in the repository. | duplicate of the previously refuted docstring requirement; preserve as optional documentation feedback, no blanket prose expansion. |
+| CRF02 | Minimal merge risk, no concrete blocker; benchmark awaits a repeat. | The repeat confirms the failure. The bot's broad readiness inference is unsupported by its own unexplained-gate qualification. | refuted readiness claim; CI03 remains the canonical open item. |
+| CRF03 | The latest head lacks fresh remote performance evidence; ignored CSVs were not inspected. | This was a real evidence limit in its supplied context. Both remote repeats and all source bindings now remain recorded; a corrected-harness CI result is still required. | duplicate of CI03; retained in this record and the measurement tables. |
+| CRF04 | Confirm joined public pair keys are intended because the issue does not request them explicitly. | The maintainer explicitly chose pair identities, retaining non-key source attribution. The join oracle covers 4,608 states and rejects source-key preference. | accepted-design, with authority and calibration above. |
+| CRF05 | Confirm aggregate provenance, caseWhen and select type changes are necessary. | Existing native-type RED evidence identifies wrapped aggregates; provenance closes that class, and tuple inference replaces repetitive overloads. The final 33 owner / 85 supplemental checks and full tsc pass. | already-fixed coverage question; preserve the independent type evidence and declared inference limits. |
+
+Loss accounting: five occurrences = two duplicates + one refuted + one
+accepted-design + one already-fixed. The earlier NR/SS/CI ledgers retain their
+identities and counts. This review is useful for identifying its own evidence
+limits, but it offers no fresh executable counterexample and overlooks the
+known gate failure in its merge-risk conclusion. It does not independently
+establish readiness or warrant hiring for performance diagnosis. No new
+behavioral finding requires an oracle change. The original high review's
+correctness and efficiency findings remain accounted for in the earlier ledger.

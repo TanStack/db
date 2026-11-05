@@ -13,6 +13,10 @@ node --test scripts/bench/compare-incremental-update.test.mjs
 Each repetition creates fresh fixtures and queries, times their first preload,
 and measures writes after warmup. Reports retain all cold-load times and
 per-repetition write medians; displayed statistics are medians across repetitions.
+Only the document case populates rich-text document fixtures. Creating those
+trees for unrelated queries can move their garbage collection into another
+case's timed hydration. The document case retains its complete fixture, and
+normal garbage collection remains enabled during every measurement.
 The nested-document case joins all open issues to 20-block documents and selects
 whole documents without a limit. Synced updates and optimistic updates with
 rollback run at all scales and index modes, like the existing flat cases.
@@ -114,3 +118,21 @@ base median versus 17.383 ms candidate. All three candidate samples exceed the
 base range and both floors. The [CI table](boundary-only-ci-2026-11-05.csv)
 retains both remote pairs (1,008 repetition rows). Thresholds remain unchanged;
 the high-review record tracks the repeatability investigation.
+
+The source-identical [f34738e69 repeat](https://github.com/TanStack/db/actions/runs/42106831377)
+fails the same case: 8.600 ms base median versus 17.413 ms candidate. All three
+remote pairs remain in the CI table (1,512 repetition rows). Local Node 24.8
+profiling reproduces the shift and attributes 12.292 ms across three affected
+hydrations to garbage collection. A diagnostic collection before hydration,
+with the original complete fixtures, reverses that case's median comparison
+to 5.618 ms base versus 4.524 ms candidate. This control is diagnostic only;
+the committed harness does not force collection or filter samples.
+
+With document fixtures confined to their own query, the full local Node 24.8
+[paired measurements](query-fixture-isolation-2026-11-05.csv) pass the unchanged
+gate: 0.61x writes / 0.51x cold. The formerly failing case measures 4.149 ms
+base versus 3.547 ms candidate. Both sides use the corrected harness, with the
+same sources, scales, index modes, write counts and repetitions. The candidate
+production sources are unchanged from f34738e69; the base is 8feab6ea3. A new
+remote run must verify the corrected harness on CI. These controls identify
+fixture-dependent GC scheduling; they do not establish zero production overhead.

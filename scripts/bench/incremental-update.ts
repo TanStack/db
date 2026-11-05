@@ -164,6 +164,7 @@ type WriteResult = void | { cleanup: WriteCleanup }
 type QueryCase = {
   name: string
   scenario: string
+  withDocuments?: boolean
   createQuery: (fixture: Fixture) => BenchmarkCollection
   write: (
     fixture: Fixture,
@@ -338,6 +339,7 @@ const queryCases: Array<QueryCase> = [
   {
     name: `open issues + documents`,
     scenario: `visible document update`,
+    withDocuments: true,
     // Every open issue with its whole document and no limit, so each output row
     // carries a nested tree into result finalization.
     createQuery: ({ issues, documents }) =>
@@ -435,7 +437,7 @@ async function runCase(
   mutationMode: MutationMode,
   options: BenchmarkRunOptions,
 ): Promise<RunResult> {
-  const fixture = createFixture(options)
+  const fixture = createFixture(options, queryCase.withDocuments ?? false)
   const query = queryCase.createQuery(fixture)
 
   const coldStart = performance.now()
@@ -531,7 +533,10 @@ function createManualCollection<T extends object, TKey extends string | number>(
   })
 }
 
-function createFixture(options: BenchmarkRunOptions): Fixture {
+function createFixture(
+  options: BenchmarkRunOptions,
+  withDocuments: boolean,
+): Fixture {
   const random = seededRandom(options.seed)
   const usersData: Array<User> = []
   for (let id = 1; id <= options.userCount; id++) {
@@ -573,12 +578,16 @@ function createFixture(options: BenchmarkRunOptions): Fixture {
     })
   }
 
-  const documentsData: Array<IssueDocument> = issuesData.map((issue) => ({
-    id: issue.id,
-    issueId: issue.id,
-    blocks: createDocumentBlocks(issue.id, random),
-    updateTick: 0,
-  }))
+  // Unrelated rich-text trees can trigger GC during another query's hydration.
+  // Keep the complete document workload in the case that actually reads it.
+  const documentsData: Array<IssueDocument> = withDocuments
+    ? issuesData.map((issue) => ({
+        id: issue.id,
+        issueId: issue.id,
+        blocks: createDocumentBlocks(issue.id, random),
+        updateTick: 0,
+      }))
+    : []
 
   const fixture = {
     seed: options.seed,

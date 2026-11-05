@@ -1007,3 +1007,507 @@ candidate,88544ac64,open issues + documents,visible document update,10000,manual
 42105504239/candidate,1df2469a5,open issues + documents,visible document update,10000,manual,optimistic,0,136.65732100000605,0.33190900000045076
 42105504239/candidate,1df2469a5,open issues + documents,visible document update,10000,manual,optimistic,1,134.58928000000014,0.33298199999990175
 42105504239/candidate,1df2469a5,open issues + documents,visible document update,10000,manual,optimistic,2,107.8540920000014,0.3287750000017695
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,100,none,synced,0,14.850320999999951,0.20394599999997354
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,100,none,synced,1,2.543434999999988,0.17095699999998715
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,100,none,synced,2,1.9386949999999956,0.08809200000001738
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,synced,0,1.8967220000000111,0.29731699999990724
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,synced,1,1.5665860000000293,0.23388099999999667
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,synced,2,1.6236310000000458,0.18792199999995773
+42106831377/base,8feab6ea3,list + author,visible author update,100,none,synced,0,12.25756100000001,0.2213729999999714
+42106831377/base,8feab6ea3,list + author,visible author update,100,none,synced,1,7.335550000000012,0.16369600000007267
+42106831377/base,8feab6ea3,list + author,visible author update,100,none,synced,2,7.595981999999935,0.1342620000000352
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,100,none,synced,0,11.98312999999996,0.2540119999999888
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,100,none,synced,1,4.8806090000000495,0.2249180000000024
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,100,none,synced,2,4.997385000000008,0.19508399999995163
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,synced,0,7.657685000000015,0.1631360000000086
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,synced,1,7.127548000000047,0.1694439999999986
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,synced,2,11.188954999999964,0.1469409999999698
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,synced,0,1.1407950000000255,0.09940899999992325
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,synced,1,0.932591999999886,0.163155000000188
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,synced,2,1.142327000000023,0.19459299999994073
+42106831377/base,8feab6ea3,open issues + documents,visible document update,100,none,synced,0,63.2961479999999,1.3575109999999313
+42106831377/base,8feab6ea3,open issues + documents,visible document update,100,none,synced,1,51.52269500000011,1.3710410000001048
+42106831377/base,8feab6ea3,open issues + documents,visible document update,100,none,synced,2,50.939027000000124,1.338653000000022
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,100,none,optimistic,0,2.0399170000000595,0.10108199999990575
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,100,none,optimistic,1,1.182888999999932,0.0873309999999492
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,100,none,optimistic,2,1.2818469999999706,0.08206300000006195
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,optimistic,0,1.6588839999999436,0.0673509999999169
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,optimistic,1,1.4064850000002025,0.057997999999997774
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,optimistic,2,1.4241210000000137,0.056494999999813444
+42106831377/base,8feab6ea3,list + author,visible author update,100,none,optimistic,0,9.925916000000143,0.10225400000012996
+42106831377/base,8feab6ea3,list + author,visible author update,100,none,optimistic,1,4.3966109999998935,0.10134199999993143
+42106831377/base,8feab6ea3,list + author,visible author update,100,none,optimistic,2,9.352824000000055,0.1096850000003542
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,100,none,optimistic,0,3.40294700000004,0.1474820000003092
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,100,none,optimistic,1,5.744368000000122,0.15175799999997253
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,100,none,optimistic,2,3.5578800000002957,0.14227399999981571
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,optimistic,0,5.103863999999703,0.09102699999994002
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,optimistic,1,7.897455000000264,0.08220400000027439
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,optimistic,2,4.986558999999943,0.0809319999998479
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,optimistic,0,0.6610740000000987,0.08822199999985969
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,optimistic,1,0.6281549999998788,0.07605499999999665
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,optimistic,2,0.6400229999999283,0.07406100000025617
+42106831377/base,8feab6ea3,open issues + documents,visible document update,100,none,optimistic,0,50.74014800000032,1.7637319999998908
+42106831377/base,8feab6ea3,open issues + documents,visible document update,100,none,optimistic,1,45.80275299999994,1.714578000000074
+42106831377/base,8feab6ea3,open issues + documents,visible document update,100,none,optimistic,2,49.5071939999998,1.6508420000000115
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,synced,0,3.347694000000047,0.08534899999995105
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,synced,1,1.7397259999997914,0.072519000000284
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,synced,2,2.035460999999941,0.06504799999993338
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,synced,0,1.8742080000001806,0.2497760000001108
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,synced,1,1.1575510000002396,0.1904859999999644
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,synced,2,1.0980709999998908,0.17521399999986897
+42106831377/base,8feab6ea3,list + author,visible author update,100,manual,synced,0,3.9081270000001496,0.08414600000014616
+42106831377/base,8feab6ea3,list + author,visible author update,100,manual,synced,1,4.723332999999911,0.14562900000009904
+42106831377/base,8feab6ea3,list + author,visible author update,100,manual,synced,2,5.133378999999877,0.08037100000001374
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,synced,0,3.3245689999994283,0.1717479999997522
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,synced,1,3.163296000000628,0.16672099999959755
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,synced,2,2.9452479999999923,0.17242999999962194
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,synced,0,4.604573999999957,0.11259900000004563
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,synced,1,5.0637049999995725,0.11105700000007346
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,synced,2,4.0616769999996905,0.11287999999967724
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,synced,0,0.4293660000003001,0.07113699999990786
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,synced,1,0.584128000000419,0.08845300000029965
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,synced,2,0.36645099999986996,0.07138699999995879
+42106831377/base,8feab6ea3,open issues + documents,visible document update,100,manual,synced,0,49.00287599999956,1.2800850000003265
+42106831377/base,8feab6ea3,open issues + documents,visible document update,100,manual,synced,1,59.84617100000014,1.2748570000003383
+42106831377/base,8feab6ea3,open issues + documents,visible document update,100,manual,synced,2,47.29225299999962,1.2738859999999477
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,optimistic,0,1.96846000000005,0.07489299999997456
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,optimistic,1,1.0379910000001473,0.07391099999949802
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,optimistic,2,1.6718839999994088,0.07049600000027567
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,optimistic,0,1.021136000000297,0.057295999999951164
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,optimistic,1,1.1548259999999573,0.05587400000058551
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,optimistic,2,1.0403949999999895,0.05571400000007998
+42106831377/base,8feab6ea3,list + author,visible author update,100,manual,optimistic,0,3.352861999999732,0.09609400000044843
+42106831377/base,8feab6ea3,list + author,visible author update,100,manual,optimistic,1,8.436585999999807,0.09494300000005751
+42106831377/base,8feab6ea3,list + author,visible author update,100,manual,optimistic,2,3.264208000000508,0.09623400000054971
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,optimistic,0,3.1884939999999915,0.14576899999974557
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,optimistic,1,3.1608930000002147,0.15267000000039843
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,optimistic,2,3.907876000000215,0.14903400000002875
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,0,4.309659999999894,0.09450199999992037
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,1,4.945195999999669,0.09226900000066962
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,2,4.24747699999989,0.09098700000049575
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,optimistic,0,0.5333220000002257,0.07890899999983958
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,optimistic,1,0.43578600000000733,0.07936900000004243
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,optimistic,2,0.39655599999969127,0.07813699999951496
+42106831377/base,8feab6ea3,open issues + documents,visible document update,100,manual,optimistic,0,48.13106500000049,1.6652140000005602
+42106831377/base,8feab6ea3,open issues + documents,visible document update,100,manual,optimistic,1,49.843159000000014,1.6732360000005428
+42106831377/base,8feab6ea3,open issues + documents,visible document update,100,manual,optimistic,2,48.20314299999973,1.6897209999997358
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,synced,0,7.933199000000059,0.05400099999951635
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,synced,1,7.680699000000459,0.05146799999965879
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,synced,2,25.88512399999945,0.12179400000059104
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,synced,0,5.911599000000024,0.7293770000005679
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,synced,1,6.411300000000665,0.7237089999998716
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,synced,2,4.738895999999841,0.7171279999993203
+42106831377/base,8feab6ea3,list + author,visible author update,1000,none,synced,0,24.425828999999794,0.07458300000052986
+42106831377/base,8feab6ea3,list + author,visible author update,1000,none,synced,1,23.809148999999707,0.07302900000013324
+42106831377/base,8feab6ea3,list + author,visible author update,1000,none,synced,2,28.69963100000041,0.07249900000078924
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,synced,0,7.586683999999877,0.1540020000002187
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,synced,1,16.560692999999446,0.15509299999939685
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,synced,2,7.754966999999851,0.15337999999974272
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,synced,0,8.356080999999904,0.0981179999998858
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,synced,1,8.428829999999834,0.0989689999996699
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,synced,2,9.8845280000005,0.09722599999986414
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,synced,0,1.4290080000000671,0.07517300000017713
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,synced,1,1.254666000000725,0.07411099999990256
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,synced,2,1.270249999999578,0.07334100000025501
+42106831377/base,8feab6ea3,open issues + documents,visible document update,1000,none,synced,0,474.55404499999986,1.2919020000008459
+42106831377/base,8feab6ea3,open issues + documents,visible document update,1000,none,synced,1,479.36679900000127,1.2996939999993629
+42106831377/base,8feab6ea3,open issues + documents,visible document update,1000,none,synced,2,464.99177099999906,1.2857829999993555
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,optimistic,0,12.477044999999634,0.06809200000134297
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,optimistic,1,4.961067000000185,0.06811199999901874
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,optimistic,2,4.826175000000148,0.06771200000002864
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,optimistic,0,5.220186000000467,0.048122000000148546
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,optimistic,1,4.844252000000779,0.04806300000018382
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,optimistic,2,4.912134000000151,0.04751100000066799
+42106831377/base,8feab6ea3,list + author,visible author update,1000,none,optimistic,0,23.53963400000066,0.09217899999930523
+42106831377/base,8feab6ea3,list + author,visible author update,1000,none,optimistic,1,24.02071700000124,0.09179800000129035
+42106831377/base,8feab6ea3,list + author,visible author update,1000,none,optimistic,2,24.620458999999755,0.09167799999886483
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,optimistic,0,8.471143000000666,0.13759700000082375
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,optimistic,1,9.203843999999663,0.13508299999921292
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,optimistic,2,8.600226999998995,0.13570400000025984
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,0,18.528951999998753,0.07733700000062527
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,1,18.092325999999957,0.07896900000014284
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,2,21.850225000000137,0.09167799999886483
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,optimistic,0,1.5317419999992126,0.07302999999956228
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,optimistic,1,1.58868799999982,0.07006499999988591
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,optimistic,2,1.437221000000136,0.06855299999915587
+42106831377/base,8feab6ea3,open issues + documents,visible document update,1000,none,optimistic,0,464.27269999999953,1.6698800000012852
+42106831377/base,8feab6ea3,open issues + documents,visible document update,1000,none,optimistic,1,486.17444200000136,1.6572009999999864
+42106831377/base,8feab6ea3,open issues + documents,visible document update,1000,none,optimistic,2,461.84790599999906,1.6650829999998678
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,synced,0,1.427746000001207,0.05376000000069325
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,synced,1,1.166111999998975,0.05383099999926344
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,synced,2,1.1433589999996912,0.054072000000815024
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,synced,0,1.1346659999999247,0.2186490000003687
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,synced,1,1.131930999999895,0.20180400000026566
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,synced,2,1.1298989999995683,0.20161299999926996
+42106831377/base,8feab6ea3,list + author,visible author update,1000,manual,synced,0,4.225211000000854,0.07560399999965739
+42106831377/base,8feab6ea3,list + author,visible author update,1000,manual,synced,1,13.013151000001017,0.07498299999861047
+42106831377/base,8feab6ea3,list + author,visible author update,1000,manual,synced,2,3.7039069999991625,0.0763440000009723
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,synced,0,3.449555999999575,0.16556900000068708
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,synced,1,3.312579999999798,0.1671409999999014
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,synced,2,6.046578999999838,0.1778279999998631
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,synced,0,5.18459299999995,0.11067699999875913
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,synced,1,4.633796000000075,0.10888299999896844
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,synced,2,4.832925000000614,0.11059600000044156
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,synced,0,0.5520400000004884,0.07331100000010338
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,synced,1,0.5216449999988981,0.07283900000038557
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,synced,2,0.5301569999992353,0.07229900000129419
+42106831377/base,8feab6ea3,open issues + documents,visible document update,1000,manual,synced,0,482.76436699999977,1.2993829999995796
+42106831377/base,8feab6ea3,open issues + documents,visible document update,1000,manual,synced,1,461.0987690000002,1.2727740000009362
+42106831377/base,8feab6ea3,open issues + documents,visible document update,1000,manual,synced,2,479.15155400000003,1.303780000000188
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,optimistic,0,1.3206050000007963,0.07004500000039116
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,optimistic,1,1.1029880000005505,0.07047499999862339
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,optimistic,2,1.085440999999264,0.0703350000003411
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,optimistic,0,1.400564999999915,0.06924400000025344
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,optimistic,1,1.0978399999985413,0.05453200000192737
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,optimistic,2,1.064089999999851,0.0538909999995667
+42106831377/base,8feab6ea3,list + author,visible author update,1000,manual,optimistic,0,3.3366839999980584,0.09209799999734969
+42106831377/base,8feab6ea3,list + author,visible author update,1000,manual,optimistic,1,4.263528000003134,0.09143699999913224
+42106831377/base,8feab6ea3,list + author,visible author update,1000,manual,optimistic,2,4.11521399999765,0.09202900000309455
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,optimistic,0,3.174841000000015,0.14631999999983236
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,optimistic,1,5.573164999997971,0.1551629999994475
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,optimistic,2,3.3544309999997495,0.15521300000182237
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,0,4.909207999997307,0.09309999999823049
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,1,4.88628400000016,0.092279000000417
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,2,4.514203999999154,0.09262999999918975
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,optimistic,0,0.5562659999995958,0.08187299999917741
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,optimistic,1,0.515994999997929,0.0800310000013269
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,optimistic,2,0.6042379999998957,0.07778700000199024
+42106831377/base,8feab6ea3,open issues + documents,visible document update,1000,manual,optimistic,0,489.2206069999993,1.6718919999984792
+42106831377/base,8feab6ea3,open issues + documents,visible document update,1000,manual,optimistic,1,459.6593009999997,1.6736950000013167
+42106831377/base,8feab6ea3,open issues + documents,visible document update,1000,manual,optimistic,2,465.5822420000004,1.6620380000022124
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,synced,0,76.54564000000028,0.06312500000058208
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,synced,1,62.7330409999995,0.062033999998675426
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,synced,2,57.61903499999971,0.06119199999739067
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,synced,0,69.661755000001,8.609388999997464
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,synced,1,56.33890199999951,7.8973189999996976
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,synced,2,62.716606000001775,7.617872999999236
+42106831377/base,8feab6ea3,list + author,visible author update,10000,none,synced,0,271.12578700000086,0.08586899999863817
+42106831377/base,8feab6ea3,list + author,visible author update,10000,none,synced,1,282.3582049999968,0.0842659999980242
+42106831377/base,8feab6ea3,list + author,visible author update,10000,none,synced,2,285.3496530000011,0.08511800000269432
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,synced,0,63.964122000001225,0.1626749999995809
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,synced,1,66.45995499999844,0.1632050000007439
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,synced,2,79.50000100000034,0.16358599999875878
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,synced,0,74.71068000000014,0.10422699999980978
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,synced,1,83.56730600000083,0.10864399999991292
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,synced,2,71.36593100000027,0.1079619999982242
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,synced,0,5.7935200000029,0.07434199999988778
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,synced,1,11.338027000001603,0.07800800000040908
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,synced,2,5.569013000000268,0.07737600000109524
+42106831377/base,8feab6ea3,open issues + documents,visible document update,10000,none,synced,0,4673.429402999998,1.2844620000032592
+42106831377/base,8feab6ea3,open issues + documents,visible document update,10000,none,synced,1,4680.1160390000005,1.27316399999836
+42106831377/base,8feab6ea3,open issues + documents,visible document update,10000,none,synced,2,4665.963698,1.2822879999948782
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,optimistic,0,59.920309000001,0.06946400000015274
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,optimistic,1,69.60558399999718,0.07467200000246521
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,optimistic,2,48.57327699999587,0.07197799999994459
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,optimistic,0,48.65827499999432,0.05351099999825237
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,optimistic,1,47.86482199999591,0.09255899999698158
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,optimistic,2,61.691312000002654,0.05593400000361726
+42106831377/base,8feab6ea3,list + author,visible author update,10000,none,optimistic,0,273.6583989999999,0.10035100000095554
+42106831377/base,8feab6ea3,list + author,visible author update,10000,none,optimistic,1,264.33035300000483,0.09863799999584444
+42106831377/base,8feab6ea3,list + author,visible author update,10000,none,optimistic,2,264.72558800000115,0.0970759999981965
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,optimistic,0,69.5422980000003,0.1746530000018538
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,optimistic,1,81.20219999999972,0.17769700000644661
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,optimistic,2,62.19145199999912,0.17561399999976857
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,0,65.07238900000084,0.08428699999785749
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,1,63.03689499999746,0.08435699999972712
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,2,76.48362700000143,0.0868209999971441
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,optimistic,0,4.644932000002882,0.08360600000014529
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,optimistic,1,8.074195000001055,0.0861090000034892
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,optimistic,2,5.678248000003805,0.08401600000070175
+42106831377/base,8feab6ea3,open issues + documents,visible document update,10000,none,optimistic,0,4667.408601999996,1.6205300000001444
+42106831377/base,8feab6ea3,open issues + documents,visible document update,10000,none,optimistic,1,4678.327268000001,1.6450340000010328
+42106831377/base,8feab6ea3,open issues + documents,visible document update,10000,none,optimistic,2,4678.001427000003,1.6276230000003125
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,synced,0,2.680678999997326,0.06340699999418575
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,synced,1,1.820386999999755,0.0629659999976866
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,synced,2,2.1794780000054743,0.06213299999944866
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,synced,0,1.927438999991864,1.1290289999888046
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,synced,1,1.908491000009235,0.7887870000122348
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,synced,2,1.7291209999966668,0.7841389999957755
+42106831377/base,8feab6ea3,list + author,visible author update,10000,manual,synced,0,5.405280999999377,0.08528899999510031
+42106831377/base,8feab6ea3,list + author,visible author update,10000,manual,synced,1,4.041148999996949,0.08487700000114273
+42106831377/base,8feab6ea3,list + author,visible author update,10000,manual,synced,2,4.1106739999959245,0.08426699999836273
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,synced,0,6.163753000000725,0.17553399999451358
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,synced,1,6.016029999998864,0.17595499999879394
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,synced,2,4.107058999987203,0.17144800000824034
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,synced,0,4.914583000005223,0.11355100000218954
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,synced,1,4.976095999998506,0.11383099999511614
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,synced,2,7.61362299999746,0.11818799999309704
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,synced,0,0.5993410000082804,0.08055099999182858
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,synced,1,0.5886350000073435,0.08021000000007916
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,synced,2,0.6313499999960186,0.07858800000394695
+42106831377/base,8feab6ea3,open issues + documents,visible document update,10000,manual,synced,0,4709.812893000009,1.2828750000044238
+42106831377/base,8feab6ea3,open issues + documents,visible document update,10000,manual,synced,1,4644.977142999996,1.304787999994005
+42106831377/base,8feab6ea3,open issues + documents,visible document update,10000,manual,synced,2,4619.364067000002,1.2748419999988982
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,optimistic,0,2.7899969999998575,0.07758700000704266
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,optimistic,1,1.7558480000006966,0.07480200000281911
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,optimistic,2,1.7252010000083828,0.07286000000021886
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,optimistic,0,2.55562299999292,0.0614730000088457
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,optimistic,1,3.0846400000009453,0.06322600001294632
+42106831377/base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,optimistic,2,1.740484000009019,0.06155300000682473
+42106831377/base,8feab6ea3,list + author,visible author update,10000,manual,optimistic,0,5.57391400000779,0.09943999999086373
+42106831377/base,8feab6ea3,list + author,visible author update,10000,manual,optimistic,1,6.31602300000668,0.09943000000203028
+42106831377/base,8feab6ea3,list + author,visible author update,10000,manual,optimistic,2,4.070558000006713,0.0997499999939464
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,optimistic,0,4.020180999999866,0.18601000000489876
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,optimistic,1,7.187867000000551,0.3400929999916116
+42106831377/base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,optimistic,2,4.40050400000473,0.18319599999813363
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,0,4.716041000006953,0.09449299999687355
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,1,5.048061000008602,0.09552399998938199
+42106831377/base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,2,4.706236000012723,0.09954999999899883
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,optimistic,0,0.6381019999971613,0.08527900000626687
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,optimistic,1,0.5946460000122897,0.08617999999842141
+42106831377/base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,optimistic,2,0.5603049999917857,0.08545899999444373
+42106831377/base,8feab6ea3,open issues + documents,visible document update,10000,manual,optimistic,0,4685.2904969999945,1.6047300000063842
+42106831377/base,8feab6ea3,open issues + documents,visible document update,10000,manual,optimistic,1,4548.036898000006,1.6205249999911757
+42106831377/base,8feab6ea3,open issues + documents,visible document update,10000,manual,optimistic,2,4648.863641999997,1.632512999989558
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,100,none,synced,0,11.198237999999947,0.18236300000000938
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,100,none,synced,1,3.1536969999999656,0.14277400000003126
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,100,none,synced,2,2.2071300000000065,0.11621400000001358
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,100,none,synced,0,1.6334419999999454,0.3596669999999449
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,100,none,synced,1,1.049859999999967,0.18798099999992246
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,100,none,synced,2,1.0358889999999974,0.2505750000000262
+42106831377/candidate,729e69094,list + author,visible author update,100,none,synced,0,8.640753000000018,0.127791000000002
+42106831377/candidate,729e69094,list + author,visible author update,100,none,synced,1,4.941769999999906,0.09016499999995631
+42106831377/candidate,729e69094,list + author,visible author update,100,none,synced,2,4.690185000000042,0.12954400000000987
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,100,none,synced,0,7.976929000000041,0.2988870000000361
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,100,none,synced,1,7.02025900000001,0.18622800000002826
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,100,none,synced,2,3.244081999999935,0.1618420000000924
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,100,none,synced,0,6.549113999999918,0.13683500000001914
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,100,none,synced,1,5.572112999999945,0.16366500000003725
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,100,none,synced,2,4.852415999999948,0.10638999999991938
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,100,none,synced,0,0.9840119999998933,0.12986399999999776
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,100,none,synced,1,0.7707330000000638,0.10086100000012266
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,100,none,synced,2,0.8192549999998846,0.08190300000001116
+42106831377/candidate,729e69094,open issues + documents,visible document update,100,none,synced,0,2.6429729999999836,0.0642760000000635
+42106831377/candidate,729e69094,open issues + documents,visible document update,100,none,synced,1,2.108323000000155,0.06119199999989178
+42106831377/candidate,729e69094,open issues + documents,visible document update,100,none,synced,2,2.8347499999999854,0.1038260000000264
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,100,none,optimistic,0,1.8122599999999238,0.12850200000002587
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,100,none,optimistic,1,1.1926529999998365,0.07170700000006036
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,100,none,optimistic,2,0.9735759999998663,0.108201999999892
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,100,none,optimistic,0,1.6419160000000375,0.08289400000012392
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,100,none,optimistic,1,6.531807999999955,0.043184000000110245
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,100,none,optimistic,2,1.3322220000000016,0.042563999999856605
+42106831377/candidate,729e69094,list + author,visible author update,100,none,optimistic,0,3.6927330000000893,0.08724000000006527
+42106831377/candidate,729e69094,list + author,visible author update,100,none,optimistic,1,3.94672300000002,0.08658900000000358
+42106831377/candidate,729e69094,list + author,visible author update,100,none,optimistic,2,2.232858999999962,0.08289400000012392
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,100,none,optimistic,0,3.041308000000072,0.16280299999993986
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,100,none,optimistic,1,2.8582139999998617,0.14125200000012228
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,100,none,optimistic,2,2.349653999999873,0.139028000000053
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,100,none,optimistic,0,3.767563999999993,0.08466699999985394
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,100,none,optimistic,1,5.241469000000052,0.07988999999997759
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,100,none,optimistic,2,4.002825999999914,0.07905899999991561
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,100,none,optimistic,0,0.6044640000000072,0.07029499999998734
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,100,none,optimistic,1,0.6001080000000911,0.06861299999991388
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,100,none,optimistic,2,0.6097010000000864,0.06751099999996768
+42106831377/candidate,729e69094,open issues + documents,visible document update,100,none,optimistic,0,1.870196999999962,0.38002800000003845
+42106831377/candidate,729e69094,open issues + documents,visible document update,100,none,optimistic,1,1.8523800000000392,0.3587870000001203
+42106831377/candidate,729e69094,open issues + documents,visible document update,100,none,optimistic,2,1.6689360000000306,0.3760730000001331
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,100,manual,synced,0,2.297717000000148,0.05534199999988232
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,100,manual,synced,1,1.2024780000001556,0.05558400000018082
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,100,manual,synced,2,1.5052419999997255,0.048211999999693944
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,100,manual,synced,0,1.5913900000000467,0.24341499999991356
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,100,manual,synced,1,0.7500709999999344,0.17703500000015993
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,100,manual,synced,2,0.8036419999998543,0.1626129999999648
+42106831377/candidate,729e69094,list + author,visible author update,100,manual,synced,0,1.9386990000002697,0.11824599999999919
+42106831377/candidate,729e69094,list + author,visible author update,100,manual,synced,1,2.752986999999848,0.0812210000003688
+42106831377/candidate,729e69094,list + author,visible author update,100,manual,synced,2,1.5722110000001521,0.06295399999999063
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,100,manual,synced,0,2.361261000000013,0.13899700000001758
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,100,manual,synced,1,6.864756999999827,0.13384099999984755
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,100,manual,synced,2,1.8907970000000205,0.1493439999999282
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,100,manual,synced,0,3.236771000000317,0.0899850000000697
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,100,manual,synced,1,25.72439200000008,0.09182800000007774
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,100,manual,synced,2,3.6166079999998146,0.10462699999970937
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,100,manual,synced,0,0.8964799999998831,0.061982000000170956
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,100,manual,synced,1,0.3961519999998018,0.060561000000234344
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,100,manual,synced,2,0.5164520000002994,0.06430600000021514
+42106831377/candidate,729e69094,open issues + documents,visible document update,100,manual,synced,0,1.7198820000003252,0.05032500000015716
+42106831377/candidate,729e69094,open issues + documents,visible document update,100,manual,synced,1,2.251056999999946,0.05561299999999392
+42106831377/candidate,729e69094,open issues + documents,visible document update,100,manual,synced,2,1.5424669999997604,0.04888299999993251
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,100,manual,optimistic,0,0.6797459999997955,0.052788999999847874
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,100,manual,optimistic,1,0.8592650000000503,0.05315000000018699
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,100,manual,optimistic,2,0.6163520000000062,0.05339899999989939
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,100,manual,optimistic,0,0.6117839999997159,0.04138200000033976
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,100,manual,optimistic,1,0.7552300000002106,0.04048099999999977
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,100,manual,optimistic,2,0.7081590000002507,0.0415130000001227
+42106831377/candidate,729e69094,list + author,visible author update,100,manual,optimistic,0,2.8006789999999455,0.07764700000006997
+42106831377/candidate,729e69094,list + author,visible author update,100,manual,optimistic,1,1.6102380000002086,0.07569299999977375
+42106831377/candidate,729e69094,list + author,visible author update,100,manual,optimistic,2,1.5253520000001117,0.0759739999998601
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,100,manual,optimistic,0,1.9753539999996974,0.13051500000028682
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,100,manual,optimistic,1,1.857108000000153,0.13047499999993306
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,100,manual,optimistic,2,2.6006900000002133,0.13096500000028755
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,0,2.780909000000065,0.0771959999997307
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,1,4.428853999999774,0.08524800000031973
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,2,4.044618999999784,0.0759040000002642
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,100,manual,optimistic,0,0.44929199999978664,0.06398600000011356
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,100,manual,optimistic,1,0.38955200000009427,0.06317399999988993
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,100,manual,optimistic,2,0.361721000000216,0.06275400000004083
+42106831377/candidate,729e69094,open issues + documents,visible document update,100,manual,optimistic,0,1.2333239999998113,0.3457069999999476
+42106831377/candidate,729e69094,open issues + documents,visible document update,100,manual,optimistic,1,1.3730139999997846,0.36086900000009337
+42106831377/candidate,729e69094,open issues + documents,visible document update,100,manual,optimistic,2,1.3009649999999056,0.3603290000000925
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,1000,none,synced,0,15.275364999999965,0.037765999999919586
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,1000,none,synced,1,4.707350000000133,0.03788600000007136
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,1000,none,synced,2,5.60628399999996,0.03861800000004223
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,1000,none,synced,0,4.68793100000039,0.7167819999999665
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,1000,none,synced,1,11.166250000000218,0.7376710000003186
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,1000,none,synced,2,4.537285999999767,0.6983900000000176
+42106831377/candidate,729e69094,list + author,visible author update,1000,none,synced,0,23.338767999999618,0.06051500000012311
+42106831377/candidate,729e69094,list + author,visible author update,1000,none,synced,1,26.12337400000024,0.059614000000237866
+42106831377/candidate,729e69094,list + author,visible author update,1000,none,synced,2,31.159766000000218,0.05738100000007762
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,1000,none,synced,0,8.978421000000253,0.1370160000001306
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,1000,none,synced,1,6.765867000000071,0.1346730000000207
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,1000,none,synced,2,6.4862960000000385,0.13286999999991167
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,1000,none,synced,0,7.319908999999825,0.08560399999987567
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,1000,none,synced,1,18.130404999999882,0.08559500000001208
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,1000,none,synced,2,8.154022000000168,0.08504399999947054
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,1000,none,synced,0,1.073421000000053,0.05937400000038906
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,1000,none,synced,1,1.5411770000000615,0.15466300000025512
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,1000,none,synced,2,1.078378999999586,0.06062500000007276
+42106831377/candidate,729e69094,open issues + documents,visible document update,1000,none,synced,0,11.668939000000137,0.04698400000052061
+42106831377/candidate,729e69094,open issues + documents,visible document update,1000,none,synced,1,11.117839999999887,0.046903999999813095
+42106831377/candidate,729e69094,open issues + documents,visible document update,1000,none,synced,2,10.537104999999428,0.04715399999986403
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,1000,none,optimistic,0,4.56888600000002,0.050590000000738655
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,1000,none,optimistic,1,4.332413000000088,0.05032900000060181
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,1000,none,optimistic,2,4.412540000000263,0.05156100000021979
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,1000,none,optimistic,0,4.383082999999715,0.035996999999952095
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,1000,none,optimistic,1,4.382362000000285,0.03419399999984307
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,1000,none,optimistic,2,4.564104000000043,0.0343219999995199
+42106831377/candidate,729e69094,list + author,visible author update,1000,none,optimistic,0,15.937597000000096,0.07268900000053691
+42106831377/candidate,729e69094,list + author,visible author update,1000,none,optimistic,1,14.5541860000003,0.10339600000042992
+42106831377/candidate,729e69094,list + author,visible author update,1000,none,optimistic,2,22.82788900000014,0.07952000000022963
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,1000,none,optimistic,0,14.805505000000267,0.13456200000018725
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,1000,none,optimistic,1,19.699913999999808,0.12958500000058848
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,1000,none,optimistic,2,17.413125999999465,0.13637500000004366
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,0,17.664974000000257,0.077436000000489
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,1,19.02948699999979,0.08143199999994977
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,2,16.935918999999558,0.07617499999923893
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,1000,none,optimistic,0,0.9354360000006636,0.0706159999999727
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,1000,none,optimistic,1,0.9213950000003024,0.06954399999995076
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,1000,none,optimistic,2,0.9937740000004851,0.0724289999998291
+42106831377/candidate,729e69094,open issues + documents,visible document update,1000,none,optimistic,0,13.324928,0.3501859999996668
+42106831377/candidate,729e69094,open issues + documents,visible document update,1000,none,optimistic,1,14.450511000000006,0.3533610000004046
+42106831377/candidate,729e69094,open issues + documents,visible document update,1000,none,optimistic,2,11.641806999999972,0.3638470000005327
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,1000,manual,synced,0,1.2731149999999616,0.043655999999828055
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,1000,manual,synced,1,0.837348999999449,0.0449479999997493
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,1000,manual,synced,2,0.8344850000003134,0.043756000000030326
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,1000,manual,synced,0,0.7894470000001093,0.20932499999980791
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,1000,manual,synced,1,0.8620160000000396,0.19388199999957578
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,1000,manual,synced,2,0.8465830000004644,0.1870810000000347
+42106831377/candidate,729e69094,list + author,visible author update,1000,manual,synced,0,1.8527359999998225,0.062343000000510074
+42106831377/candidate,729e69094,list + author,visible author update,1000,manual,synced,1,1.7079690000000483,0.06019100000048638
+42106831377/candidate,729e69094,list + author,visible author update,1000,manual,synced,2,1.7667869999995673,0.061882999999397725
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,1000,manual,synced,0,4.774099000000206,0.1474420000004102
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,1000,manual,synced,1,2.3009899999997288,0.14492799999970885
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,1000,manual,synced,2,2.2094420000003083,0.14555899999959365
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,1000,manual,synced,0,3.6107199999996737,0.09831800000029034
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,1000,manual,synced,1,3.103896999999961,0.10129299999971408
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,1000,manual,synced,2,3.160932999999204,0.09777699999995093
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,1000,manual,synced,0,0.49612600000000384,0.06798299999991286
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,1000,manual,synced,1,0.3975080000000162,0.06649000000015803
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,1000,manual,synced,2,0.4570080000003145,0.06656000000020867
+42106831377/candidate,729e69094,open issues + documents,visible document update,1000,manual,synced,0,11.786314999999377,0.05024600000069768
+42106831377/candidate,729e69094,open issues + documents,visible document update,1000,manual,synced,1,11.102657000000363,0.049964999999247084
+42106831377/candidate,729e69094,open issues + documents,visible document update,1000,manual,synced,2,13.657748000000538,0.05421200000000681
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,1000,manual,optimistic,0,1.2405959999996412,0.05759699999998702
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,1000,manual,optimistic,1,0.8006139999997686,0.05730600000060804
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,1000,manual,optimistic,2,0.9563879999996061,0.055953999999474036
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,1000,manual,optimistic,0,1.0567790000004607,0.04349499999989348
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,1000,manual,optimistic,1,0.8236389999992753,0.04279399999995803
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,1000,manual,optimistic,2,0.7608739999996033,0.04255399999965448
+42106831377/candidate,729e69094,list + author,visible author update,1000,manual,optimistic,0,1.7372829999994792,0.07765699999981734
+42106831377/candidate,729e69094,list + author,visible author update,1000,manual,optimistic,1,1.7758309999999256,0.07507299999997485
+42106831377/candidate,729e69094,list + author,visible author update,1000,manual,optimistic,2,12.08713699999953,0.07447199999933218
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,1000,manual,optimistic,0,2.359838999999738,0.1789490000001024
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,1000,manual,optimistic,1,2.37557199999992,0.1365060000007361
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,1000,manual,optimistic,2,2.119177000000491,0.13496300000042538
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,0,3.2048290000002453,0.0931799999998475
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,1,3.2206829999995534,0.08282499999950232
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,2,3.1007330000002185,0.08371600000009494
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,1000,manual,optimistic,0,0.44932599999992817,0.07158700000036333
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,1000,manual,optimistic,1,0.4601220000004105,0.07051600000067992
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,1000,manual,optimistic,2,0.4846789999992325,0.0703350000003411
+42106831377/candidate,729e69094,open issues + documents,visible document update,1000,manual,optimistic,0,20.912358000000495,0.3417039999994813
+42106831377/candidate,729e69094,open issues + documents,visible document update,1000,manual,optimistic,1,15.103211999999985,0.3518290000001798
+42106831377/candidate,729e69094,open issues + documents,visible document update,1000,manual,optimistic,2,13.542194999999992,0.355583999999908
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,10000,none,synced,0,66.72546199999942,0.04442699999981414
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,10000,none,synced,1,74.47060899999997,0.04695099999935337
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,10000,none,synced,2,73.7252380000009,0.04734199999984412
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,10000,none,synced,0,71.72668299999896,8.107802999998967
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,10000,none,synced,1,70.68912300000011,7.632298000000446
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,10000,none,synced,2,70.23249600000054,7.7850670000007085
+42106831377/candidate,729e69094,list + author,visible author update,10000,none,synced,0,199.07845700000144,0.06482700000015029
+42106831377/candidate,729e69094,list + author,visible author update,10000,none,synced,1,185.73112700000092,0.06650000000081491
+42106831377/candidate,729e69094,list + author,visible author update,10000,none,synced,2,222.73359900000105,0.09145700000044599
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,10000,none,synced,0,58.55137800000011,0.1411630000002333
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,10000,none,synced,1,67.24752500000068,0.13873899999998685
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,10000,none,synced,2,64.48681300000135,0.13828800000010233
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,10000,none,synced,0,86.6172719999995,0.0924090000007709
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,10000,none,synced,1,74.74439799999891,0.09117700000024342
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,10000,none,synced,2,80.30802399999993,0.09235900000021502
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,10000,none,synced,0,7.260308000000805,0.07158799999888288
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,10000,none,synced,1,6.530058999998801,0.06728100000145787
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,10000,none,synced,2,5.454893000000084,0.0695850000010978
+42106831377/candidate,729e69094,open issues + documents,visible document update,10000,none,synced,0,136.62513200000103,0.05031599999711034
+42106831377/candidate,729e69094,open issues + documents,visible document update,10000,none,synced,1,144.51806200000283,0.06375599999955739
+42106831377/candidate,729e69094,open issues + documents,visible document update,10000,none,synced,2,149.26312699999835,0.05233899999802816
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,10000,none,optimistic,0,74.78108399999837,0.05858799999987241
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,10000,none,optimistic,1,67.05446499999744,0.057827000000543194
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,10000,none,optimistic,2,65.47433900000033,0.0572360000005574
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,10000,none,optimistic,0,73.64396399999896,0.0398399999976391
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,10000,none,optimistic,1,65.09966499999791,0.06103199999779463
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,10000,none,optimistic,2,61.40924599999926,0.03760600000168779
+42106831377/candidate,729e69094,list + author,visible author update,10000,none,optimistic,0,216.97601099999883,0.08121200000095996
+42106831377/candidate,729e69094,list + author,visible author update,10000,none,optimistic,1,193.5165100000013,0.08138200000030338
+42106831377/candidate,729e69094,list + author,visible author update,10000,none,optimistic,2,192.68312700000024,0.07975900000019465
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,10000,none,optimistic,0,80.33281799999895,0.15170800000123563
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,10000,none,optimistic,1,67.4927110000026,0.14979499999753898
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,10000,none,optimistic,2,74.06407200000103,0.158768000001146
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,0,66.38836100000117,0.07955999999830965
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,1,88.74555700000201,0.08698100000037812
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,2,66.13237600000139,0.07981999999901745
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,10000,none,optimistic,0,5.75170799999978,0.07566299999962212
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,10000,none,optimistic,1,7.455720999998448,0.0784879999991972
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,10000,none,optimistic,2,4.892026000001351,0.07518299999719602
+42106831377/candidate,729e69094,open issues + documents,visible document update,10000,none,optimistic,0,148.86954900000273,0.3683640000017476
+42106831377/candidate,729e69094,open issues + documents,visible document update,10000,none,optimistic,1,149.8219620000018,0.356937000000471
+42106831377/candidate,729e69094,open issues + documents,visible document update,10000,none,optimistic,2,124.75498099999822,0.3550040000009176
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,10000,manual,synced,0,1.8168420000001788,0.04419600000255741
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,10000,manual,synced,1,2.3552420000014536,0.08833299999969313
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,10000,manual,synced,2,1.8333760000023176,0.04822199999762233
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,10000,manual,synced,0,1.998554999998305,0.7777090000017779
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,10000,manual,synced,1,2.427589999999327,0.7631670000009763
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,10000,manual,synced,2,1.4235499999995227,0.7648000000008324
+42106831377/candidate,729e69094,list + author,visible author update,10000,manual,synced,0,3.9471249999987776,0.06648000000132015
+42106831377/candidate,729e69094,list + author,visible author update,10000,manual,synced,1,4.661317999998573,0.0678619999998773
+42106831377/candidate,729e69094,list + author,visible author update,10000,manual,synced,2,2.457254999997531,0.06761200000255485
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,10000,manual,synced,0,4.524442999998428,0.15314000000216765
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,10000,manual,synced,1,2.904646999999386,0.15103699999963283
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,10000,manual,synced,2,2.976646000002802,0.1488839999983611
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,10000,manual,synced,0,3.8055620000013732,0.10299500000110129
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,10000,manual,synced,1,5.898498999998992,0.10342599999785307
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,10000,manual,synced,2,3.80467100000169,0.10162299999865354
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,10000,manual,synced,0,0.664228000001458,0.06976500000018859
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,10000,manual,synced,1,0.5578580000001239,0.07106700000076671
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,10000,manual,synced,2,0.6571989999974903,0.07696600000053877
+42106831377/candidate,729e69094,open issues + documents,visible document update,10000,manual,synced,0,136.1121920000005,0.05260899999848334
+42106831377/candidate,729e69094,open issues + documents,visible document update,10000,manual,synced,1,123.73280800000066,0.0507660000002943
+42106831377/candidate,729e69094,open issues + documents,visible document update,10000,manual,synced,2,137.5590970000012,0.0619829999996
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,10000,manual,optimistic,0,1.903521999996883,0.056534999999712454
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,10000,manual,optimistic,1,1.4298300000009476,0.05658499999844935
+42106831377/candidate,729e69094,list: newest 50 open,visible issue update,10000,manual,optimistic,2,18.73158500000136,0.05741699999998673
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,10000,manual,optimistic,0,2.6120169999994687,0.046559999995224643
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,10000,manual,optimistic,1,1.408188000001246,0.04656999999861
+42106831377/candidate,729e69094,list: newest 50 open,visible issue delete,10000,manual,optimistic,2,1.4263449999998556,0.04542899999796646
+42106831377/candidate,729e69094,list + author,visible author update,10000,manual,optimistic,0,22.0953640000007,0.07794700000522425
+42106831377/candidate,729e69094,list + author,visible author update,10000,manual,optimistic,1,2.430335000004561,0.0759440000038012
+42106831377/candidate,729e69094,list + author,visible author update,10000,manual,optimistic,2,2.2971639999959734,0.07655499999964377
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,10000,manual,optimistic,0,3.059570999997959,0.15824799999973038
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,10000,manual,optimistic,1,4.981419999996433,0.16603999999642838
+42106831377/candidate,729e69094,list + comment count,visible issue comment insert,10000,manual,optimistic,2,3.126970999997866,0.16318500000488712
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,0,3.8628979999994044,0.08964500000001863
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,1,3.70920599999954,0.08514799999829847
+42106831377/candidate,729e69094,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,2,6.643998999999894,0.0888929999928223
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,10000,manual,optimistic,0,0.8214950000037788,0.15160800000012387
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,10000,manual,optimistic,1,0.5692350000026636,0.0812420000002021
+42106831377/candidate,729e69094,issue detail + comments,selected issue comment insert,10000,manual,optimistic,2,0.5458909999942989,0.08058099999470869
+42106831377/candidate,729e69094,open issues + documents,visible document update,10000,manual,optimistic,0,134.2546300000031,0.35645600000134436
+42106831377/candidate,729e69094,open issues + documents,visible document update,10000,manual,optimistic,1,123.0447159999967,0.3568169999998645
+42106831377/candidate,729e69094,open issues + documents,visible document update,10000,manual,optimistic,2,243.50390499999776,0.3487139999997453
