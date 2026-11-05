@@ -82,6 +82,44 @@ Report each one as a finding:
   fix, a coverage-map record, or a maintainer decision.
 - A closure claim without a mutant that fails the oracle.
 
+Lint, reach checks, coverage, and calibrations cannot see the weaknesses
+below. Treat them as your main job, and hunt for each one in the oracle under
+review, not only in the diff:
+
+- **Run but not checked.** A history executes the code, but the comparison
+  never observes its effect. Coverage and declared reach both pass. Find a
+  line the oracle claims, and name the mutant on it that would survive.
+- **A model that copies production.** The model mirrors production's branches,
+  classifications, or helpers, so both agree on the same wrong answer. Compare
+  the model's structure with production, not only its results.
+- **A grammar narrower than the law.** The law's prose claims a value domain,
+  action, or case that the grammar never generates. Examples are a type the
+  generator never produces, an exclusion stated in prose but missing from the
+  declared limits, and a size or length setting that makes part of the
+  declared range unreachable. Check each claim in the law against a generator
+  dimension.
+- **Easy declared states and probes.** A declared state or probe is placed
+  where it is always true, or is defined by a weaker condition than the state
+  it names. Its count rises without showing that histories enter the
+  interesting state. Check each definition against the state that the law
+  needs.
+- **A late or coarse checkpoint.** The comparison runs only at the end of a
+  history or observes only a summary, so a wrong intermediate observation
+  disappears. Ask whether a user could see the wrong value before the
+  checkpoint.
+- **A limit that hides in-scope work.** A declared limit, waiver, or
+  coverage-map entry excludes a legal case that the law promises. Check that
+  each limit's decision covers exactly what it excludes.
+- **A dismissed survivor.** A surviving mutant is called equivalent or out of
+  scope without an argument from the contract. Require that argument, or a
+  witness.
+- **An invariant guard without an invariant witness.** A throw for a
+  contradictory collaborator signal or impossible state has no history that
+  reaches it. Require an invariant witness: a fault-injected step that supplies
+  the contradictory signal, with the expected observation that production
+  fails at the boundary before it releases established state or publishes
+  success.
+
 Report supported findings and remaining uncertainty. Do not invent findings,
 retire laws, or rewrite expectations to make a review come out decisive.
 
