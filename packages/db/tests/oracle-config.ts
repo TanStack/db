@@ -59,6 +59,7 @@ const staticOracleProperties = [
   `react.window-render`,
   `preact.window-render`,
   `lint.part-reach`,
+  `lint.probe-form`,
   `oracle.declared-reach`,
   `scripts.lint-scope`,
   `scripts.run-budget`,
@@ -162,6 +163,9 @@ const staticOracleProperties = [
   `electric.valid-batch-partition`,
   `ivm.index-refinement`,
   `offline.key-scheduler-fifo-ledger`,
+  `scripts.gap-report`,
+  `scripts.gap-report-static`,
+  `scripts.gap-report-classify`,
   `offline.interruption-settlement`,
   `offline.fifo-retry`,
   `offline.leadership.serial-work`,
@@ -811,6 +815,17 @@ function randomParameters<TExample>(
           replayProperty: undefined,
         }
   const selectedSeed = oracleCampaignSeed(campaignSeed, property)
+  // These are a random campaign's parameters; a path replay runs one
+  // recorded history. The gap report reads the route only from a test that
+  // builds its parameters while it runs, so a campaign whose parameters are
+  // built when its file loads keeps an unknown route.
+  globalThis.__oracleRoute?.(
+    property !== undefined &&
+      replayPath !== undefined &&
+      replayProperty === property
+      ? `fixed history`
+      : `random seed`,
+  )
   const parameters: OracleRunParameters =
     campaignSeed === undefined
       ? { numRuns, seed: selectedSeed }

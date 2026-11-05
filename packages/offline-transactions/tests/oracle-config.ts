@@ -47,5 +47,9 @@ export function oracleCampaignOptions(
   seed: number | undefined,
 ):
   ReturnType<typeof oraclePropertyOptions> | { numRuns: number; seed: number } {
+  // A fixed seed is a reproducible route for the gap report. The random
+  // campaign's options registered its route when they were built, which
+  // happened when the file loaded, so it registers again here, in the test.
+  globalThis.__oracleRoute?.(seed === undefined ? `random seed` : `fixed seed`)
   return seed === undefined ? config.random : { numRuns: config.runs, seed }
 }

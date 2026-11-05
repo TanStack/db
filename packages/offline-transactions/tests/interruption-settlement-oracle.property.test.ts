@@ -9,6 +9,7 @@ import {
   violation,
   withinTurns,
 } from '../../db/tests/oracle-property'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import {
   captureUnhandledRejections,
@@ -17,6 +18,16 @@ import {
 import type { Observation } from '../../db/tests/oracle-property'
 import type { OnlineDetector } from '../src/types'
 import type { TestItem } from './harness'
+
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
+})
 
 /**
  * # Does an interruption at any point keep each offline transaction's

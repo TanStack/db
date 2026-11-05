@@ -10,9 +10,19 @@ import {
   pass,
   violation,
 } from '../../db/tests/oracle-property'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { FakeStorageAdapter } from './harness'
 import type { Observation } from '../../db/tests/oracle-property'
 import type { OfflineTransaction } from '../src/types'
+
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [
+    `src/executor/TransactionExecutor.ts#TransactionExecutor.executeAll`,
+    `src/executor/TransactionExecutor.ts#TransactionExecutor.clear`,
+  ],
+})
 
 /**
  * # Why does a ready transaction wait, and what stops the queue?
@@ -64,6 +74,20 @@ import type { OfflineTransaction } from '../src/types'
  * over fake storage that fails as planned, with a controlled virtual clock
  * and jitter off. It records provider calls, the outbox, and each caller's
  * settlement at each checkpoint.
+ *
+ * Reach comes from what production did, never from the grammar's labels. The
+ * four states that the model can predict from the plans are state probes
+ * (glossary: state probe): production marks each one where its branch runs,
+ * `predict` says from the plans alone whether a history enters it, and reach
+ * agreement checks the two in every history. They are `retry before a queued
+ * peer` (a retriable failure while a transaction waits behind it),
+ * `permanent failure before a peer` (a non-retriable failure with a row
+ * behind it), `phase write fault` (the deletion-pending marker write fails),
+ * and `fault before a queued peer` (a storage fault stops the executor with a
+ * row behind it). `deletion fault` is reported by the storage fake when it
+ * rejects the removal that the executor issued: production reached the
+ * removal and the storage refused it. `retried head` and `retried tail` are
+ * measured only: the driver reports each provider call that fails retriably.
  *
  * Limits: an online executor with one mutation function; no leadership
  * changes, no `shouldRetry` or `beforeRetry` hooks, no storage fault on a
@@ -182,35 +206,37 @@ function fifoModel(history: History) {
   ])
 }
 
-// Reach: which fault paths a history takes, from its plans.
-const states = [
-  `retried head`,
-  `retried tail`,
-  `permanent failure before a peer`,
-  `phase write fault`,
-  `deletion fault`,
-  `fault before a queued peer`,
-] as const
-function reachedBy({ plans }: History): Array<string> {
-  const reached: Array<string> = []
+// States. A probe-bound state is predicted by `predictedStates` and marked by
+// a production probe; the other two are reported by the driver.
+const retryBeforePeer = `retry before a queued peer`
+const permanentBeforePeer = `permanent failure before a peer`
+const phaseWriteFault = `phase write fault`
+const faultBeforePeer = `fault before a queued peer`
+const deletionFault = `deletion fault`
+const measuredStates = [`retried head`, `retried tail`] as const
+
+/**
+ * Which probe-bound states a history enters, from its plans alone. The
+ * executor plays the plans in order and stops at the first storage fault
+ * (`stop`), so only the plans up to it run. A plan at `index` has a queued
+ * peer when `index < last`: the rows behind it are still waiting.
+ */
+function predictedStates({ plans }: History): Record<string, boolean> {
+  const last = plans.length - 1
   const stop = plans.findIndex(
     (entry) => entry.final === `success` && entry.storageFault !== `none`,
   )
   const played = stop < 0 ? plans : plans.slice(0, stop + 1)
-  if (played[0]!.failures > 0) reached.push(`retried head`)
-  if (played.slice(1).some((entry) => entry.failures > 0))
-    reached.push(`retried tail`)
-  if (played.slice(0, -1).some((entry) => entry.final === `permanent`))
-    reached.push(`permanent failure before a peer`)
-  if (stop >= 0) {
-    reached.push(
-      plans[stop]!.storageFault === `phase`
-        ? `phase write fault`
-        : `deletion fault`,
-    )
-    if (stop < plans.length - 1) reached.push(`fault before a queued peer`)
+  return {
+    [retryBeforePeer]: played.some(
+      (entry, index) => entry.failures > 0 && index < last,
+    ),
+    [permanentBeforePeer]: played.some(
+      (entry, index) => entry.final === `permanent` && index < last,
+    ),
+    [phaseWriteFault]: stop >= 0 && plans[stop]!.storageFault === `phase`,
+    [faultBeforePeer]: stop >= 0 && stop < last,
   }
-  return reached
 }
 
 // ---------------------------------------------------------------------------
@@ -243,8 +269,10 @@ async function driveFifo(
       }
       override async delete(key: string): Promise<void> {
         const index = plans.findIndex((_, i) => key.endsWith(idOf(i)))
-        if (index >= 0 && plans[index]!.storageFault === `delete`)
+        if (index >= 0 && plans[index]!.storageFault === `delete`) {
+          observe(`reach`, deletionFault)
           throw new Error(storageFailure(index))
+        }
         return super.delete(key)
       }
     })()
@@ -270,8 +298,10 @@ async function driveFifo(
             // An attempt the plan does not have never settles, so a runaway
             // executor stops at its first extra call, which the trace shows.
             if (attempt > failures) return new Promise<void>(() => {})
-            if (attempt < failures)
+            if (attempt < failures) {
+              observe(`reach`, index === 0 ? `retried head` : `retried tail`)
               return Promise.reject(new Error(retriable(index, attempt)))
+            }
             if (final === `permanent`)
               return Promise.reject(new NonRetriableError(permanent(index)))
             return Promise.resolve()
@@ -415,25 +445,76 @@ oracleProperty({
   },
   histories: {
     arbitrary: fifoHistory,
-    states: [`phase write fault`, `fault before a queued peer`],
-    measured: states.filter(
-      (state) =>
-        state !== `phase write fault` && state !== `fault before a queued peer`,
-    ),
+    states: [
+      {
+        name: retryBeforePeer,
+        probe: `offline-transactions#retry-before-peer`,
+      },
+      {
+        name: permanentBeforePeer,
+        probe: `offline-transactions#permanent-failure-before-peer`,
+      },
+      {
+        name: phaseWriteFault,
+        probe: `offline-transactions#phase-write-fault`,
+      },
+      {
+        name: faultBeforePeer,
+        probe: `offline-transactions#fault-before-peer`,
+      },
+      deletionFault,
+    ],
+    measured: measuredStates,
     runs: 60,
     fixedSeeds: [20260916],
-    // A storage fault in the middle of the queue: the stop law needs a peer
-    // behind the fault.
+    // Each required state gets a history with a queued peer behind the event:
+    // the laws need a peer that waits, runs, or stays in the outbox.
     constructed: [
       {
         name: `a phase write fault before a queued peer`,
-        enters: [`phase write fault`, `fault before a queued peer`],
+        enters: [phaseWriteFault, faultBeforePeer],
         build: (generated: History): History => ({
           delay: generated.delay,
           plans: [
             { ...ok },
             { failures: 0, final: `success`, storageFault: `phase` },
             ...generated.plans.slice(0, 3),
+          ],
+        }),
+      },
+      {
+        name: `a deletion fault before a queued peer`,
+        enters: [deletionFault, faultBeforePeer],
+        build: (generated: History): History => ({
+          delay: generated.delay,
+          plans: [
+            { ...ok },
+            { failures: 0, final: `success`, storageFault: `delete` },
+            ...generated.plans.slice(0, 3),
+          ],
+        }),
+      },
+      {
+        name: `a retry before a queued peer`,
+        enters: [retryBeforePeer],
+        build: (generated: History): History => ({
+          delay: generated.delay,
+          plans: [
+            { failures: 1, final: `success`, storageFault: `none` },
+            { ...ok },
+            ...generated.plans.slice(0, 3),
+          ],
+        }),
+      },
+      {
+        name: `a permanent failure before a queued peer`,
+        enters: [permanentBeforePeer],
+        build: (generated: History): History => ({
+          delay: generated.delay,
+          plans: [
+            { ...ok },
+            { failures: 0, final: `permanent`, storageFault: `none` },
+            ...generated.plans.slice(0, 2),
           ],
         }),
       },
@@ -445,7 +526,7 @@ oracleProperty({
       },
       {
         name: `a retried head keeps its place`,
-        enters: [`retried head`],
+        enters: [retryBeforePeer, `retried head`],
         history: {
           delay: 500,
           plans: [
@@ -457,7 +538,7 @@ oracleProperty({
       },
       {
         name: `a permanent failure lets the queue continue`,
-        enters: [`permanent failure before a peer`],
+        enters: [permanentBeforePeer],
         history: {
           delay: 10,
           plans: [
@@ -469,7 +550,7 @@ oracleProperty({
       },
       {
         name: `a failed deletion stops the queue`,
-        enters: [`deletion fault`, `fault before a queued peer`],
+        enters: [deletionFault, faultBeforePeer],
         history: {
           delay: 10,
           plans: [
@@ -481,7 +562,8 @@ oracleProperty({
     ],
   },
   model: fifoModel,
-  reached: (history) => reachedBy(history),
+  // Probe-bound states are predicted from the plans, never from the trace.
+  predict: predictedStates,
   driver: driveFifo,
   check: checkFifo,
   // Wrong answers the check must reject: a ready tail that passes the

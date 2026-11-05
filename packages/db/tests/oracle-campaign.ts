@@ -60,6 +60,12 @@ export async function runOracleCampaign<TState extends string>(
       ...campaign.parameters,
       seed: oracleCampaignSeed(campaign.parameters.seed, prefix),
     }
+    // The gap report counts a kill only on a reproducible route, so each
+    // campaign registers its own: the fixed seed and a recorded replay are
+    // reproducible, and the random campaign draws a new seed in every CI run.
+    globalThis.__oracleRoute?.(
+      campaign.name === `random` ? `random seed` : `fixed seed`,
+    )
     try {
       await run(reach, parameters)
       reach.assertReached()

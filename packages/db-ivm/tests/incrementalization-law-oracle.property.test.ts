@@ -543,7 +543,22 @@ const orderedHistory: fc.Arbitrary<Array<Weighted<Keyed>>> = fc
 
 // The grammar of legal ordered histories. Its calibration test checks that the
 // generated steps reach row promotions, which the ordered laws need.
-declareOracle({ grammar: [orderedHistory] })
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [
+    `src/operators/map.ts#map`,
+    `src/operators/filter.ts#filter`,
+    `src/operators/consolidate.ts#consolidate`,
+    `src/operators/reduce.ts#reduce`,
+    `src/operators/groupBy.ts#groupBy`,
+    `src/operators/join.ts#join`,
+    `src/operators/output.ts#output`,
+    `src/operators/orderBy.ts#orderByWithFractionalIndex`,
+    `src/operators/groupedOrderBy.ts#groupedOrderByWithFractionalIndex`,
+  ],
+  grammar: [orderedHistory],
+})
 
 function firstThree(input: Weighted<Keyed>): Weighted<Keyed> {
   return keyedIdentity(input)

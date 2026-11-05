@@ -367,7 +367,16 @@ function expectAgreement(
     expect(equal, `a shared identity: ${leftIdentity}`).toBe(true)
 }
 
-declareOracle({ check: [expectAgreement], model: [normal] })
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [
+    `src/hashing/hash.ts#structuralIdentity`,
+    `src/hashing/hash.ts#equalHashValues`,
+  ],
+  check: [expectAgreement],
+  model: [normal],
+})
 
 function decisions(...values: Array<boolean>): () => boolean {
   let index = 0

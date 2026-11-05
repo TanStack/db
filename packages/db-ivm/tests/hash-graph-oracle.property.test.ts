@@ -102,7 +102,10 @@ function expectGraphHash(
   expect(hashValue(nodes[0])).toBe(hashValue(unfoldEdges(edges, 0)))
 }
 
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 declareOracle({
+  owns: [`src/hashing/hash.ts#hash`],
   check: [expectGraphHash],
   model: [isAcyclic, unfoldEdges],
 })

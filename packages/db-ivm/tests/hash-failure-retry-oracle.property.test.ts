@@ -123,7 +123,10 @@ function expectRetryHistory(history: History): void {
   expect(reads).toEqual(afterSuccess)
 }
 
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 declareOracle({
+  owns: [`src/hashing/hash.ts#hash`],
   check: [expectRetryHistory],
   model: [expectedFailedReads, expectedSuccessReads, expectedPlainCopy],
 })

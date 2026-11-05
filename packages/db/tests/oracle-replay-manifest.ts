@@ -97,6 +97,26 @@ const ownerGroups: ReadonlyArray<
     `lint`,
     `part-reach`,
   ],
+  [
+    `../scripts/eslint-plugin-oracle/probe-form-oracle.property.test.js`,
+    `lint`,
+    `probe-form`,
+  ],
+  [
+    `../scripts/oracle-gaps/gap-report-oracle.property.test.mjs`,
+    `scripts`,
+    `gap-report`,
+  ],
+  [
+    `../scripts/oracle-gaps/gap-report-static-oracle.property.test.mjs`,
+    `scripts`,
+    `gap-report-static`,
+  ],
+  [
+    `../scripts/oracle-gaps/gap-report-classify-oracle.property.test.mjs`,
+    `scripts`,
+    `gap-report-classify`,
+  ],
   [`../scripts/run-budget-oracle.property.test.js`, `scripts`, `run-budget`],
   [`../scripts/lint-scope-oracle.property.test.js`, `scripts`, `lint-scope`],
   [

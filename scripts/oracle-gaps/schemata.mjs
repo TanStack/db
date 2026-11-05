@@ -33,29 +33,49 @@ const logical = new Map([
   [`??`, `&&`],
 ])
 
-function functionName(ts, node) {
-  if (node.name && ts.isIdentifier(node.name)) return node.name.text
-  const parent = node.parent
-  if (
-    parent &&
-    (ts.isVariableDeclaration(parent) ||
-      ts.isPropertyAssignment(parent) ||
-      ts.isPropertyDeclaration(parent)) &&
-    ts.isIdentifier(parent.name)
+// A mutant's anchor is the innermost statement that holds its site, as its
+// tokens joined by single spaces, so formatting does not move it.
+function anchorOf(ts, file, node) {
+  let statement = node
+  while (
+    statement.parent &&
+    !(
+      statement.kind >= ts.SyntaxKind.FirstStatement &&
+      statement.kind <= ts.SyntaxKind.LastStatement
+    )
   )
-    return parent.name.text
-  return undefined
+    statement = statement.parent
+  const scanner = ts.createScanner(
+    ts.ScriptTarget.Latest,
+    true,
+    ts.LanguageVariant.Standard,
+    statement.getText(file),
+  )
+  const tokens = []
+  for (
+    let token = scanner.scan();
+    token !== ts.SyntaxKind.EndOfFileToken;
+    token = scanner.scan()
+  ) {
+    // The scanner splits `>=` and `>>`; the parser rejoins them this way.
+    if (token === ts.SyntaxKind.GreaterThanToken) scanner.reScanGreaterToken()
+    tokens.push(scanner.getTokenText())
+  }
+  return tokens.join(` `)
 }
 
 // `offset` keeps site numbers unique across every instrumented source file,
-// because one switch serves them all.
+// because one switch serves them all. A mutant names no function: the runner
+// names it by the function declaration whose lines hold it (owners.mjs), so
+// keys and ownership read one source.
 export function instrument(ts, path, text, source, offset = 0) {
   const file = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true)
   const lineOf = (pos) => file.getLineAndCharacterOfPosition(pos).line + 1
   const mutants = []
   // `at` is the node whose line the mutant reports: the operator token for a
   // swap and the condition for an `if`, as the earlier runner reported them.
-  const add = (at, operator, fn, original, replacement) => {
+  const add = (at, operator, original, replacement) => {
+    const probeGuard = guarded
     const local = mutants.length + 1
     const id = offset + local
     mutants.push({
@@ -65,37 +85,136 @@ export function instrument(ts, path, text, source, offset = 0) {
       source,
       line: lineOf(at.getStart(file)),
       operator,
-      function: fn,
       original,
       replacement,
+      anchor: anchorOf(ts, file, at),
+      ...(probeGuard ? { probeGuard: true } : {}),
     })
     return id
   }
 
+  // Probe-only code is reported apart from the gaps: a probe compiles to
+  // nothing in production builds (the bundle check owns it), and a deleted or
+  // misplaced probe is reach agreement's to catch. Probe-only code is, by the
+  // syntax tree:
+  // - a probe statement in the decided form,
+  //   `process.env.NODE_ENV !== 'production' && globalThis.__oracleProbe?.(name, condition)`,
+  //   whose receiver may be cast with `as`, including its condition;
+  // - a call statement to a probe helper, a function declaration whose every
+  //   statement is probe-only (found by repeating until no helper is added);
+  // - an `if` with no `else` whose branch is probe-only, or a block whose
+  //   statements all are.
+  // Code beside a probe, and any other probe shape, is production code.
+  const helpers = new Set()
+  const unwrap = (node) => {
+    let inner = node
+    while (ts.isParenthesizedExpression(inner) || ts.isAsExpression(inner))
+      inner = inner.expression
+    return inner
+  }
+  const isGuard = (node) =>
+    ts.isBinaryExpression(node) &&
+    node.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken &&
+    node.left.getText(file) === `process.env.NODE_ENV` &&
+    ts.isStringLiteralLike(node.right) &&
+    node.right.text === `production`
+  const isHook = (node) => {
+    const call = unwrap(node)
+    if (!ts.isCallExpression(call) || call.arguments.length !== 2) return false
+    const callee = call.expression
+    return (
+      ts.isPropertyAccessExpression(callee) &&
+      callee.name.text === `__oracleProbe` &&
+      ts.isIdentifier(unwrap(callee.expression)) &&
+      unwrap(callee.expression).text === `globalThis`
+    )
+  }
+  const isProbeStatement = (node) =>
+    ts.isExpressionStatement(node) &&
+    ts.isBinaryExpression(node.expression) &&
+    node.expression.operatorToken.kind ===
+      ts.SyntaxKind.AmpersandAmpersandToken &&
+    isGuard(unwrap(node.expression.left)) &&
+    isHook(node.expression.right)
+  const callsHelper = (node) => {
+    const target =
+      ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)
+        ? node.expression.expression
+        : undefined
+    return (
+      target !== undefined &&
+      ts.isIdentifier(target) &&
+      helpers.has(target.text)
+    )
+  }
+  const isProbeOnly = (node) =>
+    isProbeStatement(node) ||
+    callsHelper(node) ||
+    (ts.isIfStatement(node) &&
+      node.elseStatement === undefined &&
+      isProbeOnly(node.thenStatement)) ||
+    (ts.isBlock(node) &&
+      node.statements.length > 0 &&
+      node.statements.every(isProbeOnly))
+  const declarations = []
+  const collect = (node) => {
+    if (ts.isFunctionDeclaration(node) && node.name && node.body)
+      declarations.push(node)
+    ts.forEachChild(node, collect)
+  }
+  collect(file)
+  for (let grew = true; grew; ) {
+    grew = false
+    for (const node of declarations) {
+      if (helpers.has(node.name.text)) continue
+      if (
+        node.body.statements.length > 0 &&
+        node.body.statements.every(isProbeOnly)
+      ) {
+        helpers.add(node.name.text)
+        grew = true
+      }
+    }
+  }
+  const isProbeGuard = (node) =>
+    isProbeOnly(node) ||
+    (ts.isFunctionDeclaration(node) &&
+      node.name !== undefined &&
+      helpers.has(node.name.text))
+  let guarded = false
+
   // Emit `node` with its children's instrumented text spliced in, then wrap
   // the node itself if it is a mutation site. Sites are numbered before their
   // children, matching the order of the earlier per-file runner.
-  function emit(node, fn) {
-    const name = ts.isFunctionLike(node) ? (functionName(ts, node) ?? fn) : fn
+  function emit(node) {
+    const outer = guarded
+    guarded ||= isProbeGuard(node)
+    try {
+      return emitNode(node)
+    } finally {
+      guarded = outer
+    }
+  }
+  function emitNode(node) {
     const ids = {}
     if (ts.isBinaryExpression(node)) {
       const op = node.operatorToken.getText(file)
       const swap = comparisons.get(op) ?? logical.get(op)
       if (swap)
-        ids.binary = add(node.operatorToken, `binary-swap`, name, op, swap)
+        ids.binary = add(node.operatorToken, `binary-swap`, op, swap)
     }
     if (
       ts.isPrefixUnaryExpression(node) &&
       node.operator === ts.SyntaxKind.ExclamationToken
     )
-      ids.not = add(node, `drop-not`, name, `!`, ``)
+      ids.not = add(node, `drop-not`, `!`, ``)
     if (ts.isIfStatement(node)) {
       const condition = node.expression.getText(file)
-      ids.ifTrue = add(node.expression, `if-true`, name, condition, `true`)
-      ids.ifFalse = add(node.expression, `if-false`, name, condition, `false`)
+      ids.ifTrue = add(node.expression, `if-true`, condition, `true`)
+      ids.ifFalse = add(node.expression, `if-false`, condition, `false`)
     }
     if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression))
-      ids.call = add(node, `delete-call`, name, node.getText(file), `;`)
+      ids.call = add(node, `delete-call`, node.getText(file), `;`)
 
     const children = []
     ts.forEachChild(node, (child) => {
@@ -109,7 +228,7 @@ export function instrument(ts, path, text, source, offset = 0) {
     let position = start
     for (const child of children) {
       const childStart = child.getStart(file)
-      const childText = emit(child, name)
+      const childText = emit(child)
       out += text.slice(position, childStart)
       emitted.set(child, { text: childText, at: out.length })
       out += childText
@@ -142,6 +261,6 @@ export function instrument(ts, path, text, source, offset = 0) {
     return out
   }
 
-  const code = emit(file, `<module>`)
+  const code = emit(file)
   return { code, mutants }
 }

@@ -32,6 +32,12 @@ const state =
   (process.env.ORACLE_GAPS_STATE
     ? JSON.parse(readFileSync(process.env.ORACLE_GAPS_STATE, `utf8`))
     : { mutant: null, select: null, capture: null })
+// The seed travels with each run's state, so a worker that a warm context
+// started under an earlier check's seed runs under this run's seed.
+if (`seed` in state) {
+  if (state.seed === null) delete process.env.TANSTACK_DB_ORACLE_SEED
+  else process.env.TANSTACK_DB_ORACLE_SEED = String(state.seed)
+}
 const fc = await import(`fast-check`).catch(() => undefined)
 if (fc) {
   // A property that takes no seed from the shared config would draw new
@@ -282,9 +288,59 @@ for (const name of Object.getOwnPropertyNames(proto)) {
       } catch {
         digest.update(`${name}(unrenderable)\n`)
       }
-      return matcher.apply(this, args)
+      // A soft assertion (`expect.soft`) does not throw: Vitest records its
+      // failure among the test's errors and the test goes on. A failure is
+      // seen as a new assertion error there.
+      const soft = inTest && chai.util.flag(this, `soft`)
+      const errorsBefore = currentTask?.result?.errors?.length ?? 0
+      try {
+        const returned = matcher.apply(this, args)
+        if (
+          soft &&
+          (currentTask?.result?.errors ?? [])
+            .slice(errorsBefore)
+            .some((error) => error?.name === `AssertionError`)
+        )
+          recordAssertion()
+        return returned
+      } catch (error) {
+        // A thrown assertion error is recognized by its type, never by its
+        // message.
+        if (inTest && error instanceof chai.AssertionError) recordAssertion()
+        throw error
+      }
     },
   })
+}
+
+// An assertion that fails is a verdict under an unnamed law, as older
+// oracles judge (transitional; check.mjs), with the route active when it
+// failed.
+function recordAssertion() {
+  verdicts.set(`(unnamed)\u0000${route}`, {
+    property: currentFile,
+    law: `(unnamed)`,
+    checkpoint: `assertion`,
+    route,
+  })
+}
+let currentTask
+
+// Each law violation the oracle framework raises, so the runner classifies
+// a kill by the law that rejected the mutant rather than by error text.
+let verdicts = new Map()
+globalThis.__oracleVerdict = ({ property, law, checkpoint }) => {
+  // A verdict after its test ended cannot be attributed to it.
+  if (!inTest) return
+  // A verdict carries the route active when it fired, so a test that runs
+  // several campaigns is attributed per campaign.
+  const key = `${property}\u0000${law}\u0000${checkpoint}\u0000${route}`
+  verdicts.set(key, { property, law, checkpoint, route })
+}
+// The route the framework registered for the current test (index.mjs routeOf).
+let route
+globalThis.__oracleRoute = (registered) => {
+  if (inTest) route = registered
 }
 
 globalThis.__oracleObserve = (checkpoint, value) => {
@@ -294,6 +350,7 @@ globalThis.__oracleObserve = (checkpoint, value) => {
 
 beforeEach((context) => {
   currentFile = context.task.file?.filepath
+  currentTask = context.task
   observed = createHash(`sha1`)
   observations = 0
   if (selected && !selected.has(testKey(context.task))) context.skip()
@@ -304,6 +361,8 @@ beforeEach((context) => {
   identities = new Map()
   hits = new Set()
   outcomes = new Map()
+  verdicts = new Map()
+  route = undefined
   inTest = true
 })
 
@@ -319,6 +378,8 @@ afterEach((context) => {
       observed: observations > 0 ? observed.digest(`hex`) : undefined,
       hits: [...hits],
       outcomes: [...outcomes],
+      verdicts: [...verdicts.values()],
+      route,
     })}\n`,
   )
   hits = new Set()

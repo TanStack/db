@@ -40,7 +40,16 @@ function expectedAt(phase: `hidden` | `visible`): {
     : { providerCalls: 1, outboxEntries: 0, callerState: `fulfilled` }
 }
 
-declareOracle({ model: [expectedAt] })
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [
+    `src/OfflineExecutor.ts#OfflineExecutor.getOnlineDetector`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.peekOutbox`,
+  ],
+  model: [expectedAt],
+})
 
 it.each([`visibilitychange`, `explicit retry`] as const)(
   `replays a committed outbox write on %s in a visible tab with a false online hint`,

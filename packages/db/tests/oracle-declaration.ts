@@ -28,4 +28,10 @@ export function declareOracle(_parts: {
   // A type-level oracle's model is a type, which has no value to pass, so it
   // is named: each name is a type alias or interface in the same file.
   typeModel?: ReadonlyArray<string>
+  // The production code this oracle owns: a source path relative to the
+  // package (`src/x.ts`), or one of its functions (`src/x.ts#run`,
+  // `src/x.ts#Class.method`), whose static call tree it then owns. The gap
+  // report judges each function by the tests of all its owners, so it reads
+  // this list statically: it must be a literal list of literal strings.
+  owns?: ReadonlyArray<string>
 }): void {}

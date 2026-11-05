@@ -91,7 +91,15 @@ function expectDigestsMatchReference(
 ): void {
   expect(digests(Stream, chunks)).toEqual(digests(Model, chunks))
 }
-declareOracle({ check: [expectDigestsMatchReference] })
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [
+    `src/hashing/murmur.ts#MurmurHashStream.update`,
+    `src/hashing/murmur.ts#MurmurHashStream.digest`,
+  ],
+  check: [expectDigestsMatchReference],
+})
 
 describe(`MurmurHashStream`, () => {
   it(`digests every chunk sequence as the byte-at-a-time stream does`, () => {

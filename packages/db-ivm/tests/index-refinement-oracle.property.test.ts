@@ -234,7 +234,15 @@ function expectRefinement(
 
 // The refinement law is declared with its model, the multiset of values per
 // key, and its grammar, the generated addition histories.
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 declareOracle({
+  owns: [
+    `src/indexes.ts#Index.addValue`,
+    `src/indexes.ts#Index.get`,
+    `src/indexes.ts#Index.has`,
+    `src/indexes.ts#Index.getIterator`,
+  ],
   check: [expectRefinement],
   model: [expectedIndex],
   grammar: [historyArbitrary],

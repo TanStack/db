@@ -75,7 +75,12 @@ function expectPermutedHashes(
   expectEqualHashes(original, reversed, hashValue)
 }
 // The key-order law: permuting the keys of an object leaves its hash unchanged.
-declareOracle({ check: [expectPermutedHashes] })
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [`src/hashing/hash.ts#hash`],
+  check: [expectPermutedHashes],
+})
 
 // The reusable value laws run with identical generators and checks in a
 // fixed campaign and a random campaign. A path replay of `ivm.hash-value`

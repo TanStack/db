@@ -37,7 +37,10 @@ import type { Weighted } from './incrementalization-law-oracle.js'
 const PROPERTY = `ivm.distinct-representatives`
 const family = distinctCollisionFamily(hash)
 
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 declareOracle({
+  owns: [`src/operators/distinct.ts#distinct`],
   check: [checkDistinctRepresentatives],
   grammar: [distinctBucketHistory],
 })

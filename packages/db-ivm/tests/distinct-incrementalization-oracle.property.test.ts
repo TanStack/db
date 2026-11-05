@@ -40,7 +40,12 @@ const policy = {
   clone: (value: DistinctValue) => ({ ...value }),
 }
 
-declareOracle({ check: [assertUnaryIncrementalization, checkDistinctSnapshot] })
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [`src/operators/distinct.ts#distinct`],
+  check: [assertUnaryIncrementalization, checkDistinctSnapshot],
+})
 
 for (const mode of [`selected`, `tuple`] as const) {
   const values = distinctCollisionValues((value) =>

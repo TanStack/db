@@ -2231,7 +2231,18 @@ oracleReplayTest(it, ADMISSION_PROPERTY).each([undefined])(
 // retry decision table and FIFO local rows, and the visibility and provider
 // eligibility of a started peer. Fixed scenarios whose expectations are
 // written by hand are not oracle tests; they live in transaction-settlement.test.ts.
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 declareOracle({
+  owns: [
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineAction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.waitForTransactionCompletion`,
+    `src/OfflineExecutor.ts#OfflineExecutor.rejectTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.peekOutbox`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
   check: [
     checkSettlement,
     checkRetryDecision,

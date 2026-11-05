@@ -22,6 +22,8 @@
     "lint:changed": "node scripts/agent-lint-feedback.mjs",
     "lint:oracles": "node scripts/agent-lint-feedback.mjs --all",
     "lint:run-budgets": "node scripts/check-oracle-run-counts.mjs",
+    "test:oracle-gaps": "vitest run --config scripts/oracle-gaps/vitest.config.mjs",
+    "test:oracle-gaps:fast": "vitest run --config scripts/oracle-gaps/vitest.config.mjs gap-report-static gap-report-classify",
     "test:lint-rules": "vitest run --config scripts/eslint-plugin-oracle/vitest.config.mjs && vitest run --config scripts/oracle-scripts.vitest.config.mjs",
     "lint-all": "eslint . --fix",
     "prepare": "husky",

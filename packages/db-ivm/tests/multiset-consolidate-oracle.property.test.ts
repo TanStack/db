@@ -6,10 +6,17 @@ import {
   pass,
   violation,
 } from '../../db/tests/oracle-property.js'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { contentsOf } from './multiset-support.js'
 import type { Observation } from '../../db/tests/oracle-property.js'
 import type { Data } from './multiset-support.js'
 import type { MultiSetArray } from '../src/multiset.js'
+
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [`src/multiset.ts#MultiSet.consolidate`],
+})
 
 /**
  * # Which records does `MultiSet.consolidate()` merge?
@@ -50,6 +57,36 @@ import type { MultiSetArray } from '../src/multiset.js'
  * - Key order is covered only by one fixed pair of keys that tie under locale
  *   collation (a precomposed and a decomposed Å), inserted in both orders in
  *   structural histories; equal objects must merge whatever the order.
+ *
+ * ## States, and what reach counts
+ *
+ * A state is a fact that production enters: taking an identity rule's path, or
+ * joining a record to an identity that already holds one. Production marks each
+ * state with a development-only probe (`db-ivm#...`). The model predicts each
+ * state from the history alone (`predict`). A state counts as reached only
+ * where the probe entered it (was called with a true condition) in the same
+ * history that the model predicted, which is the law `reach agreement`.
+ *
+ * - `keyed identity`: rule 1 governs the whole multiset. The rule holds
+ *   vacuously for the empty multiset, since no record fails it. Nothing is
+ *   identified there, so the empty output is the same on every path.
+ * - `primitive identity` and `structural identity`: rules 2 and 3.
+ * - `records merged`: an identity holds two or more input records. A merge
+ *   counts even when the summed multiplicity is zero, because the records
+ *   joined one identity before the zero sum dropped it. The earlier label
+ *   compared the output size with the number of distinct record values, which
+ *   a `Set` counts with SameValueZero: `-0` and `0` are one value there, so
+ *   that merge went unlabeled. Rule 2 names one identity for them as well, so
+ *   the merge is real and this state counts it.
+ * - `join tuples merged`: two join tuples with the same key and elements merge.
+ * - `only pairs without a key`: every record is a pair whose first element is
+ *   no key, so the multiset takes rule 3 although each record is a pair. A
+ *   multiset of pairs with some keys is not in this state: it takes rule 1 when
+ *   every pair is keyed, and rule 3 otherwise.
+ *
+ * Grammar modes are generator dimensions. They are not reach: a history in a
+ * mode may enter none of these states, and no state is counted by its mode.
+ * Each state has a constructed history, so every campaign enters every state.
  */
 
 type Spec =
@@ -107,11 +144,35 @@ const KEYED_KEYS: ReadonlyArray<string | number> = [
 // ---------------------------------------------------------------------------
 // Model. It does not use production identity helpers or `hash`.
 
+/** The identity rule (1, 2, or 3 in the law) that governs a whole multiset. */
+type Rule = `keyed` | `primitive` | `structural`
+type Identity = {
+  /** The retained record, normalized as rule 2 says. */
+  first: Data
+  /** The input position of the identity's first record. */
+  firstIndex: number
+  sum: number
+  /** How many input records the identity holds; two or more is a merge. */
+  members: number
+  /** Whether its records are join tuples, which only the keyed rule has. */
+  tuple: boolean
+}
 type Expected = {
-  /** `firstIndex` is the input position of the identity's first record. */
-  groups: Array<{ first: Data; firstIndex: number; sum: number }>
+  rule: Rule
+  /** Every identity, including one whose sum is zero. */
+  identities: Array<Identity>
+  /** The identities that the output owes: a nonzero sum. */
+  groups: Array<Identity>
   sameIdentity: (left: Data, right: Data) => boolean
 }
+
+// A keyed record is a `[key, value]` pair with a string or number key.
+const isKeyedRecord = (data: Data): boolean =>
+  Array.isArray(data) &&
+  data.length === 2 &&
+  (typeof data[0] === `string` || typeof data[0] === `number`)
+const isJoinTuple = (value: Data): boolean =>
+  Array.isArray(value) && value.length === 2
 
 function expectedConsolidation(records: MultiSetArray<Data>): Expected {
   // SameValueZero compares primitive values; strict equality also preserves
@@ -150,38 +211,47 @@ function expectedConsolidation(records: MultiSetArray<Data>): Expected {
     return [typeof value, value === undefined ? null : value]
   }
 
-  const isKeyed =
-    records.length > 0 &&
-    records.every(
-      ([data]) =>
-        Array.isArray(data) &&
-        data.length === 2 &&
-        (typeof data[0] === `string` || typeof data[0] === `number`),
-    )
-  const onePrimitiveType = [`string`, `number`].some((type) =>
-    records.every(([data]) => typeof data === type),
-  )
-  const sameIdentity: Expected['sameIdentity'] = isKeyed
-    ? sameKeyed
-    : onePrimitiveType
-      ? sameLeaf
-      : (left, right) =>
-          JSON.stringify(structure(left)) === JSON.stringify(structure(right))
+  // The rule the law gives the whole multiset. "Every record" holds vacuously
+  // for the empty multiset, so it is keyed there; no record is identified, so
+  // nothing observable depends on that choice.
+  const rule: Rule = records.every(([data]) => isKeyedRecord(data))
+    ? `keyed`
+    : [`string`, `number`].some((type) =>
+          records.every(([data]) => typeof data === type),
+        )
+      ? `primitive`
+      : `structural`
+  const sameIdentity: Expected['sameIdentity'] =
+    rule === `keyed`
+      ? sameKeyed
+      : rule === `primitive`
+        ? sameLeaf
+        : (left, right) =>
+            JSON.stringify(structure(left)) === JSON.stringify(structure(right))
   const retained = (data: Data) =>
-    onePrimitiveType && Object.is(data, -0) ? 0 : data
+    rule === `primitive` && Object.is(data, -0) ? 0 : data
 
-  const groups: Expected['groups'] = []
+  const identities: Array<Identity> = []
   for (const [index, [data, multiplicity]] of records.entries()) {
-    const group = groups.find(({ first }) => sameIdentity(first, data))
-    if (group) group.sum += multiplicity
-    else
-      groups.push({
+    const identity = identities.find(({ first }) => sameIdentity(first, data))
+    if (identity) {
+      identity.sum += multiplicity
+      identity.members += 1
+    } else
+      identities.push({
         first: retained(data),
         firstIndex: index,
         sum: multiplicity,
+        members: 1,
+        tuple: rule === `keyed` && isJoinTuple((data as [Data, Data])[1]),
       })
   }
-  return { groups: groups.filter(({ sum }) => sum !== 0), sameIdentity }
+  return {
+    rule,
+    identities,
+    groups: identities.filter(({ sum }) => sum !== 0),
+    sameIdentity,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -204,6 +274,22 @@ function specArbFor(maxPrimitiveIndex: number): fc.Arbitrary<Spec> {
 }
 
 const keyedSpecArb = specArbFor(KEYED_PRIMITIVES.length - 1)
+// Join tuples over a small domain, so that equal tuples recur within one
+// history. The general keyed grammar draws its leaves from a wide domain, and
+// two tuples there rarely share both elements.
+const smallLeafArb: fc.Arbitrary<Leaf> = fc.oneof(
+  fc.record({ kind: fc.constant(`prim` as const), i: fc.nat(2) }),
+  fc.record({ kind: fc.constant(`obj` as const), i: fc.nat(1) }),
+)
+const tupleSpecArb: fc.Arbitrary<Spec> = fc.record({
+  kind: fc.constant(`tuple` as const),
+  a: smallLeafArb,
+  b: smallLeafArb,
+})
+// The first element of a pair: indices 0 to 2 are values no key can be, and
+// indices 3 and 4 are keys. `unkeyedPairs` draws from 0 to 2, and `mixedPairs`
+// draws from all five, so a multiset of pairs can hold keyed and unkeyed pairs.
+const PAIR_FIRSTS: ReadonlyArray<Data> = [true, false, null, 0, `a`]
 // The unkeyed fallback checks structural hashing on its original value domain.
 const fallbackSpecArb = specArbFor(9)
 const multiplicityArb = fc.integer({ min: -2, max: 2 })
@@ -223,7 +309,16 @@ type StructuralStep =
   | { fresh: `unkeyedPair`; v: number }
 
 type Mode =
-  `keyed` | `keyedCollision` | `numbers` | `strings` | `structural` | `fallback`
+  | `keyed`
+  | `keyedCollision`
+  | `numbers`
+  | `strings`
+  | `structural`
+  | `fallback`
+  | `tuples`
+  | `unkeyedPairs`
+  | `mixedPairs`
+  | `mixedPrimitives`
 // `keyedCollision` selects grammar witnesses; it exercises the same keyed
 // production path as `keyed`. `caseName` labels a replay, not product state.
 // A `keyedCollision` history has one step: `[[name, opposed], scale]`, the
@@ -374,10 +469,43 @@ const historyArb: fc.Arbitrary<History> = fc.oneof(
     ),
   }),
   fc.record({
+    mode: fc.constant(`tuples` as const),
+    steps: fc.array(
+      fc.tuple(fc.tuple(fc.nat(3), tupleSpecArb), multiplicityArb),
+      { maxLength: 24, size: `medium` },
+    ),
+  }),
+  fc.record({
+    mode: fc.constant(`unkeyedPairs` as const),
+    steps: fc.array(fc.tuple(fc.tuple(fc.nat(2), fc.nat(1)), multiplicityArb), {
+      maxLength: 24,
+      size: `medium`,
+    }),
+  }),
+  fc.record({
+    mode: fc.constant(`mixedPairs` as const),
+    steps: fc.array(fc.tuple(fc.tuple(fc.nat(4), fc.nat(1)), multiplicityArb), {
+      maxLength: 24,
+      size: `medium`,
+    }),
+  }),
+  fc.record({
     mode: fc.constant(`numbers` as const),
     steps: fc.array(
       fc.tuple(fc.constantFrom(0, -0, 1, 2, 3, NaN), multiplicityArb),
       { maxLength: 24, size: `medium` },
+    ),
+  }),
+  // Strings and numbers together: rule 2 needs one primitive type, so this
+  // multiset is structural, and `1` and `"1"` stay apart.
+  fc.record({
+    mode: fc.constant(`mixedPrimitives` as const),
+    steps: fc.array(
+      fc.tuple(fc.constantFrom(0, 1, `1`, `p`), multiplicityArb),
+      {
+        maxLength: 24,
+        size: `medium`,
+      },
     ),
   }),
   fc.record({
@@ -424,6 +552,18 @@ const historyArb: fc.Arbitrary<History> = fc.oneof(
   }),
 )
 
+// A constructed history keeps its witness steps, then the generated steps of
+// the same mode that fit the grammar's length bound, so a campaign explores
+// what follows the state rather than one fixed visit to it.
+function continuing(
+  mode: Mode,
+  witness: History['steps'],
+  generated: History,
+): History {
+  const tail = generated.mode === mode ? generated.steps : []
+  return { mode, steps: [...witness, ...tail].slice(0, 24) }
+}
+
 // Build the records of one history with fresh object references.
 function buildRecords(history: History): MultiSetArray<Data> {
   const objects = [{ v: 1 }, { v: 1 }, { v: 2 }]
@@ -437,7 +577,15 @@ function buildRecords(history: History): MultiSetArray<Data> {
         : fromLeaf(spec)
   const records: MultiSetArray<Data> = history.steps.map(([step, m]) => {
     if (history.mode === `keyedCollision`) return [step, m]
-    if (history.mode === `keyed` || history.mode === `fallback`) {
+    if (history.mode === `unkeyedPairs` || history.mode === `mixedPairs`) {
+      const [first, v] = step as [number, number]
+      return [[PAIR_FIRSTS[first]!, { v }], m]
+    }
+    if (
+      history.mode === `keyed` ||
+      history.mode === `fallback` ||
+      history.mode === `tuples`
+    ) {
       const [keyIndex, spec] = step as [number, Spec]
       return [
         [
@@ -447,7 +595,11 @@ function buildRecords(history: History): MultiSetArray<Data> {
         m,
       ]
     }
-    if (history.mode === `numbers` || history.mode === `strings`)
+    if (
+      history.mode === `numbers` ||
+      history.mode === `strings` ||
+      history.mode === `mixedPrimitives`
+    )
       return [step, m]
     const value = step as StructuralStep
     if (value !== null && typeof value === `object`) {
@@ -652,14 +804,14 @@ function checkConsolidation(
 // Property
 // ---------------------------------------------------------------------------
 
-const modes = [
-  `keyed`,
-  `keyedCollision`,
-  `numbers`,
-  `strings`,
-  `structural`,
-  `fallback`,
-] as const
+// The declared states. Each is marked by a production probe and predicted by
+// the model, so reach comes from production (see the header's States section).
+const keyedIdentity = `keyed identity`
+const primitiveIdentity = `primitive identity`
+const structuralIdentity = `structural identity`
+const recordsMerged = `records merged`
+const joinTuplesMerged = `join tuples merged`
+const pairsWithoutKey = `only pairs without a key`
 const witness = (name: string): History => ({
   mode: `keyedCollision`,
   steps: [[[name, false], 1]],
@@ -675,12 +827,79 @@ oracleProperty({
   },
   histories: {
     arbitrary: historyArb,
-    states: [],
-    measured: [
-      ...modes,
-      `records merged`,
-      `join tuples merged`,
-      `only pairs without a key`,
+    states: [
+      { name: keyedIdentity, probe: `db-ivm#keyed-identity` },
+      { name: primitiveIdentity, probe: `db-ivm#primitive-identity` },
+      { name: structuralIdentity, probe: `db-ivm#structural-identity` },
+      { name: recordsMerged, probe: `db-ivm#records-merged` },
+      { name: joinTuplesMerged, probe: `db-ivm#join-tuples-merged` },
+      { name: pairsWithoutKey, probe: `db-ivm#only-pairs-without-key` },
+    ],
+    // Each state's constructed history enters it in every campaign. The
+    // constructed history keeps the state's witness, then generated steps.
+    constructed: [
+      {
+        name: `a keyed multiset`,
+        enters: [keyedIdentity],
+        build: (generated) =>
+          continuing(`keyed`, [[[0, { kind: `obj`, i: 0 }], 1]], generated),
+      },
+      {
+        name: `a single-number multiset`,
+        enters: [primitiveIdentity],
+        build: (generated) => continuing(`numbers`, [[1, 1]], generated),
+      },
+      {
+        name: `a multiset of one fresh object`,
+        enters: [structuralIdentity],
+        build: (generated) =>
+          continuing(`structural`, [[{ fresh: `object`, v: 0 }, 1]], generated),
+      },
+      {
+        name: `two equal strings`,
+        enters: [primitiveIdentity, recordsMerged],
+        build: (generated) =>
+          continuing(
+            `strings`,
+            [
+              [`p`, 1],
+              [`p`, 1],
+            ],
+            generated,
+          ),
+      },
+      {
+        name: `two fresh join tuples with the same elements`,
+        enters: [keyedIdentity, recordsMerged, joinTuplesMerged],
+        build: (generated) => {
+          const tuple = {
+            kind: `tuple` as const,
+            a: { kind: `prim` as const, i: 0 },
+            b: { kind: `prim` as const, i: 1 },
+          }
+          return continuing(
+            `tuples`,
+            [
+              [[0, tuple], 1],
+              [[0, tuple], 1],
+            ],
+            generated,
+          )
+        },
+      },
+      {
+        name: `two equal pairs without a key`,
+        enters: [structuralIdentity, pairsWithoutKey, recordsMerged],
+        build: (generated) =>
+          continuing(
+            `unkeyedPairs`,
+            [
+              [[0, 0], 1],
+              [[0, 0], 1],
+            ],
+            generated,
+          ),
+      },
     ],
     runs: 300,
     fixedSeeds: [2026929],
@@ -689,12 +908,12 @@ oracleProperty({
     fixed: [
       ...collisionCases.map(({ name }) => ({
         name,
-        enters: [`keyedCollision`],
+        enters: [keyedIdentity],
         history: witness(name),
       })),
       {
         name: `keyed object values merge by reference, not by contents`,
-        enters: [`keyed`],
+        enters: [keyedIdentity, recordsMerged],
         history: {
           mode: `keyed`,
           steps: [
@@ -706,7 +925,7 @@ oracleProperty({
       },
       {
         name: `fresh join tuples with the same elements merge`,
-        enters: [`keyed`, `records merged`],
+        enters: [keyedIdentity, recordsMerged, joinTuplesMerged],
         history: {
           mode: `keyed`,
           steps: [
@@ -748,7 +967,7 @@ oracleProperty({
       },
       {
         name: `arrays of other lengths stay reference values`,
-        enters: [`keyed`],
+        enters: [keyedIdentity],
         history: {
           mode: `keyed`,
           steps: [
@@ -759,7 +978,7 @@ oracleProperty({
       },
       {
         name: `one non-keyed record makes equal contents merge structurally`,
-        enters: [`fallback`, `records merged`],
+        enters: [structuralIdentity, recordsMerged],
         history: {
           mode: `fallback`,
           steps: [
@@ -770,9 +989,9 @@ oracleProperty({
       },
       {
         name: `single-number data merges -0 with 0 and returns 0`,
-        // A Set already treats -0 and 0, and NaN and NaN, as one record, so
-        // this merge does not count as `records merged`.
-        enters: [`numbers`],
+        // -0 and 0 are one identity under rule 2, so the second record merges
+        // into the first; NaN merges with NaN in the same way.
+        enters: [primitiveIdentity, recordsMerged],
         history: {
           mode: `numbers`,
           steps: [
@@ -785,7 +1004,7 @@ oracleProperty({
       },
       {
         name: `single-string data merges equal strings`,
-        enters: [`strings`, `records merged`],
+        enters: [primitiveIdentity, recordsMerged],
         history: {
           mode: `strings`,
           steps: [
@@ -797,7 +1016,7 @@ oracleProperty({
       },
       {
         name: `pairs without a key merge equal object contents structurally`,
-        enters: [`structural`, `only pairs without a key`, `records merged`],
+        enters: [structuralIdentity, pairsWithoutKey, recordsMerged],
         history: {
           mode: `structural`,
           steps: [
@@ -809,7 +1028,7 @@ oracleProperty({
       },
       {
         name: `unkeyed structural data keeps 1 and "1" apart`,
-        enters: [`structural`],
+        enters: [structuralIdentity],
         history: {
           mode: `structural`,
           steps: [
@@ -826,34 +1045,26 @@ oracleProperty({
     records: buildRecords(history),
   }),
   model: ({ records }) => expectedConsolidation(records),
-  // A history's mode, and whether consolidation merged or cancelled records
-  // (fewer owed identities than distinct input records).
-  reached: ({ mode, records }, _trace, expected) => [
-    mode,
-    ...(expected.groups.length < new Set(records.map(([data]) => data)).size
-      ? [`records merged`]
-      : []),
-    // Two fresh join tuples of one key with the same elements.
-    ...(mode === `keyed` &&
-    expected.groups.some(
-      ({ first }) =>
-        Array.isArray((first as [unknown, unknown])[1]) &&
-        records.filter(([data]) => expected.sameIdentity(first, data)).length >
-          1,
-    )
-      ? [`join tuples merged`]
-      : []),
-    ...(records.length > 0 &&
-    records.every(
-      ([data]) =>
-        Array.isArray(data) &&
-        data.length === 2 &&
-        typeof data[0] !== `string` &&
-        typeof data[0] !== `number`,
-    )
-      ? [`only pairs without a key`]
-      : []),
-  ],
+  // Each state, from the history alone. The model's identity grouping supplies
+  // the rule and the member counts; no production code or trace is read.
+  predict: ({ records }) => {
+    const expected = expectedConsolidation(records)
+    return {
+      [keyedIdentity]: expected.rule === `keyed`,
+      [primitiveIdentity]: expected.rule === `primitive`,
+      [structuralIdentity]: expected.rule === `structural`,
+      [recordsMerged]: expected.identities.some(({ members }) => members > 1),
+      [joinTuplesMerged]: expected.identities.some(
+        ({ members, tuple }) => tuple && members > 1,
+      ),
+      [pairsWithoutKey]:
+        records.length > 0 &&
+        records.every(
+          ([data]) =>
+            Array.isArray(data) && data.length === 2 && !isKeyedRecord(data),
+        ),
+    }
+  },
   driver: driveConsolidation,
   check: checkConsolidation,
   calibrations: [

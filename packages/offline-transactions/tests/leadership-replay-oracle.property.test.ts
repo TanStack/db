@@ -163,7 +163,17 @@ const storageFailureOracle = readOfflineOracleConfig({
 
 // The stale-read campaign compares each delivered read with the ledger fold,
 // the model. The append-only judgment fixes the fold's own result.
-declareOracle({ check: [checkStaleRead], model: [foldReplayLedger] })
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.waitForInit`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
+  check: [checkStaleRead],
+  model: [foldReplayLedger],
+})
 
 const startupCases = (seed: number | undefined) =>
   [`construction`, `leadership`, `outbox read`, `retry hook`].map(

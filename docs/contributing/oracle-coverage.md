@@ -595,9 +595,9 @@ that test identifiers must copy production's private data structures.
 | Electric and TrailBase | Complete | Electric replica and recovery models, installed-SDK HTTP delivery, PostgreSQL serialization, and TrailBase's controlled RecordApi/native-stream lifecycle are literate with their real-provider limits intact. |
 | PowerSync | Fixed tests only | Patch conservation, effective-update receipts, metadata and falsey changes, declared-view keys, transformed schema output, logging, cleanup, and native SQLite reach are covered by fixed tests in `correctness.test.ts`; no oracle owns them (tracked in #2264). |
 | SQLite persistence and native hosts | Complete | Persisted hydration/replay and ownership, shared-handle driver transaction laws, OPFS page and diagnostic state machines, and the 113-law native conformance manifest are literate. Native execution remains distinct from registration and shim evidence. |
-| Offline execution | Complete | FIFO retry, scheduler eligibility, leadership replay, transaction settlement, and typed wire serialization are literate. The [FIFO retry oracle](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry-oracle.property.test.ts) is the `oracleProperty` `offline.fifo-retry`: each transaction's planned retriable failures, permanent failure, and phase-write or deletion fault are history data, and a model of the README's FIFO, retry, and settlement contract judges calls, settlements, and the outbox at the deadline cuts and after every retry. A constructed history requires a phase-write fault before a queued peer on every run. Mutants that let a retried transaction move behind its peers, keep running after a storage fault, or stop the queue at a permanent failure fail it; the previous fault-free oracle passed all three. Open there: retry hooks, leadership changes, and storage faults on a permanent failure's removal. The [interruption settlement oracle](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/interruption-settlement-oracle.property.test.ts) is the `oracleProperty` `offline.interruption-settlement`. It moves one leadership loss, offline change, or disposal across individual microtask turns after one to three commits on disjoint keys, with storage and provider answers immediate or released by a generated data schedule (storage in order, the provider before or after any pending storage operation), then recovers by regaining leadership, going online, or restarting over the same storage. It requires that no provider call or new outbox admission starts while fenced, that each admitted ID reaches the provider once and in commit order, that a fulfilled commit's row is already gone from storage, that commits settle with their provider outcome after a regain or reconnect, and that the outbox ends empty. Reach is measured per campaign for interruptions before admission, between admission and the provider call, and after it, for each interruption; eight fixed histories enter every reachable landing on every run. Mutants that drop the execution loop's fence, drop the admission check, or check admission before awaiting initialization fail it; an un-awaited outbox deletion passes the immediate timing and fails the scheduled one (law durability). Open there: shared keys and overlapping old and new executors. The settlement oracle's generated FIFO histories draw each transaction as one record (outcome; manual commit, auto-commit with the option set or omitted, or an `OfflineAction`; receipt read or not), use `when('settled')` as an auto-commit's receipt, and require that no failure escapes as an unhandled rejection, also when nobody reads the receipt, and that settlement logs no failure again and writes no debug output. An empty transaction on any commit path may precede each one; its receipt and completion waiter must fulfil without reaching the provider or the outbox. A manual transaction that writes a row and rolls back before it commits may also precede each one; its waiter must reject with an Error that names the rollback. A focused witness rolls a transaction back while it persists, for both provider outcomes: its waiter must wait for the executor and report the executor's outcome. After every transaction settles, a new waiter for each one must reject within a turn rather than hang. An unread receipt still settles with its own outcome when read afterwards, and a caller may register its completion waiter before admission on every path but `OfflineAction`. A focused witness fails the admission outbox write on every commit path and requires the receipt to reject with the storage error, without an unhandled rejection or a repeated log; a failed outbox write stops the executor, so generated histories do not continue past one. Open: the generated failure source is the mutation function only; manual commits always follow their own `mutate()` at once, so a pending manual transaction behind a failing shared-key sibling is not generated; a throwing `mutate()` callback is not generated, because core keeps its transaction pending; a rolled-back-before-commit transaction is generated only on the manual path, with its own key and its waiter registered after `mutate()`, so a secondary rollback of a pending transaction by a failing sibling, whose waiter gets the generic rollback Error, is not generated. |
+| Offline execution | Complete | FIFO retry, scheduler eligibility, leadership replay, transaction settlement, and typed wire serialization are literate. The [FIFO retry oracle](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry-oracle.property.test.ts) is the `oracleProperty` `offline.fifo-retry`: each transaction's planned retriable failures, permanent failure, and phase-write or deletion fault are history data, and a model of the README's FIFO, retry, and settlement contract judges calls, settlements, and the outbox at the deadline cuts and after every retry. Reach comes from production. Four states are state probes in `TransactionExecutor` (`offline-transactions#retry-before-peer`, `#permanent-failure-before-peer`, `#phase-write-fault`, `#fault-before-peer`); `predict` says from the plans alone which histories enter each, and reach agreement must hold in every history. The storage fake reports `deletion fault` when it refuses the removal, and the driver reports `retried head` and `retried tail` as measured states. Four constructed histories enter the gating states on every run, and each campaign reaches every gating state at least 13 times. Mutants that let a ready tail pass the delayed head, retry without backoff, drop a permanent failure's caller rejection, swallow a phase-write error, keep an outbox row after removal, or keep running after a storage fault fail the oracle, and misplaced or removed probes fail reach agreement. A mutant that keeps the scheduler's active ID after a failure stalls the driver, so it is killed only by the test timeout, not by a named law. Open there: retry hooks, leadership changes, and storage faults on a permanent failure's removal. The check labels a call after a storage fault as FIFO order rather than the stop law. The [interruption settlement oracle](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/interruption-settlement-oracle.property.test.ts) is the `oracleProperty` `offline.interruption-settlement`. It moves one leadership loss, offline change, or disposal across individual microtask turns after one to three commits on disjoint keys, with storage and provider answers immediate or released by a generated data schedule (storage in order, the provider before or after any pending storage operation), then recovers by regaining leadership, going online, or restarting over the same storage. It requires that no provider call or new outbox admission starts while fenced, that each admitted ID reaches the provider once and in commit order, that a fulfilled commit's row is already gone from storage, that commits settle with their provider outcome after a regain or reconnect, and that the outbox ends empty. Reach is measured per campaign for interruptions before admission, between admission and the provider call, and after it, for each interruption; eight fixed histories enter every reachable landing on every run. Mutants that drop the execution loop's fence, drop the admission check, or check admission before awaiting initialization fail it; an un-awaited outbox deletion passes the immediate timing and fails the scheduled one (law durability). Open there: shared keys and overlapping old and new executors. The settlement oracle's generated FIFO histories draw each transaction as one record (outcome; manual commit, auto-commit with the option set or omitted, or an `OfflineAction`; receipt read or not), use `when('settled')` as an auto-commit's receipt, and require that no failure escapes as an unhandled rejection, also when nobody reads the receipt, and that settlement logs no failure again and writes no debug output. An empty transaction on any commit path may precede each one; its receipt and completion waiter must fulfil without reaching the provider or the outbox. A manual transaction that writes a row and rolls back before it commits may also precede each one; its waiter must reject with an Error that names the rollback. A focused witness rolls a transaction back while it persists, for both provider outcomes: its waiter must wait for the executor and report the executor's outcome. After every transaction settles, a new waiter for each one must reject within a turn rather than hang. An unread receipt still settles with its own outcome when read afterwards, and a caller may register its completion waiter before admission on every path but `OfflineAction`. A focused witness fails the admission outbox write on every commit path and requires the receipt to reject with the storage error, without an unhandled rejection or a repeated log; a failed outbox write stops the executor, so generated histories do not continue past one. Open: the generated failure source is the mutation function only; manual commits always follow their own `mutate()` at once, so a pending manual transaction behind a failing shared-key sibling is not generated; a throwing `mutate()` callback is not generated, because core keeps its transaction pending; a rolled-back-before-commit transaction is generated only on the manual path, with its own key and its waiter registered after `mutate()`, so a secondary rollback of a pending transaction by a failing sibling, whose waiter gets the generic rollback Error, is not generated. |
 | Frameworks | Complete | Shared live-query and infinite-query models are literate. Each framework keeps its own realm, ownership, and scheduling driver. |
-| Structural values and ordered primitives | Complete | Structural hashing, deep equality, comparison, cursor denotation, index refinement, and query-identity output equivalence are literate. |
+| Structural values and ordered primitives | Complete | Structural hashing, deep equality, comparison, cursor denotation, index refinement, and query-identity output equivalence are literate. MultiSet consolidation (`ivm.multiset-consolidate`, [owner](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/multiset-consolidate-oracle.property.test.ts)) keeps one record per identity under the keyed, primitive, or structural rule, with the first record and the summed multiplicity, and leaves its input unchanged. Six declared states are production probes (`db-ivm#...` in `packages/db-ivm/src/multiset.ts`): the three rules, `records merged`, `join tuples merged`, and `only pairs without a key`. The model predicts each one from the history alone, and reach counts a state only where the probe and the prediction agree (`reach agreement`). Each state has a constructed history, so every campaign enters it; the grammar modes are generator dimensions, not reach. Sixteen mutants are killed, each by both campaigns: wrong identity rules, merge sums, retained records, zero-sum output, -0 handling, input mutation, and wrong or missing probe placements. Limits: output order is not part of the law; structural identity uses a 32-bit hash, so no injectivity is claimed; the probes are development-only behind a temporary guard (`size:compare` measures zero shipped bytes), and they show where production enters a state while the check judges the output. The empty multiset takes rule 1 by the law's vacuous "every record" reading, which no output depends on. |
 | Mixed-kind ordered prefixes | Bounded | Eager BasicIndex and BTreeIndex paths compare ascending and descending direct and live-query windows with an unindexed scan across mixed value kinds and paired source changes. One retained on-demand BTree history checks settled windows after a number/bigint transition, a finite request for a missing row, and a cursor request after index eligibility changes. Other provider paging histories remain open. |
 | Boundary refinements | Complete | Cleanup/restart admission, metadata publication, retained state, acquisition cells, D2 source reconciliation, top-K support windows, and nested Query work bounds are literate. |
 | Small structures and test mechanics | Complete | SortedMap, cleanup appointments, and guarded replay are literate. |
@@ -1290,7 +1290,20 @@ checks FIFO eligibility and retry order at the scheduler boundary, as the
 generator drew histories of at most 12 commands (fast-check's default array
 size) with a biased selector, so 4 of 150 histories per campaign started any
 transaction and 1 retried; generation now draws 1 to 50 unbiased commands, and
-about a quarter of histories start work and a tenth retry. It does not observe
+about a quarter of histories start work and about one in fifteen retries.
+Histories also duplicate a pending ID, as outbox replay does, and schedule
+`missing`, the ID replay snapshots name without the scheduler holding it.
+`schedule` must return false for a duplicate (law `dedupe`, authority:
+TransactionExecutor uses that result to find newly loaded transactions);
+keeping the first record on a duplicate awaits a maintainer decision. The
+declared state `duplicate schedule` is the first state bound to a production
+probe: the model predicts which histories duplicate a pending ID, the
+scheduler's development-only `duplicate-schedule` probe reports which ones
+production rejected, and the two must agree in every history (law `reach
+agreement`). A constructed history fills all five slots and then duplicates
+one, so every campaign reaches `duplicate schedule at capacity`, which the
+driver records. Reach for command types comes from the commands the driver
+executed. It does not observe
 the executor's awaited outbox update between `updateTransaction` and
 `markFailed`, or public caller settlement. Those receiving cuts belong with
 `packages/offline-transactions/tests/transaction-settlement-oracle.property.test.ts`.
@@ -3995,6 +4008,84 @@ keys and the fixed seed 271828 as removed, although both campaigns still run in
 the oracle file. Owner: `scripts.run-budget`. Needed witness: a campaign whose
 budget a helper computes and passes in as parameters.
 
+`scripts/oracle-gaps/gap-report-oracle.property.test.mjs` owns the gap report
+(`scripts.gap-report`), the CLI in `scripts/oracle-gaps/` that lists the gaps an
+oracle's author must answer. It generates a source file of functions and
+classes that imports from a second source file of the same package, two
+oracle files that declare `owns` entries, an ordinary test file,
+authored mutants, declaration faults, and source edits. A small interpreter of
+that grammar predicts every report fact, and the driver runs the real CLI on a
+scratch package. Its laws are the operator enumeration; probe-only code in the decided form
+`process.env.NODE_ENV !== 'production' && globalThis.__oracleProbe?.(name,
+condition)`, with every other probe shape judged as production; owner
+discovery, static reference trees within the package as the type checker
+resolves them (calls, direct and aliased imports, `this` and typed fields,
+`.bind`, values passed as arguments, and classes passed as values, which bring
+all their methods; `new C()` brings only the constructor), stopping at the
+package boundary, and refusal of an owns entry that names nothing, a
+non-literal owns list, or a failing owner; classification by the tests of every owner on
+their registered routes, where only a law verdict on a reproducible route kills
+(a crash, an agreement-only kill, a random-only kill, a kill on an unregistered
+route, a framework-only failure, a nondeterministic test, and an ordinary test
+never do), an `expect` assertion failure counts as a verdict under an unnamed
+law (transitional, for older oracles), and a test that runs several campaigns
+has each failure attributed to the route active when it fired, including a
+soft assertion (`expect.soft`) that lets the test go on to another campaign;
+authored mutants; anchored keys; report completeness; key
+stability under an unrelated function, an inserted probe guard, and a
+reformat; and incremental equals cold: through the daemon (`--daemon`), whose
+evidence store is a TanStack DB collection persisted to SQLite, a check at
+every state of a sequence of edits (a test, a source statement, line shifts,
+an owns list, the authored mutant, a helper module one oracle file imports,
+the seed, a new oracle file, a daemon restart, and a revert) reports what a
+cold run of that state reports. Its reach requires reuse, a mix of reuse and
+recomputation, reuse from disk after a restart, and a changed cold result for
+each content edit. Its authority is the maintainer's gap-check decisions of 2026-11-04
+and 2026-11-05, which are not yet in a decision register. Limits: two source
+files of one package, with no re-exports, namespace imports, or calls into
+another package; no loops, timeouts, multi-line conditions, arrow or nested
+functions, member calls other than `this.m()`, or `--only`, `--sample`, and
+`--diff-base`; no probe-bound states, so reach
+agreement's killing of probe mutants is unchecked; no gap answers or gate;
+the incremental law's edits leave out files a test reads through `fs`,
+environment variables other than the seed, a new file that changes how an
+unchanged import resolves, Vite config and installed-package changes, edits to
+the CLI's own files, and concurrent checks. A test that is only sometimes
+nondeterministic can make an incremental check differ from a cold one, because
+the daemon replays its stored unmutated runs. Its required states are reached by constructed histories,
+and generated histories add little reach of their own. The static states
+(probe structure and ownership through the reference tree) are counted here
+and required by `scripts.gap-report-static`. The three gap-report oracles run
+in about two and a half minutes (`pnpm test:oracle-gaps`). Owner:
+`scripts/oracle-gaps`.
+
+`scripts/oracle-gaps/gap-report-static-oracle.property.test.mjs`
+(`scripts.gap-report-static`) owns the gap report's static half in-process:
+operator enumeration, probe-only code, refusal of an owns entry that names
+nothing, a missing file, or a non-literal list, ownership through the
+reference tree, keys, and key stability. It writes the end-to-end oracle's
+generated fixtures (`gap-report-model-oracle.mjs`) to a scratch package and
+calls `analyze` (analysis.mjs) and `assignKeys` directly, without Vitest, so
+a campaign takes about a second and every static state is reached in every
+campaign. Limits: the end-to-end grammar's; outcomes that need test runs and
+the failing-owner refusal belong to `scripts.gap-report`. Owner:
+`scripts/oracle-gaps`.
+
+`scripts/oracle-gaps/gap-report-classify-oracle.property.test.mjs`
+(`scripts.gap-report-classify`) owns the gap report's classification and
+summary over run records: it generates the records a test run writes
+(states, error texts, timeouts, setup and unhandled errors, capture rows
+with reach, `if` outcomes, asserted and observed hashes, routes, and
+verdicts with the route active when they fired), runs the CLI's pure
+`classify.mjs` and `renderReport`, and compares each mutant's outcome, class,
+laws, and ordinary-tier outcome, and the summary's gaps, warnings, and
+counts, with a model of the law over records. 300 histories run in well
+under a second. Limits: no authored mutants; that real runs write these
+records is `scripts.gap-report`'s. Owner: `scripts/oracle-gaps`.
+
+`pnpm test:oracle-gaps:fast` runs these two in a few seconds; the
+end-to-end oracle runs with `pnpm test:oracle-gaps`.
+
 `scripts/lint-scope-oracle.property.test.js` owns lint selection after an
 edit (`scripts.lint-scope`): the changed scope, the named (pre-commit) scope,
 and the Claude edit and stop hooks. Its model is a fixed-point closure over the
@@ -4013,6 +4104,24 @@ real-path spelling: a name given through a symlinked path is not covered. It
 does not generate a hook input without `cwd`, a worktree outside the launch
 checkout, or a worktree branch that has no copy of the script. In that last
 case the launch checkout's rule lints the worktree.
+
+`scripts/eslint-plugin-oracle/probe-form-oracle.property.test.js`
+(`lint.probe-form`) owns the state-probe form (`oracle/probe-form`). In production
+source (`packages/*/src`), a probe is one expression statement,
+`process.env.NODE_ENV !== 'production' && globalThis.__oracleProbe?.(name, condition)`,
+and every other mention of `__oracleProbe` is reported. Its grammar draws each
+legal form and one near-miss per broken part: a missing or different guard, an
+`if` or ternary wrapper, a one-, three-, or spread argument, a non-optional call,
+a bad name, a forbidden form in the condition at any depth, a foreign receiver or
+cast, an alias, and a declared type key. The model predicts the reports from the
+drawn kinds, and the reports come from the plugin's production config through
+`Linter`. The root config's enablement is checked with `calculateConfigForFile`,
+which reads no file. Owner: `scripts/eslint-plugin-oracle`. Limits: a call in a
+condition is allowed, because a syntactic rule cannot prove that a call is pure;
+the rule does not run typed rules or write scratch files; `pnpm lint:changed`
+selects only oracle files, so production reports appear in `pnpm lint`, not in
+the edit hook. Authority: the maintainer's probe-form decision and the glossary's
+state probe entry.
 
 `packages/db/tests/declared-reach-oracle.property.test.ts`
 (`oracle.declared-reach`; [review record](oracle-reviews/pr-2290-declared-reach.md))

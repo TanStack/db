@@ -21,7 +21,14 @@ import {
 import { TopKRelation } from './topk-relation-oracle.js'
 import type { TopKWithFractionalIndexOptions } from '../../src/operators/topKWithFractionalIndex.js'
 
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 declareOracle({
+  owns: [
+    `src/operators/topKWithFractionalIndex.ts#topKWithFractionalIndex`,
+    `src/operators/groupedTopKWithFractionalIndex.ts#groupedTopKWithFractionalIndex`,
+    `src/operators/orderBy.ts#orderByWithFractionalIndex`,
+  ],
   check: [TopKRelation, checkNumericWindow],
   model: [selectedWindowKeys, requestedWindowChanged],
 })
