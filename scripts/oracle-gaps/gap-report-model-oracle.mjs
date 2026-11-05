@@ -292,6 +292,10 @@ const witness = [
   // A soft assertion fails in the random campaign, and the test goes on to
   // register a fixed seed: the verdict keeps the random route.
   { id: `w_soft`, owners: [`a`], body: [kill], tests: [judging(`a`, `random seed`, 7, { judgeBy: `soft`, then: { route: `fixed seed`, input: 1 } })] },
+  // A test that asserts on a value with a getter and checks that nothing
+  // read it, as an oracle that counts reads does. The CLI's capture must
+  // not read it either: the harness may not change what a test observes.
+  { id: `w_getter`, owners: [`a`], body: [push], tests: [judging(`a`, `fixed seed`, 1, { getter: true })] },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -323,6 +327,7 @@ const captureWitness = new Set([
   `w_assert`,
   `w_campaigns`,
   `w_soft`,
+  `w_getter`,
 ])
 
 // ## Rendering and layout
@@ -1109,7 +1114,9 @@ function refusal(plan) {
   if (plan.fault === `badEntry`) return { cause: `${SOURCE}#nope` }
   if (plan.fault === `missingSource`) return { cause: `src/missing.ts` }
   if (plan.fault === `nonLiteral`) return { cause: `b.test.ts` }
-  if (plan.fault === `brokenOwner`) return { cause: `b.test.ts` }
+  // A failing owner is named with its test's error, so the author can fix it.
+  if (plan.fault === `brokenOwner`)
+    return { cause: `b.test.ts`, detail: `this owner fails with no mutant active` }
   return undefined
 }
 
@@ -1278,6 +1285,13 @@ function oracleTestFile(plan, file) {
           : `    g.__oracleObserve?.('trace', ${out})`,
         ...(t.flaky
           ? [`    g.__oracleObserve?.('clock', performance.now())`]
+          : []),
+        ...(t.getter
+          ? [
+              `    let reads${i} = 0`,
+              `    expect({ get payload() { reads${i} += 1; return ${out} } }).toBeDefined()`,
+              `    if (reads${i} !== 0) throw new Error('the payload was read')`,
+            ]
           : []),
         ...(!t.judges
           ? []

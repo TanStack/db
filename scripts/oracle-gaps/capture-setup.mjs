@@ -255,7 +255,15 @@ function render(value, seen = new Set(), depth = 0) {
     }
     const name = prototype === null ? `null-proto` : `Object`
     const keys = Object.keys(value).sort()
-    return `${name}{${keys.map((k) => `${k}:${render(value[k], seen, depth + 1)}`).join(`,`)}}`
+    // An accessor is recorded as one, never called: a getter can count its
+    // reads, and the capture must not change what the test observes.
+    const field = (k) => {
+      const descriptor = Object.getOwnPropertyDescriptor(value, k)
+      return descriptor && !(`value` in descriptor)
+        ? `accessor`
+        : render(value[k], seen, depth + 1)
+    }
+    return `${name}{${keys.map((k) => `${k}:${field(k)}`).join(`,`)}}`
   } finally {
     seen.delete(value)
   }

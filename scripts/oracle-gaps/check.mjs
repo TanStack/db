@@ -70,6 +70,16 @@ const ownFiles = [
   `../../packages/db/tests/oracle-property.ts`,
 ].map((file) => join(here, file))
 
+/** A unit's first failure: a failing test and its error, or why it did not run. */
+function failureOf(unit) {
+  if (unit.timedOut) return `its run timed out`
+  const test = unit.tests.find((t) => t.state === `failed`)
+  const text = test
+    ? `${test.fullName}: ${test.message.split(`\n`)[0]}`
+    : (unit.setupErrors[0] ?? unit.unhandled[0] ?? `it failed`)
+  return text.slice(0, 300)
+}
+
 /** A hash of this CLI's own code and the framework it reads. */
 export function codeIdentity() {
   const hash = createHash(`sha1`)
@@ -423,10 +433,11 @@ export default mergeConfig(base, {
       const rows = new Map(units.flatMap((u) => u.rows ?? []))
       for (const u of units)
         fileSeconds.set(u.file, Math.max(fileSeconds.get(u.file) ?? 0, u.duration ?? 0))
-      const failed = new Set(
+      // Each failing file, with its first failure, so a refusal says why.
+      const failed = new Map(
         units
           .filter((u) => outcomeOf([u]).outcome !== `survived`)
-          .map((u) => u.file),
+          .map((u) => [u.file, failureOf(u)]),
       )
       return { rows, failed, seconds: Math.max(0, ...units.map((u) => u.seconds)) }
     }
@@ -434,12 +445,14 @@ export default mergeConfig(base, {
     const first = await runAcross(files, 1)
     // An oracle file that fails with no mutant active cannot judge the code
     // it owns, so the run refuses rather than report that code as unowned.
-    const failingOwners = [...first.failed].filter((file) => oracleFiles.has(file))
+    const failingOwners = [...first.failed.keys()].filter((file) =>
+      oracleFiles.has(file),
+    )
     if (failingOwners.length > 0)
       throw new Error(
-        `oracle files fail with no mutant active, so their owned code cannot be judged: ${failingOwners.map(relative).join(`, `)}`,
+        `oracle files fail with no mutant active, so their owned code cannot be judged: ${failingOwners.map((file) => `${relative(file)} (${first.failed.get(file)})`).join(`, `)}`,
       )
-    const excluded = [...first.failed]
+    const excluded = [...first.failed.keys()]
     if (excluded.length > 0) {
       log(`left out, failing with no mutant active: ${excluded.join(`, `)}`)
       files = files.filter((file) => !first.failed.has(file))

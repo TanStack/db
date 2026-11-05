@@ -44,7 +44,11 @@
  *    in a function with no owner is `unowned` and is listed as a warning, not
  *    a gap. An owns entry that names nothing, an owns list that is not a
  *    literal, and an owner whose tests fail with no mutant active each make
- *    the run fail and name the cause, because each would otherwise hide gaps.
+ *    the run fail and name the cause, because each would otherwise hide gaps;
+ *    a failing owner is named with a failing test and its error. The CLI's
+ *    capture must not change what a test observes: an owner that passes
+ *    alone passes under the CLI, even when it counts the reads of a getter
+ *    on a value it asserts on.
  * 4. **Classification across owners.** Each mutant is judged only by the
  *    tests of its function's owners. Each test's route is the one the
  *    framework registered for it (`__oracleRoute`), never its name; a test
@@ -485,6 +489,8 @@ async function driver(plan, observe) {
         m.laws?.includes(`(unnamed)`)
       )
         states.add(`killed under an unnamed law`)
+      if (m.function === `w_getter` && m.outcome === `killed`)
+        states.add(`a getter the capture left unread`)
       if (m.function === `w_campaigns` && m.outcome === `random-only-kill`)
         states.add(`second campaign's route attributed`)
       if (m.function === `w_soft` && m.outcome === `random-only-kill`)
@@ -596,6 +602,12 @@ function check(plan, observations, expected) {
       return violation(
         `cli`,
         `the refusal does not name ${expected.refused.cause}: ${cli.stderr}`,
+        `ownership`,
+      )
+    if (expected.refused.detail && !`${cli.stderr}`.includes(expected.refused.detail))
+      return violation(
+        `cli`,
+        `the refusal does not give the failing test's error, ${expected.refused.detail}: ${cli.stderr}`,
         `ownership`,
       )
     return incrementalCheck(observations) ?? pass
@@ -907,6 +919,7 @@ const required = [
   `killed under an unnamed law`,
   `second campaign's route attributed`,
   `a soft verdict keeps its campaign's route`,
+  `a getter the capture left unread`,
   ...incrementalStates,
 ]
 const faults = [`badEntry`, `missingSource`, `nonLiteral`, `brokenOwner`]
