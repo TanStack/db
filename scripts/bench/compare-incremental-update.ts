@@ -419,7 +419,7 @@ function formatMarkdown(
   lines.push(``)
   const gateFailures = regressionFailures(allComparisons, threshold)
   lines.push(
-    `CI regression gate: **${gateFailures.length === 0 ? `PASS` : `FAIL`}**. Query geometric means: >+${Math.max(30, threshold * 100)}% writes or >+${Math.max(50, threshold * 100)}% cold. A case also fails when all three repetitions exceed the entire base range by >+${Math.max(50, threshold * 100)}% and the metric's absolute floor.`,
+    `CI regression gate: **${gateFailures.length === 0 ? `PASS` : `FAIL`}**. Query geometric means: >+${Math.max(30, threshold * 100)}% writes or >+${Math.max(50, threshold * 100)}% cold. A case also fails when every repetition exceeds the entire base range by >+${Math.max(50, threshold * 100)}% and the metric's absolute floor.`,
   )
   if (gateFailures.length > 0)
     lines.push(``, ...gateFailures.map((failure) => `- ${failure}`))

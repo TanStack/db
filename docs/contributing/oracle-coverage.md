@@ -996,6 +996,20 @@ fail only native type constraints. See the
 [prep-review evidence](oracle-reviews/2026-11-05-boundary-only-prep-review.md)
 for pre-edit RED, corrected carrier expectations, reach and source bindings.
 
+The CI follow-up adds three conditional inline-wrapper choices to all 24
+source descriptions: array/array, array/materialized array, and array/singleton.
+Each legal consumer runs public construction before native type comparison at
+the QueryRef functional input and Collection result. Wrapper choice must expose
+materialized values, with singleton absence preserved. The unchanged mapping
+fails 24 consumers with TS2344 only; the distributing mapping passes all 33
+checks. A restored-mapping mutant rejects the same shape assertions. This
+owner does not yet judge arbitrary unions of opaque, scalar and include wrappers.
+The publication owner also adds grouped and ungrouped aggregates through direct
+and QueryRef receivers, with held inserts, settlement and later remote inserts.
+Counts change while projection metadata belongs to the output Collection.
+Single-field wrong-source observations calibrate every metadata assertion.
+See the [CI evidence](oracle-reviews/2026-11-05-boundary-only-ci-review.md).
+
 Grouping inference remains bounded by the declared key-list type. A callback
 annotated as a broad array can return an empty list at runtime while the general
 overload still promises a generated key. The concrete trace is

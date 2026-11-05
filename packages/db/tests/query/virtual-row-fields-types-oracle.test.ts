@@ -141,12 +141,20 @@ const groupingBoundaries = [
 // Seven through nine are neighboring depths around the former cutoff. Sixteen
 // distinguishes supporting that one boundary from merely moving it one level.
 const aggregateDepths = [0, 7, 8, 9, 10, 16] as const
+// Conditional inline fields are legal authoring choices. Array/array forms
+// distinguish wrapper identity from value shape; singleton forms retain absence.
+const inlineChoices = [
+  `array-array`,
+  `array-materialized`,
+  `array-single`,
+] as const
 const authoredStates = authoredCollisions.flatMap(({ name }) =>
   authoredPaths.flatMap((path) =>
     authoredKinds.map((kind) => `authored/${name}/${path}/${kind}`),
   ),
 )
 const states = [
+  ...inlineChoices.map((choice) => `inline-choice/${choice}`),
   ...authoredStates,
   ...authoredStates.map((state) => `structured-refs/${state}`),
   ...authoredCollisions.flatMap(({ name }) =>
@@ -543,6 +551,37 @@ function consumerSource(
       )
     }
   }
+  // The expected child shape comes from its declared selection. Choosing a
+  // wrapper at construction cannot expose that wrapper in a callback's values.
+  for (const choice of inlineChoices) {
+    const right =
+      choice === `array-array`
+        ? `toArray(leaves)`
+        : choice === `array-materialized`
+          ? `materialize(leaves)`
+          : `materialize(leaves.findOne())`
+    const child = `{ label: ${shape.value} }`
+    const children =
+      choice === `array-single`
+        ? `Array<${child}> | ${child} | undefined`
+        : `Array<${child}>`
+    addWitness(
+      `inline-choice/${choice}`,
+      `{
+      const chooseArray = rows.size === 0;
+      const inner = new Query().from({ item: rows }).select(({ item }) => {
+        const leaves = new Query().from({ leaf: rows }).where(({ leaf }) => eq(leaf.id, item.id)).select(({ leaf }) => ({ label: leaf.value }));
+        return { id: item.id, children: chooseArray ? toArray(leaves) : ${right} };
+      });
+      const query = new Query().from({ result: inner }).fn.select(({ result }) => {
+        type Observed = Assert<SameShape<Normalize<typeof result>, Normalize<{ id: ${shape.key}; children: ${children} }>>>;
+        return result;
+      });
+      const published = createLiveQueryCollection({ query });
+      type PublishedObservation = Assert<SameShape<Normalize<typeof published.toArray[number]>, Normalize<Published<{ id: ${shape.key}; children: ${children} }>>>>;
+    }`,
+    )
+  }
   return {
     source: `
     import { BTreeIndex, Query, count, createCollection, createLiveQueryCollection, eq, groupKeys, include, materialize, toArray } from '@tanstack/db';
@@ -719,6 +758,7 @@ declareOracle({
     groupedForms,
     groupingBoundaries,
     aggregateDepths,
+    inlineChoices,
   ],
   model: [consumerSource],
   check: [checkConsumer, checkConsumerConstruction],

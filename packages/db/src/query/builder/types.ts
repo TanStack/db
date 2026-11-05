@@ -448,75 +448,66 @@ export type ResultTypeFromSelect<TSelectObject> =
               TSelectObject[K]
             > extends true
               ? ExtractExpressionType<TSelectObject[K]>
-              : TSelectObject[K] extends ToArrayWrapper<infer T>
-                ? Array<T>
+              : TSelectObject[K] extends
+                    | ToArrayWrapper<unknown>
+                    | MaterializeWrapper<unknown, boolean>
+                ? ResultTypeFromSelectValue<TSelectObject[K]>
                 : TSelectObject[K] extends ConcatToArrayWrapper<any>
                   ? string
-                  : // materialize() — Array<T> for multi-row, T | undefined for findOne()
-                    TSelectObject[K] extends MaterializeWrapper<
-                        infer T,
-                        infer IsSingle
-                      >
-                    ? IsSingle extends true
-                      ? T | undefined
-                      : Array<T>
-                    : TSelectObject[K] extends {
-                          readonly __brand: `CaseWhenWrapper`
-                          readonly _result?: infer T
-                        }
-                      ? ResultTypeFromCaseWhen<T>
-                      : // include() subquery — produces a child Collection
-                        TSelectObject[K] extends IncludeWrapper<
-                            infer TChildContext
-                          >
-                        ? Collection<GetResult<TChildContext>>
-                        : // Ref (full object ref or spread with RefBrand) - recursively process properties
-                          TSelectObject[K] extends AnyRef<infer _T>
-                          ? ExtractRef<TSelectObject[K]>
-                          : // RefLeaf (simple property ref like user.name)
-                            TSelectObject[K] extends RefLeaf<infer T>
-                            ? IsNullableRef<TSelectObject[K]> extends true
-                              ? T | undefined
-                              : T
-                            : // RefLeaf | undefined (schema-optional field)
-                              TSelectObject[K] extends
-                                  RefLeaf<infer T> | undefined
-                              ? T | undefined
-                              : // RefLeaf | null (schema-nullable field)
-                                TSelectObject[K] extends RefLeaf<infer T> | null
-                                ? IsNullableRef<
-                                    Exclude<TSelectObject[K], null>
-                                  > extends true
-                                  ? T | null | undefined
-                                  : T | null
-                                : // Nullable and/or optional object-type schema field
-                                  TSelectObject[K] extends
-                                      AnyRef<infer _T> | null | undefined
-                                  ? | ExtractRef<
-                                        Exclude<
-                                          TSelectObject[K],
-                                          null | undefined
-                                        >
-                                      >
-                                    | Extract<
+                  : TSelectObject[K] extends {
+                        readonly __brand: `CaseWhenWrapper`
+                        readonly _result?: infer T
+                      }
+                    ? ResultTypeFromCaseWhen<T>
+                    : // include() subquery — produces a child Collection
+                      TSelectObject[K] extends IncludeWrapper<
+                          infer TChildContext
+                        >
+                      ? Collection<GetResult<TChildContext>>
+                      : // Ref (full object ref or spread with RefBrand) - recursively process properties
+                        TSelectObject[K] extends AnyRef<infer _T>
+                        ? ExtractRef<TSelectObject[K]>
+                        : // RefLeaf (simple property ref like user.name)
+                          TSelectObject[K] extends RefLeaf<infer T>
+                          ? IsNullableRef<TSelectObject[K]> extends true
+                            ? T | undefined
+                            : T
+                          : // RefLeaf | undefined (schema-optional field)
+                            TSelectObject[K] extends
+                                RefLeaf<infer T> | undefined
+                            ? T | undefined
+                            : // RefLeaf | null (schema-nullable field)
+                              TSelectObject[K] extends RefLeaf<infer T> | null
+                              ? IsNullableRef<
+                                  Exclude<TSelectObject[K], null>
+                                > extends true
+                                ? T | null | undefined
+                                : T | null
+                              : // Nullable and/or optional object-type schema field
+                                TSelectObject[K] extends
+                                    AnyRef<infer _T> | null | undefined
+                                ? | ExtractRef<
+                                      Exclude<
                                         TSelectObject[K],
                                         null | undefined
                                       >
-                                  : TSelectObject[K] extends Aggregate<infer T>
-                                    ? T
-                                    : TSelectObject[K] extends
-                                          | string
-                                          | number
-                                          | boolean
-                                          | null
-                                          | undefined
-                                      ? TSelectObject[K]
-                                      : TSelectObject[K] extends Record<
-                                            string,
-                                            any
-                                          >
-                                        ? ResultTypeFromSelect<TSelectObject[K]>
-                                        : never
+                                    >
+                                  | Extract<TSelectObject[K], null | undefined>
+                                : TSelectObject[K] extends Aggregate<infer T>
+                                  ? T
+                                  : TSelectObject[K] extends
+                                        | string
+                                        | number
+                                        | boolean
+                                        | null
+                                        | undefined
+                                    ? TSelectObject[K]
+                                    : TSelectObject[K] extends Record<
+                                          string,
+                                          any
+                                        >
+                                      ? ResultTypeFromSelect<TSelectObject[K]>
+                                      : never
           }>
         >
 

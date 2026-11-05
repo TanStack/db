@@ -64,6 +64,7 @@
 import { afterAll, describe, expect, test, vi } from 'vitest'
 import {
   Query,
+  count,
   createLiveQueryCollection,
   eq,
   include,
@@ -284,14 +285,21 @@ const collisionCases = metadataCollisionCases
  *
  * This finite grammar crosses direct and QueryRef receivers, a one-to-many
  * join, each source's held write, every reserved-name collision, and absent,
- * array and singleton inline inputs. The model recomputes from authored source
+ * array and singleton inline inputs. Grouped and aggregate projections also
+ * insert a held source row: their counts change while their output metadata
+ * remains owned by the output Collection. The model recomputes from authored source
  * arrays. Inline projections contain only their selected ordinary fields.
  * Reads and exact Collection entry keys are compared at preload, held mutation,
  * settlement without confirmation, and a later remote source update. It does
  * not claim framework timing, rejected writes, or arbitrary include depth.
  */
 type BoundaryPublicationHistory = {
-  kind: `implicit-single` | `implicit-join` | `inline-return`
+  kind:
+    | `implicit-single`
+    | `implicit-join`
+    | `inline-return`
+    | `grouped`
+    | `aggregate`
   composition: `direct` | `query-ref`
   pendingSource: `parent` | `child`
   inline: `none` | `array` | `singleton`
@@ -299,6 +307,16 @@ type BoundaryPublicationHistory = {
   authoredPending: boolean
 }
 const boundaryPublicationHistories: Array<BoundaryPublicationHistory> = [
+  ...([`grouped`, `aggregate`] as const).flatMap((kind) =>
+    ([`direct`, `query-ref`] as const).map((composition) => ({
+      kind,
+      composition,
+      pendingSource: `child` as const,
+      inline: `none` as const,
+      collision: `none`,
+      authoredPending: false,
+    })),
+  ),
   ...([`implicit-single`, `implicit-join`] as const).flatMap((kind) =>
     ([`direct`, `query-ref`] as const).flatMap((composition) =>
       (kind === `implicit-single`
@@ -335,7 +353,16 @@ type BoundaryJoinedRow = {
   chosen: AttributionRow
 }
 type BoundaryPublicationContext = Omit<AttributionContext, `result`> & {
-  result: BoundaryPublishedRow | BoundaryJoinedRow
+  result:
+    | BoundaryPublishedRow
+    | BoundaryJoinedRow
+    | { id: AttributionKey; total: number }
+}
+// This grammar also models joined namespaces and inline children. Keep its
+// carrier open to those shapes; exact fields still come from the model below.
+type BoundaryMetadataResult = {
+  ordinary: object
+  metadata: ReturnType<typeof expectedAttributedRows>[number][`metadata`]
 }
 
 // A namespace combines two source values rather than selecting either one.
@@ -349,7 +376,20 @@ function expectedBoundaryPublication(
   parentId: string,
   childId: string,
   outputId: string,
-): Array<MetadataResult> {
+): Array<BoundaryMetadataResult> {
+  if (history.kind === `grouped` || history.kind === `aggregate`) {
+    // Group membership and counts follow authored rows, independent of their
+    // metadata. No source row is selected whole, so publication owns metadata.
+    const counts = new Map<string, number>()
+    for (const child of children) {
+      const id = history.kind === `aggregate` ? `all` : child.parentId
+      counts.set(id, (counts.get(id) ?? 0) + 1)
+    }
+    return [...counts].map(([id, total]) => ({
+      ordinary: { id, total },
+      metadata: expectedSourceMetadata(`output-${id}`, outputId, false),
+    }))
+  }
   if (history.kind === `implicit-single`)
     return expectedAttributedRows(
       children,
@@ -391,10 +431,15 @@ function expectedBoundaryPublication(
     const values = children
       .filter((child) => child.parentId === parent.id)
       .map(({ id, label }) => ({ id, label }))
-    selected.ordinary = {
-      ...selected.ordinary,
-      children: history.inline === `singleton` ? values[0] : values,
-    }
+    return [
+      {
+        ...selected,
+        ordinary: {
+          ...selected.ordinary,
+          children: history.inline === `singleton` ? values[0] : values,
+        },
+      },
+    ]
   }
   return [selected]
 }
@@ -404,7 +449,7 @@ function expectedBoundaryPublication(
 // duplicate rows and mismatches between a public row's key and its entry key.
 function checkBoundaryPublication(
   actual: ReadonlyArray<readonly [AttributionKey, object]>,
-  expected: ReadonlyArray<MetadataResult>,
+  expected: ReadonlyArray<BoundaryMetadataResult>,
 ): void {
   const order = (
     a: readonly [AttributionKey, object],
@@ -498,6 +543,19 @@ test.each(boundaryPublicationHistories)(
               ? `local`
               : `authored`
     const selected = (() => {
+      if (history.kind === `grouped`)
+        return new Query()
+          .from({ chosen: rows })
+          .groupBy(({ chosen }) => chosen.parentId)
+          .select(({ chosen }) => ({
+            id: chosen.parentId,
+            total: count(chosen.id),
+          }))
+      if (history.kind === `aggregate`)
+        return new Query().from({ chosen: rows }).select(({ chosen }) => ({
+          id: `all`,
+          total: count(chosen.id),
+        }))
       if (history.kind === `implicit-single`)
         return new Query().from({ chosen: rows })
       if (history.kind === `implicit-join`)
@@ -535,7 +593,12 @@ test.each(boundaryPublicationHistories)(
           : new Query().from({
               outer: selected,
             })) as unknown as QueryBuilder<BoundaryPublicationContext>,
-      getKey: (row) => (`chosen` in row ? `result-${row.chosen.id}` : row.id),
+      getKey: (row) =>
+        `total` in row
+          ? `output-${row.id}`
+          : `chosen` in row
+            ? `result-${row.chosen.id}`
+            : row.id,
     })
     const pending = new Set<AttributionKey>()
     const failures: Array<unknown> = []
@@ -564,20 +627,33 @@ test.each(boundaryPublicationHistories)(
     await checkWithCleanup(async () => {
       await live.preload()
       check(`initial`)
+      const inserting =
+        history.kind === `grouped` || history.kind === `aggregate`
       const source = history.pendingSource === `parent` ? parents : rows
-      const key = history.pendingSource === `parent` ? `parent` : `child`
+      const key = inserting
+        ? `inserted`
+        : history.pendingSource === `parent`
+          ? `parent`
+          : `child`
       const before =
         history.pendingSource === `parent` ? { ...parent } : { ...children[0]! }
-      if (history.pendingSource === `parent`)
+      if (inserting)
+        children = [
+          ...children,
+          { id: key, parentId: `parent`, label: `pending` },
+        ]
+      else if (history.pendingSource === `parent`)
         parent = { ...parent, label: `pending` }
       else
         children = children.map((row) =>
           row.id === key ? { ...row, label: `pending` } : row,
         )
       pending.add(key)
-      const mutation = source.update(key, (row) => {
-        row.label = `pending`
-      })
+      const mutation = inserting
+        ? source.insert({ id: key, parentId: `parent`, label: `pending` })
+        : source.update(key, (row) => {
+            row.label = `pending`
+          })
       finishMutation = async () => {
         source.utils.resolveSync()
         finishMutation = async () => {}
@@ -587,14 +663,19 @@ test.each(boundaryPublicationHistories)(
       check(`held`)
       await finishMutation()
       pending.clear()
-      if (history.pendingSource === `parent`) parent = before
+      if (inserting) children = children.filter((row) => row.id !== key)
+      else if (history.pendingSource === `parent`) parent = before
       else children = children.map((row) => (row.id === key ? before : row))
       check(`settled`)
-      const remote = { ...before, label: `remote-next-use` }
+      const remote = { ...before, id: key, label: `remote-next-use` }
       source.utils.begin()
-      source.utils.write({ type: `update`, value: remote })
+      source.utils.write({
+        type: inserting ? `insert` : `update`,
+        value: remote,
+      })
       source.utils.commit()
-      if (history.pendingSource === `parent`) parent = remote
+      if (inserting) children = [...children, remote]
+      else if (history.pendingSource === `parent`) parent = remote
       else children = children.map((row) => (row.id === key ? remote : row))
       check(`remote`)
       if (failures.length)
@@ -611,6 +692,37 @@ test.each(boundaryPublicationHistories)(
     ])
   },
 )
+
+// Calibrate the same comparison against the former source-attribution rule.
+// Mutate one metadata observation at a time; ordinary group values stay valid.
+test.each(
+  boundaryPublicationHistories.filter(
+    ({ kind }) => kind === `grouped` || kind === `aggregate`,
+  ),
+)(`rejects source metadata on a grouped output: %j`, (history) => {
+  const parent = { id: `parent`, parentId: `root`, label: `parent` }
+  const child = { id: `child`, parentId: `parent`, label: `held` }
+  const expected = expectedBoundaryPublication(
+    history,
+    parent,
+    [child],
+    new Set([child.id]),
+    `parent-source`,
+    `child-source`,
+    `output`,
+  )
+  const sourceMetadata = expectedSourceMetadata(child.id, `child-source`, true)
+  for (const field of virtualFieldNames) {
+    const wrong = expected.map(
+      ({ ordinary, metadata }) =>
+        [
+          metadata.$key as AttributionKey,
+          { ...ordinary, ...metadata, [field]: sourceMetadata[field] },
+        ] as const,
+    )
+    expect(() => checkBoundaryPublication(wrong, expected), field).toThrow()
+  }
+})
 
 /**
  * Projection shape controls attribution, not the spelling of selected fields.

@@ -2994,7 +2994,7 @@ describe(`Virtual properties`, () => {
     await syncedOnly.cleanup()
   })
 
-  it(`should aggregate pending writes and origin for grouped rows`, async () => {
+  it(`publishes grouped projections with the output Collection metadata`, async () => {
     let persistInsert!: () => void
     const insertPersisted = new Promise<void>((resolve) => {
       persistInsert = resolve
@@ -3056,9 +3056,10 @@ describe(`Virtual properties`, () => {
 
     const groupRow = grouped.toArray.find((row) => row.group === `g1`)
     expect(groupRow).toBeDefined()
-    expect(groupRow!.$hasPendingWrites).toBe(true)
-    expect(groupRow!.$origin).toBe(`local`)
-    expect(groupRow!.$collectionId).toBe(`virtual-props-aggregate-source`)
+    expect(groupRow!.total).toBe(2)
+    expect(groupRow!.$hasPendingWrites).toBe(false)
+    expect(groupRow!.$origin).toBe(`remote`)
+    expect(groupRow!.$collectionId).toBe(grouped.id)
 
     persistInsert()
     await source.cleanup({ dependents: true })

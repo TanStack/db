@@ -911,5 +911,71 @@
     "confirmedOpen": 0,
     "deferred": 0,
     "designDecision": 0
-  }
+  },
+  "ciFollowups": [
+    {
+      "parentHead": "066d0dd26d9cf7829c986b5d3af1d76c1634e8a5",
+      "sourceSha256": {
+        "packages/db/src/query/builder/types.ts": "257bae3fa76e433522c73091d84a500b3385c21fec98a0da3614174c4abb765d",
+        "packages/db/tests/collection-subscribe-changes.test.ts": "36e591f83aa5e65bd750382ae123dd17f70e7c0342dd1faeafb5c5993b2437bd",
+        "packages/db/tests/oracle-replay-manifest.ts": "25e28284ae94003131225dc57e08099247311c64ab7ee15c626c25da35023850",
+        "packages/db/tests/query/query-api-type-algebra.test-d.ts": "7590489bc629e193f1a5af708ea6fa4e8185713291a3d6d87280b0e7ab79f3b9",
+        "packages/db/tests/query/subquery-user-value.test.ts": "ce961739148e3e3c89191384c96c10894f6f57fc7c486a9d1994991d9719d7ec",
+        "packages/db/tests/query/union-all.test-d.ts": "b2751a1ba9b2ad16f4645bae9b081d2539377bfe55019e074c73c2ab3c5414f8",
+        "packages/db/tests/query/virtual-row-fields-oracle.test.ts": "28a5d98fe5bf57c6f53ada82bd4b0d51e8efe67b21e2bd83b996f2a1ad06620f",
+        "packages/db/tests/query/virtual-row-fields-reference-types.test-d.ts": "80dbbecc682bf757cf4e465471604f8793ee8b82bd679488c4ab1fbf9f41ea4d",
+        "packages/db/tests/query/virtual-row-fields-support.ts": "813980031f16171af5669c2d1b533b7fa383987950c8673e7ce208bcf1db03e1",
+        "packages/db/tests/query/virtual-row-fields-types-oracle.test.ts": "b4b8d6792b4b37f3ec2ec30e71dbca37f1781aa5c0de7e25d0dfbd9814fd28c3",
+        "scripts/bench/compare-incremental-update.ts": "d2f5b4dbc79500906fa1930ab4c630297015c649ebcb6e174c0020b8788662ce"
+      },
+      "originalTypeRedSources": {
+        "packages/db/src/query/builder/types.ts": "1a0c95fef7fa96281fadbf8b45e4360e773a89b9a0be7a0614240dcc6ae4ffb5",
+        "packages/db/tests/query/virtual-row-fields-types-oracle.test.ts": "26e714284028f7c197ef45e928d509d61ec715acebda232f6090cbd439eb322c"
+      },
+      "logSha256": {
+        "ci-inline-choice-red2.log": "979cbb24fc034581774d70635315878da72f9cfa8fdd2e86cbcadfe718b8cc00",
+        "ci-inline-choice-final-green.log": "68bbdad535fa546f85153513fc1938a3b31c539500bd43e6a86125a6e6af6f3c",
+        "ci-inline-choice-mutant.log": "8d5e326df63e2df83cc38c5d0fdf7cc7fbfe0a5708baa94df8c7370f57a0b541",
+        "ci-inline-choice-restored-green.log": "1fb210ebb1e8a86842c858a45811188449238d24b11c7a083e42e3c733b4af19",
+        "ci-whole-db-tsc-green2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "ci-group-publication-reach-direct-green.log": "776cd2d1899e57ef817fd03a96ef810506869a2fc7ffb2e6da66a02b9d12cdd8",
+        "ci-route-input-green.log": "47f3e5934566f7fe3c2f12c15db140af2c29a0de7de3015ef5b8fc7660a9b5e2",
+        "ci-replay-manifest-green.log": "591c9a9b96a59a8e6531725f2f18ca34a5ac728e7357af1becaedf4c050f4d86",
+        "ci-payload-direct-replay-green.log": "1168474b6e575b876cb0137294f756b39ed35169b0c22f0add1ef3ebd2fa33a3",
+        "ci-supplemental-types-green.log": "1f0ea2dad72cb94cad76063c1f0c346144d49fe8a6dc5f91f9e96dbaf18cfd98",
+        "ci-comparator-controls.log": "bfbec45206ba2f49cb0197c4a5eed6f64ca31dc45f86a1456684d36b177ca0fe"
+      },
+      "reach": {
+        "typeStates": 259,
+        "typeHistoriesPerState": 24,
+        "publicationStates": 88,
+        "publicationComparisons": 424,
+        "newGroupStates": 16,
+        "newGroupHistoriesPerState": 1
+      },
+      "ciBenchmark": {
+        "runId": 42087213348,
+        "candidateMerge": "88544ac64ba66e66407f7aac7473221ab5ed266b",
+        "base": "8feab6ea3eaae4456f738da39fa93508ddd5cc01",
+        "prHead": "066d0dd26d9cf7829c986b5d3af1d76c1634e8a5",
+        "baseJsonSha256": "e731391677c640a12d62103d394f8e7f168ef491f78ddaa6cd938cf058e02a75",
+        "candidateJsonSha256": "43f6de95b83b574f6be171e57f1f4aacea876f26ec7592269bc6dc3a1a1a32c9",
+        "artifactSha256": {
+          "scripts/bench/boundary-only-ci-2026-11-05.csv": "5655cdd8a6fd26d3a46befeb82a326f13c4039e0412c4ee483e42da023490179"
+        },
+        "casesPerSide": 84,
+        "repetitionsPerCase": 3,
+        "retainedObservations": 504
+      },
+      "reviewAudit": {
+        "reviewId": 5790313417,
+        "items": 20,
+        "fixedNow": 4,
+        "acceptedDesign": 3,
+        "duplicates": 11,
+        "refuted": 2,
+        "confirmedOpen": 0
+      }
+    }
+  ]
 }

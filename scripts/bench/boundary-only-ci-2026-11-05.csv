@@ -1,0 +1,505 @@
+run,db_source,query,scenario,scale,source_index_mode,mutation_mode,repetition,cold_hydrate_ms,median_write_ms
+base,8feab6ea3,list: newest 50 open,visible issue update,100,none,synced,0,10.928822000000025,0.1935659999999757
+base,8feab6ea3,list: newest 50 open,visible issue update,100,none,synced,1,3.227841000000012,0.1680780000000368
+base,8feab6ea3,list: newest 50 open,visible issue update,100,none,synced,2,1.7807670000000257,0.08245099999999184
+base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,synced,0,1.8190329999999904,0.28697299999998904
+base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,synced,1,1.2726469999998926,0.20652400000005855
+base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,synced,2,1.4365099999999984,0.18117700000004788
+base,8feab6ea3,list + author,visible author update,100,none,synced,0,14.57971699999996,0.14882000000000062
+base,8feab6ea3,list + author,visible author update,100,none,synced,1,9.638667999999939,0.1676279999999224
+base,8feab6ea3,list + author,visible author update,100,none,synced,2,5.684134999999969,0.1459459999999808
+base,8feab6ea3,list + comment count,visible issue comment insert,100,none,synced,0,11.040405999999962,0.2528230000000349
+base,8feab6ea3,list + comment count,visible issue comment insert,100,none,synced,1,6.841672000000017,0.21078099999999722
+base,8feab6ea3,list + comment count,visible issue comment insert,100,none,synced,2,6.75852000000009,0.18522399999994832
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,synced,0,10.890375000000063,0.1747779999999466
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,synced,1,6.505036000000018,0.16060700000002726
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,synced,2,5.676983999999948,0.12764800000002197
+base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,synced,0,1.0091879999999946,0.09004300000003695
+base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,synced,1,0.5951679999999442,0.10737800000003972
+base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,synced,2,0.7322500000000218,0.09016299999996136
+base,8feab6ea3,open issues + documents,visible document update,100,none,synced,0,64.12017100000003,1.3554289999999583
+base,8feab6ea3,open issues + documents,visible document update,100,none,synced,1,45.172025000000076,1.35044199999993
+base,8feab6ea3,open issues + documents,visible document update,100,none,synced,2,50.52614399999993,1.3311740000001464
+base,8feab6ea3,list: newest 50 open,visible issue update,100,none,optimistic,0,2.4124089999997977,0.11426899999992202
+base,8feab6ea3,list: newest 50 open,visible issue update,100,none,optimistic,1,1.782369000000017,0.08567700000003242
+base,8feab6ea3,list: newest 50 open,visible issue update,100,none,optimistic,2,1.1169769999999062,0.08072900000001937
+base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,optimistic,0,1.0909489999999096,0.064775999999938
+base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,optimistic,1,1.1173180000000684,0.05653299999994488
+base,8feab6ea3,list: newest 50 open,visible issue delete,100,none,optimistic,2,1.0914299999999457,0.055292000000008557
+base,8feab6ea3,list + author,visible author update,100,none,optimistic,0,5.101705999999922,0.10284099999989849
+base,8feab6ea3,list + author,visible author update,100,none,optimistic,1,5.226761000000124,0.10195100000009916
+base,8feab6ea3,list + author,visible author update,100,none,optimistic,2,5.011432000000013,0.09886499999993248
+base,8feab6ea3,list + comment count,visible issue comment insert,100,none,optimistic,0,3.5735809999998764,0.1633809999998448
+base,8feab6ea3,list + comment count,visible issue comment insert,100,none,optimistic,1,12.59706200000005,0.1528350000003229
+base,8feab6ea3,list + comment count,visible issue comment insert,100,none,optimistic,2,3.18525899999986,0.15275500000007014
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,optimistic,0,4.5058970000000045,0.09558100000003833
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,optimistic,1,5.749892000000273,0.09156500000017331
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,none,optimistic,2,4.936633000000256,0.08791999999994005
+base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,optimistic,0,0.6260940000001938,0.08129000000008091
+base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,optimistic,1,0.5951679999998305,0.08301200000005338
+base,8feab6ea3,issue detail + comments,selected issue comment insert,100,none,optimistic,2,0.5961600000000544,0.08078900000009526
+base,8feab6ea3,open issues + documents,visible document update,100,none,optimistic,0,50.22532900000033,1.6201999999998407
+base,8feab6ea3,open issues + documents,visible document update,100,none,optimistic,1,44.046024000000216,1.6429229999998824
+base,8feab6ea3,open issues + documents,visible document update,100,none,optimistic,2,47.7172599999999,1.593159999999898
+base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,synced,0,3.1286850000001323,0.07755399999996371
+base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,synced,1,2.2794519999997647,0.07360900000003312
+base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,synced,2,1.261812000000191,0.06395500000007814
+base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,synced,0,1.2947100000001228,0.24712499999986903
+base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,synced,1,1.0415859999998247,0.192323999999644
+base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,synced,2,1.1236479999997755,0.17546900000024834
+base,8feab6ea3,list + author,visible author update,100,manual,synced,0,4.862203000000136,0.1471070000002328
+base,8feab6ea3,list + author,visible author update,100,manual,synced,1,4.346782000000076,0.1450039999999717
+base,8feab6ea3,list + author,visible author update,100,manual,synced,2,8.070334999999886,0.07757500000025175
+base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,synced,0,2.978904000000057,0.16915999999991982
+base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,synced,1,2.8442159999999603,0.16942000000017288
+base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,synced,2,2.8968540000000758,0.1711219999997411
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,synced,0,4.1662350000001425,0.11117400000011912
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,synced,1,9.717854999999872,0.1109230000001844
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,synced,2,4.097173999999995,0.1152910000000702
+base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,synced,0,0.5222509999998692,0.07267700000011246
+base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,synced,1,0.610660999999709,0.0727670000001126
+base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,synced,2,0.3544729999998708,0.07128499999998894
+base,8feab6ea3,open issues + documents,visible document update,100,manual,synced,0,47.63907400000062,1.3291509999999107
+base,8feab6ea3,open issues + documents,visible document update,100,manual,synced,1,45.27053999999953,1.2926969999998619
+base,8feab6ea3,open issues + documents,visible document update,100,manual,synced,2,47.646254999999655,1.2819909999998345
+base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,optimistic,0,1.8094989999999598,0.07365799999934097
+base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,optimistic,1,0.9678380000004836,0.07346899999993184
+base,8feab6ea3,list: newest 50 open,visible issue update,100,manual,optimistic,2,1.0942740000000413,0.0684609999998429
+base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,optimistic,0,0.9500320000006468,0.0594280000004801
+base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,optimistic,1,0.901810000000296,0.0555819999999585
+base,8feab6ea3,list: newest 50 open,visible issue delete,100,manual,optimistic,2,0.930623000000196,0.05383900000015274
+base,8feab6ea3,list + author,visible author update,100,manual,optimistic,0,3.6302150000001348,0.09583199999997305
+base,8feab6ea3,list + author,visible author update,100,manual,optimistic,1,3.0257440000004863,0.09551999999985128
+base,8feab6ea3,list + author,visible author update,100,manual,optimistic,2,3.235893999999462,0.09486900000047171
+base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,optimistic,0,4.521780000000035,0.15243499999996857
+base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,optimistic,1,3.1951429999999164,0.14999100000022736
+base,8feab6ea3,list + comment count,visible issue comment insert,100,manual,optimistic,2,3.724323999999797,0.14908999999988737
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,0,3.9190609999996013,0.09370899999976245
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,1,11.30393500000082,0.09032399999978225
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,2,4.270128999999542,0.0906539999996312
+base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,optimistic,0,0.4184269999996104,0.07746399999996356
+base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,optimistic,1,0.31990200000018376,0.07796499999949447
+base,8feab6ea3,issue detail + comments,selected issue comment insert,100,manual,optimistic,2,0.3474319999995714,0.07755400000041845
+base,8feab6ea3,open issues + documents,visible document update,100,manual,optimistic,0,47.741024999999354,1.603476000000228
+base,8feab6ea3,open issues + documents,visible document update,100,manual,optimistic,1,43.435553999999684,1.6000510000003487
+base,8feab6ea3,open issues + documents,visible document update,100,manual,optimistic,2,43.12706799999978,1.5814829999999347
+base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,synced,0,7.00714699999935,0.05213699999967503
+base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,synced,1,16.799791999999798,0.05060400000002119
+base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,synced,2,9.37215600000036,0.06514600000082282
+base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,synced,0,7.497440000000097,0.7430359999998473
+base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,synced,1,6.3041889999994964,0.7217250000003332
+base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,synced,2,8.714594000000034,0.7124709999998231
+base,8feab6ea3,list + author,visible author update,1000,none,synced,0,24.671072000000095,0.07653300000038143
+base,8feab6ea3,list + author,visible author update,1000,none,synced,1,24.228339000000233,0.07473000000027241
+base,8feab6ea3,list + author,visible author update,1000,none,synced,2,29.02353200000016,0.07440000000042346
+base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,synced,0,9.358675000000403,0.15663099999983388
+base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,synced,1,8.231182000000445,0.15720200000032492
+base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,synced,2,7.256774999999834,0.15859400000044843
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,synced,0,8.82968399999936,0.10086900000078458
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,synced,1,30.55337899999995,0.10441399999945133
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,synced,2,9.139030999999704,0.1005379999996876
+base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,synced,0,1.2834830000001602,0.06766900000002352
+base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,synced,1,1.08084400000007,0.06782000000021071
+base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,synced,2,1.1588489999994636,0.06666899999981979
+base,8feab6ea3,open issues + documents,visible document update,1000,none,synced,0,457.93855299999996,1.2759519999999611
+base,8feab6ea3,open issues + documents,visible document update,1000,none,synced,1,484.7303119999997,1.2694630000005418
+base,8feab6ea3,open issues + documents,visible document update,1000,none,synced,2,454.95258300000023,1.274821000000884
+base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,optimistic,0,5.183925999999701,0.06760899999972025
+base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,optimistic,1,13.91463499999918,0.06669900000088091
+base,8feab6ea3,list: newest 50 open,visible issue update,1000,none,optimistic,2,4.644470999999612,0.15154400000028545
+base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,optimistic,0,5.005654000000504,0.050394000001688255
+base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,optimistic,1,14.063724999999977,0.04730000000017753
+base,8feab6ea3,list: newest 50 open,visible issue delete,1000,none,optimistic,2,4.665783000000374,0.04842099999950733
+base,8feab6ea3,list + author,visible author update,1000,none,optimistic,0,22.63133200000084,0.09214600000086648
+base,8feab6ea3,list + author,visible author update,1000,none,optimistic,1,32.09347099999832,0.09047300000020186
+base,8feab6ea3,list + author,visible author update,1000,none,optimistic,2,30.906789000000572,0.09104399999887391
+base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,optimistic,0,7.499241999999867,0.14112800000111747
+base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,optimistic,1,7.433665000000474,0.1404770000008284
+base,8feab6ea3,list + comment count,visible issue comment insert,1000,none,optimistic,2,7.409359000001132,0.14520400000037625
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,0,8.290388999999777,0.08068900000034773
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,1,8.559215999999651,0.0793870000015886
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,2,12.457596000000194,0.08735900000101537
+base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,optimistic,0,1.1358849999996892,0.0968830000001617
+base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,optimistic,1,1.3260260000006383,0.07526099999995495
+base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,none,optimistic,2,1.2379359999995359,0.07495999999991909
+base,8feab6ea3,open issues + documents,visible document update,1000,none,optimistic,0,461.3720570000005,1.611667999999554
+base,8feab6ea3,open issues + documents,visible document update,1000,none,optimistic,1,476.9030469999998,1.5957939999989321
+base,8feab6ea3,open issues + documents,visible document update,1000,none,optimistic,2,457.46535399999993,1.6006909999996424
+base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,synced,0,1.4451509999998962,0.05393000000003667
+base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,synced,1,1.0116219999999885,0.054269999998723506
+base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,synced,2,1.0256230000013602,0.054040000000895816
+base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,synced,0,1.0621759999994538,0.21943300000020827
+base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,synced,1,0.9581729999990785,0.20169799999894167
+base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,synced,2,0.9458159999994677,0.20345999999881315
+base,8feab6ea3,list + author,visible author update,1000,manual,synced,0,3.1396009999989474,0.07658300000002782
+base,8feab6ea3,list + author,visible author update,1000,manual,synced,1,3.2429039999988163,0.07596200000079989
+base,8feab6ea3,list + author,visible author update,1000,manual,synced,2,3.388227999999799,0.07373800000095798
+base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,synced,0,3.3013499999997293,0.16487299999971583
+base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,synced,1,5.1282740000006015,0.1722939999999653
+base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,synced,2,3.288501000000906,0.16856800000095973
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,synced,0,4.563190999999279,0.10742899999968358
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,synced,1,4.371439000000464,0.10884099999930186
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,synced,2,4.7026069999992615,0.1094119999997929
+base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,synced,0,0.43720500000017637,0.0699640000002546
+base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,synced,1,0.48682799999915005,0.07072499999958382
+base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,synced,2,0.47502999999960593,0.07047400000010384
+base,8feab6ea3,open issues + documents,visible document update,1000,manual,synced,0,478.81909300000007,1.2786759999999049
+base,8feab6ea3,open issues + documents,visible document update,1000,manual,synced,1,455.35170800000014,1.2792969999991328
+base,8feab6ea3,open issues + documents,visible document update,1000,manual,synced,2,473.25575500000014,1.2824319999999716
+base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,optimistic,0,1.1731820000004518,0.07682299999942188
+base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,optimistic,1,1.103519000000233,0.07234699999935401
+base,8feab6ea3,list: newest 50 open,visible issue update,1000,manual,optimistic,2,1.0374210000009043,0.06893200000013167
+base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,optimistic,0,1.1948639999991428,0.05630300000120769
+base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,optimistic,1,1.0402149999990797,0.05786600000101316
+base,8feab6ea3,list: newest 50 open,visible issue delete,1000,manual,optimistic,2,1.0244209999982559,0.057383999999728985
+base,8feab6ea3,list + author,visible author update,1000,manual,optimistic,0,3.9663839999993797,0.09686300000066694
+base,8feab6ea3,list + author,visible author update,1000,manual,optimistic,1,3.23578500000076,0.0970629999992525
+base,8feab6ea3,list + author,visible author update,1000,manual,optimistic,2,3.231920000000173,0.09279699999933655
+base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,optimistic,0,6.2817809999996825,0.15112300000146206
+base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,optimistic,1,3.1191130000006524,0.1476780000011786
+base,8feab6ea3,list + comment count,visible issue comment insert,1000,manual,optimistic,2,2.9785959999990155,0.14747799999895506
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,0,14.053128999999899,0.08801999999923282
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,1,14.002964999999676,0.08727899999939837
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,2,3.9362179999989166,0.08887099999992643
+base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,optimistic,0,0.5013699999981327,0.0779949999996461
+base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,optimistic,1,0.3760550000006333,0.10752900000079535
+base,8feab6ea3,issue detail + comments,selected issue comment insert,1000,manual,optimistic,2,0.3830659999985073,0.07504100000005565
+base,8feab6ea3,open issues + documents,visible document update,1000,manual,optimistic,0,476.36525900000197,1.5970170000000508
+base,8feab6ea3,open issues + documents,visible document update,1000,manual,optimistic,1,451.8797999999988,1.5953850000005332
+base,8feab6ea3,open issues + documents,visible document update,1000,manual,optimistic,2,476.8800029999984,1.5925900000002002
+base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,synced,0,72.94599900000321,0.060319000000163214
+base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,synced,1,45.92291000000114,0.06291300000157207
+base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,synced,2,61.906677999999374,0.05893699999796809
+base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,synced,0,60.62749099999928,7.219224000000395
+base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,synced,1,61.30925800000114,7.32526499999949
+base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,synced,2,58.06513300000006,7.2255999999979394
+base,8feab6ea3,list + author,visible author update,10000,none,synced,0,266.0298609999991,0.0838339999972959
+base,8feab6ea3,list + author,visible author update,10000,none,synced,1,240.64750899999854,0.08141099999920698
+base,8feab6ea3,list + author,visible author update,10000,none,synced,2,242.1538299999993,0.1423800000011397
+base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,synced,0,67.23586600000272,0.16406199999983073
+base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,synced,1,68.52803300000232,0.15896400000201538
+base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,synced,2,60.46113100000002,0.15810400000191294
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,synced,0,72.289041,0.10716799999863724
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,synced,1,60.607638000001316,0.10574600000109058
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,synced,2,72.97703700000056,0.11100400000213995
+base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,synced,0,5.260501000000659,0.07631300000139163
+base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,synced,1,8.237193000000843,0.07944700000007288
+base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,synced,2,5.471072000000277,0.07476999999926193
+base,8feab6ea3,open issues + documents,visible document update,10000,none,synced,0,4524.934381000003,1.757513000000472
+base,8feab6ea3,open issues + documents,visible document update,10000,none,synced,1,4633.0669199999975,1.2676700000010896
+base,8feab6ea3,open issues + documents,visible document update,10000,none,synced,2,4617.718115999996,1.263304000000062
+base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,optimistic,0,63.79095199999574,0.06925200000114273
+base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,optimistic,1,44.24848100000236,0.06844100000307662
+base,8feab6ea3,list: newest 50 open,visible issue update,10000,none,optimistic,2,47.07335800000146,0.07026399999449495
+base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,optimistic,0,68.79279099999985,0.057585000002291054
+base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,optimistic,1,56.14989899999637,0.05761500000517117
+base,8feab6ea3,list: newest 50 open,visible issue delete,10000,none,optimistic,2,53.55735399999685,0.054460999999719206
+base,8feab6ea3,list + author,visible author update,10000,none,optimistic,0,296.77505799999926,0.10108000000036554
+base,8feab6ea3,list + author,visible author update,10000,none,optimistic,1,241.23524899999757,0.09677200000442099
+base,8feab6ea3,list + author,visible author update,10000,none,optimistic,2,236.8691070000059,0.09551099999953294
+base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,optimistic,0,73.67528499999753,0.18187799999577692
+base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,optimistic,1,66.5427819999968,0.17624000000068918
+base,8feab6ea3,list + comment count,visible issue comment insert,10000,none,optimistic,2,56.869721000002755,0.17457699999795295
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,0,66.20736699999543,0.08734899999399204
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,1,67.9502680000005,0.08912099999724887
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,2,58.51307999999699,0.08628699999826495
+base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,optimistic,0,7.562479000000167,0.08616800000163494
+base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,optimistic,1,4.568051000002015,0.08581599999888567
+base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,none,optimistic,2,5.108927999994194,0.08370300000387942
+base,8feab6ea3,open issues + documents,visible document update,10000,none,optimistic,0,4618.897368000005,1.5900959999999031
+base,8feab6ea3,open issues + documents,visible document update,10000,none,optimistic,1,4624.132275999997,1.5910369999983232
+base,8feab6ea3,open issues + documents,visible document update,10000,none,optimistic,2,4621.722263999996,1.5994100000025355
+base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,synced,0,2.271190999999817,0.057815000000118744
+base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,synced,1,1.719397000000754,0.05729499999870313
+base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,synced,2,3.226950999996916,0.06489600000350038
+base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,synced,0,4.726814000001468,0.7852180000045337
+base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,synced,1,3.138330000001588,1.13242000000173
+base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,synced,2,1.7209489999950165,0.7562049999978626
+base,8feab6ea3,list + author,visible author update,10000,manual,synced,0,5.755871000001207,0.08501500000420492
+base,8feab6ea3,list + author,visible author update,10000,manual,synced,1,3.932031000003917,0.0828719999990426
+base,8feab6ea3,list + author,visible author update,10000,manual,synced,2,7.043541000006371,0.08349400000588503
+base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,synced,0,5.747149000002537,0.17802200000733137
+base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,synced,1,3.915126000007149,0.1784029999980703
+base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,synced,2,5.936247999998159,0.18142799999623094
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,synced,0,5.084891999998945,0.11972699999751057
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,synced,1,4.8275529999955324,0.11849500000244007
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,synced,2,4.728485999992699,0.11722299999382813
+base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,synced,0,0.6137149999995017,0.0784049999929266
+base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,synced,1,0.5732150000112597,0.0782749999925727
+base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,synced,2,0.5683380000118632,0.07815600000321865
+base,8feab6ea3,open issues + documents,visible document update,10000,manual,synced,0,4621.406743,1.2768440000072587
+base,8feab6ea3,open issues + documents,visible document update,10000,manual,synced,1,4637.115011000002,1.2690329999895766
+base,8feab6ea3,open issues + documents,visible document update,10000,manual,synced,2,4611.230287999992,1.2724279999965802
+base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,optimistic,0,2.1409500000008848,0.06818099999509286
+base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,optimistic,1,1.6595190000080038,0.06970300000102725
+base,8feab6ea3,list: newest 50 open,visible issue update,10000,manual,optimistic,2,2.628458999999566,0.07502999999269377
+base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,optimistic,0,1.789401000001817,0.06253300000389572
+base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,optimistic,1,9.708582999999635,0.06302299999515526
+base,8feab6ea3,list: newest 50 open,visible issue delete,10000,manual,optimistic,2,3.068556999991415,0.06200199999148026
+base,8feab6ea3,list + author,visible author update,10000,manual,optimistic,0,5.905352000001585,0.09796400000050198
+base,8feab6ea3,list + author,visible author update,10000,manual,optimistic,1,3.999280000003637,0.09879600000567734
+base,8feab6ea3,list + author,visible author update,10000,manual,optimistic,2,6.848593000002438,0.09912600000097882
+base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,optimistic,0,5.682803999996395,0.19434699999692384
+base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,optimistic,1,4.3795610000088345,0.19211299999733455
+base,8feab6ea3,list + comment count,visible issue comment insert,10000,manual,optimistic,2,5.809269999997923,0.1967200000071898
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,0,13.999582999997074,0.0979150000057416
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,1,4.881371000010404,0.09861500000988599
+base,8feab6ea3,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,2,4.771869999996852,0.09811500000068918
+base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,optimistic,0,0.7222559999936493,0.09081400001014117
+base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,optimistic,1,0.6507699999929173,0.09109500001068227
+base,8feab6ea3,issue detail + comments,selected issue comment insert,10000,manual,optimistic,2,0.5735659999918425,0.09014300000853837
+base,8feab6ea3,open issues + documents,visible document update,10000,manual,optimistic,0,4668.696383999995,1.5924600000143982
+base,8feab6ea3,open issues + documents,visible document update,10000,manual,optimistic,1,4625.575171999997,1.5999200000078417
+base,8feab6ea3,open issues + documents,visible document update,10000,manual,optimistic,2,4628.366093000004,1.6053390000015497
+candidate,88544ac64,list: newest 50 open,visible issue update,100,none,synced,0,9.858115999999995,0.18257900000003247
+candidate,88544ac64,list: newest 50 open,visible issue update,100,none,synced,1,3.1331930000000057,0.13741300000003775
+candidate,88544ac64,list: newest 50 open,visible issue update,100,none,synced,2,1.7444840000000568,0.07204699999999775
+candidate,88544ac64,list: newest 50 open,visible issue delete,100,none,synced,0,3.163438000000042,0.273262999999929
+candidate,88544ac64,list: newest 50 open,visible issue delete,100,none,synced,1,1.853433999999993,0.1927739999999858
+candidate,88544ac64,list: newest 50 open,visible issue delete,100,none,synced,2,0.9630909999999631,0.1578230000000076
+candidate,88544ac64,list + author,visible author update,100,none,synced,0,7.631290000000035,0.17761200000006738
+candidate,88544ac64,list + author,visible author update,100,none,synced,1,6.471869999999967,0.09025300000007519
+candidate,88544ac64,list + author,visible author update,100,none,synced,2,2.7752249999999776,0.13078299999995124
+candidate,88544ac64,list + comment count,visible issue comment insert,100,none,synced,0,13.711482000000046,0.23887200000001485
+candidate,88544ac64,list + comment count,visible issue comment insert,100,none,synced,1,4.01551500000005,0.2130539999999428
+candidate,88544ac64,list + comment count,visible issue comment insert,100,none,synced,2,3.6269509999999627,0.17540900000005877
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,100,none,synced,0,6.503926999999976,0.15460800000005293
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,100,none,synced,1,5.727971000000025,0.14222000000006574
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,100,none,synced,2,6.333746000000019,0.11105399999996735
+candidate,88544ac64,issue detail + comments,selected issue comment insert,100,none,synced,0,0.8589169999997921,0.08749899999997979
+candidate,88544ac64,issue detail + comments,selected issue comment insert,100,none,synced,1,0.6434790000000703,0.0845640000000003
+candidate,88544ac64,issue detail + comments,selected issue comment insert,100,none,synced,2,0.5689189999998234,0.08509600000002138
+candidate,88544ac64,open issues + documents,visible document update,100,none,synced,0,2.0671599999998307,0.06621700000005148
+candidate,88544ac64,open issues + documents,visible document update,100,none,synced,1,2.0288030000001527,0.10009800000011637
+candidate,88544ac64,open issues + documents,visible document update,100,none,synced,2,2.631362999999965,0.0990159999998923
+candidate,88544ac64,list: newest 50 open,visible issue update,100,none,optimistic,0,1.3914240000001428,0.1352999999999156
+candidate,88544ac64,list: newest 50 open,visible issue update,100,none,optimistic,1,1.0728630000000976,0.07074499999998807
+candidate,88544ac64,list: newest 50 open,visible issue update,100,none,optimistic,2,1.3064280000000963,0.10473499999989144
+candidate,88544ac64,list: newest 50 open,visible issue delete,100,none,optimistic,0,1.2825930000001335,0.08033799999998337
+candidate,88544ac64,list: newest 50 open,visible issue delete,100,none,optimistic,1,0.7868610000000444,0.04171100000007755
+candidate,88544ac64,list: newest 50 open,visible issue delete,100,none,optimistic,2,1.055276000000049,0.04267299999992247
+candidate,88544ac64,list + author,visible author update,100,none,optimistic,0,2.675907000000052,0.08590599999979531
+candidate,88544ac64,list + author,visible author update,100,none,optimistic,1,3.300617999999986,0.08242100000006758
+candidate,88544ac64,list + author,visible author update,100,none,optimistic,2,2.054941000000099,0.07934700000009798
+candidate,88544ac64,list + comment count,visible issue comment insert,100,none,optimistic,0,3.3183239999998477,0.16402199999993172
+candidate,88544ac64,list + comment count,visible issue comment insert,100,none,optimistic,1,4.028021000000081,0.1633710000000974
+candidate,88544ac64,list + comment count,visible issue comment insert,100,none,optimistic,2,2.38078100000007,0.1440020000000004
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,100,none,optimistic,0,4.816412999999784,0.09274600000003375
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,100,none,optimistic,1,5.300387999999884,0.08512500000006185
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,100,none,optimistic,2,4.164897999999994,0.07950699999992139
+candidate,88544ac64,issue detail + comments,selected issue comment insert,100,none,optimistic,0,0.6302490000000489,0.07949699999994664
+candidate,88544ac64,issue detail + comments,selected issue comment insert,100,none,optimistic,1,0.5744070000000647,0.07366899999988163
+candidate,88544ac64,issue detail + comments,selected issue comment insert,100,none,optimistic,2,0.5552190000000792,0.07327799999984563
+candidate,88544ac64,open issues + documents,visible document update,100,none,optimistic,0,2.5542069999999057,0.378097999999909
+candidate,88544ac64,open issues + documents,visible document update,100,none,optimistic,1,2.1142979999999625,0.3471420000000762
+candidate,88544ac64,open issues + documents,visible document update,100,none,optimistic,2,1.6323370000000068,0.35603500000001986
+candidate,88544ac64,list: newest 50 open,visible issue update,100,manual,synced,0,2.159074000000146,0.059718000000202665
+candidate,88544ac64,list: newest 50 open,visible issue update,100,manual,synced,1,1.6332239999999274,0.05286799999998948
+candidate,88544ac64,list: newest 50 open,visible issue update,100,manual,synced,2,0.8482409999999163,0.04764000000000124
+candidate,88544ac64,list: newest 50 open,visible issue delete,100,manual,synced,0,0.9619179999999687,0.23530700000014804
+candidate,88544ac64,list: newest 50 open,visible issue delete,100,manual,synced,1,0.8134900000000016,0.18245900000010806
+candidate,88544ac64,list: newest 50 open,visible issue delete,100,manual,synced,2,0.7216240000002472,0.16439199999967968
+candidate,88544ac64,list + author,visible author update,100,manual,synced,0,1.9992379999998775,0.07253700000001118
+candidate,88544ac64,list + author,visible author update,100,manual,synced,1,1.7289800000003197,0.06888100000014674
+candidate,88544ac64,list + author,visible author update,100,manual,synced,2,1.574141999999938,0.07275799999979427
+candidate,88544ac64,list + comment count,visible issue comment insert,100,manual,synced,0,2.8124980000002324,0.2294080000001486
+candidate,88544ac64,list + comment count,visible issue comment insert,100,manual,synced,1,2.7915070000003652,0.16605500000014217
+candidate,88544ac64,list + comment count,visible issue comment insert,100,manual,synced,2,2.4184869999999137,0.17295500000000175
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,100,manual,synced,0,8.794940999999653,0.10465500000009342
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,100,manual,synced,1,4.749714999999924,0.10442399999965346
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,100,manual,synced,2,3.2767329999996946,0.10539599999992788
+candidate,88544ac64,issue detail + comments,selected issue comment insert,100,manual,synced,0,0.5113440000000082,0.0726169999998092
+candidate,88544ac64,issue detail + comments,selected issue comment insert,100,manual,synced,1,0.46193099999982223,0.0721760000001268
+candidate,88544ac64,issue detail + comments,selected issue comment insert,100,manual,synced,2,0.3189310000002479,0.07150499999988824
+candidate,88544ac64,open issues + documents,visible document update,100,manual,synced,0,2.1370419999998376,0.05095600000004197
+candidate,88544ac64,open issues + documents,visible document update,100,manual,synced,1,1.4980089999999109,0.049923000000035245
+candidate,88544ac64,open issues + documents,visible document update,100,manual,synced,2,2.343757000000096,0.08724899999970148
+candidate,88544ac64,list: newest 50 open,visible issue update,100,manual,optimistic,0,0.6267850000003818,0.05528099999992264
+candidate,88544ac64,list: newest 50 open,visible issue update,100,manual,optimistic,1,0.6139960000000428,0.05430999999998676
+candidate,88544ac64,list: newest 50 open,visible issue update,100,manual,optimistic,2,1.0284770000002936,0.05374900000015259
+candidate,88544ac64,list: newest 50 open,visible issue delete,100,manual,optimistic,0,0.6464339999997719,0.04220200000008845
+candidate,88544ac64,list: newest 50 open,visible issue delete,100,manual,optimistic,1,0.6434290000001965,0.04154100000005201
+candidate,88544ac64,list: newest 50 open,visible issue delete,100,manual,optimistic,2,0.6324829999998656,0.04065000000036889
+candidate,88544ac64,list + author,visible author update,100,manual,optimistic,0,1.9360249999999724,0.07691299999987677
+candidate,88544ac64,list + author,visible author update,100,manual,optimistic,1,1.5014740000001439,0.07779500000015105
+candidate,88544ac64,list + author,visible author update,100,manual,optimistic,2,1.5390299999999115,0.07824500000015178
+candidate,88544ac64,list + comment count,visible issue comment insert,100,manual,optimistic,0,3.6293730000002142,0.14450299999998606
+candidate,88544ac64,list + comment count,visible issue comment insert,100,manual,optimistic,1,2.511974999999893,0.14475399999992078
+candidate,88544ac64,list + comment count,visible issue comment insert,100,manual,optimistic,2,2.245002000000113,0.14580500000010943
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,0,3.1341529999999693,0.08990300000004936
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,1,3.7564299999999093,0.09084400000028836
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,100,manual,optimistic,2,3.504178000000138,0.08460500000001048
+candidate,88544ac64,issue detail + comments,selected issue comment insert,100,manual,optimistic,0,0.41735499999958847,0.0742099999997663
+candidate,88544ac64,issue detail + comments,selected issue comment insert,100,manual,optimistic,1,0.3006540000001223,0.07575199999973847
+candidate,88544ac64,issue detail + comments,selected issue comment insert,100,manual,optimistic,2,0.37137799999982235,0.07434899999998379
+candidate,88544ac64,open issues + documents,visible document update,100,manual,optimistic,0,1.3597459999996317,0.3338130000001911
+candidate,88544ac64,open issues + documents,visible document update,100,manual,optimistic,1,1.9465399999999136,0.3265310000001591
+candidate,88544ac64,open issues + documents,visible document update,100,manual,optimistic,2,1.2751610000000255,0.32546999999976833
+candidate,88544ac64,list: newest 50 open,visible issue update,1000,none,synced,0,5.495094999999765,0.03794599999991988
+candidate,88544ac64,list: newest 50 open,visible issue update,1000,none,synced,1,4.986002999999982,0.03811600000017279
+candidate,88544ac64,list: newest 50 open,visible issue update,1000,none,synced,2,4.777626000000055,0.03786499999978332
+candidate,88544ac64,list: newest 50 open,visible issue delete,1000,none,synced,0,8.555577999999969,0.7557950000000346
+candidate,88544ac64,list: newest 50 open,visible issue delete,1000,none,synced,1,6.222408000000087,0.7081450000000586
+candidate,88544ac64,list: newest 50 open,visible issue delete,1000,none,synced,2,4.158813000000009,0.7031569999999192
+candidate,88544ac64,list + author,visible author update,1000,none,synced,0,16.074898999999732,0.05941800000027797
+candidate,88544ac64,list + author,visible author update,1000,none,synced,1,15.836436999999933,0.057405000000017026
+candidate,88544ac64,list + author,visible author update,1000,none,synced,2,17.434915000000274,0.05793600000015431
+candidate,88544ac64,list + comment count,visible issue comment insert,1000,none,synced,0,6.739651000000322,0.14848899999969944
+candidate,88544ac64,list + comment count,visible issue comment insert,1000,none,synced,1,15.20997299999999,0.14941999999973632
+candidate,88544ac64,list + comment count,visible issue comment insert,1000,none,synced,2,6.547086000000036,0.1507219999998597
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,1000,none,synced,0,7.707779000000301,0.09879600000022037
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,1000,none,synced,1,16.010623000000123,0.1054959999996754
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,1000,none,synced,2,8.696096000000125,0.09216599999990649
+candidate,88544ac64,issue detail + comments,selected issue comment insert,1000,none,synced,0,1.5453189999998358,0.14231999999992695
+candidate,88544ac64,issue detail + comments,selected issue comment insert,1000,none,synced,1,1.040614000000005,0.06851099999994403
+candidate,88544ac64,issue detail + comments,selected issue comment insert,1000,none,synced,2,0.9029910000003838,0.06591699999989942
+candidate,88544ac64,open issues + documents,visible document update,1000,none,synced,0,11.976563999999598,0.04918299999917508
+candidate,88544ac64,open issues + documents,visible document update,1000,none,synced,1,16.394068999999945,0.04803100000026461
+candidate,88544ac64,open issues + documents,visible document update,1000,none,synced,2,10.743525999999292,0.046828999999888765
+candidate,88544ac64,list: newest 50 open,visible issue update,1000,none,optimistic,0,4.685720000000401,0.050204000000121596
+candidate,88544ac64,list: newest 50 open,visible issue update,1000,none,optimistic,1,4.426958999999442,0.05095500000061293
+candidate,88544ac64,list: newest 50 open,visible issue update,1000,none,optimistic,2,4.514998999999989,0.05139499999950203
+candidate,88544ac64,list: newest 50 open,visible issue delete,1000,none,optimistic,0,4.63155099999949,0.035412999999607564
+candidate,88544ac64,list: newest 50 open,visible issue delete,1000,none,optimistic,1,17.170763999999508,0.03354899999976624
+candidate,88544ac64,list: newest 50 open,visible issue delete,1000,none,optimistic,2,4.520357000000331,0.033660000000054424
+candidate,88544ac64,list + author,visible author update,1000,none,optimistic,0,14.780359999999746,0.07303700000011304
+candidate,88544ac64,list + author,visible author update,1000,none,optimistic,1,20.445354000000407,0.07978800000000774
+candidate,88544ac64,list + author,visible author update,1000,none,optimistic,2,20.66944500000045,0.07743399999981193
+candidate,88544ac64,list + comment count,visible issue comment insert,1000,none,optimistic,0,16.442520999999942,0.14258999999947264
+candidate,88544ac64,list + comment count,visible issue comment insert,1000,none,optimistic,1,7.206629000000248,0.1446330000007947
+candidate,88544ac64,list + comment count,visible issue comment insert,1000,none,optimistic,2,6.875971000000391,0.1444129999999859
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,0,7.903336999999738,0.08293200000025536
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,1,9.180850000000646,0.08044900000004418
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,1000,none,optimistic,2,7.3091999999996915,0.08114999999997963
+candidate,88544ac64,issue detail + comments,selected issue comment insert,1000,none,optimistic,0,1.0042610000000423,0.07468000000062602
+candidate,88544ac64,issue detail + comments,selected issue comment insert,1000,none,optimistic,1,0.8880300000000716,0.07304700000076991
+candidate,88544ac64,issue detail + comments,selected issue comment insert,1000,none,optimistic,2,1.014165999999932,0.07085499999993772
+candidate,88544ac64,open issues + documents,visible document update,1000,none,optimistic,0,15.409796999999344,0.3367469999993773
+candidate,88544ac64,open issues + documents,visible document update,1000,none,optimistic,1,12.603107999999338,0.32808400000067195
+candidate,88544ac64,open issues + documents,visible document update,1000,none,optimistic,2,13.227799000000232,0.3334610000001703
+candidate,88544ac64,list: newest 50 open,visible issue update,1000,manual,synced,0,1.132900999999947,0.04190199999993638
+candidate,88544ac64,list: newest 50 open,visible issue update,1000,manual,synced,1,0.7854079999997339,0.04212199999983568
+candidate,88544ac64,list: newest 50 open,visible issue update,1000,manual,synced,2,14.476571000000149,0.04125099999964732
+candidate,88544ac64,list: newest 50 open,visible issue delete,1000,manual,synced,0,0.7013340000003154,0.20777599999928498
+candidate,88544ac64,list: newest 50 open,visible issue delete,1000,manual,synced,1,0.67599699999937,0.1873359999999593
+candidate,88544ac64,list: newest 50 open,visible issue delete,1000,manual,synced,2,0.6554059999998572,0.18597399999998743
+candidate,88544ac64,list + author,visible author update,1000,manual,synced,0,1.9762449999998353,0.10354300000017247
+candidate,88544ac64,list + author,visible author update,1000,manual,synced,1,1.7249949999995806,0.06289300000025833
+candidate,88544ac64,list + author,visible author update,1000,manual,synced,2,1.6311960000002728,0.06013900000016292
+candidate,88544ac64,list + comment count,visible issue comment insert,1000,manual,synced,0,4.38738099999955,0.17058099999940168
+candidate,88544ac64,list + comment count,visible issue comment insert,1000,manual,synced,1,2.4884500000007392,0.16244000000006054
+candidate,88544ac64,list + comment count,visible issue comment insert,1000,manual,synced,2,2.641335000000254,0.163220999999794
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,1000,manual,synced,0,3.84915699999965,0.10336300000017218
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,1000,manual,synced,1,3.3359510000000228,0.10802899999998772
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,1000,manual,synced,2,3.5819830000000366,0.10080800000014278
+candidate,88544ac64,issue detail + comments,selected issue comment insert,1000,manual,synced,0,0.4881199999999808,0.07010300000001735
+candidate,88544ac64,issue detail + comments,selected issue comment insert,1000,manual,synced,1,0.3565859999998793,0.06877200000053563
+candidate,88544ac64,issue detail + comments,selected issue comment insert,1000,manual,synced,2,0.3914970000005269,0.07007300000077521
+candidate,88544ac64,open issues + documents,visible document update,1000,manual,synced,0,11.585137000000032,0.05157599999984086
+candidate,88544ac64,open issues + documents,visible document update,1000,manual,synced,1,12.43050299999959,0.051314999999704014
+candidate,88544ac64,open issues + documents,visible document update,1000,manual,synced,2,19.119128000000273,0.053598999999849184
+candidate,88544ac64,list: newest 50 open,visible issue update,1000,manual,optimistic,0,1.0101599999998143,0.060548999999809894
+candidate,88544ac64,list: newest 50 open,visible issue update,1000,manual,optimistic,1,0.7692749999996522,0.05794599999990169
+candidate,88544ac64,list: newest 50 open,visible issue update,1000,manual,optimistic,2,0.7658999999994194,0.05660299999999552
+candidate,88544ac64,list: newest 50 open,visible issue delete,1000,manual,optimistic,0,0.8269700000000739,0.043373999999857915
+candidate,88544ac64,list: newest 50 open,visible issue delete,1000,manual,optimistic,1,0.7370160000000396,0.04297300000052928
+candidate,88544ac64,list: newest 50 open,visible issue delete,1000,manual,optimistic,2,0.7493150000000242,0.043805000000247674
+candidate,88544ac64,list + author,visible author update,1000,manual,optimistic,0,1.822508000000198,0.07798499999989872
+candidate,88544ac64,list + author,visible author update,1000,manual,optimistic,1,1.5344640000002983,0.07748400000036781
+candidate,88544ac64,list + author,visible author update,1000,manual,optimistic,2,1.5632459999997081,0.07571099999950093
+candidate,88544ac64,list + comment count,visible issue comment insert,1000,manual,optimistic,0,2.555287999999564,0.14807899999959773
+candidate,88544ac64,list + comment count,visible issue comment insert,1000,manual,optimistic,1,2.3951519999991433,0.14871899999980087
+candidate,88544ac64,list + comment count,visible issue comment insert,1000,manual,optimistic,2,2.367812000000413,0.17478699999992386
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,0,3.5499159999999392,0.08692800000062562
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,1,3.3810770000000048,0.08607699999993201
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,1000,manual,optimistic,2,3.3420500000001994,0.08579600000030041
+candidate,88544ac64,issue detail + comments,selected issue comment insert,1000,manual,optimistic,0,0.4349709999996776,0.07531100000051083
+candidate,88544ac64,issue detail + comments,selected issue comment insert,1000,manual,optimistic,1,0.4000799999994342,0.07449999999971624
+candidate,88544ac64,issue detail + comments,selected issue comment insert,1000,manual,optimistic,2,0.6065140000000611,0.0739690000000337
+candidate,88544ac64,open issues + documents,visible document update,1000,manual,optimistic,0,20.443201000000045,0.334023000000343
+candidate,88544ac64,open issues + documents,visible document update,1000,manual,optimistic,1,11.346284999999625,0.32344699999976
+candidate,88544ac64,open issues + documents,visible document update,1000,manual,optimistic,2,10.258228999999119,0.329515999999785
+candidate,88544ac64,list: newest 50 open,visible issue update,10000,none,synced,0,62.441343999999845,0.04810100000031525
+candidate,88544ac64,list: newest 50 open,visible issue update,10000,none,synced,1,55.11252499999955,0.04859200000009878
+candidate,88544ac64,list: newest 50 open,visible issue update,10000,none,synced,2,124.19730699999946,0.04825100000016391
+candidate,88544ac64,list: newest 50 open,visible issue delete,10000,none,synced,0,51.64546100000007,7.153169999999591
+candidate,88544ac64,list: newest 50 open,visible issue delete,10000,none,synced,1,53.469646999999895,7.2199820000005275
+candidate,88544ac64,list: newest 50 open,visible issue delete,10000,none,synced,2,54.313482000001386,7.141787000000477
+candidate,88544ac64,list + author,visible author update,10000,none,synced,0,302.38135599999987,0.06555699999989884
+candidate,88544ac64,list + author,visible author update,10000,none,synced,1,173.2878720000008,0.06475499999942258
+candidate,88544ac64,list + author,visible author update,10000,none,synced,2,162.76685999999972,0.10078900000007707
+candidate,88544ac64,list + comment count,visible issue comment insert,10000,none,synced,0,54.17598899999939,0.15315599999848928
+candidate,88544ac64,list + comment count,visible issue comment insert,10000,none,synced,1,75.81132900000011,0.15674199999921257
+candidate,88544ac64,list + comment count,visible issue comment insert,10000,none,synced,2,58.62085699999989,0.15428800000154297
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,10000,none,synced,0,66.9599100000014,0.09743400000115798
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,10000,none,synced,1,63.098103000000265,0.09626199999911478
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,10000,none,synced,2,84.45169700000042,0.1083199999993667
+candidate,88544ac64,issue detail + comments,selected issue comment insert,10000,none,synced,0,5.380178000001251,0.0726169999998092
+candidate,88544ac64,issue detail + comments,selected issue comment insert,10000,none,synced,1,5.976478000000498,0.07303799999863259
+candidate,88544ac64,issue detail + comments,selected issue comment insert,10000,none,synced,2,7.494918000000325,0.09658300000046438
+candidate,88544ac64,open issues + documents,visible document update,10000,none,synced,0,162.3468099999991,0.05143600000155857
+candidate,88544ac64,open issues + documents,visible document update,10000,none,synced,1,122.039041,0.05008399999860558
+candidate,88544ac64,open issues + documents,visible document update,10000,none,synced,2,165.96462800000154,0.05429000000003725
+candidate,88544ac64,list: newest 50 open,visible issue update,10000,none,optimistic,0,60.75531499999852,0.0578349999996135
+candidate,88544ac64,list: newest 50 open,visible issue update,10000,none,optimistic,1,53.43638799999826,0.057645000000775326
+candidate,88544ac64,list: newest 50 open,visible issue update,10000,none,optimistic,2,70.03007400000206,0.06034899999940535
+candidate,88544ac64,list: newest 50 open,visible issue delete,10000,none,optimistic,0,59.01503799999773,0.04122099999949569
+candidate,88544ac64,list: newest 50 open,visible issue delete,10000,none,optimistic,1,56.919566000000486,0.04073000000062166
+candidate,88544ac64,list: newest 50 open,visible issue delete,10000,none,optimistic,2,58.96925099999862,0.04076999999961117
+candidate,88544ac64,list + author,visible author update,10000,none,optimistic,0,170.9088899999988,0.08076900000014575
+candidate,88544ac64,list + author,visible author update,10000,none,optimistic,1,167.29200199999832,0.07847499999843421
+candidate,88544ac64,list + author,visible author update,10000,none,optimistic,2,325.1053979999997,0.08057900000130758
+candidate,88544ac64,list + comment count,visible issue comment insert,10000,none,optimistic,0,62.653363000001264,0.16743700000006356
+candidate,88544ac64,list + comment count,visible issue comment insert,10000,none,optimistic,1,58.31050799999866,0.16703699999925448
+candidate,88544ac64,list + comment count,visible issue comment insert,10000,none,optimistic,2,65.07070499999827,0.16313099999752012
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,0,70.05843499999901,0.08767899999656947
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,1,60.79862099999809,0.08796000000074855
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,10000,none,optimistic,2,64.51413400000092,0.08579599999939092
+candidate,88544ac64,issue detail + comments,selected issue comment insert,10000,none,optimistic,0,4.564735999996628,0.08073900000090362
+candidate,88544ac64,issue detail + comments,selected issue comment insert,10000,none,optimistic,1,6.883999000001495,0.08500500000081956
+candidate,88544ac64,issue detail + comments,selected issue comment insert,10000,none,optimistic,2,6.216143000001466,0.08205100000122911
+candidate,88544ac64,open issues + documents,visible document update,10000,none,optimistic,0,132.70738599999822,0.33328199999959907
+candidate,88544ac64,open issues + documents,visible document update,10000,none,optimistic,1,120.50242499999877,0.33414300000004005
+candidate,88544ac64,open issues + documents,visible document update,10000,none,optimistic,2,161.0908870000021,0.35326100000020233
+candidate,88544ac64,list: newest 50 open,visible issue update,10000,manual,synced,0,2.5305439999974624,0.04574700000011944
+candidate,88544ac64,list: newest 50 open,visible issue update,10000,manual,synced,1,1.5166779999999562,0.08248199999798089
+candidate,88544ac64,list: newest 50 open,visible issue update,10000,manual,synced,2,1.7239939999999478,0.045927999999548774
+candidate,88544ac64,list: newest 50 open,visible issue delete,10000,manual,synced,0,2.850246000001789,0.7814939999989292
+candidate,88544ac64,list: newest 50 open,visible issue delete,10000,manual,synced,1,2.601737000000867,0.7648179999996501
+candidate,88544ac64,list: newest 50 open,visible issue delete,10000,manual,synced,2,1.382539000001998,0.74752300000182
+candidate,88544ac64,list + author,visible author update,10000,manual,synced,0,3.855688999999984,0.0661870000003546
+candidate,88544ac64,list + author,visible author update,10000,manual,synced,1,4.520678999997472,0.0712149999999383
+candidate,88544ac64,list + author,visible author update,10000,manual,synced,2,4.669067999999243,0.07420900000215624
+candidate,88544ac64,list + comment count,visible issue comment insert,10000,manual,synced,0,13.411325999997644,0.16427200000180164
+candidate,88544ac64,list + comment count,visible issue comment insert,10000,manual,synced,1,4.164724999998725,0.16817799999989802
+candidate,88544ac64,list + comment count,visible issue comment insert,10000,manual,synced,2,5.613472000000911,0.16807799999878625
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,10000,manual,synced,0,14.06852599999911,0.10964199999943958
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,10000,manual,synced,1,6.086559999999736,0.11214500000278349
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,10000,manual,synced,2,4.081672000000253,0.11161400000128197
+candidate,88544ac64,issue detail + comments,selected issue comment insert,10000,manual,synced,0,0.657138999999006,0.08227099999930942
+candidate,88544ac64,issue detail + comments,selected issue comment insert,10000,manual,synced,1,0.5440429999980552,0.08111900000221794
+candidate,88544ac64,issue detail + comments,selected issue comment insert,10000,manual,synced,2,0.6267450000013923,0.07959699999992154
+candidate,88544ac64,open issues + documents,visible document update,10000,manual,synced,0,139.32408399999986,0.05284800000299583
+candidate,88544ac64,open issues + documents,visible document update,10000,manual,synced,1,112.05037699999957,0.05038499999864143
+candidate,88544ac64,open issues + documents,visible document update,10000,manual,synced,2,124.64969999999812,0.05094499999904656
+candidate,88544ac64,list: newest 50 open,visible issue update,10000,manual,optimistic,0,1.8489279999994324,0.05501100000037695
+candidate,88544ac64,list: newest 50 open,visible issue update,10000,manual,optimistic,1,2.559295999999449,0.06127999999807798
+candidate,88544ac64,list: newest 50 open,visible issue update,10000,manual,optimistic,2,1.3990540000013425,0.06071000000156346
+candidate,88544ac64,list: newest 50 open,visible issue delete,10000,manual,optimistic,0,10.782136999998329,0.04771000000255299
+candidate,88544ac64,list: newest 50 open,visible issue delete,10000,manual,optimistic,1,2.263528999999835,0.04814099999930477
+candidate,88544ac64,list: newest 50 open,visible issue delete,10000,manual,optimistic,2,1.4010770000022603,0.047350000000733417
+candidate,88544ac64,list + author,visible author update,10000,manual,optimistic,0,4.177913999999873,0.08118000000104075
+candidate,88544ac64,list + author,visible author update,10000,manual,optimistic,1,4.559847000000445,0.08128000000215252
+candidate,88544ac64,list + author,visible author update,10000,manual,optimistic,2,4.624421999993501,0.08216199999878881
+candidate,88544ac64,list + comment count,visible issue comment insert,10000,manual,optimistic,0,3.239558000001125,0.1805270000040764
+candidate,88544ac64,list + comment count,visible issue comment insert,10000,manual,optimistic,1,3.283634000006714,0.17965499999991152
+candidate,88544ac64,list + comment count,visible issue comment insert,10000,manual,optimistic,2,5.530588000001444,0.18280999999842606
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,0,3.9643579999974463,0.09516099999746075
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,1,3.937397999994573,0.09578200000396464
+candidate,88544ac64,list + 3 recent comments,visible issue comment insert,10000,manual,optimistic,2,3.9324710000000778,0.09300700000312645
+candidate,88544ac64,issue detail + comments,selected issue comment insert,10000,manual,optimistic,0,0.6621269999959623,0.08928200000082143
+candidate,88544ac64,issue detail + comments,selected issue comment insert,10000,manual,optimistic,1,0.5510530000028666,0.09108399999968242
+candidate,88544ac64,issue detail + comments,selected issue comment insert,10000,manual,optimistic,2,0.6592830000008689,0.09029299999383511
+candidate,88544ac64,open issues + documents,visible document update,10000,manual,optimistic,0,146.1472930000018,0.33950999999797205
+candidate,88544ac64,open issues + documents,visible document update,10000,manual,optimistic,1,112.94211500000529,0.7060209999981453
+candidate,88544ac64,open issues + documents,visible document update,10000,manual,optimistic,2,112.52661100000114,0.3370169999980135
