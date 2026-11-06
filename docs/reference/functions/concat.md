@@ -9,7 +9,7 @@ title: concat
 function concat<T>(arg): ConcatToArrayWrapper<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:305](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L305)
+Defined in: [packages/db/src/query/builder/functions.ts:388](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L388)
 
 ### Type Parameters
 
@@ -30,17 +30,23 @@ Defined in: [packages/db/src/query/builder/functions.ts:305](https://github.com/
 ## Call Signature
 
 ```ts
-function concat(...args): BasicExpression<string>;
+function concat<T>(...args): WithAggregate<BasicExpression<string>, T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:308](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L308)
+Defined in: [packages/db/src/query/builder/functions.ts:391](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L391)
+
+### Type Parameters
+
+#### T
+
+`T` *extends* `ExpressionLike`[]
 
 ### Parameters
 
 #### args
 
-...`ExpressionLike`[]
+...`T`
 
 ### Returns
 
-[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`string`\>
+`WithAggregate`\<[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`string`\>, `T`\>

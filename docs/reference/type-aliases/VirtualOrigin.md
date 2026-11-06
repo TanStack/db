@@ -7,7 +7,7 @@ title: VirtualOrigin
 type VirtualOrigin = "local" | "remote";
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:38](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L38)
+Defined in: [packages/db/src/virtual-props.ts:39](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L39)
 
 Collection attribution for a row's current value.
 

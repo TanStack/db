@@ -4,21 +4,31 @@ title: ilike
 ---
 
 ```ts
-function ilike(left, right): BasicExpression<boolean>;
+function ilike<L, R>(left, right): WithAggregate<BasicExpression<boolean>, [L, R]>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:278](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L278)
+Defined in: [packages/db/src/query/builder/functions.ts:348](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L348)
+
+## Type Parameters
+
+### L
+
+`L` *extends* `StringLike`
+
+### R
+
+`R` *extends* `StringLike`
 
 ## Parameters
 
 ### left
 
-`StringLike`
+`L`
 
 ### right
 
-`StringLike`
+`R`
 
 ## Returns
 
-[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+`WithAggregate`\<[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>, \[`L`, `R`\]\>

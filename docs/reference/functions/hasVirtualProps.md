@@ -7,7 +7,7 @@ title: hasVirtualProps
 function hasVirtualProps(value): value is VirtualRowProps<string | number>;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:167](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L167)
+Defined in: [packages/db/src/virtual-props.ts:168](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L168)
 
 Checks if a value has all virtual properties attached.
 

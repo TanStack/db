@@ -4,10 +4,10 @@ title: multiply
 ---
 
 ```ts
-function multiply<T1, T2>(left, right): BinaryNumericReturnType;
+function multiply<T1, T2>(left, right): WithAggregate<BinaryNumericReturnType, [T1, T2]>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:637](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L637)
+Defined in: [packages/db/src/query/builder/functions.ts:548](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L548)
 
 ## Type Parameters
 
@@ -31,4 +31,4 @@ Defined in: [packages/db/src/query/builder/functions.ts:637](https://github.com/
 
 ## Returns
 
-`BinaryNumericReturnType`
+`WithAggregate`\<`BinaryNumericReturnType`, \[`T1`, `T2`\]\>
