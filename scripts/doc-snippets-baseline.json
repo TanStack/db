@@ -47,13 +47,6 @@
     "4aab899a80ba22aa",
     "98b87c13d2c27c2d"
   ],
-  "docs/collections/trailbase-collection.md": [
-    "12d3bb6a8cbe9e60",
-    "278f9eb34997c711",
-    "2b6add33b4927e85",
-    "99ddff1d9bea25f1",
-    "e857a71d21616e00"
-  ],
   "docs/contributing/oracle-reviews/initial-full-source-sync-readiness.md": [
     "a066dfd28d064b54"
   ],
@@ -217,9 +210,6 @@
     "dc6d9e33683e8ac3",
     "ec093891b32b4c42",
     "f176b07d2a47be29"
-  ],
-  "packages/db/skills/db-core/collection-setup/references/trailbase-adapter.md": [
-    "8ef2725baa21af1d"
   ],
   "packages/db/skills/db-core/collection-setup/SKILL.md": [
     "09a82388169989af",

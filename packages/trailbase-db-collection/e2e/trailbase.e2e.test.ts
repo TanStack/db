@@ -170,6 +170,7 @@ function createCollectionsForSyncMode(
   const usersCollection = createCollection(
     trailBaseCollectionOptions({
       id: `trailbase-e2e-users-${suffix}-${testId}`,
+      client,
       recordApi: usersRecordApi,
       getKey: (item: User) => item.id,
       startSync: true,
@@ -197,6 +198,7 @@ function createCollectionsForSyncMode(
   const postsCollection = createCollection(
     trailBaseCollectionOptions({
       id: `trailbase-e2e-posts-${suffix}-${testId}`,
+      client,
       recordApi: postsRecordApi,
       getKey: (item: Post) => item.id,
       startSync: true,
@@ -222,6 +224,7 @@ function createCollectionsForSyncMode(
   const commentsCollection = createCollection(
     trailBaseCollectionOptions({
       id: `trailbase-e2e-comments-${suffix}-${testId}`,
+      client,
       recordApi: commentsRecordApi,
       getKey: (item: Comment) => item.id,
       startSync: true,

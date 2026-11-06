@@ -2,7 +2,7 @@ import { describe, expectTypeOf, it } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import type { TrailBaseCollectionUtils } from '../src/trailbase'
-import type { RecordApi } from 'trailbase'
+import type { Client, RecordApi } from 'trailbase'
 
 type TestItem = {
   id: string
@@ -14,6 +14,7 @@ describe(`TrailBase collection type tests`, () => {
     const collection = createCollection(
       trailBaseCollectionOptions<TestItem>({
         id: `todos`,
+        client: {} as Client,
         recordApi: {} as RecordApi<TestItem>,
         getKey: (item) => item.id,
         parse: {},

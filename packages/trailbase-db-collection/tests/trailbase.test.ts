@@ -24,6 +24,7 @@ const stripState = (state: Map<number | string | null, Data>) =>
 function setUp(recordApi: MockRecordApi<Data>) {
   // Get the options with utilities
   const options = trailBaseCollectionOptions({
+    client: recordApi.client,
     recordApi,
     getKey: (item: Data): number | number =>
       item.id ?? Math.round(Math.random() * 100000),
@@ -254,6 +255,7 @@ describe(`TrailBase Integration`, () => {
     const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
     const collection = createCollection(
       trailBaseCollectionOptions({
+        client: recordApi.client,
         recordApi,
         getKey: (row: Data) => row.id!,
         parse: {
@@ -300,15 +302,11 @@ describe(`TrailBase Integration`, () => {
       const errors: Array<unknown> = []
       const recordUnhandled = (error: unknown) => errors.push(error)
       const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
-      const intervals = vi.spyOn(globalThis, `setInterval`)
-      const clear = vi.spyOn(globalThis, `clearInterval`)
       process.on(`unhandledRejection`, recordUnhandled)
       const collection = createCollection(setUp(recordApi))
 
       try {
         await collection.preload()
-        const timer = intervals.mock.results.at(-1)?.value
-        expect(timer).toBeDefined()
         const expectedRows = new Map([[1, row]])
         if (ending === `buffered-close`) {
           for (const id of [2, 3]) {
@@ -322,7 +320,6 @@ describe(`TrailBase Integration`, () => {
         await new Promise((resolve) => setTimeout(resolve, 0))
 
         expect(errors).toEqual([])
-        expect(clear).toHaveBeenCalledWith(timer)
         expect(stream.locked).toBe(false)
         expect(collection.status).toBe(`ready`)
         expect(stripState(collection.state)).toEqual(expectedRows)
@@ -343,8 +340,6 @@ describe(`TrailBase Integration`, () => {
         await new Promise((resolve) => setTimeout(resolve, 0))
         process.off(`unhandledRejection`, recordUnhandled)
         reported.mockRestore()
-        intervals.mockRestore()
-        clear.mockRestore()
       }
     },
   )
@@ -471,6 +466,7 @@ describe(`TrailBase Integration`, () => {
     recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
     const collection = createCollection(
       trailBaseCollectionOptions({
+        client: recordApi.client,
         recordApi,
         getKey: (item: Data) => item.id ?? -1,
         startSync: true,
@@ -512,6 +508,7 @@ describe(`TrailBase Integration`, () => {
     recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
     const commits = observeAppliedCommits(
       trailBaseCollectionOptions({
+        client: recordApi.client,
         recordApi,
         getKey: (item: Data) => item.id ?? -1,
         startSync: true,
@@ -590,6 +587,7 @@ describe(`TrailBase Integration`, () => {
     recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
     const collection = createCollection(
       trailBaseCollectionOptions({
+        client: recordApi.client,
         recordApi,
         getKey: (item: Data) => item.id ?? -1,
         startSync: true,
@@ -638,6 +636,7 @@ describe(`TrailBase Integration`, () => {
     recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
     const collection = createCollection(
       trailBaseCollectionOptions({
+        client: recordApi.client,
         recordApi,
         getKey: (item: Data) => item.id ?? -1,
         startSync: true,
@@ -695,6 +694,7 @@ describe(`TrailBase Integration`, () => {
     recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
     const collection = createCollection(
       trailBaseCollectionOptions({
+        client: recordApi.client,
         recordApi,
         getKey: (item: Data) => item.id ?? -1,
         startSync: true,
@@ -969,6 +969,7 @@ describe(`TrailBase Integration`, () => {
     })
     const collection = createCollection(
       trailBaseCollectionOptions<Item, Stored, number>({
+        client: recordApi.client,
         recordApi,
         getKey: (item) => item.id,
         startSync: true,
@@ -1145,6 +1146,7 @@ describe(`TrailBase aborted subset loads`, () => {
     })
     const collection = createCollection(
       trailBaseCollectionOptions({
+        client: recordApi.client,
         recordApi,
         getKey: (item: Data) => item.id ?? -1,
         startSync: true,

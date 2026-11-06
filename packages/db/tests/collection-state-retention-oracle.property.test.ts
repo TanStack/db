@@ -1202,21 +1202,36 @@ it.each(
     })
   },
 )
-fcTest.prop([optimisticHistory], { numRuns: oracleRuns(100), seed: 86103 })(
-  `matches optimistic ownership and publication histories with a fixed seed`,
-  async ({ initial, steps }) => {
-    await runOptimisticHistory(initial, steps)
-  },
-)
-fcTest.prop(
-  [optimisticHistory],
-  oraclePropertyOptions(100, `collection-state.optimistic-history`),
-)(
-  `matches optimistic ownership and publication histories with a random or replayed seed`,
-  async ({ initial, steps }) => {
-    await runOptimisticHistory(initial, steps)
-  },
-)
+// Reach, per campaign (ORC-015): an edit that removes a field the row holds.
+// The update API keeps the removed field as an own `undefined`, which only
+// strict row comparisons distinguish from an absent one.
+async function optimisticCampaign(
+  campaign: string,
+  options: Parameters<typeof fc.assert>[1],
+): Promise<void> {
+  const reach = createOracleReach(
+    `collection-state.optimistic-history (${campaign})`,
+    [`removed-held-field`],
+    { minimum: 5 },
+  )
+  await fc.assert(
+    fc.asyncProperty(optimisticHistory, async ({ initial, steps }) => {
+      reach.beginHistory()
+      const counts = await runOptimisticHistory(initial, steps)
+      if (counts.removedFieldEdits > 0) reach.reach(`removed-held-field`)
+    }),
+    options,
+  )
+  reach.assertReached()
+}
+
+it(`matches optimistic ownership and publication histories with a fixed seed`, () =>
+  optimisticCampaign(`fixed`, { numRuns: oracleRuns(100), seed: 86103 }))
+it(`matches optimistic ownership and publication histories with a random or replayed seed`, () =>
+  optimisticCampaign(
+    `random`,
+    oraclePropertyOptions(100, `collection-state.optimistic-history`),
+  ))
 // An aborted open batch never applies, so the source's own rows must return
 // to their state before it. A later partial update then omits `c` again, and
 // the Collection keeps the held `c`. Shrunk from seed -526998278.

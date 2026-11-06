@@ -1870,7 +1870,8 @@ export class ConformanceViolation extends Error {
     readonly step: number,
     readonly expected: unknown,
     readonly actual: unknown,
-    readonly history: EagerLiveSourceHistory,
+    // The failing history, of whichever family's grammar.
+    readonly history: unknown,
   ) {
     super(
       `${law} violated at step ${step} of ${show(history)}: ` +

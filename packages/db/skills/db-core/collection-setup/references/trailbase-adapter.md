@@ -15,8 +15,11 @@ import { initClient } from 'trailbase'
 
 const trailBaseClient = initClient('https://your-trailbase-instance.com')
 
+type Todo = { id: string; text: string; completed: boolean }
+
 const todosCollection = createCollection(
-  trailBaseCollectionOptions({
+  trailBaseCollectionOptions<Todo>({
+    client: trailBaseClient,
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
     parse: {},
@@ -25,6 +28,7 @@ const todosCollection = createCollection(
 )
 ```
 
+- `client` -- The TrailBase client; each transaction's writes go through `client.execute` as one TrailBase transaction
 - `recordApi` -- TrailBase Record API instance from `trailBaseClient.records(tableName)`
 - `getKey` -- extracts unique key from each item
 - `parse` -- field conversions from TrailBase records to collection rows
@@ -61,6 +65,7 @@ type Todo = {
 const collection = createCollection(
   trailBaseCollectionOptions<Todo, SelectTodo>({
     id: 'todos',
+    client: trailBaseClient,
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
     parse: {
@@ -112,6 +117,7 @@ type SelectTodo = {
 const todosCollection = createCollection(
   trailBaseCollectionOptions<Todo, SelectTodo>({
     id: 'todos',
+    client: trailBaseClient,
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
     parse: {

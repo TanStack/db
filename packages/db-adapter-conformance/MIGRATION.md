@@ -17,7 +17,7 @@ reviewed change.
 | Family                                | Status                                    | Laws                                                                                                                 |
 | ------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Eager live source                     | Built (`src/eager-live-source-oracle.ts`) | READY-2/3/4/8/10, HEALTH-1/2/5, PUB-1/2/3/5/7/9, FID-1/4, LIFE-2/5/10, EVID-1/2/3, RETRY-1 (eager), RECON-1, RENEW-1 |
-| Mutations and confirmation            | Needed                                    | MUT-1/2/4/5/7/10/13, FID-5                                                                                           |
+| Mutations and confirmation            | Built (`src/mutation-oracle.ts`)          | MUT-1/2/3/7/8/10/11/13, reload, transactions, FID-5; MUT-4/5 stay with core                                          |
 | On-demand loading                     | Needed                                    | DEM-1 to DEM-23, MAP-1 to MAP-4                                                                                      |
 | Reload and retry                      | Needed                                    | RELOAD-1 to RELOAD-5; RETRY-1 and HEALTH-2 beyond the eager source's retried failures                                |
 | Client cache and refetch              | Needed                                    | CACHE-1 to CACHE-8, REF-1 to REF-7, DIR-1 to DIR-5                                                                   |
@@ -27,27 +27,64 @@ reviewed change.
 
 ## Adapters
 
-| Adapter           | Families that apply (section A)                                                       | Driver status                                                                                                                                                                                                                                                                                                       |
-| ----------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Neon Realtime     | eager live source, mutations                                                          | Eager: RED (READY-4, HEALTH-1, and LIFE-10 behind them); adapter update pending                                                                                                                                                                                                                                     |
-| Electric          | eager live source, mutations, on-demand, source shapes, reload and retry, persistence | Eager: GREEN (2026-10-30) after three fixes, per-batch commits, typed Postgres columns, over the installed client. Driver `electric-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.electric`. Other families: not started                                              |
-| PowerSync         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-30) after a fix, per-batch commits, over real local SQLite. Driver `powersync-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.powersync`. Mutations, on-demand: not started                                                                       |
-| RxDB              | eager live source, mutations                                                          | Eager: GREEN (2026-10-29) after a fix, per-change commits, `listen-before-fetch`. Driver `rxdb-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.rxdb`. Mutations: not started                                                                                            |
-| TrailBase         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-29), per-change commits. Driver `trailbase-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.trailbase`; declares `duplicate-key-delivery` and `source-failure-after-ready`. Mutations, on-demand: not started                                      |
-| Convex            | eager live source, mutations, on-demand, source shapes                                | Eager: GREEN (2026-11-02) after a fix, per-batch commits, complete results, over the real Convex JavaScript client and a controlled WebSocket. Driver `convex-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.convex`. Mutations, on-demand, source shapes: not started |
-| query-db          | client cache and refetch, on-demand, mutations, reload and retry, persistence         | Not started; not a push source, so the eager family does not apply                                                                                                                                                                                                                                                  |
-| local-only        | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                                                                         |
-| localStorage      | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                                                                         |
-| Persisted wrapper | persistence wrapper                                                                   | Not started                                                                                                                                                                                                                                                                                                         |
-| Storage hosts (8) | storage hosts                                                                         | Not started                                                                                                                                                                                                                                                                                                         |
+| Adapter           | Families that apply (section A)                                                       | Driver status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Neon Realtime     | eager live source, mutations                                                          | Eager: RED (READY-4, HEALTH-1, and LIFE-10 behind them); adapter update pending                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Electric          | eager live source, mutations, on-demand, source shapes, reload and retry, persistence | Eager: GREEN (2026-10-30) after three fixes, per-batch commits, typed Postgres columns, over the installed client. Driver `electric-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.electric`. Mutations: GREEN (2026-11-04) after a fix, `application-handlers`, `log-ordered-echoes`, `held-echoes`, `reloads`, `reload-keeps-feed`, `atomic-transactions`. Driver `electric-db-collection/tests/mutation-conformance-driver.ts`, property `adapter-conformance.mutations.electric`. Other families: not started                                                                             |
+| PowerSync         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-30) after a fix, per-batch commits, over real local SQLite. Driver `powersync-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.powersync`. Mutations: GREEN (2026-11-04), no adapter change, `undefinedField: 'null'`, `field-updates`, `reloads`, `atomic-transactions`. Driver `powersync-db-collection/tests/mutation-conformance-driver.ts`, property `adapter-conformance.mutations.powersync`. On-demand: not started                                                                                                                                               |
+| RxDB              | eager live source, mutations                                                          | Eager: GREEN (2026-10-29) after a fix, per-change commits, `listen-before-fetch`. Driver `rxdb-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.rxdb`. Mutations: GREEN (2026-11-04) after fixes, `undefinedField: 'absent'`, `merged-updates`, `reloads`, `snapshot-reloads`; transactions stop at the first rejection. Driver `rxdb-db-collection/tests/mutation-conformance-driver.ts`, property `adapter-conformance.mutations.rxdb`                                                                                                                                                        |
+| TrailBase         | eager live source, mutations, on-demand                                               | Eager: GREEN (2026-10-29), per-change commits. Driver `trailbase-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.trailbase`; declares `duplicate-key-delivery` and `source-failure-after-ready`. Mutations: GREEN (2026-11-04) after fixes, `undefinedField: 'null'`, `field-updates`, `held-echoes`, `counted-echoes`, `reloads`, `atomic-transactions`. Driver `trailbase-db-collection/tests/mutation-conformance-driver.ts`, property `adapter-conformance.mutations.trailbase`. On-demand: not started                                                                                    |
+| Convex            | eager live source, mutations, on-demand, source shapes                                | Eager: GREEN (2026-11-02) after a fix, per-batch commits, complete results, over the real Convex JavaScript client and a controlled WebSocket. Driver `convex-db-collection/tests/conformance-driver.ts`, property `adapter-conformance.eager-live-source.convex`. Mutations: GREEN (2026-11-04), no adapter change, `application-handlers`, `ordered-answers`, `log-ordered-echoes`, `held-echoes`, `reloads`, `reload-keeps-feed`, `snapshot-reloads`, `atomic-transactions`. Driver `convex-db-collection/tests/mutation-conformance-driver.ts`, property `adapter-conformance.mutations.convex`. On-demand, source shapes: not started |
+| query-db          | client cache and refetch, on-demand, mutations, reload and retry, persistence         | Not started; not a push source, so the eager family does not apply                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| local-only        | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| localStorage      | local and shared stores, mutations                                                    | Not started                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Persisted wrapper | persistence wrapper                                                                   | Not started                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Storage hosts (8) | storage hosts                                                                         | Not started                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 ## Suggested order
 
 1. **Push adapters on the existing family:** RxDB (done), TrailBase (done), PowerSync (done), Electric (eager mode, done), and Convex (eager mode, done). Each needs only a controlled-provider driver. A RED result is a finding against that adapter.
 2. **Retire duplicated adapter tests (separate PR, maintainer decision 2026-11-02).** For each adapter on the eager family, classify its existing eager-mode tests and oracles against what the shared oracle generates and observes: remove a test only when the shared family checks the same law, history, path, and observation; narrow one it covers in part; keep the rest. Known overlap: TrailBase's lifecycle oracle and the shared family both own eager startup failure and stream-end health.
 3. **The Neon update, run against its driver.** This shows an adapter moving from RED to GREEN. Publishing the package for drivers outside this repository (a public package, `@tanstack/db` as a peer dependency, an exported reach counter) is deferred (maintainer decision 2026-11-02).
-4. **The mutations family.** It applies to every adapter except the storage hosts.
+4. **The mutations family (in progress).** It applies to every adapter except the storage hosts.
 5. **The other families,** one at a time. Each family's new driver work goes to the adapters that declare it.
+
+## Next slice: mutations and confirmation (started 2026-11-02)
+
+The family checks what an adapter owes when an application writes, through
+one shared model and one driver per adapter, as the eager family does. Core
+keeps its own owners for laws that no adapter can change: joining a
+transaction (MUT-4) and holding synced commits behind pending optimistic
+state (MUT-5) stay with `packages/db/tests/optimistic-history-oracle.ts`.
+
+- **Laws, first cut:** MUT-1 (the write is visible until it settles), MUT-2
+  (a rejected write rolls back and `isPersisted` rejects with the error),
+  MUT-13 and MUT-3 (one handler call per write, with the authored values),
+  MUT-10 (writes reach the backend in order per Collection), FID-5 and MUT-8
+  (after settlement the backend holds the fold of accepted writes; a rejected
+  write leaves no backend effect), and MUT-7 (under confirmation through sync,
+  the write stays persisting until its own write arrives in a committed
+  batch). Authority: the law set's section 9 and FID-5.
+- **Capabilities:** `adapter-persistence` (the adapter writes to the backend
+  itself: RxDB, TrailBase, PowerSync) and `confirm-through-sync` (the
+  application's handler writes and returns evidence: Electric, Convex).
+- **Model:** the synced rows, the backend rows, and the pending writes in
+  author order with their outcome. Visible rows are the synced rows with the
+  pending writes folded on; a settled write leaves the fold.
+- **Grammar:** single-row inserts, updates, and deletes through the
+  Collection; the backend accepts or rejects a write, at once or held; the
+  backend's copy arrives through sync, at once or withheld; a commit by
+  another client while no write is pending. Manual and multi-mutation
+  transactions, and commits by another client while a write is pending
+  (MUT-11), are planned grammar extensions, not generated yet.
+- **Observations:** visible rows and change events, each transaction's state
+  and settlement, the backend rows and the order of backend operations,
+  handler calls.
+- **Calibration:** a reference adapter for each capability and hostile
+  mutants per law.
+- **Order:** the family and its reference adapter, then RxDB, TrailBase,
+  PowerSync (adapter persistence), then Electric and Convex (confirmation
+  through sync).
 
 ## Migration log
 
@@ -499,3 +536,173 @@ error/sync-give-up, accept]`). Fix: remember that give-up and fail the
     replay, or skip the check on the React path, are rejected. A fixed-seed
     campaign now runs the React client.
   - **Size:** convex-db-collection +26 gzip bytes for LIFE-10.
+- **2026-11-03, mutations family, reference adapter.** The family's oracle
+  and reference adapter are GREEN on both campaigns, with every declared
+  reach state met, and seven mutants each rejected with their law.
+  - **Oracle changes this run exposed:** a publication of unchanged row values
+    (core's `$hasPendingWrites` update) is not a change of row values; a
+    subscription forwards changes only for keys it sent, so the recorder
+    starts from the initial state.
+  - **Maintainer decision:** a removed field stays an own `undefined`, the
+    documented rule; the core owner `optimistic-history-oracle` now generates
+    field removal.
+- **2026-11-03, RxDB, mutations.** Both campaigns are GREEN after an
+  adapter fix, with every declared reach state met.
+  - **Driver:** a real RxDB database on memory storage; the provider wraps
+    the storage's `bulkWrite`, stores JSON documents, and rejects with a
+    per-row write error. An insert the storage refuses as a conflict, which
+    RxDB's `bulkUpsert` sends before it updates, is not a request.
+  - **RED on the parent:** 38 of 300 fixed-campaign histories failed MUT-10
+    (writes did not wait for the earlier one) and 24 failed MUT-2 (a rejected
+    delete rejected with an array). Fix: writes run in author order, and a
+    failed delete rejects with RxDB's `RxError`. The parent is the hostile
+    mutant for both.
+  - **Oracle changes this migration exposed:** a driver declares how its
+    provider stores an authored `undefined` field (`undefinedField`, FID-1's
+    value domain), and the model holds an accepted write's sync transaction
+    while another mutation persists (the glossary's held optimistic row). A
+    JSON-provider reference campaign and an eighth mutant calibrate both.
+  - **Decided 2026-11-03:** a storage `bulkWrite` that throws wedges the
+    incremental write queue of RxDB 17.1.0 to 17.5.0, so `incrementalPatch`
+    never settles (pubkey/rxdb#9025, fixed in 17.6.0). The adapter keeps
+    `incrementalPatch`; its RxDB dev dependency is now 17.6.0 and its peer
+    range `>=17.6.0`. A driver can declare `rejectionKinds`; RxDB declares
+    a per-row write error and a thrown storage error. RED on 17.1.0 (both
+    campaigns failed HEALTH-5 at a thrown update), GREEN on 17.6.0.
+  - **Size:** rxdb-db-collection +43 gzip bytes for MUT-10.
+- **2026-11-03, mutations family, server rewrites.** A new capability,
+  `server-rewrites`: an accepted insert's or update's plan can rewrite the
+  stored row (normalize the title, drop `note`, set `note`), as server
+  defaults, triggers, and normalization do. The request still carries the
+  authored row; the provider's copy is the row's value. New reach state
+  `server-rewrote-copy`, and a grammar arm for updates without `note`.
+  - **Calibration:** the reference mutant `writes-back-authored` survives
+    without the capability and fails FID-5 with it. RxDB rewrites through
+    its `preInsert` and `preSave` hooks; with no-op hooks the fixed campaign
+    fails FID-5.
+  - **Result:** the reference adapter and RxDB are GREEN, with no
+    production change.
+- **2026-11-03, mutations family, SQL providers and confirmation through
+  sync.** New capabilities `field-updates` (an update sends only its changed
+  fields and the provider merges them, the law set's MUT-8 clause) and
+  `held-echoes` (the provider answers before its change feed delivers the
+  copy; the mutation stays pending until it arrives, MUT-7), a `deliver`
+  step, and `undefinedField: 'null'` (a SQL row: a removed field is sent as
+  `null`, and a complete row carries every column). A SQL-provider reference
+  campaign and three mutants calibrate them (a complete-row update, a dropped
+  removal, settling on the answer). Requests now compare by the fields they
+  carry. A reach count that credited a rejected write as accepted is fixed.
+- **2026-11-03, TrailBase, mutations.** Both campaigns are GREEN after an
+  adapter fix, with every declared reach state met.
+  - **RED on the parent:** of 300 fixed-campaign histories, 37 failed MUT-8
+    (a removed field was sent as an empty patch), 27 failed MUT-10 (writes
+    did not wait), and 5 failed MUT-1 (a write was confirmed by an earlier
+    event on the same key).
+  - **Fix:** a removed field is sent as `null`; writes run in author order;
+    a write is confirmed only by an event after it began, recorded only
+    while a write is admitted, which removes the periodic cleanup timer.
+    A mutant with the old confirmation fails MUT-1. Refined on 2026-11-04:
+    same-key histories showed that an earlier write's late event could
+    still confirm a later write on the key, so the adapter now counts
+    events per key and confirms the n-th answered write on a key by the
+    n-th event on it; a late event from an earlier write does not confirm
+    a later one.
+  - **Size:** trailbase-db-collection −46 gzip bytes.
+- **2026-11-03, PowerSync, mutations.** Both campaigns are GREEN after an
+  adapter fix, with every declared reach state met.
+  - **Driver:** a real local PowerSync database is the provider; each
+    adapter statement on the table is a request, a held echo holds the
+    change watcher's next callback, and the propagation step waits for
+    every write's receipt or, while something is held, for quiet.
+  - **RED on the parent:** both campaigns failed MUT-10: a write started
+    once the earlier one committed locally, before its diff trigger
+    observed it. The law set's "decides" is settlement. Fix: each write
+    runs after the earlier one settles. Removals already reach SQLite as
+    `NULL`.
+  - **Oracle change this migration exposed:** `server-rewrote-copy` counted
+    a copy that differs only by the value domain (a removal under `null`),
+    so a driver without `server-rewrites` reached an undeclared state. It
+    now counts only a plan's rewrite.
+  - **Size:** powersync-db-collection +26 gzip bytes for MUT-10.
+- **Decided 2026-11-03, MUT-10 under confirmation through sync.** "The
+  earlier one decides" is the provider's answer, not the write's
+  confirmation through sync: core does not chain independent transactions,
+  and an application that needs that chains them itself. Waiting for
+  confirmation made a burst of 50 PowerSync inserts take 1.6 s instead of
+  31 ms.
+  - **Oracle:** an answered write is decided, so the next write's request is
+    owed; it stays pending until its copy arrives. The reference SQL adapter
+    now starts the next write at the answer and confirms each write by its
+    own commit; new mutants `chains-on-confirmation` (MUT-8) and
+    `confirms-by-high-water`, which confirms a withheld copy once a later
+    one applies (MUT-1).
+  - **PowerSync:** the ordering change is reverted; the write lock already
+    orders its writes. Its driver no longer declares `held-writes` or
+    `held-echoes` (a held statement holds the lock the diff flush needs, and
+    one watcher callback applies every write). GREEN with no adapter change;
+    a mutant that settles before its diff trigger observes the write fails
+    MUT-1.
+  - **TrailBase:** a write starts after the earlier one's HTTP response, not
+    after its change event. The committed version, which waited for the
+    event, fails the fixed campaign.
+- **2026-11-03, Electric, mutations.** Both campaigns are GREEN with no
+  adapter change, with every declared reach state met.
+  - **Driver:** Electric does not persist writes, so the driver supplies
+    application handlers that write through a backend API and await
+    `awaitTxId`; the real `ShapeStream` reads a shape log that carries each
+    commit's txid in commit order.
+  - **Oracle changes this migration exposed:** `application-handlers` (the
+    application's handlers persist writes, so requests go out when made and
+    MUT-10 is the application's), `log-ordered-echoes` (a withheld copy holds
+    back later ones), and `ordered-answers` (the provider answers in arrival
+    order). Writes that settle at one step settle in an order no law fixes,
+    so the check then compares each row's own value sequence. Reference
+    campaigns calibrate each: Electric-like and Convex-like providers, and a
+    provider that breaks each declaration fails (MUT-7, MUT-8, MUT-13).
+  - **Mutant:** a txid evidence check that accepts any txid fails MUT-1.
+- **2026-11-03, Convex, mutations.** Both campaigns are GREEN with no
+  adapter change, with every declared reach state met.
+  - **Driver lessons:** a server answers a `Mutation` after the client
+    registers it, and sends the `MutationResponse` before the transition
+    that carries the commit: the client completes a mutation only at a later
+    transition, and drops a response for a request it is not tracking yet.
+  - **Mutants:** an adapter that does not await the handler fails MUT-1. One
+    that skips its wait for the source survives these histories; the
+    cached-listener path it protects is owned by `tests/collection.test.ts`
+    and the ownership oracle, which reject it.
+- **Decided 2026-11-03, RxDB updates merge named fields.** Same-key
+  histories found that RxDB's `incrementalPatch` keeps a stored field an
+  update does not name (seed 371775937). RxDB keeps that behavior: the
+  driver declares `merged-updates`, under which an update's stored row is
+  its authored row merged into the provider's row. This revises the law
+  set's complete-row MUT-8 clause for RxDB. An RxDB that replaces the row
+  fails MUT-8.
+- **Decided 2026-11-03, RxDB update of a deleted document.** It rejects
+  with `UpdateKeyNotFoundError` instead of fulfilling without persisting.
+- **Decided 2026-11-03, superseded 2026-11-04, TrailBase multi-mutation
+  transactions.** Requests
+  go out one at a time in mutation order and a rejection ends the
+  transaction; generating multi-mutation transactions, and the law for a
+  rejection partway through one, are a follow-up for the mutations owner.
+- **Superseded 2026-11-04, TrailBase multi-mutation transactions.** The
+  grammar now generates transactions; see the decision below.
+- **2026-11-04, mutations family, commits by other clients, reloads, and
+  transactions.** The grammar generates commits by another client over
+  pending writes (MUT-11), reloads, and transactions of two or three
+  mutations. The model's feed carries every commit's copy in commit order,
+  and core applies the delivered copies once no write persists. New
+  capabilities: `counted-echoes`, `reloads`, `reload-keeps-feed`,
+  `snapshot-reloads`, `atomic-transactions`. Twenty reference mutants and
+  the misdeclared-provider calibrations reject the wrong designs. The
+  findings and fixes are in the coverage map's mutations section.
+- **Decided 2026-11-04, TrailBase confirmation.** TrailBase events carry no
+  write identity, so the adapter's per-key counting is the declared rule
+  (`counted-echoes`): the n-th answered write on a record settles at the
+  n-th event on it, also another client's. Every other adapter follows
+  strict MUT-11.
+- **Decided 2026-11-04, transactions.** A transaction persists all or none
+  where the provider can: TrailBase through `client.execute(operations,
+true)`, PowerSync in one write transaction, and Electric and Convex in one
+  application call. RxDB has no transaction over several documents, so its
+  requests go out one at a time and the first rejection ends it.
+  `trailBaseCollectionOptions` now requires `client` (breaking).

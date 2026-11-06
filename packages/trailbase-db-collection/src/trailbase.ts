@@ -11,7 +11,16 @@ import {
   TimeoutWaitingForIdsError,
 } from './errors'
 import type { OrderByClause } from '../../db/dist/esm/query/ir'
-import type { CompareOp, Event, FilterOrComposite, RecordApi } from 'trailbase'
+import type {
+  Client,
+  CompareOp,
+  CreateOperation,
+  DeleteOperation,
+  Event,
+  FilterOrComposite,
+  RecordApi,
+  UpdateOperation,
+} from 'trailbase'
 
 import type {
   BaseCollectionConfig,
@@ -83,6 +92,9 @@ function convertPartial<
   return Object.fromEntries(
     Object.keys(input).map((k: string) => {
       const value = input[k]
+      // A removed field is an own `undefined`, which JSON would drop; it is
+      // the column's `NULL`.
+      if (value === undefined) return [k, null]
       return [k, c[k]?.(value as any) ?? value]
     }),
   ) as OutputType
@@ -102,6 +114,13 @@ export interface TrailBaseCollectionConfig<
   `onInsert` | `onUpdate` | `onDelete` | `syncMode`
 > {
   /**
+   * The TrailBase client the record API belongs to. Each transaction's
+   * writes go through its `execute` as one TrailBase transaction, so they
+   * commit together or not at all.
+   */
+  client: Client
+
+  /**
    * Record API name
    */
   recordApi: RecordApi<TRecord>
@@ -113,6 +132,11 @@ export interface TrailBaseCollectionConfig<
   syncMode?: TrailBaseSyncMode
 
   parse: Conversions<TRecord, TItem>
+  /**
+   * Per-field conversions for values sent to TrailBase. An update that
+   * removes a field sends `null`, which clears the column, without calling
+   * that field's conversion.
+   */
   serialize: Conversions<TItem, TRecord>
 }
 
@@ -140,17 +164,37 @@ export function trailBaseCollectionOptions<
   const serialIns = (item: TItem) =>
     convert<TItem, TRecord>(config.serialize, item)
 
+  // Change events per key, and this client's answered writes per key,
+  // counted while a write is admitted or an answered write's event is still
+  // to come. Each answered write on a key produces one event there, in
+  // order, so a write is confirmed by the event its answer is numbered for,
+  // not by an earlier write's late one (MUT-7).
   const seenIds = new Store(new Map<string, number>())
+  const answeredIds = new Map<string, number>()
+  let eventSequence = 0
+  // Writes admitted and not yet settled.
+  let writes = 0
+  // The run whose listing has not committed yet; no write settles until it
+  // has, since the listing confirms the writes it credits.
+  let listing: object | undefined
 
   const internalSyncMode = config.syncMode ?? `eager`
   let fullSyncCompleted = false
 
+  // Numbers an answered write on a key as soon as TrailBase answers it.
+  const ticket = (id: string): readonly [string, number] => {
+    const number = (answeredIds.get(id) ?? 0) + 1
+    answeredIds.set(id, number)
+    return [id, number]
+  }
+
   const awaitIds = (
-    ids: Array<string>,
+    tickets: Array<readonly [string, number]>,
     timeout: number = 120 * 1000,
   ): Promise<void> => {
     const completed = (value: Map<string, number>) =>
-      ids.every((id) => value.has(id))
+      !listing &&
+      tickets.every(([id, ticket]) => (value.get(id) ?? 0) >= ticket)
     if (completed(seenIds.state)) {
       return Promise.resolve()
     }
@@ -158,7 +202,9 @@ export function trailBaseCollectionOptions<
     return new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         sub.unsubscribe()
-        reject(new TimeoutWaitingForIdsError(ids.toString()))
+        reject(
+          new TimeoutWaitingForIdsError(tickets.map(([id]) => id).toString()),
+        )
       }, timeout)
 
       const sub = seenIds.subscribe((value) => {
@@ -169,6 +215,46 @@ export function trailBaseCollectionOptions<
         }
       })
     })
+  }
+
+  // Writes reach TrailBase in author order: a write starts at once when no
+  // other is being sent, and otherwise after the earlier one's response
+  // (MUT-10). It does not wait for the earlier one's change event. A write
+  // returns a ticket per request TrailBase answered and settles once the
+  // change stream carries each of them (MUT-7).
+  let sending = 0
+  let turn: Promise<unknown> = Promise.resolve()
+  const inTurn = <T>(send: () => Promise<T>): Promise<T> => {
+    const sent = (sending++ === 0 ? send() : turn.then(send)).finally(() => {
+      sending--
+    })
+    turn = sent.catch(() => {})
+    return sent
+  }
+  const persist = async (
+    write: () => Promise<Array<readonly [string, number]>>,
+  ) => {
+    writes++
+    try {
+      await awaitIds(await inTurn(write))
+    } finally {
+      writes--
+      forgetSeenIds()
+    }
+  }
+
+  // The counts are kept while a write is admitted or an answered request's
+  // event is still to come, and cleared once neither holds.
+  const forgetSeenIds = () => {
+    if (
+      writes === 0 &&
+      [...answeredIds].every(
+        ([id, number]) => (seenIds.state.get(id) ?? 0) >= number,
+      )
+    ) {
+      seenIds.setState(() => new Map())
+      answeredIds.clear()
+    }
   }
 
   let eventReader: ReadableStreamDefaultReader<Event> | undefined
@@ -187,15 +273,12 @@ export function trailBaseCollectionOptions<
     sync: (params: SyncParams) => {
       const { begin, write, commit, markReady, fail, collection } = params
       let cancelled = false
-      let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
       const cleanup = () => {
         cancelled = true
+        leaveTurn()
+        creditListing()
         settleListener()
         cancelEventReader()
-        if (periodicCleanupTask !== undefined) {
-          clearInterval(periodicCleanupTask)
-          periodicCleanupTask = undefined
-        }
       }
 
       // TrailBase cursors are opaque. Cache a cursor by its last fetched key
@@ -205,9 +288,8 @@ export function trailBaseCollectionOptions<
       const cursors = new Map<string | number, string>()
 
       let listening = false
-      // Orders this run's change events against its list calls. Only loads
-      // in flight compare against it, so it is kept only while one runs.
-      let eventSequence = 0
+      // Orders change events against this run's list calls. Only loads in
+      // flight compare against it, so it is kept only while one runs.
       const eventSequenceByKey = new Map<TKey, number>()
       let loadsInFlight = 0
       // Settles when the listener runs, cannot start (with the failure), or
@@ -366,6 +448,9 @@ export function trailBaseCollectionOptions<
             const applied = commit()
             if (applied !== true) appliedPages.push(applied)
           }
+          // Every page is committed; core may hold them behind a credited
+          // write, so the credit cannot wait for them to apply.
+          if (everyRow) creditListing()
         } finally {
           if (--loadsInFlight === 0) eventSequenceByKey.clear()
         }
@@ -404,14 +489,16 @@ export function trailBaseCollectionOptions<
           void commit()
 
           if (value) {
-            ++eventSequence
+            const sequence = ++eventSequence
             if (loadsInFlight > 0)
-              eventSequenceByKey.set(getKey(value), eventSequence)
-            seenIds.setState((curr: Map<string, number>) => {
-              const newIds = new Map(curr)
-              newIds.set(String(getKey(value)), Date.now())
-              return newIds
-            })
+              eventSequenceByKey.set(getKey(value), sequence)
+            if (writes > 0 || answeredIds.size > 0) {
+              const id = String(getKey(value))
+              seenIds.setState((curr: Map<string, number>) =>
+                new Map(curr).set(id, (curr.get(id) ?? 0) + 1),
+              )
+              forgetSeenIds()
+            }
           }
         }
       }
@@ -430,16 +517,49 @@ export function trailBaseCollectionOptions<
         fail(error)
       }
 
+      // Each run subscribes in the write queue, once every write admitted
+      // before it is answered: each of those committed before the stream
+      // opened, so its event may be on the retired stream only, and the
+      // eager listing carries it. The open stream credits their numbers,
+      // and no write settles until the listing has committed (MUT-7).
+      const run = {}
+      let leaveTurn!: () => void
+      const left = new Promise<void>((resolve) => (leaveTurn = resolve))
+      const creditListing = () => {
+        if (listing !== run) return
+        listing = undefined
+        seenIds.setState((curr: Map<string, number>) => new Map(curr))
+      }
+
       async function start() {
-        let reader: ReadableStreamDefaultReader<Event> | undefined
         try {
-          const eventStream = await config.recordApi.subscribe(`*`)
+          let opening: Promise<ReadableStream<Event>> | undefined
+          // The turn ends when the stream opens or fails, or at cleanup, so a
+          // stale subscription holds neither a replacement run nor a write.
+          await inTurn(() => {
+            if (cancelled) return left
+            opening = config.recordApi.subscribe(`*`).then((stream) => {
+              if (!cancelled) {
+                listing = run
+                seenIds.setState((curr: Map<string, number>) => {
+                  const next = new Map(curr)
+                  for (const [id, answered] of answeredIds)
+                    next.set(id, Math.max(next.get(id) ?? 0, answered))
+                  return next
+                })
+              }
+              return stream
+            })
+            return Promise.race([opening.catch(() => {}), left])
+          })
+          if (!opening) return
+          const eventStream = await opening
           if (cancelled) {
             await eventStream.cancel()
             return
           }
           const subscribedReader = eventStream.getReader()
-          reader = eventReader = subscribedReader
+          eventReader = subscribedReader
 
           // Start listening for subscriptions first. Otherwise, we'd risk a gap
           // between the initial fetch and starting to listen.
@@ -471,6 +591,10 @@ export function trailBaseCollectionOptions<
             await load({}, true)
             if (cancelled) return
             fullSyncCompleted = true
+          } else {
+            // On demand, no listing carries every row: the open stream
+            // credits the answered writes.
+            creditListing()
           }
           // After this run's fail(), markReady() does nothing.
           if (!cancelled) markReady()
@@ -482,37 +606,6 @@ export function trailBaseCollectionOptions<
           reportStreamEnd(error, true)
           return
         }
-
-        // Lastly, start a periodic cleanup task that will be removed when the
-        // reader closes.
-        if (cancelled || !reader) return
-
-        periodicCleanupTask = setInterval(() => {
-          seenIds.setState((curr) => {
-            const now = Date.now()
-            let anyExpired = false
-
-            const notExpired = Array.from(curr.entries()).filter(([_, v]) => {
-              const expired = now - v > 300 * 1000
-              anyExpired = anyExpired || expired
-              return !expired
-            })
-
-            if (anyExpired) {
-              return new Map(notExpired)
-            }
-            return curr
-          })
-        }, 120 * 1000)
-
-        const clearCleanupTask = () => {
-          if (periodicCleanupTask !== undefined) {
-            clearInterval(periodicCleanupTask)
-            periodicCleanupTask = undefined
-          }
-        }
-        // listen() reports read errors. Observe this separate promise too.
-        void reader.closed.then(clearCleanupTask, clearCleanupTask)
       }
 
       void start()
@@ -539,7 +632,12 @@ export function trailBaseCollectionOptions<
       }) as const,
   }
 
+  const execute = (
+    operations: Array<CreateOperation | UpdateOperation | DeleteOperation>,
+  ) => config.client.execute(operations, true)
+
   const {
+    client: _client,
     recordApi: _recordApi,
     parse: _parse,
     serialize: _serialize,
@@ -550,59 +648,42 @@ export function trailBaseCollectionOptions<
     ...collectionConfig,
     sync,
     getKey,
-    onInsert: async (params: InsertMutationFnParams<TItem, TKey>) => {
-      const ids = await config.recordApi.createBulk(
-        params.transaction.mutations.map((tx) => {
-          const { type, modified } = tx
-          if (type !== `insert`) {
-            throw new ExpectedInsertTypeError(type)
-          }
-          return serialIns(modified)
-        }),
-      )
-
-      // The optimistic mutation overlay is removed on return, so at this point
-      // we have to ensure that the new record was properly added to the local
-      // DB by the subscription.
-      await awaitIds(ids.map((id) => String(id)))
-    },
-    onUpdate: async (params: UpdateMutationFnParams<TItem, TKey>) => {
-      const ids: Array<string> = await Promise.all(
-        params.transaction.mutations.map(async (tx) => {
-          const { type, changes, key } = tx
-          if (type !== `update`) {
-            throw new ExpectedUpdateTypeError(type)
-          }
-
-          await config.recordApi.update(key, serialUpd(changes))
-
-          return String(key)
-        }),
-      )
-
-      // The optimistic mutation overlay is removed on return, so at this point
-      // we have to ensure that the new record was properly updated in the local
-      // DB by the subscription.
-      await awaitIds(ids)
-    },
-    onDelete: async (params: DeleteMutationFnParams<TItem, TKey>) => {
-      const ids: Array<string> = await Promise.all(
-        params.transaction.mutations.map(async (tx) => {
-          const { type, key } = tx
-          if (type !== `delete`) {
-            throw new ExpectedDeleteTypeError(type)
-          }
-
-          await config.recordApi.delete(key)
-          return String(key)
-        }),
-      )
-
-      // The optimistic mutation overlay is removed on return, so at this point
-      // we have to ensure that the new record was properly updated in the local
-      // DB by the subscription.
-      await awaitIds(ids)
-    },
+    // The optimistic mutation overlay is removed when a handler returns, so
+    // each one waits until the subscription has applied what it wrote.
+    // A transaction is one TrailBase transaction: its writes commit
+    // together or not at all, and a rejection rejects it whole.
+    onInsert: (params: InsertMutationFnParams<TItem, TKey>) =>
+      persist(async () => {
+        const ids = await execute(
+          params.transaction.mutations.map(({ type, modified }) => {
+            if (type !== `insert`) throw new ExpectedInsertTypeError(type)
+            return config.recordApi.createOp(serialIns(modified))
+          }),
+        )
+        return ids.map((id) => ticket(String(id)))
+      }),
+    onUpdate: (params: UpdateMutationFnParams<TItem, TKey>) =>
+      persist(async () => {
+        const { mutations } = params.transaction
+        await execute(
+          mutations.map(({ type, changes, key }) => {
+            if (type !== `update`) throw new ExpectedUpdateTypeError(type)
+            return config.recordApi.updateOp(key, serialUpd(changes))
+          }),
+        )
+        return mutations.map(({ key }) => ticket(String(key)))
+      }),
+    onDelete: (params: DeleteMutationFnParams<TItem, TKey>) =>
+      persist(async () => {
+        const { mutations } = params.transaction
+        await execute(
+          mutations.map(({ type, key }) => {
+            if (type !== `delete`) throw new ExpectedDeleteTypeError(type)
+            return config.recordApi.deleteOp(key)
+          }),
+        )
+        return mutations.map(({ key }) => ticket(String(key)))
+      }),
     utils: {
       cancel: cancelEventReader,
     },

@@ -38,6 +38,7 @@ function createSdkBoundary(apiName: string) {
     return Promise.reject(unexpected)
   })
   return {
+    client,
     api,
     requests,
     subscriptionPath,
@@ -58,6 +59,7 @@ it.each([`oracle_rows`, `other_rows`])(
     const cleared = vi.spyOn(globalThis, `clearInterval`)
     const collection = createCollection(
       trailBaseCollectionOptions({
+        client: fixture.client,
         recordApi: fixture.api,
         getKey: (row: Row) => row.id,
         syncMode: `eager`,
@@ -146,6 +148,7 @@ it(`does not give a single-record SDK request the wildcard fixture`, async () =>
     .mockImplementation(() => subscribe(7))
   const collection = createCollection(
     trailBaseCollectionOptions({
+      client: fixture.client,
       recordApi: fixture.api,
       getKey: (row: Row) => row.id,
       syncMode: `eager`,

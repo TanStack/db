@@ -29,11 +29,16 @@ import { initClient } from 'trailbase'
 
 const trailBaseClient = initClient(`https://your-trailbase-instance.com`)
 
+type Todo = { id: string; text: string; completed: boolean }
+
 const todosCollection = createCollection(
-  trailBaseCollectionOptions({
+  trailBaseCollectionOptions<Todo>({
     id: 'todos',
+    client: trailBaseClient,
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
+    parse: {},
+    serialize: {},
   })
 )
 ```
@@ -45,17 +50,15 @@ The `trailBaseCollectionOptions` function accepts the following options:
 ### Required Options
 
 - `id`: Unique identifier for the collection
+- `client`: The TrailBase client the record API comes from. Each transaction's writes go through its `execute` as one TrailBase transaction, so they commit together or not at all.
 - `recordApi`: TrailBase Record API instance created via `trailBaseClient.records()`
 - `getKey`: Function to extract the unique key from an item
+- `parse`: Object mapping field names to parsing functions that transform data coming from TrailBase. Use `{}` when the record and the item have the same shape.
+- `serialize`: Object mapping field names to serialization functions that transform data going to TrailBase. An update that removes a field (for example `draft.tags = undefined`) sends `null`, which clears the column, without calling that field's function. A `NOT NULL` column rejects such an update. Use `{}` when the record and the item have the same shape.
 
 ### Optional Options
 
-- `schema`: [Standard Schema](https://standardschema.dev) compatible schema (e.g., Zod, Effect) for client-side validation
-- `parse`: Object mapping field names to parsing functions that transform data coming from TrailBase
-- `serialize`: Object mapping field names to serialization functions that transform data going to TrailBase
-- `onInsert`: Handler function called when items are inserted
-- `onUpdate`: Handler function called when items are updated
-- `onDelete`: Handler function called when items are deleted
+- `syncMode`: `eager` (the default) loads every record at startup, and `on-demand` loads the records that queries ask for
 
 ## Data Transformation
 
@@ -76,12 +79,12 @@ type Todo = {
   completed: boolean
 }
 
-const todosCollection = createCollection<SelectTodo, Todo>(
-  trailBaseCollectionOptions({
+const todosCollection = createCollection(
+  trailBaseCollectionOptions<Todo, SelectTodo>({
     id: 'todos',
+    client: trailBaseClient,
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
-    schema: todoSchema,
     // Transform TrailBase data to application format
     parse: {
       created_at: (ts) => new Date(ts * 1000),
@@ -99,11 +102,16 @@ const todosCollection = createCollection<SelectTodo, Todo>(
 TrailBase supports real-time subscriptions when enabled on the server. The collection automatically subscribes to changes and updates in real-time:
 
 ```typescript
+type Todo = { id: string; text: string; completed: boolean }
+
 const todosCollection = createCollection(
-  trailBaseCollectionOptions({
+  trailBaseCollectionOptions<Todo>({
     id: 'todos',
+    client: trailBaseClient,
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
+    parse: {},
+    serialize: {},
     // Real-time updates work automatically when
     // enable_subscriptions is set in TrailBase config
   })
@@ -113,53 +121,29 @@ const todosCollection = createCollection(
 // the collection in real-time
 ```
 
-## Mutation Handlers
+## Writes and Transactions
 
-Handle inserts, updates, and deletes by providing mutation handlers:
+The adapter persists inserts, updates, and deletes itself, so it takes no `onInsert`, `onUpdate`, or `onDelete` handler. Each transaction goes to TrailBase as one `client.execute` call, so its writes commit together or not at all. A write settles when its change event arrives through the subscription:
 
 ```typescript
-const todosCollection = createCollection(
-  trailBaseCollectionOptions({
-    id: 'todos',
-    recordApi: trailBaseClient.records('todos'),
-    getKey: (item) => item.id,
-    onInsert: async ({ transaction }) => {
-      const newTodo = transaction.mutations[0].modified
-      // TrailBase handles the persistence automatically
-      // Add custom logic here if needed
-    },
-    onUpdate: async ({ transaction }) => {
-      const { original, modified } = transaction.mutations[0]
-      // TrailBase handles the persistence automatically
-      // Add custom logic here if needed
-    },
-    onDelete: async ({ transaction }) => {
-      const deletedTodo = transaction.mutations[0].original
-      // TrailBase handles the persistence automatically
-      // Add custom logic here if needed
-    },
-  })
-)
+// One transaction: TrailBase saves both updates or neither.
+const tx = todosCollection.update([firstId, secondId], (drafts) => {
+  for (const draft of drafts) draft.completed = true
+})
+await tx.when('settled')
 ```
+
+If TrailBase rejects the transaction, `tx.when('settled')` rejects with its error, and the optimistic changes roll back.
 
 ## Complete Example
 
 ```typescript
-import { createCollection } from '@tanstack/react-db'
+import { createCollection, useLiveQuery } from '@tanstack/react-db'
 import { not } from '@tanstack/db'
 import { trailBaseCollectionOptions } from '@tanstack/trailbase-db-collection'
 import { initClient } from 'trailbase'
-import { z } from 'zod'
 
 const trailBaseClient = initClient(`https://your-trailbase-instance.com`)
-
-// Define schema
-const todoSchema = z.object({
-  id: z.string(),
-  text: z.string(),
-  completed: z.boolean(),
-  created_at: z.date(),
-})
 
 type SelectTodo = {
   id: string
@@ -168,24 +152,25 @@ type SelectTodo = {
   created_at: number
 }
 
-type Todo = z.infer<typeof todoSchema>
+type Todo = {
+  id: string
+  text: string
+  completed: boolean
+  created_at: Date
+}
 
 // Create collection
-export const todosCollection = createCollection<SelectTodo, Todo>(
-  trailBaseCollectionOptions({
+export const todosCollection = createCollection(
+  trailBaseCollectionOptions<Todo, SelectTodo>({
     id: 'todos',
+    client: trailBaseClient,
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
-    schema: todoSchema,
     parse: {
       created_at: (ts) => new Date(ts * 1000),
     },
     serialize: {
       created_at: (date) => Math.floor(date.valueOf() / 1000),
-    },
-    onInsert: async ({ transaction }) => {
-      const newTodo = transaction.mutations[0].modified
-      console.log('Todo created:', newTodo)
     },
   })
 )

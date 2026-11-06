@@ -98,6 +98,7 @@ async function checkLifecycle(
   process.on(`unhandledRejection`, onUnhandled)
   const collection = createCollection(
     trailBaseCollectionOptions({
+      client: api.client,
       recordApi: api,
       getKey: (row: Row) => row.id,
       syncMode: mode,
@@ -584,6 +585,7 @@ async function checkEarlyDemand(plan: EarlyDemandPlan) {
   const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
   const collection = createCollection(
     trailBaseCollectionOptions({
+      client: api.client,
       recordApi: api,
       getKey: (row: EarlyRow) => row.id,
       syncMode: `on-demand`,
@@ -807,6 +809,7 @@ async function checkPageEventRace(plan: RacePlan) {
   const delivery = plan.timing === `before-list` ? plan.delivery : undefined
   const collection = createCollection(
     trailBaseCollectionOptions({
+      client: api.client,
       recordApi: api,
       getKey: (row: RaceRow) => row.id,
       syncMode: plan.mode,
@@ -943,6 +946,7 @@ async function checkHeldPage(plan: HeldPlan) {
   }
   const collection = createCollection(
     trailBaseCollectionOptions({
+      client: api.client,
       recordApi: api,
       getKey: (row: RaceRow) => row.id,
       syncMode: `on-demand`,
@@ -1066,6 +1070,7 @@ async function checkStreamEnd(ending: `close` | `read-error`) {
   const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
   const collection = createCollection(
     trailBaseCollectionOptions({
+      client: api.client,
       recordApi: api,
       getKey: (row: RaceRow) => row.id,
       syncMode: `on-demand`,
@@ -1273,6 +1278,7 @@ async function checkPageHistory(history: PageHistory) {
   })
   const collection = createCollection(
     trailBaseCollectionOptions({
+      client: api.client,
       recordApi: api,
       getKey: (row: RaceRow) => row.id,
       syncMode: `on-demand`,
@@ -1501,6 +1507,7 @@ async function checkFreshRunAfterEvent() {
   const now = vi.spyOn(Date, `now`).mockReturnValue(1_000_000)
   const collection = createCollection(
     trailBaseCollectionOptions({
+      client: api.client,
       recordApi: api,
       getKey: (row: RaceRow) => row.id,
       syncMode: `on-demand`,

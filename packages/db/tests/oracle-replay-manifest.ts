@@ -823,6 +823,36 @@ const ownerGroups: ReadonlyArray<
     `adapter-conformance.eager-live-source`,
     `convex`,
   ],
+  [
+    `db-adapter-conformance/tests/reference-mutation-oracle.property.test.ts`,
+    `adapter-conformance.mutations`,
+    `reference reference-json reference-sql reference-log reference-in-order reference-counted`,
+  ],
+  [
+    `rxdb-db-collection/tests/mutation-conformance-oracle.property.test.ts`,
+    `adapter-conformance.mutations`,
+    `rxdb`,
+  ],
+  [
+    `trailbase-db-collection/tests/mutation-conformance-oracle.property.test.ts`,
+    `adapter-conformance.mutations`,
+    `trailbase`,
+  ],
+  [
+    `powersync-db-collection/tests/mutation-conformance-oracle.property.test.ts`,
+    `adapter-conformance.mutations`,
+    `powersync`,
+  ],
+  [
+    `electric-db-collection/tests/mutation-conformance-oracle.property.test.ts`,
+    `adapter-conformance.mutations`,
+    `electric`,
+  ],
+  [
+    `convex-db-collection/tests/mutation-conformance-oracle.property.test.ts`,
+    `adapter-conformance.mutations`,
+    `convex`,
+  ],
 ]
 
 const owners = new Map<string, string>()
@@ -926,6 +956,27 @@ const replayTestNames = new Map([
       [
         `adapter-conformance.eager-live-source.${driver}`,
         `conforms on a random campaign or a replayed seed`,
+      ] as const,
+  ),
+  ...[`reference`, `rxdb`, `trailbase`, `powersync`, `electric`, `convex`].map(
+    (driver) =>
+      [
+        `adapter-conformance.mutations.${driver}`,
+        `conforms on a random campaign or a replayed seed`,
+      ] as const,
+  ),
+  ...(
+    [
+      [`json`, `a JSON provider`],
+      [`sql`, `a SQL provider`],
+      [`log`, `a SQL log provider and application handlers`],
+      [`in-order`, `an in-order JSON log provider and application handlers`],
+    ] as const
+  ).map(
+    ([name, label]) =>
+      [
+        `adapter-conformance.mutations.reference-${name}`,
+        `conforms with ${label} on a random campaign or a replayed seed`,
       ] as const,
   ),
   [

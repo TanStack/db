@@ -173,6 +173,7 @@ export function trailBaseConformanceDriver(): EagerLiveSourceDriver {
       const provider = new TrailBaseProvider()
       const collection = createCollection(
         trailBaseCollectionOptions({
+          client: provider.api.client,
           recordApi: provider.api,
           getKey: (row: ConformanceRecord) => row.id,
           syncMode: `eager`,
