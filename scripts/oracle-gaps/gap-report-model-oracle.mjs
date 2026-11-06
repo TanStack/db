@@ -5,8 +5,15 @@
  * end-to-end oracle runs the real CLI on them.
  */
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import fc from 'fast-check'
+
+// TypeScript is the authority on what a token is (law 6), not the CLI.
+const ts = createRequire(
+  join(dirname(fileURLToPath(import.meta.url)), `../../package.json`),
+)(`typescript`)
 
 const SOURCE = `src/sut.ts`
 // A second source in the same package, which the first imports from.
@@ -852,11 +859,24 @@ const routeOf = (t, part = t) =>
         ? `random`
         : `framework`
 
-/** Law 6's normalization: the statement's tokens, joined by single spaces. */
+/**
+ * Law 6's normalization: the statement's tokens, as TypeScript's scanner
+ * reads them, joined by single spaces. The scanner reads `>` alone unless
+ * asked to rescan it, which joins `>=`.
+ */
 function tokens(text) {
-  const pattern =
-    /'[^']*'|`[^`]*`|[A-Za-z_$][\w$]*|\d+|\.\.\.|\?\.|=>|!==|===|&&|\|\||<=|>=|[^\s\w]/g
-  return text.match(pattern).join(` `)
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, true)
+  scanner.setText(text)
+  const found = []
+  for (
+    let kind = scanner.scan();
+    kind !== ts.SyntaxKind.EndOfFileToken;
+    kind = scanner.scan()
+  ) {
+    if (kind === ts.SyntaxKind.GreaterThanToken) scanner.reScanGreaterToken()
+    found.push(scanner.getTokenText())
+  }
+  return found.join(` `)
 }
 
 /** The functions whose every statement is probe-only (law 2), by fixpoint. */
