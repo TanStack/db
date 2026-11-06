@@ -583,6 +583,14 @@ async function driver(plan, observe) {
         states.add(`a kill in one owner after a gap in another`)
       if (m.function === `w_flakykill` && m.outcome === `killed`)
         states.add(`a kill after a nondeterministic verdict in its file`)
+      if (m.function === `w_load` && m.operator === `if-true` && m.outcome === `killed`)
+        states.add(`a mutant that changes a value only at load killed`)
+      if (
+        m.function === `w_otherinfect` &&
+        m.outcome === `killed` &&
+        cli.mutants.filter((x) => x.function === `w_otherinfect` && x.outcome === `killed`).length >= 2
+      )
+        states.add(`each owner's value change killed its own mutant`)
       if (m.function === `w_slowkill` && m.outcome === `killed`)
         states.add(`a slow kill past the first time limit killed`)
       if (m.function === `w_hang` && m.outcome === `timeout`)
@@ -1038,6 +1046,8 @@ const required = [
   `a kill after a nondeterministic verdict in its file`,
   `a kill in one owner after a gap in another`,
   `a slow kill past the first time limit killed`,
+  `a mutant that changes a value only at load killed`,
+  `each owner's value change killed its own mutant`,
   `a hang alone timed out`,
   `a hang in one owner and a kill in another killed`,
   `a hang in one owner and a survivor in another timed out`,

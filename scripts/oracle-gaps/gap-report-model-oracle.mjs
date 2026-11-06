@@ -344,7 +344,10 @@ const witness = [
     body: [{ kind: `memoSet` }, { kind: `memoGet` }],
     tests: [judging(`a`, `fixed seed`, 1)],
   },
-  { id: `w_load`, owners: [`a`], body: [push], tests: [] },
+  // `w_load`'s `if` runs only at load, with 0: its `if-true` mutant
+  // changes a value only there, so a runner that skips mutants which change
+  // no value must count what runs at load.
+  { id: `w_load`, owners: [`a`], body: [kill, push], tests: [] },
   {
     id: `w_loaded`,
     owners: [`a`],
@@ -432,6 +435,14 @@ const witness = [
     body: [kill],
     tests: [judging(`a`, `fixed seed`, 7, { slow: true })],
   },
+  // Each owner makes only one of this `if`'s two mutants change a value:
+  // owner a calls it with 1, owner b with 7.
+  {
+    id: `w_otherinfect`,
+    owners: [`a`, `b`],
+    body: [kill],
+    tests: [judging(`a`, `fixed seed`, 1), judging(`b`, `fixed seed`, 7)],
+  },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -477,6 +488,7 @@ const captureWitness = new Set([
   `w_flakykill`,
   `w_crosskill`,
   `w_slowkill`,
+  `w_otherinfect`,
 ])
 
 // ## Rendering and layout
@@ -1378,6 +1390,13 @@ function model(plan) {
     plan.tests.filter(
       (t) => ORACLE_FILES.includes(t.file) && owners(id).has(t.file),
     )
+  // Code that ran when the module loaded: the call at the end of the source,
+  // and the sites of `w_load` that the call reached (with 0).
+  const loadRun =
+    plan.moduleLoadLine !== undefined ? interpret(plan, `w_load`, 0, sites) : undefined
+  const ranAtLoad = (site) =>
+    site.function === `<module>` ||
+    (site.function === `w_load` && loadRun?.reached.has(site.id) === true)
   const kindOf = (site) => {
     if (owners(site.function).size === 0) return `unowned`
     const tests = ownerTests(site.function)
@@ -1390,10 +1409,15 @@ function model(plan) {
         for (const [line, value] of run.outcomes)
           taken.set(line, new Set([...(taken.get(line) ?? []), value]))
       }
-    // Code that runs when the module loads (`w_load`, and the call at the
-    // end of the source) runs in every owner file that has a test, and
-    // reaches every test of that file (maintainer decision, 2026-11-06).
-    const atLoad = site.function === `w_load` || site.function === `<module>`
+    // What runs at load reaches every test of the file (maintainer decision,
+    // 2026-11-06), so the outcomes its `if`s take count as taken there.
+    if (loadRun && tests.length > 0)
+      for (const [line, value] of loadRun.outcomes)
+        taken.set(line, new Set([...(taken.get(line) ?? []), value]))
+    // Code that ran when the module loaded runs in every owner file that has
+    // a test, and reaches every test of that file (maintainer decision,
+    // 2026-11-06); a site that the load did not run is reached only by tests.
+    const atLoad = ranAtLoad(site)
     if (!reached.has(site.id) && !(atLoad && tests.length > 0)) return `unreached`
     const reaching = atLoad
       ? tests
@@ -1416,8 +1440,7 @@ function model(plan) {
   // the module, ordinary files included (maintainer decision, 2026-11-06).
   const ordinaryReaches = (site) => {
     const ordinary = plan.tests.filter((t) => t.file === `c`)
-    if (site.function === `w_load` || site.function === `<module>`)
-      return ordinary.length > 0
+    if (ranAtLoad(site)) return ordinary.length > 0
     return ordinary.some((t) =>
       interpret(plan, t.fn, t.input, sites).reached.has(site.id),
     )
