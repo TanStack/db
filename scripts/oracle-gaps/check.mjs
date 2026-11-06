@@ -140,12 +140,18 @@ export async function openSession(pkg) {
   )
   // Each process uses its own harness files, so a cold run beside the daemon
   // cannot remove the daemon's.
-  const wrapper = join(pkg, `.oracle-gaps-${process.pid}.vitest.config.ts`)
   const harness = join(pkg, `.oracle-gaps-${process.pid}.capture-setup.mjs`)
   copyFileSync(join(here, `capture-setup.mjs`), harness)
-  writeFileSync(
-    wrapper,
-    `import { realpathSync } from 'node:fs'
+  // One wrapper config per context. Each serves its own context's patched
+  // sources, so authored mutants run in every context at once without one
+  // seeing another's patch.
+  const wrappers = new Map()
+  const wrapperFor = (index) => {
+    if (!wrappers.has(index)) {
+      const wrapper = join(pkg, `.oracle-gaps-${process.pid}-${index}.vitest.config.ts`)
+      writeFileSync(
+        wrapper,
+        `import { realpathSync } from 'node:fs'
 import { mergeConfig } from 'vitest/config'
 import base from './vite.config.ts'
 export default mergeConfig(base, {
@@ -154,18 +160,23 @@ export default mergeConfig(base, {
     enforce: 'pre',
     load(id) {
       const path = id.split('?')[0]
-      // An authored mutant's patched source, or else the instrumented source
-      // of the current check, both set by the runner in this process.
+      // This context's authored patch, or else the instrumented source of the
+      // current check, both set by the runner in this process.
       try {
         const real = realpathSync(path)
-        return globalThis.__oracleGapsServe?.get(real) ?? globalThis.__oracleGapsSchemata?.get(real)
+        return globalThis.__oracleGapsServe?.[${index}]?.get(real) ?? globalThis.__oracleGapsSchemata?.get(real)
       } catch { return undefined }
     },
   }],
   test: { setupFiles: ['./${harness.split(`/`).at(-1)}'] },
 })
 `,
-  )
+      )
+      wrappers.set(index, wrapper)
+    }
+    return wrappers.get(index)
+  }
+  globalThis.__oracleGapsServe = []
   // Vitest resolves test-file filters and parts of its project setup against
   // the working directory, so the runner works from the package directory.
   process.chdir(pkg)
@@ -174,23 +185,29 @@ export default mergeConfig(base, {
   // context last served, so a changed file is invalidated in the warm
   // contexts before it is read again.
   globalThis.__oracleGapsSchemata = new Map()
-  const servedHash = (path) => {
+  const servedHash = (path, index) => {
     const text =
-      globalThis.__oracleGapsServe?.get(path) ??
+      globalThis.__oracleGapsServe[index]?.get(path) ??
       globalThis.__oracleGapsSchemata.get(path)
     return text === undefined ? hashOf(path) : sha1(text)
   }
+  // Per context: the hash of what it last served for each path.
   const lastServed = new Map()
+  const servedBy = (index) => {
+    if (!lastServed.has(index)) lastServed.set(index, new Map())
+    return lastServed.get(index)
+  }
+  const indexOf = new Map()
   let contexts = []
   let contextsKey
   let contextsConfig
   const contextSpecs = new Map()
   let runCounter = 0
 
-  async function warmContext(settings) {
+  async function warmContext(settings, index) {
     const context = await createVitest(`test`, {
       root: pkg,
-      config: wrapper,
+      config: wrapperFor(index),
       watch: false,
       maxWorkers: 1,
       // Every test in a file runs, so a kill is attributed to each route
@@ -209,6 +226,8 @@ export default mergeConfig(base, {
     })
     // Vitest 3 calls this step `init`; Vitest 4 renamed it `standalone`.
     await (context.standalone ? context.standalone() : context.init())
+    indexOf.set(context, index)
+    lastServed.delete(index)
     return context
   }
   async function globSpecs(context) {
@@ -233,7 +252,7 @@ export default mergeConfig(base, {
   // This process's harness files are generated from this CLI's own files,
   // which every key covers, and their names carry the process id, so they
   // are left out of every key and input.
-  const ownHarness = (path) => path === wrapper || path === harness
+  const ownHarness = (path) => path.startsWith(`${pkg}/.oracle-gaps-${process.pid}`)
   // The files the Vite config loaded, for the global key.
   const configFiles = () =>
     (contexts[0]?.vite?.config?.configFileDependencies ?? []).filter(
@@ -241,12 +260,16 @@ export default mergeConfig(base, {
     )
 
   /** Invalidates every path whose served text changed since a context read it. */
-  function invalidateChanged(paths) {
-    for (const path of paths) {
-      const hash = servedHash(path)
-      if (lastServed.get(path) === hash) continue
-      for (const context of contexts) context.invalidateFile(path)
-      lastServed.set(path, hash)
+  function invalidateChanged(paths, only) {
+    for (const context of only ? [only] : contexts) {
+      const index = indexOf.get(context)
+      const served = servedBy(index)
+      for (const path of paths) {
+        const hash = servedHash(path, index)
+        if (served.get(path) === hash) continue
+        context.invalidateFile(path)
+        served.set(path, hash)
+      }
     }
   }
 
@@ -399,12 +422,12 @@ export default mergeConfig(base, {
     ) {
       await closeContexts()
       for (let i = 0; i < options.contexts; i += 1)
-        contexts.push(await warmContext(settings))
+        contexts.push(await warmContext(settings, i))
       contextsKey = JSON.stringify(settings)
       contextsConfig = configHash()
     }
     while (contexts.length < options.contexts)
-      contexts.push(await warmContext(settings))
+      contexts.push(await warmContext(settings, contexts.length))
     endPhase(`warm contexts`, { contexts: contexts.length })
     for (const context of contexts) await globSpecs(context)
     endPhase(`find test files`)
@@ -419,7 +442,13 @@ export default mergeConfig(base, {
     )
     const previous = [...globalThis.__oracleGapsSchemata.keys()]
     globalThis.__oracleGapsSchemata = instrumented
-    invalidateChanged(new Set([...previous, ...instrumented.keys(), ...lastServed.keys()]))
+    invalidateChanged(
+      new Set([
+        ...previous,
+        ...instrumented.keys(),
+        ...[...lastServed.values()].flatMap((served) => [...served.keys()]),
+      ]),
+    )
     endPhase(`static analysis`, { mutants: mutants.length })
 
     // The global inputs of every unit.
@@ -442,10 +471,12 @@ export default mergeConfig(base, {
     // none, so it is stored under these: a mutant changes no import.
     const fileInputs = new Map()
     async function unit(context, file, spec, runOptions = {}) {
+      const index = indexOf.get(context)
       const id = sha1(JSON.stringify([globalKey, file, spec, runOptions.select ?? null]))
       const row = store.get(id)
       const looked = Date.now()
-      const valid = row && row.inputs.every(([path, hash]) => servedHash(path) === hash)
+      const valid =
+        row && row.inputs.every(([path, hash]) => servedHash(path, index) === hash)
       span(`lookup`, looked, { file: file.split(`/`).at(-1), spec, hit: Boolean(valid) })
       if (valid) {
         evidence.reused += 1
@@ -461,8 +492,8 @@ export default mergeConfig(base, {
       if (!result.timedOut && spec.startsWith(`unmutated:`))
         fileInputs.set(file, result.inputs)
       if (paths) {
-        const inputs = paths.map((path) => [path, servedHash(path)])
-        for (const [path, hash] of inputs) lastServed.set(path, hash)
+        const inputs = paths.map((path) => [path, servedHash(path, index)])
+        for (const [path, hash] of inputs) servedBy(index).set(path, hash)
         store.put({ id, inputs, unit: result })
       }
       return result
@@ -611,7 +642,7 @@ export default mergeConfig(base, {
     const replace = async (slot) => {
       const started = Date.now()
       await Promise.race([slot.context.close().catch(() => undefined), sleep(10_000)])
-      slot.context = await warmContext(settings)
+      slot.context = await warmContext(settings, slot.index)
       await globSpecs(slot.context)
       contexts[slot.index] = slot.context
       span(`replace context`, started, { slot: slot.index })
@@ -679,10 +710,12 @@ export default mergeConfig(base, {
     results.sort((a, b) => a.number - b.number || a.source.localeCompare(b.source))
     endPhase(`operator mutants`, { mutants: results.length })
 
-    // 6. Authored mutants, one at a time in the first context. Each one
-    // serves a patched copy of its source, which every context in this
-    // process would see. The copy is not instrumented, so an authored mutant
-    // runs against every owner of the function its edit lands in.
+    // 6. Authored mutants, spread across the contexts. Each serves a patched
+    // copy of its source only to the context that runs it. The copy is not
+    // instrumented, so an authored mutant runs against every owner of the
+    // function its edit lands in, whole files, still stopping at its first
+    // kill.
+    const authoredJobs = []
     for (const mutant of authored) {
       const id = `authored:${mutant.id}`
       if (options.only && !options.only.has(id)) continue
@@ -708,33 +741,49 @@ export default mergeConfig(base, {
       }
       result.function = owned.functionAt(mutant.source, patched.line)
       const owners = owned.of(mutant.source, result.function)
-      const targets = [...owners].filter((file) => fileSpecs.has(file))
       if (owners.size === 0) {
         result.outcome = `unowned`
         continue
       }
-      const slot = { context: contexts[0], index: 0 }
-      globalThis.__oracleGapsServe = new Map([[path, patched.text]])
-      invalidateChanged([path])
-      // An authored copy has no reach record, so whole files run; the runner
-      // still stops at the first kill.
+      authoredJobs.push({
+        id,
+        path,
+        patched,
+        result,
+        targets: [...owners].filter((file) => fileSpecs.has(file)),
+      })
+    }
+    const judgeAuthoredJob = async (slot, job) => {
+      const serve = globalThis.__oracleGapsServe
+      serve[slot.index] = new Map([[job.path, job.patched.text]])
+      invalidateChanged([job.path], slot.context)
       const units = []
-      for (const file of targets) {
+      for (const file of job.targets) {
         units.push(
-          await unit(slot.context, file, id, {
+          await unit(slot.context, file, job.id, {
             mutant: -1,
             limitMs: limitFor(file),
             stopOnKill: true,
           }),
         )
-        if (units.at(-1).timedOut) await replace(slot)
+        if (units.at(-1).timedOut) {
+          await replace(slot)
+          invalidateChanged([job.path], slot.context)
+        }
         if (outcomeOf(units, baseline.nondeterministic).outcome === `killed`) break
       }
-      globalThis.__oracleGapsServe = undefined
-      invalidateChanged([path])
-      Object.assign(result, judgeAuthored(units, baseline))
-      log(`${id} ${result.outcome}${result.class ? ` (${result.class})` : ``}`)
+      serve[slot.index] = undefined
+      invalidateChanged([job.path], slot.context)
+      Object.assign(job.result, judgeAuthored(units, baseline))
+      log(`${job.id} ${job.result.outcome}${job.result.class ? ` (${job.result.class})` : ``}`)
     }
+    await Promise.all(
+      contexts.map(async (context, index) => {
+        const slot = { context, index }
+        for (let job = authoredJobs.shift(); job; job = authoredJobs.shift())
+          await judgeAuthoredJob(slot, job)
+      }),
+    )
     endPhase(`authored mutants`, { mutants: authored.length })
     // Keys go into every output, so an agent reads them from the JSON
     // results.
@@ -772,7 +821,7 @@ export default mergeConfig(base, {
 
   async function close() {
     await closeContexts()
-    rmSync(wrapper, { force: true })
+    for (const wrapper of wrappers.values()) rmSync(wrapper, { force: true })
     rmSync(harness, { force: true })
   }
 

@@ -449,6 +449,16 @@ async function driver(plan, observe) {
     )
     for (const m of cli.mutants) {
       if (m.authored) {
+        const others = cli.mutants.filter((x) => x.authored && x.key !== m.key)
+        if (
+          others.some(
+            (x) =>
+              x.outcome !== `does-not-apply` &&
+              m.outcome !== `does-not-apply` &&
+              (x.class ?? x.outcome) !== (m.class ?? m.outcome),
+          )
+        )
+          states.add(`two authored mutants judged apart`)
         states.add(
           m.outcome !== `does-not-apply`
             ? `authored mutant`
@@ -690,15 +700,31 @@ function check(plan, observations, expected) {
         `ordinary tier`,
         { actual: got, expected: owed },
       )
-  const authored = cli.mutants.find((m) => m.authored)
-  const authoredKind = authored && (authored.class ?? authored.outcome)
-  if (authoredKind !== expected.authored)
+  // Each authored mutant, by its key: its id, whatever its file is called.
+  const authoredGot = cli.mutants.filter((m) => m.authored)
+  if (authoredGot.length !== expected.authoredAll.length)
     return violation(
       `cli`,
-      `the authored mutant is ${authoredKind}, owed ${expected.authored}`,
+      `${authoredGot.length} authored mutants are reported, owed ${expected.authoredAll.length}`,
       `authored mutants`,
-      { actual: authoredKind, expected: expected.authored },
     )
+  for (const owed of expected.authoredAll) {
+    const got = authoredGot.find((m) => m.key === owed.key)
+    const kind = got && (got.class ?? got.outcome)
+    if (kind !== owed.kind)
+      return violation(
+        `cli`,
+        `the authored mutant ${owed.id} is ${kind}, owed ${owed.kind}`,
+        `authored mutants`,
+        { actual: kind, expected: owed.kind },
+      )
+    if (owed.line !== undefined && got.line !== owed.line)
+      return violation(
+        `cli`,
+        `the authored mutant ${owed.id} is reported at line ${got.line}, owed ${owed.line}`,
+        `authored mutants`,
+      )
+  }
   for (const [owed, got] of pairs)
     if (got.key !== owed.key)
       return violation(
@@ -707,14 +733,6 @@ function check(plan, observations, expected) {
         `keys`,
         { actual: got.key, expected: owed.key },
       )
-  if (authored && authored.key !== `${SOURCE}#authored:a1`)
-    return violation(`cli`, `the authored key is ${authored.key}`, `keys`)
-  if (expected.authoredLine !== undefined && authored.line !== expected.authoredLine)
-    return violation(
-      `cli`,
-      `the authored mutant is reported at line ${authored.line}, owed ${expected.authoredLine}`,
-      `authored mutants`,
-    )
   if (
     cli.gaps.join(`\n`) !== expected.gaps.join(`\n`) ||
     JSON.stringify(cli.entries) !== JSON.stringify(expected.entries) ||
@@ -954,11 +972,13 @@ const required = [
   `a kill through state an earlier test stored`,
   `ordinary tests run when asked`,
   `ordinary tests left out by default`,
+  `two authored mutants judged apart`,
   ...incrementalStates,
 ]
 const faults = [`badEntry`, `missingSource`, `nonLiteral`, `brokenOwner`]
 const separate = [
   `ordinary tests left out by default`,
+  `two authored mutants judged apart`,
   `stale authored mutant`,
   `ambiguous authored mutant`,
   ...faults.map((fault) => `refused ${fault}`),
@@ -1068,6 +1088,31 @@ oracleProperty({
             `cli`,
             `restart`,
           ],
+        }),
+      },
+      {
+        // Two authored mutants in one source file, one killed and one a
+        // comparison gap: a run that let one see the other's patch would
+        // judge them alike.
+        name: `two authored mutants`,
+        enters: [`two authored mutants judged apart`],
+        build: (generated) => ({
+          ...generated,
+          functions: [[{ kind: `push`, quote: `'` }], [{ kind: `push`, quote: `'` }]],
+          containers: [],
+          overloads: [],
+          owners: [`a`, `a`],
+          wholeFile: `none`,
+          witness: false,
+          tests: [
+            { ...judging(`a`, `fixed seed`, 1), fn: 0 },
+            { ...judging(`a`, `fixed seed`, 1, { judges: false }), fn: 1 },
+          ],
+          authored: { stmt: 0, kind: `apply` },
+          secondAuthored: true,
+          fault: `none`,
+          stability: `none`,
+          steps: null,
         }),
       },
       {

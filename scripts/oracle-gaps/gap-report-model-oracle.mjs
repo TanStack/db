@@ -199,6 +199,9 @@ const histories = fc.record({
   // Most histories have no steps, which keeps the campaign's cost down.
   // Whether the run asks for the ordinary tests' outcome (`--ordinary`).
   ordinary: fc.boolean(),
+  // A second authored mutant, on the next statement, so that two patched
+  // sources are judged in the same run and neither may see the other's.
+  secondAuthored: fc.boolean(),
   steps: fc.oneof(
     { weight: 5, arbitrary: fc.constant(null) },
     {
@@ -706,37 +709,48 @@ function resolveHistory(history) {
       .filter((stmt) => [`push`, `if`, `mixed`, `elseIf`].includes(stmt.kind))
       .map((stmt) => ({ fn: fn.id, stmt })),
   )
+  const authoredFrom = (spec, id) => {
+    const target = pushes[spec.stmt % pushes.length]
+    const find =
+      spec.kind === `stale`
+        ? `out.push('nope');`
+        : spec.kind === `ambiguous`
+          ? `out.push(`
+          : pushText(target.stmt)
+    return {
+      id,
+      fn: target.fn,
+      label: target.stmt.label,
+      find,
+      replace:
+        spec.kind === `apply`
+          ? pushText(target.stmt).replace(
+              `s${target.stmt.label}`,
+              `s${target.stmt.label}!`,
+            )
+          : `out.push('x');`,
+      applies: source.split(find).length - 1 === 1,
+      line: source.slice(0, source.indexOf(find)).split(`\n`).length,
+      kind: spec.kind,
+    }
+  }
   const authored =
     history.authored && pushes.length > 0
-      ? (() => {
-          const target = pushes[history.authored.stmt % pushes.length]
-          const find =
-            history.authored.kind === `stale`
-              ? `out.push('nope');`
-              : history.authored.kind === `ambiguous`
-                ? `out.push(`
-                : pushText(target.stmt)
-          return {
-            fn: target.fn,
-            label: target.stmt.label,
-            find,
-            replace:
-              history.authored.kind === `apply`
-                ? pushText(target.stmt).replace(
-                    `s${target.stmt.label}`,
-                    `s${target.stmt.label}!`,
-                  )
-                : `out.push('x');`,
-            applies: source.split(find).length - 1 === 1,
-            line: source.slice(0, source.indexOf(find)).split(`\n`).length,
-            kind: history.authored.kind,
-          }
-        })()
+      ? authoredFrom(history.authored, `a1`)
       : undefined
+  const authoredList = authored
+    ? [
+        authored,
+        ...(history.secondAuthored
+          ? [authoredFrom({ stmt: history.authored.stmt + 1, kind: `apply` }, `a2`)]
+          : []),
+      ]
+    : []
   return {
     functions,
     tests,
     authored,
+    authoredList,
     wholeFile: history.wholeFile,
     template: history.template,
     fault: history.fault,
@@ -1229,15 +1243,19 @@ function model(plan) {
         plan.ordinary && survivorKinds.has(kind) && ordinaryReaches(site),
     }
   })
-  const authored =
-    plan.authored &&
-    (!plan.authored.applies
+  // Each authored mutant is judged alone, against the original source with
+  // only its own edit.
+  const authoredAll = plan.authoredList.map((a) => ({
+    id: a.id,
+    key: `${SOURCE}#authored:${a.id}`,
+    kind: !a.applies
       ? `does-not-apply`
-      : owners(plan.authored.fn).size === 0
+      : owners(a.fn).size === 0
         ? `unowned`
-        : judge(plan, ownerTests(plan.authored.fn), sites, {
-            authored: plan.authored.label,
-          }))
+        : judge(plan, ownerTests(a.fn), sites, { authored: a.label }),
+    line: a.applies ? a.line : undefined,
+  }))
+  const authored = authoredAll[0]?.kind
   const isGap = (kind) =>
     kind !== undefined && ![`killed`, `unowned`].includes(kind)
   const count = (kind) => mutants.filter((m) => m.kind === kind).length
@@ -1246,31 +1264,27 @@ function model(plan) {
     ...mutants
       .filter((m) => isGap(m.kind))
       .map((m) => ({ key: m.key, kind: m.kind, line: String(m.line) })),
-    ...(isGap(authored)
-      ? [
-          {
-            key: `${SOURCE}#authored:a1`,
-            kind: authored,
-            line: String(plan.authored.applies ? plan.authored.line : undefined),
-          },
-        ]
-      : []),
+    ...authoredAll
+      .filter((a) => isGap(a.kind))
+      .map((a) => ({ key: a.key, kind: a.kind, line: String(a.line) })),
   ].sort((a, b) => (a.key < b.key ? -1 : 1))
   const gaps = entries.map((e) => e.key)
   return {
     mutants,
     authored,
-    authoredLine: plan.authored?.applies ? plan.authored.line : undefined,
+    authoredAll,
+    authoredLine: authoredAll[0]?.line,
     gaps,
     entries,
     unowned: [
       ...mutants.filter((m) => m.kind === `unowned`).map((m) => m.key),
-      ...(authored === `unowned` ? [`${SOURCE}#authored:a1`] : []),
+      ...authoredAll.filter((a) => a.kind === `unowned`).map((a) => a.key),
     ].sort(),
     counts: {
-      mutants: mutants.length + (plan.authored ? 1 : 0),
-      authored: plan.authored ? 1 : 0,
-      killed: count(`killed`) + (authored === `killed` ? 1 : 0),
+      mutants: mutants.length + authoredAll.length,
+      authored: authoredAll.length,
+      killed:
+        count(`killed`) + authoredAll.filter((a) => a.kind === `killed`).length,
       gaps: gaps.length,
       probe: mutants.filter((m) => m.probe).length,
     },
@@ -1500,15 +1514,16 @@ function fixtureFiles(plan, state = initialState(plan)) {
       `d`,
     )
   }
-  if (plan.authored)
-    files[AUTHORED] = JSON.stringify({
-      id: `a1`,
-      source: SOURCE,
-      find: plan.authored.find,
-      replace: plan.authored.replace,
-      intent: `pushes a different label`,
-      author: `gap-report oracle`,
-    })
+  for (const a of plan.authoredList)
+    files[a.id === `a1` ? AUTHORED : `mutants/authored-mutant-${a.id}.json`] =
+      JSON.stringify({
+        id: a.id,
+        source: SOURCE,
+        find: a.find,
+        replace: a.replace,
+        intent: `pushes a different label`,
+        author: `gap-report oracle`,
+      })
   return files
 }
 
