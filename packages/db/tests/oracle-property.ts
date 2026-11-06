@@ -234,6 +234,18 @@ export function forwardCut<State>(
  * wait for work that production schedules on a delayed timer; a driver for
  * such work controls that timer.
  */
+/**
+ * One event-loop turn. `setTimeout(0)` waits at least a millisecond in Node,
+ * which made schedule-heavy histories mostly idle; `setImmediate` yields the
+ * same turn without that clamp. A browser has no `setImmediate`.
+ */
+const nextTurn = () =>
+  new Promise<void>((resolve) =>
+    typeof setImmediate === `function`
+      ? setImmediate(resolve)
+      : setTimeout(resolve, 0),
+  )
+
 export function withinTurns(
   promise: Promise<unknown>,
   turns: number,
@@ -246,7 +258,7 @@ export function withinTurns(
   )
   const expiry = (async () => {
     for (let turn = 0; turn < turns && !state.settled; turn += 1)
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      await nextTurn()
     return false
   })()
   return Promise.race([done, expiry])
@@ -288,7 +300,7 @@ export function scheduleFrom(choices: ReadonlyArray<number>): DataScheduler {
   let step = 0
   // Continuations of a released task run on microtasks; one macrotask turn
   // lets them finish, and lets them schedule further tasks.
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+  const settle = nextTurn
   const waitOne = async () => {
     if (pending.length === 0) return
     const queues = [...new Set(pending.map((task) => task.queue))]
