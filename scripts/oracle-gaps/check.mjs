@@ -493,16 +493,21 @@ export default mergeConfig(base, {
     const result = await Promise.race([running, watchdog])
     clearTimeout(timer)
     const seconds = (Date.now() - started) / 1000
+    // Each copy's rows, and the copies that skipped their tests because an
+    // earlier copy in the batch killed their mutant.
+    const skipped = new Set()
     const rowsOf = () => {
       const rows = new Map(copies.map((copy) => [copy, []]))
       if (existsSync(capture))
         for (const line of readFileSync(capture, `utf8`).split(`\n`).filter(Boolean)) {
           const row = JSON.parse(line)
           const copy = copies.find((c) => row.key?.startsWith(`${c} > `) || row.file === c)
+          if (copy && row.skipped) skipped.add(copy)
           if (copy && !row.closed) rows.get(copy).push(row)
         }
       return rows
     }
+    const skippedUnit = (item) => ({ file: item.file, skipped: true })
     try {
       if (result === undefined) {
         await Promise.race([
@@ -515,6 +520,7 @@ export default mergeConfig(base, {
         const rows = rowsOf()
         return {
           units: items.slice(0, current).map((item, i) => {
+            if (skipped.has(copies[i])) return skippedUnit(item)
             const map = keyFor(copies[i], item.file)
             const own = rows.get(copies[i]).map((row) => ({ ...row, key: map(row.key) }))
             return {
@@ -545,6 +551,7 @@ export default mergeConfig(base, {
       return {
         units: items.map((item, i) => {
           const copy = copies[i]
+          if (skipped.has(copy)) return skippedUnit(item)
           const map = keyFor(copy, item.file)
           const modules = result.testModules.filter((m) => m.moduleId === copy)
           return {
@@ -715,8 +722,10 @@ export default mergeConfig(base, {
     // Units for many requests at once. Each is looked up first; the rest run
     // as one batch (runBatch). A batch cut off by a hang records that item
     // as timed out and reruns the rest in a fresh context; a batch with
-    // errors outside any test runs its items alone.
-    async function unitsBatch(slot, requests) {
+    // errors outside any test runs its items alone. `needed` says, from the
+    // units found so far, whether a request must still run; a request that
+    // need not run, or whose copy skipped its tests, gets no unit.
+    async function unitsBatch(slot, requests, needed = () => true) {
       const index = indexOf.get(slot.context)
       const got = new Array(requests.length)
       let rest = []
@@ -728,20 +737,24 @@ export default mergeConfig(base, {
           got[i] = valid.unit
         } else rest.push({ ...request, i, id })
       })
-      while (rest.length > 0) {
+      for (;;) {
+        rest = rest.filter((r) => needed(r, got))
+        if (rest.length === 0) break
         const batch = await runBatch(slot.context, options.out, rest, options.seed ?? null)
         if (batch.unattributed) {
           for (const r of rest)
-            got[r.i] = await unit(slot.context, r.file, r.spec, {
-              mutant: r.mutant,
-              select: r.select,
-              stopOnKill: r.stopOnKill,
-              ignore: r.ignore,
-              limitMs: r.limitMs,
-            })
+            if (needed(r, got))
+              got[r.i] = await unit(slot.context, r.file, r.spec, {
+                mutant: r.mutant,
+                select: r.select,
+                stopOnKill: r.stopOnKill,
+                ignore: r.ignore,
+                limitMs: r.limitMs,
+              })
           break
         }
         batch.units.forEach((u, k) => {
+          if (u.skipped) return
           got[rest[k].i] = u
           remember(rest[k].id, rest[k].file, u, index)
           evidence.computed += 1
@@ -923,20 +936,27 @@ export default mergeConfig(base, {
       contexts[slot.index] = slot.context
       span(`replace context`, started, { slot: slot.index })
     }
-    // Mutants run in groups per context. In each round, every undecided
-    // mutant of the group runs its next owner file, all in one batch; a
-    // mutant is decided once an owner kills it or every owner has run. The
+    // Mutants run in groups per context, all in one batch: each undecided
+    // mutant's owner files, file by file, so every mutant's first file runs
+    // before any mutant's second. A copy whose mutant an earlier copy killed
+    // skips its tests, and a file after a kill is not run at all. A mutant's
+    // units are those of its files in order, up to and including the first
+    // that kills it, however they were found (run, reused, or rerun after a
+    // hang), so a result never depends on how its evidence was produced. The
     // ordinary tier, when asked for, runs the same way afterwards.
     const GROUP = 4
-    const rounds = async (slot, states, filesOf, keysOf) => {
-      for (;;) {
-        const active = states.filter((st) => !st.done)
-        if (active.length === 0) return
-        const requests = []
+    const kills = (u) => outcomeOf([u], baseline.nondeterministic).outcome === `killed`
+    const runOwners = async (slot, states, filesOf, keysOf) => {
+      const active = states.filter((st) => !st.done)
+      const requests = []
+      const depth = Math.max(0, ...active.map((st) => filesOf(st).length))
+      for (let position = 0; position < depth; position += 1)
         for (const st of active) {
-          const file = filesOf(st)[st.next]
+          const file = filesOf(st)[position]
+          if (file === undefined) continue
           requests.push({
             st,
+            position,
             file,
             spec: `mutant:${st.mutant.number}`,
             mutant: st.mutant.number,
@@ -946,17 +966,29 @@ export default mergeConfig(base, {
             ignore: ignoredIn(file),
           })
         }
-        const got = await unitsBatch(slot, requests)
-        got.forEach((u, i) => {
-          const st = requests[i].st
-          st.units.push(u)
-          st.next += 1
-          if (
-            st.next >= filesOf(st).length ||
-            outcomeOf(st.units, baseline.nondeterministic).outcome === `killed`
-          )
-            st.done = true
-        })
+      // A request is needed until one of its mutant's earlier files kills.
+      const killedBefore = (request, got) =>
+        requests.some(
+          (other, i) =>
+            other.st === request.st &&
+            other.position < request.position &&
+            got[i] !== undefined &&
+            kills(got[i]),
+        )
+      const got = await unitsBatch(slot, requests, (request, found) => !killedBefore(request, found))
+      for (const st of active) {
+        for (const [i, request] of requests.entries()) {
+          if (request.st !== st) continue
+          // Only a kill earlier in the mutant's files leaves a file without
+          // a unit.
+          if (got[i] === undefined) {
+            if (st.units.some(kills)) break
+            throw new Error(`${st.mutant.id}: ${relative(request.file)} has no unit and no earlier kill`)
+          }
+          st.units.push(got[i])
+          if (kills(got[i])) break
+        }
+        st.done = true
       }
     }
     async function evaluateGroup(group, slot) {
@@ -970,11 +1002,10 @@ export default mergeConfig(base, {
           owners,
           targets,
           units: [],
-          next: 0,
           done: owners.size === 0 || targets.oracleTargets.length === 0,
         }
       })
-      await rounds(
+      await runOwners(
         slot,
         states,
         (st) => st.targets.oracleTargets,
@@ -995,9 +1026,9 @@ export default mergeConfig(base, {
           }),
         }
         if (needsOrdinary(st.result, st.targets))
-          ordinary.push({ ...st, units: [], next: 0, done: false })
+          ordinary.push({ ...st, units: [], done: false })
       }
-      await rounds(
+      await runOwners(
         slot,
         ordinary,
         (st) => st.targets.testTargets,

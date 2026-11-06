@@ -38,7 +38,13 @@ const run =
 // then load the package's modules afresh, under its mutant, with no state
 // left by an earlier copy.
 const unit = run.units?.[globalThis.__vitest_worker__?.filepath]
-if (run.units) vi.resetModules()
+// The mutants that a copy earlier in this batch killed. A later copy of the
+// same mutant runs nothing: the mutant is decided (stop at first kill).
+if (globalThis.__oracleGapsKilled?.capture !== run.capture)
+  globalThis.__oracleGapsKilled = { capture: run.capture, mutants: new Set() }
+const killed = globalThis.__oracleGapsKilled.mutants
+const skippedCopy = unit !== undefined && killed.has(unit.mutant)
+if (run.units && !skippedCopy) vi.resetModules()
 const state = unit ? { ...run, ...unit } : run
 // The seed travels with each run's state, so a worker that a warm context
 // started under an earlier check's seed runs under this run's seed.
@@ -424,7 +430,7 @@ const reproducibleRoutes = new Set([
   `case`,
   `enumerated`,
 ])
-let stopped = false
+let stopped = skippedCopy
 let currentTask
 // When the current test started, so its row records how long it took.
 let testStarted = 0
@@ -487,8 +493,10 @@ afterEach((context) => {
       (v) =>
         v.law !== `reach agreement` && reproducibleRoutes.has(v.route ?? route),
     )
-  )
+  ) {
     stopped = true
+    if (unit) killed.add(unit.mutant)
+  }
   if (!state.capture) return
   appendFileSync(
     state.capture,
@@ -529,6 +537,10 @@ afterAll(() => {
       state.capture,
       `${JSON.stringify({ key: `${currentFile} > (background)`, background: true, hits: [...background] })}\n`,
     )
-  // A batch's watchdog reads this row to know that the copy finished.
-  appendFileSync(state.capture, `${JSON.stringify({ file: thisFile, closed: true })}\n`)
+  // A batch's watchdog reads this row to know that the copy finished; a
+  // skipped copy says so, and its run is no evidence.
+  appendFileSync(
+    state.capture,
+    `${JSON.stringify({ file: thisFile, closed: true, ...(skippedCopy ? { skipped: true } : {}) })}\n`,
+  )
 })
