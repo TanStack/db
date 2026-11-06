@@ -296,6 +296,19 @@ const witness = [
   // read it, as an oracle that counts reads does. The CLI's capture must
   // not read it either: the harness may not change what a test observes.
   { id: `w_getter`, owners: [`a`], body: [push], tests: [judging(`a`, `fixed seed`, 1, { getter: true })] },
+  // Two tests that share state: the first, which calls another function,
+  // sets it; the second calls this function only when it is set. A runner
+  // that runs only the tests that reached a site must not change what the
+  // second sees.
+  {
+    id: `w_shared`,
+    owners: [`a`],
+    body: [kill],
+    tests: [
+      { ...judging(`a`, `fixed seed`, 1, { judges: false, setsShared: true }), fn: `w_kill` },
+      judging(`a`, `fixed seed`, 5, { judges: false, readsShared: true }),
+    ],
+  },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -328,6 +341,7 @@ const captureWitness = new Set([
   `w_campaigns`,
   `w_soft`,
   `w_getter`,
+  `w_shared`,
 ])
 
 // ## Rendering and layout
@@ -653,7 +667,7 @@ function resolveHistory(history) {
       fn: generatedIds[t.fn % generatedIds.length],
     })),
     ...functions.flatMap((fn) =>
-      fn.generated ? [] : fn.tests.map((t) => ({ ...t, fn: fn.id })),
+      fn.generated ? [] : fn.tests.map((t) => ({ ...t, fn: t.fn ?? fn.id })),
     ),
   ]
   const pushes = functions.filter((fn) => fn.file === SOURCE).flatMap((fn) =>
@@ -1254,6 +1268,8 @@ function oracleTestFile(plan, file) {
     `import * as sut from '../src/sut'`,
     ...(file === `b` ? [`import { strict } from './strict'`] : []),
     `function declareOracle(_parts: { owns: Array<string> }): void {}`,
+    // State that tests of this file share (the `w_shared` witness).
+    `const shared = { value: 0 }`,
     ...owns,
     `const g = globalThis as { __oracleRoute?: (route: string) => void; __oracleObserve?: (c: string, v: unknown) => void; __oracleVerdict?: (v: { property: string; law: string; checkpoint: string }) => void }`,
   ]
@@ -1279,7 +1295,10 @@ function oracleTestFile(plan, file) {
       return [
         ...(t.registered ? [`    g.__oracleRoute?.('${part.route}')`] : []),
         `    const ${out}: Array<string> = []`,
-        `    ${callFor(t.fn)}(${part.input}, ${out})`,
+        ...(t.setsShared ? [`    shared.value = 5`] : []),
+        t.readsShared
+          ? `    if (shared.value === 5) ${callFor(t.fn)}(${part.input}, ${out})`
+          : `    ${callFor(t.fn)}(${part.input}, ${out})`,
         t.channel === `expect`
           ? `    expect(${out}).toBeDefined()`
           : `    g.__oracleObserve?.('trace', ${out})`,

@@ -331,6 +331,24 @@ function recordAssertion() {
     checkpoint: `assertion`,
     route,
   })
+  noteKill(`(unnamed)`, route)
+}
+
+// A mutant run may stop at its first kill (maintainer decision,
+// 2026-11-06): once a behavioral law, any but reach agreement, rejects the
+// mutant on a reproducible route, the file's remaining tests are skipped.
+// The runner also runs no further file (check.mjs).
+const reproducibleRoutes = new Set([
+  `fixed seed`,
+  `fixed history`,
+  `constructed history`,
+  `case`,
+  `enumerated`,
+])
+let stopped = false
+function noteKill(law, at) {
+  if (state.stopOnKill && law !== `reach agreement` && reproducibleRoutes.has(at))
+    stopped = true
 }
 let currentTask
 
@@ -344,6 +362,7 @@ globalThis.__oracleVerdict = ({ property, law, checkpoint }) => {
   // several campaigns is attributed per campaign.
   const key = `${property}\u0000${law}\u0000${checkpoint}\u0000${route}`
   verdicts.set(key, { property, law, checkpoint, route })
+  noteKill(law, route)
 }
 // The route the framework registered for the current test (index.mjs routeOf).
 let route
@@ -361,7 +380,8 @@ beforeEach((context) => {
   currentTask = context.task
   observed = createHash(`sha1`)
   observations = 0
-  if (selected && !selected.has(testKey(context.task))) context.skip()
+  if (stopped || (selected && !selected.has(testKey(context.task))))
+    context.skip()
   installRandom(testKey(context.task))
   digest = createHash(`sha1`)
   count = 0

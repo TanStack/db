@@ -38,10 +38,14 @@ function routeOf(registered) {
  * nothing, so a mutant that only such tests fail is not killed.
  */
 export function outcomeOf(units, nondeterministic = new Set(), assertions = false) {
-  if (units.some((unit) => unit.timedOut))
-    return { outcome: `timeout`, detail: `run time limit` }
+  // A run that timed out recorded nothing. A kill in another run still
+  // decides; failing that, the mutant is `timeout`.
+  const timeout = units.some((unit) => unit.timedOut)
+    ? { outcome: `timeout`, detail: `run time limit` }
+    : undefined
   const failures = []
   for (const unit of units) {
+    if (unit.timedOut) continue
     const rows = new Map(unit.rows)
     for (const message of unit.setupErrors)
       failures.push({ setup: true, message })
@@ -72,7 +76,7 @@ export function outcomeOf(units, nondeterministic = new Set(), assertions = fals
     }
     for (const message of unit.unhandled) failures.push({ message })
   }
-  if (failures.length === 0) return { outcome: `survived` }
+  if (failures.length === 0) return timeout ?? { outcome: `survived` }
   const judged = (route) =>
     failures
       .filter(
@@ -90,25 +94,27 @@ export function outcomeOf(units, nondeterministic = new Set(), assertions = fals
   const reproducible = judged(`reproducible`)
   const random = judged(`random`)
   const unregistered = judged(`unknown`)
-  // Reach agreement alone shows that production took another path, not that
-  // any behavioral law saw a different result.
-  const laws = lawsOf(reproducible)
-  if (
-    reproducible.length > 0 &&
-    laws.length > 0 &&
-    laws.every((law) => law === `reach agreement`)
+  // A behavioral verdict on a reproducible route kills: any law but reach
+  // agreement, or an ordinary test's assertion. Reach agreement alone shows
+  // that production took another path, not that any behavioral law saw a
+  // different result.
+  const behavioral = (law) => law !== `reach agreement`
+  const killing = reproducible.filter(
+    (f) => f.verdicts.some((v) => behavioral(v.law)) || f.verdicts.length === 0,
   )
+  if (killing.length > 0)
+    return {
+      outcome: `killed`,
+      by: killing.map((f) => f.test),
+      laws: lawsOf(killing).filter(behavioral),
+      randomAlso: random.length > 0,
+    }
+  if (timeout) return timeout
+  if (reproducible.length > 0)
     return {
       outcome: `agreement-only-kill`,
       by: reproducible.map((f) => f.test),
-      laws,
-    }
-  if (reproducible.length > 0)
-    return {
-      outcome: `killed`,
-      by: reproducible.map((f) => f.test),
-      laws,
-      randomAlso: random.length > 0,
+      laws: lawsOf(reproducible),
     }
   if (random.length > 0)
     return {

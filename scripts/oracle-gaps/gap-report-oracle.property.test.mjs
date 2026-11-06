@@ -491,6 +491,8 @@ async function driver(plan, observe) {
         states.add(`killed under an unnamed law`)
       if (m.function === `w_getter` && m.outcome === `killed`)
         states.add(`a getter the capture left unread`)
+      if (m.function === `w_shared` && m.class === `generator-gap`)
+        states.add(`a test that depends on an earlier test`)
       if (m.function === `w_campaigns` && m.outcome === `random-only-kill`)
         states.add(`second campaign's route attributed`)
       if (m.function === `w_soft` && m.outcome === `random-only-kill`)
@@ -920,6 +922,7 @@ const required = [
   `second campaign's route attributed`,
   `a soft verdict keeps its campaign's route`,
   `a getter the capture left unread`,
+  `a test that depends on an earlier test`,
   ...incrementalStates,
 ]
 const faults = [`badEntry`, `missingSource`, `nonLiteral`, `brokenOwner`]

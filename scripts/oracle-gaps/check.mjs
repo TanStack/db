@@ -240,9 +240,14 @@ export default mergeConfig(base, {
   }
 
   /** One Vitest run of one test file, as plain data. */
-  async function runUnit(context, out, file, { mutant = null, seed = null, limitMs } = {}) {
+  async function runUnit(
+    context,
+    out,
+    file,
+    { mutant = null, seed = null, limitMs, select = null, stopOnKill = false } = {},
+  ) {
     const capture = join(out, `run-${process.pid}-${++runCounter}.jsonl`)
-    const state = { mutant, select: null, capture, seed }
+    const state = { mutant, select, capture, seed, stopOnKill }
     // Vitest 3 and 4 both expose the root project's `provide`; the state file
     // remains for setups that cannot `inject`.
     context.getRootProject?.().provide(`oracleGaps`, state)
@@ -384,11 +389,15 @@ export default mergeConfig(base, {
       ]),
     )
     const evidence = { reused: 0, computed: 0 }
+    // Each file's imports in its unmutated run. A run that timed out reports
+    // none, so it is stored under these: a mutant changes no import.
+    const fileInputs = new Map()
     async function unit(context, file, spec, runOptions = {}) {
-      const id = sha1(JSON.stringify([globalKey, file, spec]))
+      const id = sha1(JSON.stringify([globalKey, file, spec, runOptions.select ?? null]))
       const row = store.get(id)
       if (row && row.inputs.every(([path, hash]) => servedHash(path) === hash)) {
         evidence.reused += 1
+        if (!row.unit.timedOut) fileInputs.set(file, row.unit.inputs)
         return row.unit
       }
       const result = await runUnit(context, options.out, file, {
@@ -396,8 +405,11 @@ export default mergeConfig(base, {
         ...runOptions,
       })
       evidence.computed += 1
-      if (!result.timedOut) {
-        const inputs = result.inputs.map((path) => [path, servedHash(path)])
+      const paths = result.timedOut ? fileInputs.get(file) : result.inputs
+      if (!result.timedOut && spec.startsWith(`unmutated:`))
+        fileInputs.set(file, result.inputs)
+      if (paths) {
+        const inputs = paths.map((path) => [path, servedHash(path)])
         for (const [path, hash] of inputs) lastServed.set(path, hash)
         store.put({ id, inputs, unit: result })
       }
@@ -416,7 +428,7 @@ export default mergeConfig(base, {
     // detect anything, and it may read source text that instrumentation
     // changes. Each file's unmutated duration sets a mutant run's time limit.
     const fileSeconds = new Map()
-    const limitFor = (file) => 10_000 + 3000 * (fileSeconds.get(file) ?? 10)
+    const limitFor = (file) => 5_000 + 3000 * (fileSeconds.get(file) ?? 10)
     const runAcross = async (files, pass) => {
       const parts = contexts.map(() => [])
       files.forEach((file, index) => parts[index % contexts.length].push(file))
@@ -496,23 +508,64 @@ export default mergeConfig(base, {
     // Results are appended as they finish, so a stopped survey keeps them.
     const partial = join(options.out, `results.jsonl`)
     rmSync(partial, { force: true })
-    // The units of one mutant against some files, one file at a time. A
-    // unit that timed out makes the mutant's outcome `timeout`, and its
-    // cancelled context must be replaced before it runs anything else, so
-    // the rest are not run.
-    const unitsFor = async (context, targets, mutant) => {
-      const done = []
-      for (const file of targets) {
-        const result = await unit(context, file, `mutant:${mutant}`, {
-          mutant,
+    // Whether running only `keys` of a file, with no mutant active,
+    // reproduces what those tests recorded when the whole file ran. A test
+    // can depend on state that an earlier test set, so a selection is used
+    // only when it reproduces the full run.
+    const selectionChecks = new Map()
+    const selectionFor = async (slot, file, keys) => {
+      const all = [...baseline.firstRows.keys()].filter(
+        (k) => fileOf(k) === file && !baseline.firstRows.get(k).background,
+      )
+      const selection = [...new Set(keys)].filter((k) => !k.endsWith(` > (background)`)).sort()
+      if (selection.length === 0 || selection.length >= all.length) return null
+      const id = `${file}\0${selection.join(`\0`)}`
+      if (!selectionChecks.has(id)) {
+        const run = await unit(slot.context, file, `selected`, {
+          select: selection,
           limitMs: limitFor(file),
         })
+        if (run.timedOut) await replace(slot)
+        const rows = new Map(run.rows ?? [])
+        selectionChecks.set(
+          id,
+          !run.timedOut &&
+            outcomeOf([run]).outcome === `survived` &&
+            selection.every(
+              (k) =>
+                rows.get(k)?.hash === baseline.firstRows.get(k)?.hash &&
+                rows.get(k)?.observed === baseline.firstRows.get(k)?.observed,
+            ),
+        )
+      }
+      return selectionChecks.get(id) ? selection : null
+    }
+    // A cancelled run can leave work behind, so its context is replaced.
+    const replace = async (slot) => {
+      await Promise.race([slot.context.close().catch(() => undefined), sleep(10_000)])
+      slot.context = await warmContext(settings)
+      await globSpecs(slot.context)
+      contexts[slot.index] = slot.context
+    }
+    // The units of one mutant against some files, one file at a time and
+    // only the tests that reached it. The runner stops at the first kill: a
+    // kill decides the outcome whatever the other files would do.
+    const unitsFor = async (slot, targets, keys, mutant) => {
+      const done = []
+      for (const file of targets) {
+        const result = await unit(slot.context, file, `mutant:${mutant}`, {
+          mutant,
+          limitMs: limitFor(file),
+          select: await selectionFor(slot, file, keys),
+          stopOnKill: true,
+        })
         done.push(result)
-        if (result.timedOut) break
+        if (result.timedOut) await replace(slot)
+        if (outcomeOf(done, baseline.nondeterministic).outcome === `killed`) break
       }
       return done
     }
-    async function evaluate(mutant, context) {
+    async function evaluate(mutant, slot) {
       mutant.inDiff = diffs.get(mutant.source)?.has(mutant.line)
       const owners = ownersOf(mutant)
       const targets = targetsOf(mutant, baseline, owners, oracleFiles)
@@ -521,40 +574,29 @@ export default mergeConfig(base, {
         oracleFiles: targets.oracleTargets,
         ordinaryFiles: targets.testTargets,
       }
-      let replace = false
       const units =
         owners.size > 0 && targets.oracleTargets.length > 0
-          ? await unitsFor(context, targets.oracleTargets, mutant.number)
+          ? await unitsFor(slot, targets.oracleTargets, targets.oracleKeys, mutant.number)
           : []
-      replace ||= units.some((u) => u.timedOut)
       Object.assign(
         result,
         judgeMutant(mutant, { owners, targets, units, baseline, mutants }),
       )
-      if (needsOrdinary(result, targets)) {
-        const ordinary = await unitsFor(context, targets.testTargets, mutant.number)
-        replace ||= ordinary.some((u) => u.timedOut)
-        result.testOutcome = judgeOrdinary(ordinary)
-      }
+      if (needsOrdinary(result, targets))
+        result.testOutcome = judgeOrdinary(
+          await unitsFor(slot, targets.testTargets, targets.testKeys, mutant.number),
+        )
       results.push(result)
       appendFileSync(partial, `${JSON.stringify(result)}\n`)
       log(
         `${mutant.id} L${mutant.line} ${mutant.operator} ${result.outcome}${result.class ? ` (${result.class})` : ``}${result.testOutcome ? ` [ordinary: ${result.testOutcome}]` : ``}`,
       )
-      return replace
     }
     await Promise.all(
-      contexts.map(async (initial, slot) => {
-        let context = initial
-        for (let mutant = queue.shift(); mutant; mutant = queue.shift()) {
-          if (!(await evaluate(mutant, context))) continue
-          // A cancelled run can leave work behind, so its context is
-          // replaced.
-          await Promise.race([context.close().catch(() => undefined), sleep(10_000)])
-          context = await warmContext(settings)
-          await globSpecs(context)
-          contexts[slot] = context
-        }
+      contexts.map(async (context, index) => {
+        const slot = { context, index }
+        for (let mutant = queue.shift(); mutant; mutant = queue.shift())
+          await evaluate(mutant, slot)
       }),
     )
     results.sort((a, b) => a.number - b.number || a.source.localeCompare(b.source))
@@ -593,26 +635,27 @@ export default mergeConfig(base, {
         result.outcome = `unowned`
         continue
       }
-      let context = contexts[0]
+      const slot = { context: contexts[0], index: 0 }
       globalThis.__oracleGapsServe = new Map([[path, patched.text]])
       invalidateChanged([path])
+      // An authored copy has no reach record, so whole files run; the runner
+      // still stops at the first kill.
       const units = []
       for (const file of targets) {
         units.push(
-          await unit(context, file, id, { mutant: -1, limitMs: limitFor(file) }),
+          await unit(slot.context, file, id, {
+            mutant: -1,
+            limitMs: limitFor(file),
+            stopOnKill: true,
+          }),
         )
-        if (units.at(-1).timedOut) break
+        if (units.at(-1).timedOut) await replace(slot)
+        if (outcomeOf(units, baseline.nondeterministic).outcome === `killed`) break
       }
       globalThis.__oracleGapsServe = undefined
       invalidateChanged([path])
       Object.assign(result, judgeAuthored(units, baseline))
       log(`${id} ${result.outcome}${result.class ? ` (${result.class})` : ``}`)
-      if (units.some((u) => u.timedOut)) {
-        await Promise.race([context.close().catch(() => undefined), sleep(10_000)])
-        context = await warmContext(settings)
-        await globSpecs(context)
-        contexts[0] = context
-      }
     }
     // Keys go into every output, so an agent reads them from the JSON
     // results.

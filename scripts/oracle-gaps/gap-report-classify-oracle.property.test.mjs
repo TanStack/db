@@ -20,13 +20,17 @@
  * 1. No owner: `unowned`. No owner test reached it: `unreached`.
  * 2. Otherwise the records of the owner files whose tests reached it judge
  *    it, except tests whose values differed between the two unmutated runs
- *    (nondeterministic), which judge nothing. A run that timed out makes it
- *    `timeout`.
+ *    (nondeterministic), which judge nothing.
  * 3. A law verdict takes the route active when it fired, or the test's route
- *    when none was active. On a reproducible route (a fixed seed, a fixed,
- *    constructed, or enumerated history, a case) it kills: `killed`, unless
- *    reach agreement is its only law, which makes it an
- *    `agreement-only-kill`. Failing that, a verdict on the random campaign
+ *    when none was active. A verdict on a reproducible route (a fixed seed,
+ *    a fixed, constructed, or enumerated history, a case) under a behavioral
+ *    law (any law but reach agreement) kills: `killed`, even when another
+ *    owner file's run timed out, and the kill names at least one such law.
+ *    The runner may stop at the first one (maintainer decision, 2026-11-06),
+ *    so a kill names a non-empty part of them. Failing that, a run that
+ *    timed out makes it `timeout`. Failing that, reproducible verdicts under
+ *    reach agreement alone make it an `agreement-only-kill`, which names
+ *    them all. Failing that, a verdict on the random campaign
  *    makes it a `random-only-kill`, and one on an unknown or unregistered
  *    route an `unregistered-kill`.
  * 4. Failing that, if every failing test timed out, it is `timeout`; a
@@ -199,10 +203,13 @@ function modelOutcome(h, mi) {
   if (targets.length === 0) return withOrdinary({ outcome: `unreached` })
   const tests = targets.flatMap((fi) => h.files[fi].tests.map((t, ti) => ({ t, fi, ti })))
   const under = ({ t }) => t.under[mi].kind
-  if (tests.some((x) => under(x) === `runTimeout`)) return { outcome: `timeout` }
+  const timedOut = tests.some((x) => under(x) === `runTimeout`)
   const setup = tests.some((x) => under(x) === `setupError`)
-  // A file that failed to load ran no tests.
-  const ran = tests.filter((x) => !h.files[x.fi].tests.some((t) => t.under[mi].kind === `setupError`))
+  // A file that failed to load, or whose run timed out, ran no tests.
+  const ran = tests.filter(
+    (x) =>
+      !h.files[x.fi].tests.some((t) => [`setupError`, `runTimeout`].includes(t.under[mi].kind)),
+  )
   const failing = ran.filter(
     (x) => !x.t.flaky && [`verdict`, `assertion`, `crash`, `timeoutMessage`].includes(under(x)),
   )
@@ -211,11 +218,11 @@ function modelOutcome(h, mi) {
       .filter((x) => under(x) === `verdict` && kindOf(x.t.under[mi].firedAt ?? x.t.route) === kind)
       .map((x) => x.t.under[mi].law)
   const kills = verdictsOn(`reproducible`)
-  if (kills.length > 0)
-    return {
-      outcome: kills.every((law) => law === `reach agreement`) ? `agreement-only-kill` : `killed`,
-      laws: [...new Set(kills)].sort(),
-    }
+  const behavioral = kills.filter((law) => law !== `reach agreement`)
+  if (behavioral.length > 0)
+    return { outcome: `killed`, laws: [...new Set(behavioral)].sort(), lawsMayBePart: true }
+  if (timedOut) return { outcome: `timeout` }
+  if (kills.length > 0) return { outcome: `agreement-only-kill`, laws: [`reach agreement`] }
   if (verdictsOn(`random`).length > 0) return withOrdinary({ outcome: `random-only-kill` })
   if (verdictsOn(`unknown`).length > 0) return { outcome: `unregistered-kill` }
   if (failing.length > 0 && failing.every((x) => under(x) === `timeoutMessage`))
@@ -264,8 +271,11 @@ function targetsSeen(h, oi, owners) {
 function ordinaryOutcome(h, mi, files) {
   const tests = files.flatMap((fi) => h.files[fi].tests.map((t) => ({ t, fi })))
   const under = ({ t }) => t.under[mi].kind
-  if (tests.some((x) => under(x) === `runTimeout`)) return `timeout`
-  const ran = tests.filter((x) => !h.files[x.fi].tests.some((t) => t.under[mi].kind === `setupError`))
+  const timedOut = tests.some((x) => under(x) === `runTimeout`)
+  const ran = tests.filter(
+    (x) =>
+      !h.files[x.fi].tests.some((t) => [`setupError`, `runTimeout`].includes(t.under[mi].kind)),
+  )
   const failing = ran.filter((x) =>
     [`verdict`, `assertion`, `crash`, `timeoutMessage`].includes(under(x)),
   )
@@ -276,12 +286,12 @@ function ordinaryOutcome(h, mi, files) {
         (under(x) === `assertion` && kindOf(x.t.route) === kind && kind !== `framework`),
     )
   const kills = judgedOn(`reproducible`)
-  if (kills.length > 0) {
-    const laws = kills.filter((x) => under(x) === `verdict`).map((x) => x.t.under[mi].law)
-    return laws.length > 0 && laws.every((law) => law === `reach agreement`)
-      ? `agreement-only-kill`
-      : `killed`
-  }
+  const behavioral = kills.filter(
+    (x) => under(x) === `assertion` || x.t.under[mi].law !== `reach agreement`,
+  )
+  if (behavioral.length > 0) return `killed`
+  if (timedOut) return `timeout`
+  if (kills.length > 0) return `agreement-only-kill`
   if (judgedOn(`random`).length > 0) return `random-only-kill`
   if (judgedOn(`unknown`).length > 0) return `unregistered-kill`
   if (failing.length > 0 && failing.every((x) => under(x) === `timeoutMessage`)) return `timeout`
@@ -418,6 +428,7 @@ async function driver(h, observe) {
     ...(m.probe ? { probeGuard: true } : {}),
   }))
   const fileIndex = (file) => Number(file.match(/f(\d+)\.test/)[1])
+  const states = new Set()
   const results = mutants.map((mutant, mi) => {
     const owners = new Set(
       h.mutants[mi].owners
@@ -431,6 +442,8 @@ async function driver(h, observe) {
       ...mutant,
       ...judgeMutant(mutant, { owners, targets, units, baseline, mutants }),
     }
+    if (result.outcome === `killed` && units.some((u) => u.timedOut))
+      states.add(`killed beside a timeout`)
     if (needsOrdinary(result, targets))
       result.testOutcome = judgeOrdinary(
         targets.testTargets.map((file) => unitOf(h, fileIndex(file), mi)),
@@ -449,7 +462,6 @@ async function driver(h, observe) {
       renderReport({ results, run: { id: `r`, inputs: `records` }, excluded: [] }),
     ),
   })
-  const states = new Set()
   for (const r of results) {
     states.add(r.class ?? r.outcome)
     if (r.testOutcome === `killed`) states.add(`ordinary killed`)
@@ -462,14 +474,18 @@ async function driver(h, observe) {
 function check(h, observations, expected) {
   const got = observations.find((o) => o.checkpoint === `classified`)?.value
   if (!got) return violation(`classified`, `nothing was classified`, `completion`)
-  // A kill names its laws; the model owes laws only for kills.
-  const view = (o, laws) =>
-    JSON.stringify([o.outcome, o.class, laws ? (o.laws ?? []) : null, o.testOutcome ?? null])
+  // A kill names a non-empty part of its behavioral laws (the runner may
+  // stop at the first); an agreement-only kill names reach agreement.
+  const view = (o) => JSON.stringify([o.outcome, o.class, o.testOutcome ?? null])
   for (const [mi, owed] of expected.outcomes.entries()) {
     const actual = got.outcomes[mi]
-    const laws = owed.laws !== undefined
-    if (view(actual, laws) !== view(owed, laws))
-      return violation(`classified`, `mutant m${mi}: ${view(actual, laws)}, owed ${view(owed, laws)}`, `classification`, { actual, expected: owed })
+    const lawsFit =
+      owed.laws === undefined ||
+      (owed.lawsMayBePart
+        ? (actual.laws ?? []).length > 0 && actual.laws.every((law) => owed.laws.includes(law))
+        : JSON.stringify(actual.laws ?? []) === JSON.stringify(owed.laws))
+    if (view(actual) !== view(owed) || !lawsFit)
+      return violation(`classified`, `mutant m${mi}: ${view(actual)} laws ${JSON.stringify(actual.laws ?? [])}, owed ${view(owed)} laws ${JSON.stringify(owed.laws ?? [])}`, `classification`, { actual, expected: owed })
   }
   if (JSON.stringify(got.summary) !== JSON.stringify(expected.summary))
     return violation(`classified`, `the summary does not list exactly the owed gaps, unowned warnings, and counts`, `report completeness`, { actual: got.summary, expected: expected.summary })
@@ -520,6 +536,7 @@ const required = [
   `unreached`,
   `timeout`,
   `killed`,
+  `killed beside a timeout`,
   `agreement-only-kill`,
   `random-only-kill`,
   `unregistered-kill`,
@@ -603,6 +620,25 @@ const constructed = [
     effect: { kind: `verdict` },
   }),
   single(`a crash`, [`crashed`], { effect: { kind: `crash` } }),
+  {
+    // One owner file kills; another's run times out. The kill decides.
+    name: `a kill beside a timed-out run`,
+    enters: [`killed beside a timeout`],
+    build: () => {
+      const base = single(`x`, [], { effect: { kind: `verdict` } }).build()
+      return {
+        ...base,
+        files: [
+          base.files[0],
+          {
+            ...base.files[0],
+            tests: [{ ...base.files[0].tests[0], under: four({ kind: `runTimeout`, law: `L`, firedAt: undefined }) }],
+          },
+        ],
+        mutants: [{ ...base.mutants[0], owners: [0, 1] }],
+      }
+    },
+  },
   single(`a failing calibration`, [`framework-error`], {
     test: { route: `calibration` },
     effect: { kind: `crash` },
