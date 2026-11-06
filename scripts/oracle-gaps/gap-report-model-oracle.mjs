@@ -309,6 +309,32 @@ const witness = [
       judging(`a`, `fixed seed`, 5, { judges: false, readsShared: true }),
     ],
   },
+  // A test that fires a verdict and catches its failure passes, so it kills
+  // nothing, and the tests after it must still run. It sits between a test
+  // that reaches `w_late` and the one that judges it, so a runner that
+  // leaves out the tests before the first reaching one still runs it.
+  { id: `w_caught`, owners: [`a`], body: [push], tests: [] },
+  {
+    id: `w_late`,
+    owners: [`a`],
+    body: [push],
+    tests: [
+      judging(`a`, `fixed seed`, 1, { judges: false }),
+      { ...judging(`a`, `fixed seed`, 1, { judges: false, caughtVerdict: true }), fn: `w_caught` },
+      judging(`a`, `fixed seed`, 1),
+    ],
+  },
+  // A test that never calls this function judges what an earlier test
+  // stored from it, so it sees the mutant through shared state.
+  {
+    id: `w_prop`,
+    owners: [`a`],
+    body: [push],
+    tests: [
+      judging(`a`, `fixed seed`, 7, { judges: false, storesShared: true }),
+      judging(`a`, `fixed seed`, 7, { judgesShared: true }),
+    ],
+  },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -342,6 +368,9 @@ const captureWitness = new Set([
   `w_soft`,
   `w_getter`,
   `w_shared`,
+  `w_caught`,
+  `w_late`,
+  `w_prop`,
 ])
 
 // ## Rendering and layout
@@ -1270,6 +1299,7 @@ function oracleTestFile(plan, file) {
     `function declareOracle(_parts: { owns: Array<string> }): void {}`,
     // State that tests of this file share (the `w_shared` witness).
     `const shared = { value: 0 }`,
+    `const stored: { value: Array<string> } = { value: [] }`,
     ...owns,
     `const g = globalThis as { __oracleRoute?: (route: string) => void; __oracleObserve?: (c: string, v: unknown) => void; __oracleVerdict?: (v: { property: string; law: string; checkpoint: string }) => void }`,
   ]
@@ -1298,7 +1328,18 @@ function oracleTestFile(plan, file) {
         ...(t.setsShared ? [`    shared.value = 5`] : []),
         t.readsShared
           ? `    if (shared.value === 5) ${callFor(t.fn)}(${part.input}, ${out})`
-          : `    ${callFor(t.fn)}(${part.input}, ${out})`,
+          : t.judgesShared
+            ? `    ${out}.push(...stored.value)`
+            : `    ${callFor(t.fn)}(${part.input}, ${out})`,
+        ...(t.storesShared ? [`    stored.value = [...${out}]`] : []),
+        ...(t.caughtVerdict
+          ? [
+              `    try {`,
+              `      g.__oracleVerdict?.({ property: 'fixture-${file}', law: 'L', checkpoint: 'caught' })`,
+              `      throw new Error('caught')`,
+              `    } catch {}`,
+            ]
+          : []),
         t.channel === `expect`
           ? `    expect(${out}).toBeDefined()`
           : `    g.__oracleObserve?.('trace', ${out})`,

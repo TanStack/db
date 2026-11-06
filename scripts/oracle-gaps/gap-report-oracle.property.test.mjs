@@ -424,7 +424,9 @@ async function driver(plan, observe) {
   try {
     const files = fixtureFiles(plan)
     const cli = runCli(dir, files)
-    observe(`cli`, cli)
+    // How many units were computed or reused says how the result was
+    // produced, not what it is, so it is not observed.
+    observe(`cli`, { ...cli, evidence: undefined })
     // Reach comes from what the CLI reported, mapped onto the plan.
     const states = new Set()
     // Each kind of declaration fault is its own state, so each refusal has
@@ -493,6 +495,10 @@ async function driver(plan, observe) {
         states.add(`a getter the capture left unread`)
       if (m.function === `w_shared` && m.class === `generator-gap`)
         states.add(`a test that depends on an earlier test`)
+      if (m.function === `w_late` && m.outcome === `killed`)
+        states.add(`a kill after a caught verdict`)
+      if (m.function === `w_prop` && m.outcome === `killed`)
+        states.add(`a kill through state an earlier test stored`)
       if (m.function === `w_campaigns` && m.outcome === `random-only-kill`)
         states.add(`second campaign's route attributed`)
       if (m.function === `w_soft` && m.outcome === `random-only-kill`)
@@ -923,6 +929,8 @@ const required = [
   `a soft verdict keeps its campaign's route`,
   `a getter the capture left unread`,
   `a test that depends on an earlier test`,
+  `a kill after a caught verdict`,
+  `a kill through state an earlier test stored`,
   ...incrementalStates,
 ]
 const faults = [`badEntry`, `missingSource`, `nonLiteral`, `brokenOwner`]

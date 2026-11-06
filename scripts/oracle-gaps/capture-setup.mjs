@@ -331,13 +331,13 @@ function recordAssertion() {
     checkpoint: `assertion`,
     route,
   })
-  noteKill(`(unnamed)`, route)
 }
 
 // A mutant run may stop at its first kill (maintainer decision,
-// 2026-11-06): once a behavioral law, any but reach agreement, rejects the
-// mutant on a reproducible route, the file's remaining tests are skipped.
-// The runner also runs no further file (check.mjs).
+// 2026-11-06): once a test fails with a verdict under a behavioral law, any
+// but reach agreement, on a reproducible route, the file's remaining tests
+// are skipped. The runner also runs no further file (check.mjs). A verdict
+// in a test that passes kills nothing, as in the classification.
 const reproducibleRoutes = new Set([
   `fixed seed`,
   `fixed history`,
@@ -346,10 +346,6 @@ const reproducibleRoutes = new Set([
   `enumerated`,
 ])
 let stopped = false
-function noteKill(law, at) {
-  if (state.stopOnKill && law !== `reach agreement` && reproducibleRoutes.has(at))
-    stopped = true
-}
 let currentTask
 
 // Each law violation the oracle framework raises, so the runner classifies
@@ -362,7 +358,6 @@ globalThis.__oracleVerdict = ({ property, law, checkpoint }) => {
   // several campaigns is attributed per campaign.
   const key = `${property}\u0000${law}\u0000${checkpoint}\u0000${route}`
   verdicts.set(key, { property, law, checkpoint, route })
-  noteKill(law, route)
 }
 // The route the framework registered for the current test (index.mjs routeOf).
 let route
@@ -396,6 +391,16 @@ beforeEach((context) => {
 
 afterEach((context) => {
   inTest = false
+  if (
+    state.stopOnKill &&
+    (context.task.result?.state === `fail` ||
+      (context.task.result?.errors?.length ?? 0) > 0) &&
+    [...verdicts.values()].some(
+      (v) =>
+        v.law !== `reach agreement` && reproducibleRoutes.has(v.route ?? route),
+    )
+  )
+    stopped = true
   if (!state.capture) return
   appendFileSync(
     state.capture,

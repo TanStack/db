@@ -70,6 +70,17 @@ const ownFiles = [
   `../../packages/db/tests/oracle-property.ts`,
 ].map((file) => join(here, file))
 
+// Temporary profiling: with ORACLE_GAPS_PROFILE set, each phase and each
+// run appends one JSON line to <out>/profile.jsonl.
+let profileFile
+const span = (kind, started, fields = {}) => {
+  if (!profileFile) return
+  appendFileSync(
+    profileFile,
+    `${JSON.stringify({ kind, ms: Date.now() - started, at: started, ...fields })}\n`,
+  )
+}
+
 /** A unit's first failure: a failing test and its error, or why it did not run. */
 function failureOf(unit) {
   if (unit.timedOut) return `its run timed out`
@@ -269,17 +280,42 @@ export default mergeConfig(base, {
           ])
     clearTimeout(timer)
     const seconds = (Date.now() - started) / 1000
+    const profiled = {
+      file: file.split(`/`).at(-1),
+      mutant,
+      select: select?.length ?? null,
+      limitMs,
+    }
     if (result === undefined) {
+      const cancelled = Date.now()
       await Promise.race([
         context.cancelCurrentRun(`keyboard-input`).catch(() => undefined),
         sleep(5000),
       ])
+      span(`cancel`, cancelled, profiled)
+      span(`run`, started, { ...profiled, timedOut: true })
       rmSync(capture, { force: true })
       return { file, timedOut: true, seconds }
     }
     // The result also lists test modules from earlier runs, with their old
     // results. Only this run's file counts.
     const modules = result.testModules.filter((m) => m.moduleId === file)
+    if (profileFile) {
+      const d = modules[0]?.diagnostic?.() ?? {}
+      const states = modules.flatMap((m) =>
+        [...m.children.allTests()].map((t) => t.result().state),
+      )
+      span(`run`, started, {
+        ...profiled,
+        tests: states.length,
+        ran: states.filter((x) => x !== `skipped`).length,
+        environment: Math.round(d.environmentSetupDuration ?? 0),
+        prepare: Math.round(d.prepareDuration ?? 0),
+        collect: Math.round(d.collectDuration ?? 0),
+        setup: Math.round(d.setupDuration ?? 0),
+        testsMs: Math.round(d.duration ?? 0),
+      })
+    }
     const rows = []
     if (existsSync(capture)) {
       for (const line of readFileSync(capture, `utf8`).split(`\n`).filter(Boolean)) {
@@ -337,6 +373,16 @@ export default mergeConfig(base, {
   async function check(options, store, log = console.error) {
     const authored = options.mutants ? loadAuthored(options.mutants) : []
     mkdirSync(options.out, { recursive: true })
+    profileFile = process.env.ORACLE_GAPS_PROFILE
+      ? join(options.out, `profile.jsonl`)
+      : undefined
+    if (profileFile) rmSync(profileFile, { force: true })
+    const checkStarted = Date.now()
+    let phase = Date.now()
+    const endPhase = (name, fields) => {
+      span(`phase`, phase, { name, ...fields })
+      phase = Date.now()
+    }
     // The state file is the fallback for setups that cannot `inject`.
     process.env.ORACLE_GAPS_STATE = join(options.out, `state.json`)
     const settings = {
@@ -359,7 +405,9 @@ export default mergeConfig(base, {
     }
     while (contexts.length < options.contexts)
       contexts.push(await warmContext(settings))
+    endPhase(`warm contexts`, { contexts: contexts.length })
     for (const context of contexts) await globSpecs(context)
+    endPhase(`find test files`)
 
     // 1. The static half (analysis.mjs): instrumented sources, mutants,
     // declarations, and ownership. A broken declaration refuses the run.
@@ -372,6 +420,7 @@ export default mergeConfig(base, {
     const previous = [...globalThis.__oracleGapsSchemata.keys()]
     globalThis.__oracleGapsSchemata = instrumented
     invalidateChanged(new Set([...previous, ...instrumented.keys(), ...lastServed.keys()]))
+    endPhase(`static analysis`, { mutants: mutants.length })
 
     // The global inputs of every unit.
     const lockfile = lockfileOf(pkg)
@@ -395,7 +444,10 @@ export default mergeConfig(base, {
     async function unit(context, file, spec, runOptions = {}) {
       const id = sha1(JSON.stringify([globalKey, file, spec, runOptions.select ?? null]))
       const row = store.get(id)
-      if (row && row.inputs.every(([path, hash]) => servedHash(path) === hash)) {
+      const looked = Date.now()
+      const valid = row && row.inputs.every(([path, hash]) => servedHash(path) === hash)
+      span(`lookup`, looked, { file: file.split(`/`).at(-1), spec, hit: Boolean(valid) })
+      if (valid) {
         evidence.reused += 1
         if (!row.unit.timedOut) fileInputs.set(file, row.unit.inputs)
         return row.unit
@@ -455,6 +507,7 @@ export default mergeConfig(base, {
     }
     let files = [...fileSpecs.keys()]
     const first = await runAcross(files, 1)
+    endPhase(`unmutated pass 1`, { files: files.length })
     // An oracle file that fails with no mutant active cannot judge the code
     // it owns, so the run refuses rather than report that code as unowned.
     const failingOwners = [...first.failed.keys()].filter((file) =>
@@ -476,6 +529,7 @@ export default mergeConfig(base, {
       }
     }
     const second = await runAcross(files, 2)
+    endPhase(`unmutated pass 2`, { files: files.length })
     const baseline = baselineOf(first.rows, second.rows, oracleFiles)
     const { nondeterministic } = baseline
     log(
@@ -508,44 +562,56 @@ export default mergeConfig(base, {
     // Results are appended as they finish, so a stopped survey keeps them.
     const partial = join(options.out, `results.jsonl`)
     rmSync(partial, { force: true })
-    // Whether running only `keys` of a file, with no mutant active,
-    // reproduces what those tests recorded when the whole file ran. A test
-    // can depend on state that an earlier test set, so a selection is used
-    // only when it reproduces the full run.
+    // The tests of a file that a mutant must run: every test from the first
+    // one that reached its site. A later test can see the mutant through
+    // state that a reaching test changed, so only the tests before the
+    // first reaching one are left out, and only when running the rest with
+    // no mutant active reproduces what they recorded when the whole file
+    // ran: a later test can depend on state that a left-out test set.
     const selectionChecks = new Map()
     const selectionFor = async (slot, file, keys) => {
       const all = [...baseline.firstRows.keys()].filter(
         (k) => fileOf(k) === file && !baseline.firstRows.get(k).background,
       )
-      const selection = [...new Set(keys)].filter((k) => !k.endsWith(` > (background)`)).sort()
-      if (selection.length === 0 || selection.length >= all.length) return null
+      const reaching = new Set(keys)
+      if (keys.some((k) => k === `${file} > (background)`)) return null
+      const first = all.findIndex((k) => reaching.has(k))
+      if (first <= 0) return null
+      const selection = all.slice(first)
       const id = `${file}\0${selection.join(`\0`)}`
-      if (!selectionChecks.has(id)) {
-        const run = await unit(slot.context, file, `selected`, {
-          select: selection,
-          limitMs: limitFor(file),
-        })
-        if (run.timedOut) await replace(slot)
-        const rows = new Map(run.rows ?? [])
+      // The check runs once per selection, even when several contexts ask
+      // for it at the same time.
+      if (!selectionChecks.has(id))
         selectionChecks.set(
           id,
-          !run.timedOut &&
-            outcomeOf([run]).outcome === `survived` &&
-            selection.every(
-              (k) =>
-                rows.get(k)?.hash === baseline.firstRows.get(k)?.hash &&
-                rows.get(k)?.observed === baseline.firstRows.get(k)?.observed,
-            ),
+          (async () => {
+            const run = await unit(slot.context, file, `selected`, {
+              select: selection,
+              limitMs: limitFor(file),
+            })
+            if (run.timedOut) await replace(slot)
+            const rows = new Map(run.rows ?? [])
+            return (
+              !run.timedOut &&
+              outcomeOf([run]).outcome === `survived` &&
+              selection.every(
+                (k) =>
+                  rows.get(k)?.hash === baseline.firstRows.get(k)?.hash &&
+                  rows.get(k)?.observed === baseline.firstRows.get(k)?.observed,
+              )
+            )
+          })(),
         )
-      }
-      return selectionChecks.get(id) ? selection : null
+      return (await selectionChecks.get(id)) ? selection : null
     }
     // A cancelled run can leave work behind, so its context is replaced.
     const replace = async (slot) => {
+      const started = Date.now()
       await Promise.race([slot.context.close().catch(() => undefined), sleep(10_000)])
       slot.context = await warmContext(settings)
       await globSpecs(slot.context)
       contexts[slot.index] = slot.context
+      span(`replace context`, started, { slot: slot.index })
     }
     // The units of one mutant against some files, one file at a time and
     // only the tests that reached it. The runner stops at the first kill: a
@@ -566,6 +632,7 @@ export default mergeConfig(base, {
       return done
     }
     async function evaluate(mutant, slot) {
+      const evaluated = Date.now()
       mutant.inDiff = diffs.get(mutant.source)?.has(mutant.line)
       const owners = ownersOf(mutant)
       const targets = targetsOf(mutant, baseline, owners, oracleFiles)
@@ -587,6 +654,13 @@ export default mergeConfig(base, {
           await unitsFor(slot, targets.testTargets, targets.testKeys, mutant.number),
         )
       results.push(result)
+      span(`mutant`, evaluated, {
+        id: mutant.id,
+        slot: slot.index,
+        outcome: result.class ?? result.outcome,
+        files: units.length,
+        targets: targets.oracleTargets.length,
+      })
       appendFileSync(partial, `${JSON.stringify(result)}\n`)
       log(
         `${mutant.id} L${mutant.line} ${mutant.operator} ${result.outcome}${result.class ? ` (${result.class})` : ``}${result.testOutcome ? ` [ordinary: ${result.testOutcome}]` : ``}`,
@@ -600,6 +674,7 @@ export default mergeConfig(base, {
       }),
     )
     results.sort((a, b) => a.number - b.number || a.source.localeCompare(b.source))
+    endPhase(`operator mutants`, { mutants: results.length })
 
     // 6. Authored mutants, one at a time in the first context. Each one
     // serves a patched copy of its source, which every context in this
@@ -657,6 +732,7 @@ export default mergeConfig(base, {
       Object.assign(result, judgeAuthored(units, baseline))
       log(`${id} ${result.outcome}${result.class ? ` (${result.class})` : ``}`)
     }
+    endPhase(`authored mutants`, { mutants: authored.length })
     // Keys go into every output, so an agent reads them from the JSON
     // results.
     assignKeys(results)
@@ -681,6 +757,7 @@ export default mergeConfig(base, {
         1,
       ),
     )
+    span(`check`, checkStarted, { evidence })
     const summary = renderReport({
       results,
       run: runIdentity,
