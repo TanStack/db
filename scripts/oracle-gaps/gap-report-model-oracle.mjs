@@ -397,6 +397,17 @@ const witness = [
       judging(`b`, `fixed seed`, 7, { judges: false }),
     ],
   },
+  // A nondeterministic test judges nothing, even when its verdict fires, so
+  // it must not stop its file: the deterministic test after it decides.
+  {
+    id: `w_flakykill`,
+    owners: [`a`],
+    body: [kill],
+    tests: [
+      judging(`a`, `fixed seed`, 7, { flaky: true }),
+      judging(`a`, `fixed seed`, 7),
+    ],
+  },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -439,6 +450,7 @@ const captureWitness = new Set([
   `w_hang`,
   `w_hangkill`,
   `w_hangsurvive`,
+  `w_flakykill`,
 ])
 
 // ## Rendering and layout

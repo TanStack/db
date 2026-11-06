@@ -570,6 +570,8 @@ async function driver(plan, observe) {
         states.add(`method owned through this`)
       if (m.function === `w_union` && m.outcome === `killed`)
         states.add(`killed by a second owner`)
+      if (m.function === `w_flakykill` && m.outcome === `killed`)
+        states.add(`a kill after a nondeterministic verdict in its file`)
       if (m.function === `w_hang` && m.outcome === `timeout`)
         states.add(`a hang alone timed out`)
       if (m.function === `w_hangkill` && m.outcome === `killed`)
@@ -1020,6 +1022,7 @@ const required = [
   `ordinary tests left out by default`,
   `two authored mutants judged apart`,
   `timeout`,
+  `a kill after a nondeterministic verdict in its file`,
   `a hang alone timed out`,
   `a hang in one owner and a kill in another killed`,
   `a hang in one owner and a survivor in another timed out`,

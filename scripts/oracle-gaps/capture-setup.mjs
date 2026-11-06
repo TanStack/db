@@ -415,7 +415,8 @@ function recordAssertion() {
 // 2026-11-06): once a test fails with a verdict under a behavioral law, any
 // but reach agreement, on a reproducible route, the file's remaining tests
 // are skipped. The runner also runs no further file (check.mjs). A verdict
-// in a test that passes kills nothing, as in the classification.
+// in a test that passes kills nothing, as in the classification, and so does
+// a verdict in a nondeterministic test.
 const reproducibleRoutes = new Set([
   `fixed seed`,
   `fixed history`,
@@ -472,10 +473,14 @@ beforeEach((context) => {
   inTest = true
 })
 
+// Tests whose observations varied between the two unmutated runs: their
+// verdicts judge nothing, so they never stop a run.
+const ignored = new Set(state.ignore ?? [])
 afterEach((context) => {
   inTest = false
   if (
     state.stopOnKill &&
+    !ignored.has(testKey(context.task)) &&
     (context.task.result?.state === `fail` ||
       (context.task.result?.errors?.length ?? 0) > 0) &&
     [...verdicts.values()].some(

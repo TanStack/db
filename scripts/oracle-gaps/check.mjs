@@ -294,10 +294,17 @@ export default mergeConfig(base, {
     context,
     out,
     file,
-    { mutant = null, seed = null, limitMs, select = null, stopOnKill = false } = {},
+    {
+      mutant = null,
+      seed = null,
+      limitMs,
+      select = null,
+      stopOnKill = false,
+      ignore = [],
+    } = {},
   ) {
     const capture = join(out, `run-${process.pid}-${++runCounter}.jsonl`)
-    const state = { mutant, select, capture, seed, stopOnKill }
+    const state = { mutant, select, capture, seed, stopOnKill, ignore }
     // Vitest 3 and 4 both expose the root project's `provide`; the state file
     // remains for setups that cannot `inject`.
     context.getRootProject?.().provide(`oracleGaps`, state)
@@ -432,18 +439,19 @@ export default mergeConfig(base, {
     })
     const keyFor = (copy, file) => (key) =>
       key.startsWith(`${copy} > `) ? `${file}${key.slice(copy.length)}` : key
+    // A file's test keys, named as its copy names them.
+    const inCopy = (copy, file, keys) =>
+      keys.map((key) =>
+        key.startsWith(`${file} > `) ? `${copy}${key.slice(file.length)}` : key,
+      )
     const units = Object.fromEntries(
       copies.map((copy, i) => [
         copy,
         {
           mutant: items[i].mutant ?? null,
-          select:
-            items[i].select?.map((key) =>
-              key.startsWith(`${items[i].file} > `)
-                ? `${copy}${key.slice(items[i].file.length)}`
-                : key,
-            ) ?? null,
+          select: items[i].select ? inCopy(copy, items[i].file, items[i].select) : null,
           stopOnKill: items[i].stopOnKill ?? false,
+          ignore: inCopy(copy, items[i].file, items[i].ignore ?? []),
         },
       ]),
     )
@@ -656,8 +664,10 @@ export default mergeConfig(base, {
     // Each file's imports in its unmutated run. A run that timed out reports
     // none, so it is stored under these: a mutant changes no import.
     const fileInputs = new Map()
-    const idOf = (file, spec, select) =>
-      sha1(JSON.stringify([globalKey, file, spec, select ?? null]))
+    // The tests whose verdicts cannot stop a run (see `ignoredIn`) are part
+    // of a unit's id: they change which tests run.
+    const idOf = (file, spec, select, ignore = []) =>
+      sha1(JSON.stringify([globalKey, file, spec, select ?? null, ignore]))
     // A run is reused when every input of one of its stored versions is
     // unchanged; undoing an edit finds the version from before it.
     const lookup = (id, index) =>
@@ -676,7 +686,7 @@ export default mergeConfig(base, {
     }
     async function unit(context, file, spec, runOptions = {}) {
       const index = indexOf.get(context)
-      const id = idOf(file, spec, runOptions.select)
+      const id = idOf(file, spec, runOptions.select, runOptions.ignore)
       const looked = Date.now()
       const valid = lookup(id, index)
       span(`lookup`, looked, { file: file.split(`/`).at(-1), spec, hit: Boolean(valid) })
@@ -711,7 +721,7 @@ export default mergeConfig(base, {
       const got = new Array(requests.length)
       let rest = []
       requests.forEach((request, i) => {
-        const id = idOf(request.file, request.spec, request.select)
+        const id = idOf(request.file, request.spec, request.select, request.ignore)
         const valid = lookup(id, index)
         if (valid) {
           evidence.reused += 1
@@ -726,6 +736,7 @@ export default mergeConfig(base, {
               mutant: r.mutant,
               select: r.select,
               stopOnKill: r.stopOnKill,
+              ignore: r.ignore,
               limitMs: r.limitMs,
             })
           break
@@ -828,6 +839,9 @@ export default mergeConfig(base, {
     endPhase(`unmutated pass 2`, { files: files.length })
     const baseline = baselineOf(first.rows, second.rows, oracleFiles)
     const { nondeterministic } = baseline
+    // A nondeterministic test judges nothing, so its verdict must not stop
+    // a run at its first kill: a later test of the file may decide.
+    const ignoredIn = (file) => [...nondeterministic].filter((key) => fileOf(key) === file).sort()
     log(
       `unmutated: ${[...first.rows.values()].filter((r) => !r.background).length} tests in ${first.seconds.toFixed(1)}s and ${second.seconds.toFixed(1)}s; nondeterministic: ${nondeterministic.size}`,
     )
@@ -929,6 +943,7 @@ export default mergeConfig(base, {
             select: await selectionFor(slot, file, keysOf(st)),
             limitMs: limitFor(file),
             stopOnKill: true,
+            ignore: ignoredIn(file),
           })
         }
         const got = await unitsBatch(slot, requests)
@@ -1082,6 +1097,7 @@ export default mergeConfig(base, {
               select: null,
               limitMs: limitFor(file),
               stopOnKill: true,
+              ignore: ignoredIn(file),
             },
           ])
           job.units.push(got)
