@@ -511,7 +511,11 @@ export default mergeConfig(base, {
     // detect anything, and it may read source text that instrumentation
     // changes. Each file's unmutated duration sets a mutant run's time limit.
     const fileSeconds = new Map()
-    const limitFor = (file) => 5_000 + 3000 * (fileSeconds.get(file) ?? 10)
+    // A mutant can slow a run that still ends, for example by lengthening a
+    // retry backoff. A 5 s base cut off such a run in offline-transactions
+    // and turned a kill into a timeout, so the base stays at 10 s; hangs are
+    // cached, so it costs only cold runs.
+    const limitFor = (file) => 10_000 + 3000 * (fileSeconds.get(file) ?? 10)
     const runAcross = async (files, pass) => {
       const parts = contexts.map(() => [])
       files.forEach((file, index) => parts[index % contexts.length].push(file))
