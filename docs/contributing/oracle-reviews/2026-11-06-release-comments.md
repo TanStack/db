@@ -469,3 +469,47 @@ Source fingerprints (SHA-256):
 
 - `scripts/comment-on-release.ts`: `404e380684afeb237e28beeaaecf299270e5fac3287bc762ee6f3a717b761452`
 - `scripts/release-comments-oracle.property.test.js`: `472ffb7364f969fdd7cf6bd7e0a2b160dc963cdfa58a0caeb2ace2c1a3abc33c`
+
+## R17: positive partial response after a failed duplicate check
+
+Review5805686967 at1edf65b131219c8b75b311781f93550e8aa07cf1, inline4496583160,
+correctly found a grammar gap: every partial failure response contained zero.
+The maintainer's attempt-post rule applies regardless of incomplete stdout.
+The model, production script, failure driver and exit comparison stay unchanged.
+
+- **Law:** Failed checks log recipient/cause and permit posting, even after a
+  partial response reports an existing comment. Authority is the R13 maintainer
+  decision. A successful positive check still suppresses its notification.
+- **RED/calibration:** A warning-preserving mutant that parses error.stdout
+  passed the unchanged157-history owner. After the grammar extension, direct
+  replays157–160 each reject it at the notification value assertion after
+  successful script exit. The mutant incorrectly omits the failed recipient.
+  This is a demonstrated oracle gap, not a baseline production defect.
+- **GREEN:** pnpm test:release passes161 histories plus11 existing tests. A
+  later local variable rename/formatting changes no generated input or judgment.
+- **Reach:** Four added histories cross PR/issue recipients and both source
+  repositories with positive first-page output before failure. Positive partial
+  response4; any partial response8; failed PR check6; failed issue check6.
+  All24 failing minima pass; every prior history/index/minimum remains.
+- **Limits:** Controlled gh stdout/errors and recorded notifications at exit;
+  no real comment or delivery/authentication claim. Earlier limits remain.
+
+Grammar reconstruction retains absent, zero and positive partial responses.
+Removing positive output loses the distinguishing witness. Negative marker
+counts remain outside the legal count domain. ORC-001–007 and009–016 retain
+prior conformance with the new grammar/reach and rejecting calibration above;
+ORC-008 remains inapplicable to the stateless model. No shared semantic-helper
+fault or missing production input is introduced.
+
+R17 is fixed-now. Summary-only R18 asks whether full local pnpm test ran; the
+PR description now explicitly distinguishes targeted local validation from
+full remote CI. CodeRabbit is accurate and useful here: hire for identifying a
+plausible surviving implementation and the smallest distinguishing history.
+Final ledger accounting:16 fixed,1 refuted,1 accepted-design, plus fixed sibling
+S1. No item or policy decision remains open. Final-head CI and review remain
+separate merge gates.
+
+Source fingerprints (SHA-256):
+
+- `scripts/comment-on-release.ts`: `404e380684afeb237e28beeaaecf299270e5fac3287bc762ee6f3a717b761452`
+- `scripts/release-comments-oracle.property.test.js`: `d1be2b1750738944ddcc5a47a558dac912143fb02185988f800ce27296cdb5ec`

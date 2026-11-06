@@ -6740,7 +6740,7 @@ recipient URLs, source PR URLs, package/version/anchor unions and lookup stderr
 at script exit. Numeric recipients retain explicit `--repo`/`-R` overrides, and
 issue lookup fixtures belong to their requested source repository.
 
-All 157 finite histories pass, preserving all prior replay indexes. They cover
+All 161 finite histories pass, preserving all prior replay indexes. They cover
 stable/prerelease/build neighbors, both section orders, independent package
 versions/documents, duplicate PR references, source repositories, asymmetric
 contributions, shared/disjoint/absent issue edges, same-number foreign issues,
@@ -6749,14 +6749,15 @@ misleading display labels, existing comments on early/later pages, missing
 versions, empty sections and no publications. Source PR identity comes from the
 URL, not its label; foreign changelog references do not create local recipients.
 
-Declared reach: stable 88, prerelease 77, build metadata 44, reversed sections 62,
-linked issues 118, no linked issues 32, no matching PRs 7, asymmetric contributions 78,
-disjoint edges 12, shared edges 54, foreign issues 51, same-number foreign issues 42,
-lookup failure 6, colliding heading anchor 13, alternate source repository 30,
+Declared reach: stable 92, prerelease 77, build metadata 44, reversed sections 62,
+linked issues 122, no linked issues 32, no matching PRs 7, asymmetric contributions 82,
+disjoint edges 12, shared edges 54, foreign issues 54, same-number foreign issues 44,
+lookup failure 6, colliding heading anchor 13, alternate source repository 32,
 independent package versions 8, foreign changelog reference 12, label mismatch 4,
-existing release comment 20, release comment on later page 12, failed PR check 4,
-failed issue check 4 and partial response before failure 4. All 23 states have
-failing minima. Linked reach now requires a selected expected issue notification;
+existing release comment 24, release comment on later page 12, failed PR check 6,
+failed issue check 6, partial response before failure 8 and positive partial
+response before failure 4. All 24 states have failing minima. Linked reach now
+requires a selected expected issue notification;
 no-selected case 64 counts zero rather than its earlier false reach of one.
 
 Before production edits, the initial pinned script failed 64/67 comparisons;
@@ -6783,6 +6784,14 @@ before production edits. The 157-history campaign and all 11 existing tests pass
 skip-on-failure and missing-cause mutants fail intended assertions. R13 is
 accepted-design with its diagnostic coverage complete. Actual delivery still
 needs an authorized host observation.
+
+R17 adds four positive-partial-response histories across both repositories and
+PR/issue recipients, preserving all previous indexes and budgets. A mutant that
+warns but trusts failed-command stdout passes all previous 157 histories, then
+fails all four added histories at the notification comparison. Unchanged
+production passes all 161 histories and 11 existing tests. This extends the
+accepted failed-check rule; it does not change production behavior.
+
 The release-history owner below continues to own version/publish planning.
 
 ## RC release histories and replay observations

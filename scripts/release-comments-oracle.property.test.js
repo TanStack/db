@@ -324,6 +324,21 @@ for (const repository of ['TanStack/db', 'TanStack/query']) {
   }
 }
 
+// Preserve all prior indexes and cross the same failed-check recipients with
+// positive partial output. A failed command still permits posting, even when
+// its incomplete response reports an existing comment.
+for (const input of histories.filter(
+  (candidate) => candidate.partialCommentResponse,
+)) {
+  histories.push({
+    ...input,
+    existingComments: {
+      ...input.existingComments,
+      [input.failedCommentChecks[0]]: [1, 0],
+    },
+  })
+}
+
 // Independent ledger judgment: authored releases determine PR contributions;
 // authored per-PR edges determine each issue's union. Recipient identity is its
 // repository plus number. Expected results never parse production Markdown or
@@ -532,6 +547,7 @@ const reach = new Map(
     'failed PR comment check',
     'failed issue comment check',
     'partial comment response before failure',
+    'positive partial comment response before failure',
   ].map((state) => [state, 0]),
 )
 const script =
@@ -730,8 +746,11 @@ if (args[0] === 'api' && args[1] === 'graphql') {
           ? 'failed PR comment check'
           : 'failed issue comment check',
       )
-      if (input.partialCommentResponse)
+      if (input.partialCommentResponse) {
         states.push('partial comment response before failure')
+        if (input.existingComments[input.failedCommentChecks[0]][0] > 0)
+          states.push('positive partial comment response before failure')
+      }
     }
     for (const state of states) reach.set(state, reach.get(state) + 1)
     checkNotifications(input, recorded, result.stderr)
