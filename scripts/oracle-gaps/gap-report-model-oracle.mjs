@@ -1324,10 +1324,16 @@ function model(plan) {
   // The ordinary tests' outcome is reported, for information, only when the
   // run asks for it, and only for a survivor or an unreached mutant that an
   // ordinary test reached.
-  const ordinaryReaches = (site) =>
-    plan.tests
-      .filter((t) => t.file === `c`)
-      .some((t) => interpret(plan, t.fn, t.input, sites).reached.has(site.id))
+  // Code that runs at module load reaches every test of a file that loads
+  // the module, ordinary files included (maintainer decision, 2026-11-06).
+  const ordinaryReaches = (site) => {
+    const ordinary = plan.tests.filter((t) => t.file === `c`)
+    if (site.function === `w_load` || site.function === `<module>`)
+      return ordinary.length > 0
+    return ordinary.some((t) =>
+      interpret(plan, t.fn, t.input, sites).reached.has(site.id),
+    )
+  }
   const survivorKinds = new Set([
     `comparison-gap`,
     `generator-gap`,

@@ -33,7 +33,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join, relative as relativePath } from 'node:path'
+import { basename, dirname, join, relative as relativePath } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { applyAuthored, loadAuthored } from './authored.mjs'
 import { assignKeys, renderReport } from './report.mjs'
@@ -97,6 +97,17 @@ export function codeIdentity() {
   for (const file of ownFiles)
     hash.update(`${file}\0${existsSync(file) ? readFileSync(file) : ``}\0`)
   return hash.digest(`hex`)
+}
+
+
+/** A sequencer that runs files in the order given. */
+class KeepOrder {
+  async sort(files) {
+    return files
+  }
+  async shard(files) {
+    return files
+  }
 }
 
 /** Hashes of files by content, memoized by size and modification time. */
@@ -222,6 +233,11 @@ export default mergeConfig(base, {
       // Every module each test file imports, which a unit records as its
       // inputs.
       experimental: { importDurations: { limit: 1_000_000 } },
+      // A batch runs copies of test files in one worker, sharing its
+      // environment (runBatch), in the order given, so a hang is attributed
+      // to the copy that was running.
+      isolate: false,
+      sequence: { sequencer: KeepOrder },
       reporters: [{}],
     })
     // Vitest 3 calls this step `init`; Vitest 4 renamed it `standalone`.
@@ -343,7 +359,8 @@ export default mergeConfig(base, {
     if (existsSync(capture)) {
       for (const line of readFileSync(capture, `utf8`).split(`\n`).filter(Boolean)) {
         const row = JSON.parse(line)
-        rows.push([row.key, row])
+        // A closing row marks the end of a file for a batch's watchdog.
+        if (!row.closed) rows.push([row.key, row])
       }
       rmSync(capture)
     }
@@ -390,6 +407,171 @@ export default mergeConfig(base, {
           ),
         ]),
       ].filter((path) => path.startsWith(`/`) && !ownHarness(path)),
+    }
+  }
+
+  /**
+   * Many units in one Vitest run. Each item runs in its own copy of its test
+   * file, next to the original so that its imports resolve. The worker keeps
+   * its environment between copies, and the capture setup gives each copy
+   * its own mutant and a fresh module registry. A copy that passes its time
+   * limit is cut off: the copies before it keep their results, it is
+   * `timedOut`, and the caller reruns the rest. Returns one unit per
+   * finished item, in order, and the index of the item that timed out.
+   */
+  let copyCounter = 0
+  async function runBatch(context, out, items, seed) {
+    const capture = join(out, `run-${process.pid}-${++runCounter}.jsonl`)
+    const copies = items.map((item) => {
+      const copy = join(
+        dirname(item.file),
+        `.oracle-gaps-${process.pid}-${++copyCounter}-${basename(item.file)}`,
+      )
+      writeFileSync(copy, readFileSync(item.file))
+      return copy
+    })
+    const keyFor = (copy, file) => (key) =>
+      key.startsWith(`${copy} > `) ? `${file}${key.slice(copy.length)}` : key
+    const units = Object.fromEntries(
+      copies.map((copy, i) => [
+        copy,
+        {
+          mutant: items[i].mutant ?? null,
+          select:
+            items[i].select?.map((key) =>
+              key.startsWith(`${items[i].file} > `)
+                ? `${copy}${key.slice(items[i].file.length)}`
+                : key,
+            ) ?? null,
+          stopOnKill: items[i].stopOnKill ?? false,
+        },
+      ]),
+    )
+    const state = { mutant: null, select: null, capture, seed, units }
+    context.getRootProject?.().provide(`oracleGaps`, state)
+    writeFileSync(join(out, `state.json`), JSON.stringify(state))
+    const project = context.getRootProject()
+    const started = Date.now()
+    const running = context.runTestSpecifications(
+      copies.map((copy) => project.createSpecification(copy)),
+      false,
+    )
+    // The watchdog: each copy writes a closing row when it finishes, so the
+    // copy that is running is the first without one. A copy that passes its
+    // file's time limit is cut off.
+    const finished = () => {
+      if (!existsSync(capture)) return 0
+      const done = new Set()
+      for (const line of readFileSync(capture, `utf8`).split(`\n`))
+        if (line.includes(`"closed":true`)) done.add(JSON.parse(line).file)
+      return copies.findIndex((copy) => !done.has(copy))
+    }
+    let current = 0
+    let copyStarted = Date.now()
+    let timer
+    const watchdog = new Promise((resolve) => {
+      const poll = () => {
+        const at = finished()
+        if (at === -1) return
+        if (at !== current) {
+          current = at
+          copyStarted = Date.now()
+        }
+        if (Date.now() - copyStarted > items[current].limitMs) return resolve(undefined)
+        timer = setTimeout(poll, 50)
+      }
+      timer = setTimeout(poll, 50)
+    })
+    const result = await Promise.race([running, watchdog])
+    clearTimeout(timer)
+    const seconds = (Date.now() - started) / 1000
+    const rowsOf = () => {
+      const rows = new Map(copies.map((copy) => [copy, []]))
+      if (existsSync(capture))
+        for (const line of readFileSync(capture, `utf8`).split(`\n`).filter(Boolean)) {
+          const row = JSON.parse(line)
+          const copy = copies.find((c) => row.key?.startsWith(`${c} > `) || row.file === c)
+          if (copy && !row.closed) rows.get(copy).push(row)
+        }
+      return rows
+    }
+    try {
+      if (result === undefined) {
+        await Promise.race([
+          context.cancelCurrentRun(`keyboard-input`).catch(() => undefined),
+          sleep(5000),
+        ])
+        span(`run`, started, { file: `batch`, items: items.length, timedOut: current })
+        // The copies before the one that hung finished: their units come
+        // from their capture rows.
+        const rows = rowsOf()
+        return {
+          units: items.slice(0, current).map((item, i) => {
+            const map = keyFor(copies[i], item.file)
+            const own = rows.get(copies[i]).map((row) => ({ ...row, key: map(row.key) }))
+            return {
+              file: item.file,
+              timedOut: false,
+              seconds: seconds / items.length,
+              setupErrors: [],
+              tests: own
+                .filter((row) => !row.background)
+                .map((row) => ({
+                  key: row.key,
+                  fullName: row.key.split(` > `).slice(1).join(` > `),
+                  state: row.state === `fail` ? `failed` : row.state === `skip` ? `skipped` : `passed`,
+                  message: row.message ?? ``,
+                })),
+              unhandled: [],
+              rows: own.map((row) => [row.key, row]),
+            }
+          }),
+          timedOutAt: current,
+        }
+      }
+      // Errors outside any test cannot be attributed to one copy, so the
+      // caller runs those items alone.
+      if ((result.unhandledErrors ?? []).length > 0) return { units: [], unattributed: true }
+      const rows = rowsOf()
+      span(`run`, started, { file: `batch`, items: items.length })
+      return {
+        units: items.map((item, i) => {
+          const copy = copies[i]
+          const map = keyFor(copy, item.file)
+          const modules = result.testModules.filter((m) => m.moduleId === copy)
+          return {
+            file: item.file,
+            timedOut: false,
+            seconds: Math.max(0, ...modules.map((m) => (m.diagnostic?.().duration ?? 0) / 1000)),
+            setupErrors: modules.flatMap((m) =>
+              (m.errors?.() ?? []).map((error) => error.message),
+            ),
+            tests: modules.flatMap((module) =>
+              [...module.children.allTests()].map((testCase) => {
+                const testResult = testCase.result()
+                return {
+                  key: map(`${module.moduleId} > ${testCase.fullName}`),
+                  fullName: testCase.fullName,
+                  state: testResult.state,
+                  message: (testResult.errors ?? [])
+                    .map((error) => {
+                      const cause = error.cause
+                      return cause?.message
+                        ? `${cause.name ?? ``}: ${cause.message}`
+                        : `${error.name ?? ``}: ${error.message ?? ``}`
+                    })
+                    .join(`\n`),
+                }
+              }),
+            ),
+            unhandled: [],
+            rows: rows.get(copy).map((row) => [map(row.key), { ...row, key: map(row.key) }]),
+          }
+        }),
+      }
+    } finally {
+      for (const copy of copies) rmSync(copy, { force: true })
+      rmSync(capture, { force: true })
     }
   }
 
@@ -470,21 +652,34 @@ export default mergeConfig(base, {
     // Each file's imports in its unmutated run. A run that timed out reports
     // none, so it is stored under these: a mutant changes no import.
     const fileInputs = new Map()
-    async function unit(context, file, spec, runOptions = {}) {
-      const index = indexOf.get(context)
-      const id = sha1(JSON.stringify([globalKey, file, spec, runOptions.select ?? null]))
-      // A run is reused when every input of one of its stored versions is
-      // unchanged; undoing an edit finds the version from before it.
-      const looked = Date.now()
-      const valid = store
+    const idOf = (file, spec, select) =>
+      sha1(JSON.stringify([globalKey, file, spec, select ?? null]))
+    // A run is reused when every input of one of its stored versions is
+    // unchanged; undoing an edit finds the version from before it.
+    const lookup = (id, index) =>
+      store
         .get(id)
         ?.variants.find((variant) =>
           variant.inputs.every(([path, hash]) => servedHash(path, index) === hash),
         )
+    // A batch item reads the modules its file's unmutated run read: a mutant
+    // changes no import.
+    const remember = (id, file, result, index) => {
+      const paths = fileInputs.get(file)
+      if (!paths) return
+      const inputs = paths.map((path) => [path, servedHash(path, index)])
+      store.put(id, { inputs, unit: result })
+    }
+    async function unit(context, file, spec, runOptions = {}) {
+      const index = indexOf.get(context)
+      const id = idOf(file, spec, runOptions.select)
+      const looked = Date.now()
+      const valid = lookup(id, index)
       span(`lookup`, looked, { file: file.split(`/`).at(-1), spec, hit: Boolean(valid) })
       if (valid) {
         evidence.reused += 1
-        if (!valid.unit.timedOut) fileInputs.set(file, valid.unit.inputs)
+        if (spec.startsWith(`unmutated:`) && valid.unit.inputs)
+          fileInputs.set(file, valid.unit.inputs)
         return valid.unit
       }
       const result = await runUnit(context, options.out, file, {
@@ -501,6 +696,50 @@ export default mergeConfig(base, {
         store.put(id, { inputs, unit: result })
       }
       return result
+    }
+    // Units for many requests at once. Each is looked up first; the rest run
+    // as one batch (runBatch). A batch cut off by a hang records that item
+    // as timed out and reruns the rest in a fresh context; a batch with
+    // errors outside any test runs its items alone.
+    async function unitsBatch(slot, requests) {
+      const index = indexOf.get(slot.context)
+      const got = new Array(requests.length)
+      let rest = []
+      requests.forEach((request, i) => {
+        const id = idOf(request.file, request.spec, request.select)
+        const valid = lookup(id, index)
+        if (valid) {
+          evidence.reused += 1
+          got[i] = valid.unit
+        } else rest.push({ ...request, i, id })
+      })
+      while (rest.length > 0) {
+        const batch = await runBatch(slot.context, options.out, rest, options.seed ?? null)
+        if (batch.unattributed) {
+          for (const r of rest)
+            got[r.i] = await unit(slot.context, r.file, r.spec, {
+              mutant: r.mutant,
+              select: r.select,
+              stopOnKill: r.stopOnKill,
+              limitMs: r.limitMs,
+            })
+          break
+        }
+        batch.units.forEach((u, k) => {
+          got[rest[k].i] = u
+          remember(rest[k].id, rest[k].file, u, index)
+          evidence.computed += 1
+        })
+        if (batch.timedOutAt === undefined) break
+        const hung = rest[batch.timedOutAt]
+        const timedOut = { file: hung.file, timedOut: true, seconds: hung.limitMs / 1000 }
+        got[hung.i] = timedOut
+        remember(hung.id, hung.file, timedOut, index)
+        evidence.computed += 1
+        await replace(slot)
+        rest = rest.slice(batch.timedOutAt + 1)
+      }
+      return got
     }
 
     const vitest = contexts[0]
@@ -663,64 +902,107 @@ export default mergeConfig(base, {
       contexts[slot.index] = slot.context
       span(`replace context`, started, { slot: slot.index })
     }
-    // The units of one mutant against some files, one file at a time and
-    // only the tests that reached it. The runner stops at the first kill: a
-    // kill decides the outcome whatever the other files would do.
-    const unitsFor = async (slot, targets, keys, mutant) => {
-      const done = []
-      for (const file of targets) {
-        const result = await unit(slot.context, file, `mutant:${mutant}`, {
-          mutant,
-          limitMs: limitFor(file),
-          select: await selectionFor(slot, file, keys),
-          stopOnKill: true,
+    // Mutants run in groups per context. In each round, every undecided
+    // mutant of the group runs its next owner file, all in one batch; a
+    // mutant is decided once an owner kills it or every owner has run. The
+    // ordinary tier, when asked for, runs the same way afterwards.
+    const GROUP = 4
+    const rounds = async (slot, states, filesOf, keysOf) => {
+      for (;;) {
+        const active = states.filter((st) => !st.done)
+        if (active.length === 0) return
+        const requests = []
+        for (const st of active) {
+          const file = filesOf(st)[st.next]
+          requests.push({
+            st,
+            file,
+            spec: `mutant:${st.mutant.number}`,
+            mutant: st.mutant.number,
+            select: await selectionFor(slot, file, keysOf(st)),
+            limitMs: limitFor(file),
+            stopOnKill: true,
+          })
+        }
+        const got = await unitsBatch(slot, requests)
+        got.forEach((u, i) => {
+          const st = requests[i].st
+          st.units.push(u)
+          st.next += 1
+          if (
+            st.next >= filesOf(st).length ||
+            outcomeOf(st.units, baseline.nondeterministic).outcome === `killed`
+          )
+            st.done = true
         })
-        done.push(result)
-        if (result.timedOut) await replace(slot)
-        if (outcomeOf(done, baseline.nondeterministic).outcome === `killed`) break
       }
-      return done
     }
-    async function evaluate(mutant, slot) {
+    async function evaluateGroup(group, slot) {
       const evaluated = Date.now()
-      mutant.inDiff = diffs.get(mutant.source)?.has(mutant.line)
-      const owners = ownersOf(mutant)
-      const targets = targetsOf(mutant, baseline, owners, oracleFiles)
-      const result = {
-        ...mutant,
-        oracleFiles: targets.oracleTargets,
-        ordinaryFiles: targets.testTargets,
-      }
-      const units =
-        owners.size > 0 && targets.oracleTargets.length > 0
-          ? await unitsFor(slot, targets.oracleTargets, targets.oracleKeys, mutant.number)
-          : []
-      Object.assign(
-        result,
-        judgeMutant(mutant, { owners, targets, units, baseline, mutants }),
-      )
-      if (needsOrdinary(result, targets))
-        result.testOutcome = judgeOrdinary(
-          await unitsFor(slot, targets.testTargets, targets.testKeys, mutant.number),
-        )
-      results.push(result)
-      span(`mutant`, evaluated, {
-        id: mutant.id,
-        slot: slot.index,
-        outcome: result.class ?? result.outcome,
-        files: units.length,
-        targets: targets.oracleTargets.length,
+      const states = group.map((mutant) => {
+        mutant.inDiff = diffs.get(mutant.source)?.has(mutant.line)
+        const owners = ownersOf(mutant)
+        const targets = targetsOf(mutant, baseline, owners, oracleFiles)
+        return {
+          mutant,
+          owners,
+          targets,
+          units: [],
+          next: 0,
+          done: owners.size === 0 || targets.oracleTargets.length === 0,
+        }
       })
-      appendFileSync(partial, `${JSON.stringify(result)}\n`)
-      log(
-        `${mutant.id} L${mutant.line} ${mutant.operator} ${result.outcome}${result.class ? ` (${result.class})` : ``}${result.testOutcome ? ` [ordinary: ${result.testOutcome}]` : ``}`,
+      await rounds(
+        slot,
+        states,
+        (st) => st.targets.oracleTargets,
+        (st) => st.targets.oracleKeys,
       )
+      const ordinary = []
+      for (const st of states) {
+        st.result = {
+          ...st.mutant,
+          oracleFiles: st.targets.oracleTargets,
+          ordinaryFiles: st.targets.testTargets,
+          ...judgeMutant(st.mutant, {
+            owners: st.owners,
+            targets: st.targets,
+            units: st.units,
+            baseline,
+            mutants,
+          }),
+        }
+        if (needsOrdinary(st.result, st.targets))
+          ordinary.push({ ...st, units: [], next: 0, done: false })
+      }
+      await rounds(
+        slot,
+        ordinary,
+        (st) => st.targets.testTargets,
+        (st) => st.targets.testKeys,
+      )
+      for (const st of ordinary)
+        states.find((x) => x.mutant === st.mutant).result.testOutcome = judgeOrdinary(st.units)
+      for (const st of states) {
+        results.push(st.result)
+        span(`mutant`, evaluated, {
+          id: st.mutant.id,
+          slot: slot.index,
+          outcome: st.result.class ?? st.result.outcome,
+          files: st.units.length,
+          targets: st.targets.oracleTargets.length,
+        })
+        appendFileSync(partial, `${JSON.stringify(st.result)}\n`)
+        log(
+          `${st.mutant.id} L${st.mutant.line} ${st.mutant.operator} ${st.result.outcome}${st.result.class ? ` (${st.result.class})` : ``}${st.result.testOutcome ? ` [ordinary: ${st.result.testOutcome}]` : ``}`,
+        )
+      }
     }
     await Promise.all(
       contexts.map(async (context, index) => {
         const slot = { context, index }
-        for (let mutant = queue.shift(); mutant; mutant = queue.shift())
-          await evaluate(mutant, slot)
+        for (let group = queue.splice(0, GROUP); group.length > 0; group = queue.splice(0, GROUP))
+          await evaluateGroup(group, slot)
       }),
     )
     results.sort((a, b) => a.number - b.number || a.source.localeCompare(b.source))
@@ -769,37 +1051,42 @@ export default mergeConfig(base, {
         targets: [...owners].filter((file) => fileSpecs.has(file)),
       })
     }
-    const judgeAuthoredJob = async (slot, job) => {
-      const serve = globalThis.__oracleGapsServe
-      serve[slot.index] = new Map([[job.path, job.patched.text]])
-      invalidateChanged([job.path], slot.context)
-      const units = []
-      for (const file of job.targets) {
-        units.push(
-          await unit(slot.context, file, job.id, {
-            mutant: -1,
-            limitMs: limitFor(file),
-            stopOnKill: true,
-          }),
-        )
-        if (units.at(-1).timedOut) {
-          await replace(slot)
-          invalidateChanged([job.path], slot.context)
-        }
-        if (outcomeOf(units, baseline.nondeterministic).outcome === `killed`) break
-      }
-      serve[slot.index] = undefined
-      invalidateChanged([job.path], slot.context)
-      Object.assign(job.result, judgeAuthored(units, baseline))
-      log(`${job.id} ${job.result.outcome}${job.result.class ? ` (${job.result.class})` : ``}`)
-    }
+    // Each owner file of each authored mutant is its own item, taken by any
+    // free context, which serves the patch only to itself. A hang in one
+    // owner then waits beside the others, not before them; a kill in any
+    // owner decides the mutant (a kill outranks a timeout).
+    const authoredItems = authoredJobs.flatMap((job) =>
+      job.targets.map((file) => ({ job, file })),
+    )
+    for (const job of authoredJobs) job.units = []
     await Promise.all(
       contexts.map(async (context, index) => {
         const slot = { context, index }
-        for (let job = authoredJobs.shift(); job; job = authoredJobs.shift())
-          await judgeAuthoredJob(slot, job)
+        const serve = globalThis.__oracleGapsServe
+        for (let item = authoredItems.shift(); item; item = authoredItems.shift()) {
+          const { job, file } = item
+          serve[slot.index] = new Map([[job.path, job.patched.text]])
+          invalidateChanged([job.path], slot.context)
+          const [got] = await unitsBatch(slot, [
+            {
+              file,
+              spec: job.id,
+              mutant: -1,
+              select: null,
+              limitMs: limitFor(file),
+              stopOnKill: true,
+            },
+          ])
+          job.units.push(got)
+          serve[slot.index] = undefined
+          invalidateChanged([job.path], slot.context)
+        }
       }),
     )
+    for (const job of authoredJobs) {
+      Object.assign(job.result, judgeAuthored(job.units, baseline))
+      log(`${job.id} ${job.result.outcome}${job.result.class ? ` (${job.result.class})` : ``}`)
+    }
     endPhase(`authored mutants`, { mutants: authored.length })
     // Keys go into every output, so an agent reads them from the JSON
     // results.
