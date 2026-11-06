@@ -221,7 +221,11 @@ TanStack DB provides several built-in collection types for different data source
 
 **Sync Collections**
 
+- **[Neon Realtime Collection](./collections/neon-realtime-collection.md)** — Sync live SQL query results from Postgres into collections using Neon Realtime.
+
 - **[ElectricCollection](./collections/electric-collection.md)** — Sync data into collections from Postgres using ElectricSQL's real-time sync engine.
+
+- **[Convex Collection](./collections/convex-collection.md)** — Sync reactive Convex query results into collections.
 
 - **[TrailBaseCollection](./collections/trailbase-collection.md)** — Sync data into collections using TrailBase's self-hosted backend with real-time subscriptions.
 
