@@ -5,10 +5,12 @@
  * copy on 2026-11-06 while upstream's prerelease parser is repaired.
  *
  * This owner judges selection and aggregation at the gh command boundary. All
- * Comment operations succeed and no earlier release comment exists. Lookup
+ * Comment operations succeed. Earlier release comments suppress new posts. Lookup
  * failures must warn without suppressing unrelated notifications. It does not
- * establish GitHub authentication, delivery, pagination, retries, or concurrent
- * release behavior. The version/publish ledger has a separate release owner.
+ * establish GitHub authentication, delivery, linked-issue pagination beyond ten,
+ * retries, or concurrent releases. Failed existing-comment checks retain the
+ * prior attempt-post fallback; their policy is outside this judgment pending
+ * the maintainer's decision. The version/publish ledger has a separate owner.
  */
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -35,8 +37,13 @@ import { declareOracle } from '../packages/db/tests/oracle-declaration.js'
 // issue numbers in different repositories. Failed lookups remove only their
 // own edges and produce a diagnostic. Heading collisions include generated
 // suffixes that themselves collide with a later version heading.
-// Only unique, plain ## version headings and same-repository PR links are legal;
-// bracketed headings and foreign changelog PR links remain outside this grammar.
+// The source repository and each package's published version can differ across
+// histories. Issue lookup answers belong to the requested source repository.
+// Authored references can include incidental foreign PRs or misleading labels;
+// only source-repository PR URL identities contribute to the release ledger.
+// Only unique, plain ## version headings are legal; bracketed headings remain
+// outside this grammar.
+/** Author a semantic version and its base GitHub heading anchor. */
 function versionRecord(core, pre = [], build = []) {
   return {
     name:
@@ -54,6 +61,7 @@ function versionRecord(core, pre = [], build = []) {
   }
 }
 
+/** Supply neighboring stable, prerelease and build versions for a numeric core. */
 function versions(core) {
   return [
     [[], []],
@@ -74,6 +82,7 @@ const issue = (number, repository = 'TanStack/db') => ({ number, repository })
 const issueUrl = ({ number, repository }) =>
   `https://github.com/${repository}/issues/${number}`
 
+/** Author package sections and issue edges for one selected version. */
 function history(core, target, reverse, linked) {
   const sections = versions(core).map((version, index) => ({
     ...version,
@@ -81,6 +90,8 @@ function history(core, target, reverse, linked) {
   }))
   const selected = sections[target]
   return {
+    repository: 'TanStack/db',
+    existingComments: {},
     version: selected?.name ?? '9.9.9-rc.1',
     pre: selected?.pre ?? false,
     build: selected?.build ?? false,
@@ -194,6 +205,100 @@ for (const selected of collidingVersions) {
   }
 }
 
+// Keep prior replay indexes stable. A second source repository distinguishes
+// authored repository identity from a hardcoded default. Mixed publications
+// distinguish each package's selected release from the first package's version.
+for (const target of [0, 5]) {
+  for (const reverse of [false, true]) {
+    for (const routing of ['disjoint', 'foreign']) {
+      const input = routedHistory([1, 0, 0], target, reverse, routing)
+      input.repository = 'TanStack/query'
+      histories.push(input)
+    }
+  }
+}
+for (const repository of ['TanStack/db', 'TanStack/query']) {
+  for (const reverse of [false, true]) {
+    for (const target of [0, 5]) {
+      const input = routedHistory([1, 0, 0], target, reverse, 'foreign')
+      input.repository = repository
+      const other = history([2, 9, 10], target === 0 ? 2 : 0, reverse, false)
+      const contributions = input.packages[1].sections.find(
+        (section) => section.name === input.version,
+      ).prs
+      input.packages[1] = {
+        ...other.packages[1],
+        version: other.version,
+        sections: other.packages[1].sections.map((section) => ({
+          ...section,
+          prs: section.name === other.version ? contributions : section.prs,
+        })),
+      }
+      histories.push(input)
+    }
+  }
+}
+
+// Changeset text can mention another repository or display an arbitrary label.
+// The ledger records actual source contributions; serialization adds references
+// that must not create unrelated local recipients. Existing-comment pages vary
+// independently for PR and issue recipients, including later-page matches.
+for (const repository of ['TanStack/db', 'TanStack/query']) {
+  for (const reverse of [false, true]) {
+    for (const form of [
+      'foreign alongside local',
+      'label mismatch',
+      'foreign only',
+    ]) {
+      const input = routedHistory([1, 0, 0], 0, reverse, 'foreign')
+      input.repository = repository
+      input.referenceForm = form
+      input.packages = input.packages.map((pkg) => ({
+        ...pkg,
+        sections: pkg.sections.map((section) =>
+          section.name !== input.version
+            ? section
+            : {
+                ...section,
+                prs: form === 'foreign only' ? [] : section.prs,
+                references: [
+                  ...(form === 'foreign only'
+                    ? []
+                    : section.prs.map((number) => ({
+                        repository,
+                        number,
+                        label:
+                          form === 'label mismatch' ? number + 1000 : number,
+                      }))),
+                  {
+                    repository:
+                      repository === 'TanStack/db'
+                        ? 'TanStack/query'
+                        : 'TanStack/db',
+                    number: 200,
+                    label: form === 'foreign only' ? 200 : 999,
+                  },
+                ],
+              },
+        ),
+      }))
+      histories.push(input)
+    }
+  }
+  for (const kind of ['pr', 'issue']) {
+    for (const pages of [[1], [0, 1], [0, 0, 1], [0, 0]]) {
+      const input = routedHistory([1, 0, 0], 0, false, 'foreign')
+      input.repository = repository
+      const target =
+        kind === 'pr'
+          ? `https://github.com/${repository}/issues/200`
+          : 'https://github.com/TanStack/db/issues/700'
+      input.existingComments = { [target]: pages }
+      histories.push(input)
+    }
+  }
+}
+
 // Independent ledger judgment: authored releases determine PR contributions;
 // authored per-PR edges determine each issue's union. Recipient identity is its
 // repository plus number. Expected results never parse production Markdown or
@@ -203,6 +308,7 @@ function expectedNotifications(input) {
   const prs = new Map()
   let collision = false
   for (const pkg of input.packages) {
+    const version = pkg.version ?? input.version
     const used = []
     for (const [position, section] of pkg.sections.entries()) {
       const anchor = Array.from(
@@ -210,9 +316,9 @@ function expectedNotifications(input) {
         (_, suffix) => section.anchor + (suffix ? `-${suffix}` : ''),
       ).find((candidate) => !used.includes(candidate))
       used.push(anchor)
-      if (section.name !== input.version) continue
+      if (section.name !== version) continue
       collision ||= anchor !== section.anchor
-      const link = `[${pkg.name}@${section.name}](https://github.com/TanStack/db/blob/main/packages/${pkg.name.slice('@tanstack/'.length)}/CHANGELOG.md#${anchor})`
+      const link = `[${pkg.name}@${section.name}](https://github.com/${input.repository}/blob/main/packages/${pkg.name.slice('@tanstack/'.length)}/CHANGELOG.md#${anchor})`
       for (const pr of section.prs) {
         if (!prs.has(pr)) prs.set(pr, new Set())
         prs.get(pr).add(link)
@@ -229,7 +335,7 @@ function expectedNotifications(input) {
   const comments = [
     ...[...prs].map(([number, links]) => ({
       kind: 'pr',
-      target: `https://github.com/TanStack/db/pull/${number}`,
+      target: `https://github.com/${input.repository}/pull/${number}`,
       packages: [...links].sort(),
       prs: [],
     })),
@@ -246,20 +352,31 @@ function expectedNotifications(input) {
           ...new Set(contributors.flatMap((pr) => [...prs.get(pr)])),
         ].sort(),
         prs: contributors
-          .map((pr) => `https://github.com/TanStack/db/pull/${pr}`)
+          .map((pr) => `https://github.com/${input.repository}/pull/${pr}`)
           .sort(),
       }
     }),
-  ].sort(orderNotifications)
+  ]
+    .filter(
+      (comment) =>
+        !(
+          input.existingComments[
+            comment.target.replace('/pull/', '/issues/')
+          ] ?? []
+        ).some((count) => count > 0),
+    )
+    .sort(orderNotifications)
   return {
     comments,
     lookupFailures: [...prs.keys()]
       .filter((pr) => input.failedLookups.includes(pr))
       .sort((a, b) => a - b),
     collision,
+    prCount: prs.size,
   }
 }
 
+/** Ignore notification ordering, which the release contract does not constrain. */
 function orderNotifications(a, b) {
   return a.kind.localeCompare(b.kind) || a.target.localeCompare(b.target)
 }
@@ -270,9 +387,20 @@ function checkNotifications(input, calls, stderr) {
     .filter((args) => args[1] === 'comment')
     .map((args) => {
       const body = args[args.indexOf('--body') + 1]
+      // gh resolves a numeric recipient in --repo/-R when supplied, otherwise
+      // in the checkout's repository. Retain explicit overrides in observations.
+      const repositoryFlag = args.findIndex(
+        (arg) => arg === '--repo' || arg === '-R',
+      )
+      const explicitRepository =
+        repositoryFlag >= 0
+          ? args[repositoryFlag + 1]
+          : (args.find((arg) => arg.startsWith('--repo='))?.slice(7) ??
+            args.find((arg) => arg.startsWith('-R'))?.slice(2))
+      const recipientRepository = explicitRepository ?? input.repository
       const target = args[2].startsWith('https://')
         ? args[2]
-        : `https://github.com/TanStack/db/${args[0] === 'pr' ? 'pull' : 'issues'}/${args[2]}`
+        : `https://github.com/${recipientRepository}/${args[0] === 'pr' ? 'pull' : 'issues'}/${args[2]}`
       const repository = new URL(target).pathname
         .split('/')
         .slice(1, 3)
@@ -344,6 +472,12 @@ const reach = new Map(
     'same-number foreign issues',
     'lookup failure',
     'colliding heading anchor',
+    'alternate source repository',
+    'independent package versions',
+    'foreign changelog reference',
+    'label disagrees with PR URL',
+    'existing release comment',
+    'release comment on later page',
   ].map((state) => [state, 0]),
 )
 const script =
@@ -376,15 +510,22 @@ function exercise(input) {
             .map(
               (s) =>
                 `## ${s.name}\n\n### Patch Changes\n\n` +
-                s.prs
+                (
+                  s.references ??
+                  s.prs.map((number) => ({
+                    number,
+                    label: number,
+                    repository: input.repository,
+                  }))
+                )
                   .map(
-                    (pr) =>
-                      `- Fix ([#${pr}](https://github.com/TanStack/db/pull/${pr}))\n`,
+                    (ref) =>
+                      `- Fix ([#${ref.label}](https://github.com/${ref.repository}/pull/${ref.number}))\n`,
                   )
                   .join(''),
             )
             .join('\n') +
-          '\n## Archive\n\n[#999](https://github.com/TanStack/db/pull/999)\n',
+          `\n## Archive\n\n[#999](https://github.com/${input.repository}/pull/999)\n`,
       )
     }
     writeFileSync(
@@ -395,17 +536,22 @@ const args = process.argv.slice(2)
 appendFileSync(process.env.RELEASE_COMMENT_CALLS, JSON.stringify(args) + '\\n')
 if (args[0] === 'api' && args[1] === 'graphql') {
   const pr = Number(args.find((arg) => arg.startsWith('pr=')).slice(3))
-  if (JSON.parse(process.env.RELEASE_COMMENT_FAILURES).includes(pr)) {
+  const owner = args.find((arg) => arg.startsWith('owner=')).slice(6)
+  const repo = args.find((arg) => arg.startsWith('repo=')).slice(5)
+  const sourceMatches = owner + '/' + repo === process.env.RELEASE_COMMENT_REPOSITORY
+  if (sourceMatches && JSON.parse(process.env.RELEASE_COMMENT_FAILURES).includes(pr)) {
     console.error('controlled lookup failure')
     process.exit(1)
   }
-  const linked = JSON.parse(process.env.RELEASE_COMMENT_EDGES)[pr] ?? []
+  const linked = sourceMatches ? JSON.parse(process.env.RELEASE_COMMENT_EDGES)[pr] ?? [] : []
   const projection = args[args.indexOf('--jq') + 1]
   if (projection.endsWith('nodes[].number')) console.log(linked.map((i) => i.number).join('\\n'))
   else if (projection.endsWith('nodes[].url')) console.log(linked.map((i) => 'https://github.com/' + i.repository + '/issues/' + i.number).join('\\n'))
   else throw Error('Unexpected GraphQL projection')
 } else if (args[0] === 'api' && args[1].endsWith('/comments')) {
-  console.log('0')
+  const target = 'https://github.com/' + args[1].slice('repos/'.length, -'/comments'.length)
+  const pages = JSON.parse(process.env.RELEASE_COMMENT_EXISTING)[target] ?? [0]
+  console.log((args.includes('--paginate') ? pages : pages.slice(0, 1)).join('\\n'))
 } else if ((args[0] === 'pr' || args[0] === 'issue') && args[1] === 'comment') {
 } else {
   console.error('Unexpected gh call:', args)
@@ -422,10 +568,15 @@ if (args[0] === 'api' && args[1] === 'graphql') {
         ...process.env,
         PATH: [bin, process.env.PATH].join(delimiter),
         PUBLISHED_PACKAGES: JSON.stringify(
-          input.packages.map(({ name }) => ({ name, version: input.version })),
+          input.packages.map(({ name, version }) => ({
+            name,
+            version: version ?? input.version,
+          })),
         ),
-        REPOSITORY: 'TanStack/db',
-        GITHUB_REPOSITORY: 'TanStack/db',
+        REPOSITORY: input.repository,
+        GITHUB_REPOSITORY: input.repository,
+        RELEASE_COMMENT_REPOSITORY: input.repository,
+        RELEASE_COMMENT_EXISTING: JSON.stringify(input.existingComments),
         RELEASE_COMMENT_CALLS: calls,
         RELEASE_COMMENT_EDGES: JSON.stringify(input.edges),
         RELEASE_COMMENT_FAILURES: JSON.stringify(input.failedLookups),
@@ -436,16 +587,23 @@ if (args[0] === 'api' && args[1] === 'graphql') {
       .split('\n')
       .filter(Boolean)
       .map((line) => JSON.parse(line))
-    const states = [
-      input.pre ? 'prerelease' : 'stable',
-      Object.values(input.edges).some((edges) => edges.length)
-        ? 'linked issues'
-        : 'no linked issues',
-    ]
-    if (input.build) states.push('build metadata')
-    if (input.reverse) states.push('reversed sections')
+    const selectedVersions = input.packages.length
+      ? input.packages.map((pkg) => pkg.version ?? input.version)
+      : [input.version]
     const expected = expectedNotifications(input)
-    if (expected.comments.length === 0) states.push('no matching PRs')
+    const states = []
+    if (expected.comments.some((comment) => comment.kind === 'issue'))
+      states.push('linked issues')
+    else if (!Object.values(input.edges).some((edges) => edges.length))
+      states.push('no linked issues')
+    if (selectedVersions.some((version) => version.includes('-')))
+      states.push('prerelease')
+    if (selectedVersions.some((version) => !version.includes('-')))
+      states.push('stable')
+    if (selectedVersions.some((version) => version.includes('+')))
+      states.push('build metadata')
+    if (input.reverse) states.push('reversed sections')
+    if (expected.prCount === 0) states.push('no matching PRs')
     if (input.routing === 'disjoint') states.push('disjoint issue edges')
     if (
       input.routing === 'shared' &&
@@ -457,7 +615,15 @@ if (args[0] === 'api' && args[1] === 'graphql') {
       expected.comments.some((c) => c.kind === 'pr' && c.packages.length === 1)
     )
       states.push('asymmetric contributions')
-    if (expected.comments.some((c) => c.target.includes('TanStack/query/')))
+    if (
+      expected.comments.some(
+        (c) =>
+          c.kind === 'issue' &&
+          !c.target.startsWith(
+            `https://github.com/${input.repository}/issues/`,
+          ),
+      )
+    )
       states.push('foreign issue targets')
     if (
       expected.comments.some((c) =>
@@ -470,6 +636,28 @@ if (args[0] === 'api' && args[1] === 'graphql') {
       states.push('same-number foreign issues')
     if (expected.lookupFailures.length) states.push('lookup failure')
     if (expected.collision) states.push('colliding heading anchor')
+    if (input.repository !== 'TanStack/db')
+      states.push('alternate source repository')
+    if (
+      new Set(input.packages.map((pkg) => pkg.version ?? input.version)).size >
+      1
+    )
+      states.push('independent package versions')
+    if (input.referenceForm) states.push('foreign changelog reference')
+    if (input.referenceForm === 'label mismatch')
+      states.push('label disagrees with PR URL')
+    if (
+      Object.values(input.existingComments).some((pages) =>
+        pages.some((count) => count > 0),
+      )
+    )
+      states.push('existing release comment')
+    if (
+      Object.values(input.existingComments).some(
+        (pages) => pages[0] === 0 && pages.slice(1).some((count) => count > 0),
+      )
+    )
+      states.push('release comment on later page')
     for (const state of states) reach.set(state, reach.get(state) + 1)
     checkNotifications(input, recorded, result.stderr)
   } catch (error) {

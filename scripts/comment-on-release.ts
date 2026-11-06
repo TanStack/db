@@ -8,7 +8,7 @@
 
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 
 interface PublishedPackage {
   name: string
@@ -39,6 +39,7 @@ interface IssueInfo {
 function extractPRsFromChangelog(
   changelogPath: string,
   version: string,
+  repository: string,
 ): { prNumbers: Array<number>; anchor: string } {
   try {
     const content = readFileSync(changelogPath, 'utf-8')
@@ -74,10 +75,11 @@ function extractPRsFromChangelog(
       // Extract PR numbers from links like [#302](https://github.com/TanStack/config/pull/302)
       if (inTargetVersion) {
         const prMatches = line.matchAll(
-          /\[#(\d+)\]\(https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+\)/g,
+          /\[#\d+\]\(https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)\)/g,
         )
         for (const match of prMatches) {
-          prNumbers.add(parseInt(match[1], 10))
+          if (match[1]!.toLowerCase() === repository.toLowerCase())
+            prNumbers.add(parseInt(match[2]!, 10))
         }
       }
     }
@@ -100,6 +102,7 @@ function extractPRsFromChangelog(
  */
 function groupPRsByNumber(
   publishedPackages: Array<PublishedPackage>,
+  repository: string,
 ): Map<number, PRInfo> {
   const prMap = new Map<number, PRInfo>()
 
@@ -110,6 +113,7 @@ function groupPRsByNumber(
     const { prNumbers, anchor } = extractPRsFromChangelog(
       changelogPath,
       pkg.version,
+      repository,
     )
 
     for (const prNumber of prNumbers) {
@@ -133,12 +137,18 @@ function groupPRsByNumber(
  */
 function hasExistingComment(url: string): boolean {
   try {
-    const result = execSync(
-      `gh api repos${new URL(url).pathname}/comments --jq '[.[] | select(.body | contains("has been released!"))] | length'`,
+    const result = execFileSync(
+      'gh',
+      [
+        'api',
+        `repos${new URL(url).pathname}/comments`,
+        '--paginate',
+        '--jq',
+        '[.[] | select(.body | contains("has been released!"))] | length',
+      ],
       { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     )
-    const count = parseInt(result.trim(), 10)
-    return count > 0
+    return result.split('\n').some((count) => parseInt(count, 10) > 0)
   } catch {
     console.warn(`Warning: Could not check existing comments for ${url}`)
     return false
@@ -165,8 +175,22 @@ function findLinkedIssues(prNumber: number, repository: string): Array<string> {
   `
 
   try {
-    const result = execSync(
-      `gh api graphql -f query='${query}' -F owner='${owner}' -F repo='${repo}' -F pr=${prNumber} --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[].url'`,
+    const result = execFileSync(
+      'gh',
+      [
+        'api',
+        'graphql',
+        '-f',
+        `query=${query}`,
+        '-F',
+        `owner=${owner}`,
+        '-F',
+        `repo=${repo}`,
+        '-F',
+        `pr=${prNumber}`,
+        '--jq',
+        '.data.repository.pullRequest.closingIssuesReferences.nodes[].url',
+      ],
       { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     )
 
@@ -214,7 +238,7 @@ async function commentOnPR(pr: PRInfo, repository: string): Promise<void> {
 
   try {
     // Use gh CLI to post the comment
-    execSync(`gh pr comment ${number} --body '${comment.replace(/'/g, '"')}'`, {
+    execFileSync('gh', ['pr', 'comment', String(number), '--body', comment], {
       stdio: 'inherit',
     })
     console.log(`✓ Commented on PR #${number}`)
@@ -256,10 +280,9 @@ async function commentOnIssue(
 
   try {
     // Use gh CLI to post the comment
-    execSync(
-      `gh issue comment '${url}' --body '${comment.replace(/'/g, '"')}'`,
-      { stdio: 'inherit' },
-    )
+    execFileSync('gh', ['issue', 'comment', url, '--body', comment], {
+      stdio: 'inherit',
+    })
     console.log(`✓ Commented on ${url}`)
   } catch (error) {
     console.error(`✗ Failed to comment on ${url}:`, error)
@@ -300,7 +323,7 @@ async function main() {
   console.log(`Processing ${publishedPackages.length} published package(s)...`)
 
   // Group PRs by number
-  const prMap = groupPRsByNumber(publishedPackages)
+  const prMap = groupPRsByNumber(publishedPackages, repository)
 
   if (prMap.size === 0) {
     console.log('No PRs found in CHANGELOGs. Nothing to comment on.')

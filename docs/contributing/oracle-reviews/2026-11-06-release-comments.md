@@ -238,3 +238,176 @@ Follow-up source fingerprints (SHA-256):
 - `scripts/comment-on-release.ts`: `3293bdebd25bcc359f6be794812a8843e71d0f745aaa5066f2ed866f3425784c`
 - `scripts/release-comments-oracle.property.test.js`: `7dd58425eba0d3c235dd2f3352a211f9921f5d9a17040addfc7bfe4cbc429c8a`
 - Workflow and package manifest fingerprints remain unchanged from the initial record.
+
+## Follow-up: fresh review of repository and package distinctions
+
+A fresh subagent reviewed clean head
+`348403c0883f3ef8a68cdc5bdccf6aea82869163`. It confirmed no production defect,
+but demonstrated three oracle gaps. Each mutant below passed the prior owner
+on case 69 after successful script exit. These surviving mutants are the RED
+evidence for the oracle repair; production remains unchanged.
+
+| ID | Surviving wrong design | Missing distinction | Disposition |
+| --- | --- | --- | --- |
+| R7, P2 | Query `TanStack/query` instead of the authored source repository | Fake GraphQL ignored owner/repo and returned the source PR's edges anyway | fixed-now: repository-aware fixture and alternate source histories |
+| R8, P2 | Add `--repo TanStack/query` to numeric PR comment commands | Recorder discarded explicit repository selection | fixed-now: recipient interpretation retains `--repo` and `-R` |
+| R9, P2 | Parse every package with `publishedPackages[0].version` | Every publication used one version across all packages | fixed-now: independent package versions and document anchors |
+
+These are enforcement gaps in the existing per-package selection and recipient
+identity laws, not proposals to extend delivery or authorization promises. The
+action contract says each published package contributes its own released PRs.
+GitHub CLI's `gh pr comment --help` documents `--repo`/`-R` as selecting another
+repository. The fresh reviewer merits a hire for producing distinguishing
+semantic mutants and separating oracle gaps from production defects.
+
+All 105 prior histories retain their indexes. Eight new histories vary the
+source repository across stable/build releases, both orders and disjoint/foreign
+issue graphs. Eight more publish packages at independently selected numeric,
+prerelease and build versions, across both source repositories and orders.
+Their different release documents also require different anchors. The model
+selects each package's authored version and source repository. The fake API
+returns edges only for the requested source repository; the recorder resolves
+numeric recipients using the supplied repository flag or the checkout's
+repository. Expected notifications still come from the independent ledger.
+
+**GREEN:** `pnpm test:release` passes all 11 existing tests and all 121 histories.
+The executable script's fingerprint remains unchanged. ESLint has no errors
+(two inherited `require-await` warnings); changed-file lint, configured formatting
+and whitespace checks pass.
+
+**Reach:** stable 52; prerelease 77; build metadata 44; reversed sections 56;
+linked issues 89; no linked issues 32; no matching PRs 3; asymmetric contributions
+46; disjoint issue edges 12; shared issue edges 54; foreign issue targets 24;
+same-number foreign issues 20; lookup failure 6; colliding heading anchor 13;
+alternate source repository 12; independent package versions 8. All 16 failing
+minima pass. Mixed publications may reach both stable and prerelease states;
+the missing-version case is now classified from its actual prerelease target.
+
+The same campaign and replay commands documented above apply. Six temporary
+mutants each failed `checkNotifications` after successful script exit:
+
+| Mutant | Replay | Rejected value |
+| --- | --- | --- |
+| Force lookup repository to `TanStack/query` | 69 | Missing source issue notifications |
+| Hardcode lookup repository to `TanStack/db` | 105 | Missing alternate-source issue notifications |
+| Add `--repo TanStack/query` to PR posting | 69 | Wrong PR recipient URLs |
+| Add `-R TanStack/query` to PR posting | 69 | Wrong PR recipient URLs |
+| Select `publishedPackages[0].version` for every package | 113 | Omitted second-package contributors |
+| Reuse the first stored package anchor for every package | 113 | Wrong second-package changelog links |
+
+All failures are intended notification assertions, not setup errors, runtime
+crashes or timeouts. The original script is GREEN with the same driver and
+comparison. The new grammar distinguishes the reported mistakes and plausible
+narrow repairs that hardcode the usual repository or reuse package data.
+
+The prior conformance table remains applicable with these corrections:
+ORC-004 includes alternate source repositories and independent package releases;
+ORC-005 retains repository flags in recipient observations; ORC-006 includes
+the six new mutant rejections; ORC-007 exhausts 121 histories with unchanged
+prior replay indexes; ORC-013 includes wrong-source and wrong-package neighboring
+rules; ORC-015 measures all 16 reach minima. ORC-001/002/003/009/010/011/012/014/016
+retain the stated outcomes. ORC-008 remains inapplicable to this stateless model.
+The controlled command boundary and real delivery limits remain unchanged.
+No reachable in-scope counterexample remains known in the declared finite domain.
+
+Final oracle SHA-256:
+`664ea4f98fa5551bf9f087b5c502ba2e5fc95cc76270ca96cc0dba8bb22e7b7e`.
+The script remains
+`3293bdebd25bcc359f6be794812a8843e71d0f745aaa5066f2ed866f3425784c`.
+
+## Follow-up: source references and existing-comment pages
+
+CodeRabbit review 5805246017 at348403c0883f3ef8a68cdc5bdccf6aea82869163 added
+three inline findings and two separate suggestions. This append records all of
+them, plus the fresh reviewer's prose correction, without replacing prior results.
+The final executable fingerprints below supersede the earlier source identities.
+
+| ID/source | Judgment and action | Evidence |
+| --- | --- | --- |
+| R10, inline 4496287004 | fixed-now: derive linked reach from selected expected issue notifications, not all input edges | No-selected replay64 previously reported linked1; now reports0. All 20 reach minima pass. |
+| R11, inline 4496287019 | fixed-now: filter changelog references by source repository and use the URL's PR number | Twelve histories cross two source repositories, both orders, foreign-plus-local, label mismatch and foreign-only references. |
+| R12, inline 4496287037 | fixed-now: request every comment page and aggregate its release-marker counts | Sixteen histories vary PR/issue recipients, source repositories, early/later markers and all-zero pages. |
+| R13, same inline's failure-policy suggestion | design-decision: skip or attempt posting when an existing-comment check fails | Existing fallback logs a warning and posts; it is preserved while the maintainer chooses. No silent policy change or completed-closure claim. |
+| R14, same inline's process-invocation tool note | fixed-now as preventive cleanup; no injection defect or exploit is claimed | All four gh invocations use execFileSync argument arrays. The command-boundary oracle validates routing and literal arguments. |
+| R15, fresh reviewer | fixed-now: qualify the pagination exclusion as linked-issue pagination beyond ten | Source prose now distinguishes covered comment pagination from excluded linked-issue pagination. |
+| R16, review pre-merge-check prose | fixed-now: document remaining fixture/ordering helpers | Added source documentation; the remote docstring percentage awaits recomputation. No runtime semantics changed. |
+
+The accepted laws remain exact per-package selection and recipient identity.
+Changelog labels cannot redirect a contributing source PR; incidental foreign
+references cannot notify an unrelated local PR. Successful existing-comment
+checks suppress repeat posts regardless of which page contains the release
+marker. The shared action's documented duplicate avoidance, source-release
+integration and GitHub URL identity provide authority. Failed checks have no
+new policy authority; the requested maintainer decision is separate.
+
+Before production edits, the extended 149-history oracle ran against unchanged
+script 3293bdebd25bcc359f6be794812a8843e71d0f745aaa5066f2ed866f3425784c:
+20 intended notification assertions failed and129 passed. Every reference case
+and later-page case failed; early-page/no-marker controls passed. This was not
+a setup, timeout or runtime RED. Production now filters source URL identities,
+reads all comment pages and aggregates every count. GH calls use argv directly.
+The same command and histories give GREEN:149 plus 11 existing release tests.
+No prior history or budget was removed.
+
+Reach: stable 80; prerelease 77; build metadata 44; reversed sections 62; linked
+issues 110; no linked issues 32; no matching PRs 7; asymmetric contributions 70;
+disjoint issue edges 12; shared issue edges 54; foreign issue targets45; same-number
+foreign issues 38; lookup failure 6; colliding heading anchor 13; alternate source
+repository 26; independent package versions 8; foreign changelog reference 12;
+label disagrees with PR URL4; existing release comment 12; later-page release
+comment 8. All 20 states have a failing minimum of one; RED and GREEN counts agree.
+The no-matching-PR counter uses selected contributions, so suppressed comments
+cannot masquerade as a release with no contributing PRs.
+
+Four additional semantic mutants reach the notification comparison after
+successful script exit and fail value assertions:
+
+| Mutant | Replay | Wrong observation |
+| --- | --- | --- |
+| Accept foreign repository PR URLs | 121 | Unrelated local PR notification |
+| Filter repository but take the displayed label | 122 | Wrong source PR recipient |
+| Omit --paginate | 128 | Duplicate post despite a later-page release marker |
+| Request all pages but parse only the first count | 128 | Same duplicate through a plausible narrow repair |
+
+The earlier twelve routing/anchor/package mutants were adapted to the final
+argv source and rerun. All fail intended notification/diagnostic assertions.
+Sixteen rejections therefore apply to the final production fingerprint, with
+unchanged baseline controls in the 149-history GREEN campaign.
+
+Conformance: ORC-001 states the unchanged authority and new controlled page
+boundary; ORC-002 uses authored contributions and per-recipient page counts,
+not production parsing or JQ; ORC-003 keeps adjacent prose; ORC-004 reconstructs
+foreign-only/mixed references, misleading labels, early/later/all-zero pages
+across both recipient types and repositories. Removing any new axis loses its
+witness. Unique plain headings remain constructed; alternate Markdown is excluded.
+ORC-005 checks full recorded notifications at exit and preserves duplicates;
+ORC-006 records the 16 mutant assertions; ORC-007 exhausts149 cases with direct
+index replay and no stochastic claim; ORC-008 remains inapplicable to stateless
+recomputation; ORC-009 maps authored references/pages to Markdown/API fixtures;
+ORC-010 retains cleanup failure fidelity; ORC-011 retains independent rendered
+anchor evidence; ORC-012 preserves all stages here; ORC-013 distinguishes URL
+identity and later-page narrow fixes; ORC-014 limits evidence to controlled gh
+arguments, page counts and stderr; ORC-015 measures 20 failing minima; ORC-016
+keeps all cases on one independent model, driver and comparison.
+
+The fresh reviewer found no introduced implementation/model defect. It correctly
+identified the stale unqualified pagination exclusion (R15). CodeRabbit's reach,
+foreign-reference and page findings were technically useful; its earlier claim
+that #2361's P22 mutant was a no-op was refuted by an exact-target probe. #2361's
+PR description now includes the template structure, coverage owner and current
+review status; no #2361 source changed in this pass.
+
+Limits: controlled successful comment calls and authored comment-marker counts
+establish neither raw GitHub/JQ reception nor actual posting. Authentication,
+foreign authorization, linked-issue pagination beyond ten, retries, concurrent
+releases and alternative Markdown remain outside this finite claim. Failed
+existing-comment checks retain the old warning/attempt-post fallback. R13 is
+open as a design decision, with this oracle owner responsible for failed-check
+histories and calibration after the maintainer answers. No real notification
+was posted. Whole-PR readiness is not established while this decision and new
+head CI are pending. Shipped npm JavaScript remains unchanged.
+
+Final source fingerprints (SHA-256):
+
+- `scripts/comment-on-release.ts`: `f174e6812edc0e5a3fa2124091c5107baf507e7ff5c251e2cb3d3a564e21ef4b`
+- `scripts/release-comments-oracle.property.test.js`: `9da4b7bc5a58a0ff2c915bd46d25727ad83ab9ef170bfab84af6d1998caee92d`

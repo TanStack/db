@@ -6732,40 +6732,52 @@ O22 owns that receiving boundary. Full evidence is in the RC chunk record.
 
 ## Release notification selection
 
-`scripts/release-comments-oracle.property.test.js` owns exact published-version
-selection and package/PR/linked-issue aggregation at the `gh` command boundary.
-Its independent structured release ledger drives the executable local copy,
-`scripts/comment-on-release.ts`, and compares every recorded comment after exit.
-All 105 finite histories pass, retaining the original 67: stable/prerelease/build
-versions, prefix neighbors, both section orders, duplicate PR links, asymmetric
-package contributions, shared/disjoint/absent per-PR issue edges, equal issue
-numbers in different repositories, lookup failures, colliding version-heading
-anchors, missing versions, empty sections and no published packages. The check
-compares full recipient URLs, source PR URLs, package/version/anchor unions and
-lookup diagnostics. Declared reach is stable 41, prerelease 64, build metadata
-36, reversed sections 48, linked issues 73, no linked issues 32, no matching PRs
-3, asymmetric contributions 30, disjoint issue edges 8, shared issue edges 54,
-foreign issue targets 8, same-number foreign issues 8, lookup failure 6 and
-colliding heading anchor 13. Every state has a failing minimum of one.
+`scripts/release-comments-oracle.property.test.js` owns exact per-package
+published-version selection, source PR identity, linked-issue aggregation and
+existing-comment suppression at the controlled `gh` command boundary. Its
+independent release ledger drives `scripts/comment-on-release.ts` and compares
+recipient URLs, source PR URLs, package/version/anchor unions and lookup stderr
+at script exit. Numeric recipients retain explicit `--repo`/`-R` overrides, and
+issue lookup fixtures belong to their requested source repository.
 
-The initial pinned upstream parser failed 64 of the original 67 comparisons.
-The expanded owner, run before the review repairs, rejected 27 of 105 histories.
-Six repair mutants fail intended notification/diagnostic assertions: fixed-PR
-lookup, global package union, wrong issue repository, relative source PR links,
-missing lookup warning and per-base-only anchor suffixing. Earlier prefix,
-section-leakage and build-anchor calibrations remain recorded.
-[Evidence and replay commands](oracle-reviews/2026-11-06-release-comments.md)
-preserve both the initial false-green gaps and the review repair evidence.
+All 149 finite histories pass, preserving all prior replay indexes. They cover
+stable/prerelease/build neighbors, both section orders, independent package
+versions/documents, duplicate PR references, source repositories, asymmetric
+contributions, shared/disjoint/absent issue edges, same-number foreign issues,
+lookup failures, document-wide heading collisions, foreign changelog references,
+misleading display labels, existing comments on early/later pages, missing
+versions, empty sections and no publications. Source PR identity comes from the
+URL, not its label; foreign changelog references do not create local recipients.
 
-This owner assumes successful comment operations and no prior release comments;
-selected issue lookups fail under controlled conditions. Authentication, actual
-GitHub delivery (including permission on foreign issues), pagination beyond ten
-linked issues, retries, other API failure modes, duplicate suppression across
-releases, concurrent releases, foreign changelog PR links and alternative
-Markdown headings remain outside its claim. Before extending the claim, this
-owner needs matching grammar and a receiving witness; real delivery needs an
-authorized release/host observation. GitHub-rendered changelog HTML independently
-confirms the heading collision rule, but is not a delivery witness.
+Declared reach: stable 80, prerelease 77, build metadata 44, reversed sections 62,
+linked issues 110, no linked issues 32, no matching PRs 7, asymmetric contributions 70,
+disjoint edges 12, shared edges 54, foreign issues 45, same-number foreign issues 38,
+lookup failure 6, colliding heading anchor 13, alternate source repository 26,
+independent package versions 8, foreign changelog reference 12, label mismatch 4,
+existing release comment 12 and release comment on later page 8. All 20 states have
+failing minima. Linked reach now requires a selected expected issue notification;
+no-selected case 64 counts zero rather than its earlier false reach of one.
+
+Before production edits, the initial pinned script failed64/67 comparisons;
+the first expanded owner rejected27/105. A fresh reviewer demonstrated three
+more surviving mutants; the 121-history owner rejected them and narrow variants.
+The149-history owner then rejected unchanged production in20 intended reference/
+comment-page comparisons, with129 passes. Repaired production passes149 plus
+all 11 existing release tests. Sixteen final-source mutants fail intended value
+assertions across routing, unions, repository identity, per-package selection,
+anchors, warnings, reference identity and pagination. Earlier parser calibrations
+remain recorded. [Versioned evidence and replays](oracle-reviews/2026-11-06-release-comments.md)
+preserve all review stages, source identities, corrections and calibrated scope.
+
+The controlled comment API supplies per-page marker counts; raw GitHub comment
+body/JQ conformance and actual delivery are not established. Authentication,
+foreign-token permissions, linked-issue pagination beyond ten, retries, concurrent
+releases and alternative Markdown remain outside this claim. Existing-comment
+lookup failures currently warn and proceed; whether to skip instead is a pending
+maintainer policy decision from CodeRabbit review 5805246017, item R13. This owner
+must add failed-check histories and a distinguishing mutant once that decision
+is made. The PR does not claim that policy is settled or that duplicates cannot
+occur after failed checks. Real delivery needs an authorized host observation.
 The release-history owner below continues to own version/publish planning.
 
 ## RC release histories and replay observations
