@@ -237,6 +237,9 @@ export default mergeConfig(base, {
       // environment (runBatch), in the order given, so a hang is attributed
       // to the copy that was running.
       isolate: false,
+      // Worker threads start much faster than child processes, and each
+      // batch starts one (`--pool`; see args.mjs).
+      pool: settings.pool,
       sequence: { sequencer: KeepOrder },
       reporters: [{}],
     })
@@ -607,6 +610,7 @@ export default mergeConfig(base, {
     process.env.ORACLE_GAPS_STATE = join(options.out, `state.json`)
     const settings = {
       testTimeout: options.testTimeout,
+      pool: options.pool,
       bail: Number(process.env.ORACLE_GAPS_BAIL ?? 0),
     }
     // Contexts are warmed again when their settings or the Vite config they
