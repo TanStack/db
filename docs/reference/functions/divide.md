@@ -4,10 +4,10 @@ title: divide
 ---
 
 ```ts
-function divide<T1, T2>(left, right): DivideReturnType;
+function divide<T1, T2>(left, right): WithAggregate<DivideReturnType, [T1, T2]>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:647](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L647)
+Defined in: [packages/db/src/query/builder/functions.ts:558](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L558)
 
 ## Type Parameters
 
@@ -31,4 +31,4 @@ Defined in: [packages/db/src/query/builder/functions.ts:647](https://github.com/
 
 ## Returns
 
-`DivideReturnType`
+`WithAggregate`\<`DivideReturnType`, \[`T1`, `T2`\]\>

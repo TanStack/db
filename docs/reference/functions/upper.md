@@ -4,10 +4,10 @@ title: upper
 ---
 
 ```ts
-function upper<T>(arg): StringFunctionReturnType<T>;
+function upper<T>(arg): WithAggregate<StringFunctionReturnType<T>, T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:287](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L287)
+Defined in: [packages/db/src/query/builder/functions.ts:361](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L361)
 
 ## Type Parameters
 
@@ -23,4 +23,4 @@ Defined in: [packages/db/src/query/builder/functions.ts:287](https://github.com/
 
 ## Returns
 
-`StringFunctionReturnType`\<`T`\>
+`WithAggregate`\<`StringFunctionReturnType`\<`T`\>, `T`\>

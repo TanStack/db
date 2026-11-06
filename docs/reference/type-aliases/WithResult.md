@@ -4,23 +4,10 @@ title: WithResult
 ---
 
 ```ts
-type WithResult<TContext, TResult> = Prettify<Omit<TContext, "result" | "hasResult"> & Pick<TContext, "baseSchema" | "schema" | "fromSourceName"> & object>;
+type WithResult<TContext, TResult, TSelection> = Prettify<Omit<TContext, "result" | "hasResult" | "hasAggregate"> & Pick<TContext, "baseSchema" | "schema" | "fromSourceName"> & object>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:1404](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1404)
-
-WithResult - Updates a context with a new result type after select()
-
-This utility type is used internally when the `select()` method is called
-to update the context with the projected result type. It preserves all
-other context properties while replacing the `result` field.
-
-**Usage**:
-When `select()` is called, the query builder uses this type to create
-a new context where `result` contains the shape of the selected fields.
-
-The double `Prettify` ensures both the overall context and the nested
-result type display cleanly in IDEs.
+Defined in: [packages/db/src/query/builder/types.ts:1470](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1470)
 
 ## Type Parameters
 
@@ -31,3 +18,7 @@ result type display cleanly in IDEs.
 ### TResult
 
 `TResult`
+
+### TSelection
+
+`TSelection` = `unknown`

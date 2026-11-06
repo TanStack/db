@@ -4,17 +4,23 @@ title: not
 ---
 
 ```ts
-function not(value): BasicExpression<boolean>;
+function not<T>(value): WithAggregate<BasicExpression<boolean>, T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:250](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L250)
+Defined in: [packages/db/src/query/builder/functions.ts:303](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L303)
+
+## Type Parameters
+
+### T
+
+`T` *extends* `ExpressionLike`
 
 ## Parameters
 
 ### value
 
-`ExpressionLike`
+`T`
 
 ## Returns
 
-[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+`WithAggregate`\<[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>, `T`\>

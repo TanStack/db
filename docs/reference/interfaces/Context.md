@@ -59,6 +59,26 @@ Defined in: [packages/db/src/query/builder/types.ts:55](https://github.com/TanSt
 
 ***
 
+### hasAggregate?
+
+```ts
+optional hasAggregate: boolean;
+```
+
+Defined in: [packages/db/src/query/builder/types.ts:71](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L71)
+
+***
+
+### hasGrouping?
+
+```ts
+optional hasGrouping: true;
+```
+
+Defined in: [packages/db/src/query/builder/types.ts:70](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L70)
+
+***
+
 ### hasJoins?
 
 ```ts
@@ -135,4 +155,4 @@ Defined in: [packages/db/src/query/builder/types.ts:49](https://github.com/TanSt
 optional singleResult: boolean;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:70](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L70)
+Defined in: [packages/db/src/query/builder/types.ts:73](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L73)

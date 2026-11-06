@@ -3,7 +3,7 @@ id: VirtualRowProps
 title: VirtualRowProps
 ---
 
-Defined in: [packages/db/src/virtual-props.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L78)
+Defined in: [packages/db/src/virtual-props.ts:79](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L79)
 
 Virtual properties recognized on TanStack DB rows.
 
@@ -56,7 +56,7 @@ The type of the row's key (string or number)
 readonly $collectionId: string;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:116](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L116)
+Defined in: [packages/db/src/virtual-props.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L117)
 
 The ID of the source collection this row originated from.
 
@@ -72,7 +72,7 @@ row roots otherwise use the live-query Collection's ID.
 readonly $hasPendingWrites: boolean;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L87)
+Defined in: [packages/db/src/virtual-props.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L88)
 
 Whether this row currently has pending local optimistic writes.
 
@@ -87,7 +87,7 @@ acknowledgement. It is always `false` for local-only collections.
 readonly $key: TKey;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:107](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L107)
+Defined in: [packages/db/src/virtual-props.ts:108](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L108)
 
 The row's key (primary identifier).
 
@@ -102,7 +102,7 @@ Useful when you need the key in projections or computations.
 readonly $origin: VirtualOrigin;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:99](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L99)
+Defined in: [packages/db/src/virtual-props.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L100)
 
 Collection attribution for this row's current value. `'local'` covers
 optimistic rows and attributed source writes; `'remote'` covers source

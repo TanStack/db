@@ -7,7 +7,7 @@ title: OperatorCallback
 type OperatorCallback<TContext, TCallback> = 0 extends 1 & TContext ? (refs) => any : TCallback;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:659](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L659)
+Defined in: [packages/db/src/query/builder/types.ts:664](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L664)
 
 A callback that an operator value receives before the query supplies its
 context. Without noImplicitAny, TypeScript skips that inference and the

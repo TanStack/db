@@ -4,17 +4,23 @@ title: isUndefined
 ---
 
 ```ts
-function isUndefined(value): BasicExpression<boolean>;
+function isUndefined<T>(value): WithAggregate<BasicExpression<boolean>, T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:255](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L255)
+Defined in: [packages/db/src/query/builder/functions.ts:311](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L311)
+
+## Type Parameters
+
+### T
+
+`T` *extends* `ExpressionLike`
 
 ## Parameters
 
 ### value
 
-`ExpressionLike`
+`T`
 
 ## Returns
 
-[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+`WithAggregate`\<[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>, `T`\>
