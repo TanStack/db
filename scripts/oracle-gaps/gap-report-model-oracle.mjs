@@ -208,7 +208,7 @@ const histories = fc.record({
       weight: 1,
       arbitrary: fc.array(fc.constantFrom(...edits), {
         minLength: 1,
-        maxLength: edits.length,
+        maxLength: edits.length + 2,
       }),
     },
   ),

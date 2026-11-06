@@ -12,12 +12,24 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 
+// A run keeps a few versions, newest first, each under the inputs it read,
+// as a build system keeps several verifying traces: an edit and its undo
+// both find their evidence.
+const VERSIONS = 4
+const withVersion = (row, variant) => [
+  variant,
+  ...(row?.variants ?? []).filter(
+    (old) => JSON.stringify(old.inputs) !== JSON.stringify(variant.inputs),
+  ),
+].slice(0, VERSIONS)
+
 /** A store that lives for one check. */
 export function memoryStore() {
   const rows = new Map()
   return {
     get: (id) => rows.get(id),
-    put: (row) => rows.set(row.id, row),
+    put: (id, variant) =>
+      rows.set(id, { id, variants: withVersion(rows.get(id), variant) }),
   }
 }
 
@@ -45,20 +57,20 @@ export async function diskStore(dir) {
       id: `evidence-units`,
       getKey: (row) => row.id,
       persistence: createNodeSQLitePersistence({ database }),
-      schemaVersion: 1,
+      schemaVersion: 2,
     }),
   )
   await units.preload()
   let pending = []
   return {
     get: (id) => units.get(id),
-    put(row) {
-      const transaction = units.has(row.id)
-        ? units.update(row.id, (draft) => {
-            draft.inputs = row.inputs
-            draft.unit = row.unit
+    put(id, variant) {
+      const variants = withVersion(units.get(id), variant)
+      const transaction = units.has(id)
+        ? units.update(id, (draft) => {
+            draft.variants = variants
           })
-        : units.insert(row)
+        : units.insert({ id, variants })
       pending.push(transaction.when(`settled`))
     },
     async flush() {

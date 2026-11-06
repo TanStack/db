@@ -360,6 +360,10 @@ function incremental(dir, plan, cli, observe, states) {
       },
     ])
   const trail = [initialState(plan)]
+  // The steps that made each state after the first, so a revert knows what
+  // it undid.
+  const made = []
+  let reverted
   let previous = cli
   const checkAt = (step) => {
     const state = trail.at(-1)
@@ -402,6 +406,15 @@ function incremental(dir, plan, cli, observe, states) {
       states.add(`incremental check reused some evidence and recomputed some`)
     if (step === `restart` && reused > 0)
       states.add(`evidence reused after a daemon restart`)
+    // Undoing an edit to a file returns to a state the daemon has seen, so
+    // it reruns nothing.
+    if (
+      step === `revert` &&
+      [`test`, `source`, `prepend`, `owns`, `authored`, `helper`, `newOracle`].includes(reverted) &&
+      reused > 0 &&
+      computed === 0
+    )
+      states.add(`a revert of a file edit reran nothing`)
     // An edit that changes the cold result is one a stale cache could miss.
     if (step !== `start` && result(previous) !== result(coldRun))
       states.add(`edit ${step} changed the cold result`)
@@ -419,7 +432,11 @@ function incremental(dir, plan, cli, observe, states) {
       if (step === `restart`) stop()
       else if (step === `revert`) {
         if (trail.length > 1) trail.pop()
-      } else trail.push(applyEdit(trail.at(-1), step))
+        reverted = made.pop()
+      } else {
+        trail.push(applyEdit(trail.at(-1), step))
+        made.push(step)
+      }
       checkAt(step)
     }
   } finally {
@@ -911,6 +928,7 @@ const incrementalStates = [
   `incremental check reused evidence`,
   `incremental check reused some evidence and recomputed some`,
   `evidence reused after a daemon restart`,
+  `a revert of a file edit reran nothing`,
   ...edits
     .filter((edit) => edit !== `restart`)
     .map((edit) => `edit ${edit} changed the cold result`),
@@ -1078,6 +1096,8 @@ oracleProperty({
           steps: [
             `helper`,
             `seed`,
+            `revert`,
+            `test`,
             `revert`,
             `test`,
             `source`,

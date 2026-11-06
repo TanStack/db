@@ -473,15 +473,19 @@ export default mergeConfig(base, {
     async function unit(context, file, spec, runOptions = {}) {
       const index = indexOf.get(context)
       const id = sha1(JSON.stringify([globalKey, file, spec, runOptions.select ?? null]))
-      const row = store.get(id)
+      // A run is reused when every input of one of its stored versions is
+      // unchanged; undoing an edit finds the version from before it.
       const looked = Date.now()
-      const valid =
-        row && row.inputs.every(([path, hash]) => servedHash(path, index) === hash)
+      const valid = store
+        .get(id)
+        ?.variants.find((variant) =>
+          variant.inputs.every(([path, hash]) => servedHash(path, index) === hash),
+        )
       span(`lookup`, looked, { file: file.split(`/`).at(-1), spec, hit: Boolean(valid) })
       if (valid) {
         evidence.reused += 1
-        if (!row.unit.timedOut) fileInputs.set(file, row.unit.inputs)
-        return row.unit
+        if (!valid.unit.timedOut) fileInputs.set(file, valid.unit.inputs)
+        return valid.unit
       }
       const result = await runUnit(context, options.out, file, {
         seed: options.seed ?? null,
@@ -494,7 +498,7 @@ export default mergeConfig(base, {
       if (paths) {
         const inputs = paths.map((path) => [path, servedHash(path, index)])
         for (const [path, hash] of inputs) servedBy(index).set(path, hash)
-        store.put({ id, inputs, unit: result })
+        store.put(id, { inputs, unit: result })
       }
       return result
     }
