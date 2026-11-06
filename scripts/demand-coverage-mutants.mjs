@@ -200,8 +200,8 @@ const MUTANTS = [
   {
     id: 'P22',
     file: 'packages/db-sqlite-persistence-core/src/persisted.ts',
-    find: '      options.signal?.addEventListener(`abort`, settle, { once: true })\n',
-    replace: '',
+    find: '      options.signal?.addEventListener(`abort`, settle, { once: true })\n      void upstream.catch(() => undefined).then(settle)',
+    replace: '      void upstream.catch(() => undefined).then(settle)',
     rationale: 'settleCoveredDemand: release does not end the covered wait',
   },
   {
