@@ -47,6 +47,9 @@ export function parseArgs(argv, cwd = process.cwd()) {
     // The base of each mutant run's time limit, in milliseconds; the limit
     // adds three times the file's unmutated duration (see limitFor).
     hangLimit: Number(args[`hang-limit`] ?? 10000),
+    // The base of a mutant run's first, short budget; a copy past it runs
+    // again alone with the full limit before it can be a timeout.
+    firstLimit: Number(args[`first-limit`] ?? 2000),
     // Vitest's worker pool. Threads start much faster than child processes;
     // a package whose tests need process isolation runs with `forks`.
     pool: args.pool ?? `threads`,

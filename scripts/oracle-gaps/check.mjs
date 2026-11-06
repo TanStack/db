@@ -397,9 +397,13 @@ export default mergeConfig(base, {
       file,
       timedOut: false,
       seconds,
+      // The file's own time: loading and collecting it, and its tests.
       duration: Math.max(
         0,
-        ...modules.map((m) => (m.diagnostic?.().duration ?? 0) / 1000),
+        ...modules.map((m) => {
+          const d = m.diagnostic?.() ?? {}
+          return ((d.collectDuration ?? 0) + (d.duration ?? 0)) / 1000
+        }),
       ),
       setupErrors: modules.flatMap((m) =>
         (m.errors?.() ?? []).map((error) => error.message),
@@ -764,13 +768,42 @@ export default mergeConfig(base, {
           evidence.computed += 1
         })
         if (batch.timedOutAt === undefined) break
+        // A copy past its first budget may only be slow: a loaded machine
+        // slows a run that ends. It runs again alone, in a fresh context,
+        // with the full limit, and only a run cut off there too is a timeout.
         const hung = rest[batch.timedOutAt]
-        const timedOut = { file: hung.file, timedOut: true, seconds: hung.limitMs / 1000 }
-        got[hung.i] = timedOut
-        remember(hung.id, hung.file, timedOut, index)
-        evidence.computed += 1
+        const full = limitFor(hung.file)
         evidence.cut += 1
         await replace(slot)
+        // A copy that already had the full limit is a timeout as it stands.
+        const alone =
+          hung.limitMs >= full
+            ? { timedOutAt: 0, units: [] }
+            : await runBatch(slot.context, options.out, [{ ...hung, limitMs: full }], options.seed ?? null)
+        const hadFullLimit = hung.limitMs >= full
+        if (alone.unattributed)
+          got[hung.i] = await unit(slot.context, hung.file, hung.spec, {
+            mutant: hung.mutant,
+            select: hung.select,
+            stopOnKill: hung.stopOnKill,
+            ignore: hung.ignore,
+            limitMs: full,
+          })
+        else {
+          const confirmed =
+            alone.timedOutAt === 0
+              ? { file: hung.file, timedOut: true, seconds: full / 1000 }
+              : alone.units[0]
+          if (alone.timedOutAt === 0 && !hadFullLimit) {
+            evidence.cut += 1
+            await replace(slot)
+          }
+          if (!confirmed.skipped) {
+            got[hung.i] = confirmed
+            remember(hung.id, hung.file, confirmed, index)
+            evidence.computed += 1
+          }
+        }
         rest = rest.slice(batch.timedOutAt + 1)
         evidence.rerun += rest.length
       }
@@ -790,10 +823,14 @@ export default mergeConfig(base, {
     // changes. Each file's unmutated duration sets a mutant run's time limit.
     const fileSeconds = new Map()
     // A mutant can slow a run that still ends, for example by lengthening a
-    // retry backoff. A 5 s base cut off such a run in offline-transactions
-    // and turned a kill into a timeout, so the base defaults to 10 s
-    // (`--hang-limit`); hangs are cached, so it costs only cold runs.
+    // retry backoff, and a loaded machine slows every run. A mutant run
+    // first gets a short budget (`--first-limit`); a copy cut off there runs
+    // again alone, with the full limit (`--hang-limit`, 10 s by default:
+    // a 5 s base once turned a slow kill into a timeout), and only a run
+    // cut off there too is a timeout (see unitsBatch).
     const limitFor = (file) => options.hangLimit + 3000 * (fileSeconds.get(file) ?? 10)
+    const firstLimitFor = (file) =>
+      Math.min(limitFor(file), options.firstLimit + 3000 * (fileSeconds.get(file) ?? 10))
     // A cancelled run can leave work behind, so its context is replaced.
     const replace = async (slot) => {
       const started = Date.now()
@@ -1015,7 +1052,7 @@ export default mergeConfig(base, {
             spec: `mutant:${st.mutant.number}`,
             mutant: st.mutant.number,
             select: await selectionFor(slot, file, keysOf(st)),
-            limitMs: limitFor(file),
+            limitMs: firstLimitFor(file),
             stopOnKill: true,
             ignore: ignoredIn(file),
           })

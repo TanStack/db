@@ -18,6 +18,10 @@ const ts = createRequire(
 const SOURCE = `src/sut.ts`
 // A second source in the same package, which the first imports from.
 const LIB = `src/lib.ts`
+// How long a slow test waits, in real milliseconds: past the 1 s first
+// budget that the driver passes (`--first-limit`), within the 6 s full limit
+// (`--hang-limit`).
+const SLOW_MS = 3000
 const ORACLE_FILES = [`a`, `b`]
 const METHOD_NAMES = [`run`, `step`, `tick`]
 
@@ -129,6 +133,8 @@ const testCase = fc.record({
   // on a promise that never settles. Rare, since each hang costs a run its
   // whole time limit.
   hangs: fc.constantFrom(false, false, false, false, false, false, false, true),
+  // Slow tests cost seconds of real time each, so only a witness has one.
+  slow: fc.constant(false),
   // A test may run a second campaign, on its own route and input, as
   // `runOracleCampaign` does.
   then: fc.option(
@@ -241,6 +247,7 @@ const judging = (file, route, input, extra = {}) => ({
   flaky: false,
   judgeBy: `verdict`,
   hangs: false,
+  slow: false,
   then: null,
   ...extra,
 })
@@ -416,6 +423,15 @@ const witness = [
     body: [kill],
     tests: [judging(`a`, `random seed`, 7), judging(`b`, `fixed seed`, 7)],
   },
+  // A slow kill: the run ends after the first budget, within the full
+  // limit, so the confirming rerun kills it (a run is a timeout only when
+  // it passes the full limit alone).
+  {
+    id: `w_slowkill`,
+    owners: [`a`],
+    body: [kill],
+    tests: [judging(`a`, `fixed seed`, 7, { slow: true })],
+  },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -460,6 +476,7 @@ const captureWitness = new Set([
   `w_hangsurvive`,
   `w_flakykill`,
   `w_crosskill`,
+  `w_slowkill`,
 ])
 
 // ## Rendering and layout
@@ -1573,6 +1590,13 @@ function oracleTestFile(plan, file) {
               `    if (reads${i} !== 0) throw new Error('the payload was read')`,
             ]
           : []),
+        // A slow test waits past the first budget, within the full limit,
+        // where the output differs; it then judges as usual.
+        ...(t.slow
+          ? [
+              `    if (${gate} && JSON.stringify(${out}) !== '${expected}') await new Promise((r) => setTimeout(r, ${SLOW_MS}))`,
+            ]
+          : []),
         // A flaky test never hangs: the model leaves flaky tests out.
         ...(t.hangs && !t.flaky
           ? [
@@ -1595,7 +1619,7 @@ function oracleTestFile(plan, file) {
     }
     out.push(
       `describe('t${index}', () => {`,
-      `  test('${testName(t, index)}', ${t.hangs && !t.flaky ? `async ` : ``}() => {`,
+      `  test('${testName(t, index)}', ${(t.hangs && !t.flaky) || t.slow ? `async ` : ``}() => {`,
       ...partsOf(t).flatMap(campaign),
       `  })`,
       `})`,
