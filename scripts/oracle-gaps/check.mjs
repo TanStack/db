@@ -790,7 +790,17 @@ export default mergeConfig(base, {
     // and turned a kill into a timeout, so the base defaults to 10 s
     // (`--hang-limit`); hangs are cached, so it costs only cold runs.
     const limitFor = (file) => options.hangLimit + 3000 * (fileSeconds.get(file) ?? 10)
-    const runAcross = async (files, pass) => {
+    // A cancelled run can leave work behind, so its context is replaced.
+    const replace = async (slot) => {
+      const started = Date.now()
+      await Promise.race([slot.context.close().catch(() => undefined), sleep(10_000)])
+      slot.context = await warmContext(settings, slot.index)
+      await globSpecs(slot.context)
+      contexts[slot.index] = slot.context
+      span(`replace context`, started, { slot: slot.index })
+    }
+    // `after(index)` is more work for context `index` once its files ran.
+    const runAcross = async (files, pass, after = async () => {}) => {
       const parts = contexts.map(() => [])
       files.forEach((file, index) => parts[index % contexts.length].push(file))
       const units = (
@@ -799,6 +809,7 @@ export default mergeConfig(base, {
             const done = []
             for (const file of parts[index])
               done.push(await unit(context, file, `unmutated:${pass}`))
+            await after(index)
             return done
           }),
         )
@@ -848,25 +859,7 @@ export default mergeConfig(base, {
           if (fileOf(key) === file) first.rows.delete(key)
       }
     }
-    const second = await runAcross(files, 2)
-    endPhase(`unmutated pass 2`, { files: files.length })
-    const baseline = baselineOf(first.rows, second.rows, oracleFiles)
-    const { nondeterministic } = baseline
-    // A nondeterministic test judges nothing, so its verdict must not stop
-    // a run at its first kill: a later test of the file may decide.
-    const ignoredIn = (file) => [...nondeterministic].filter((key) => fileOf(key) === file).sort()
-    log(
-      `unmutated: ${[...first.rows.values()].filter((r) => !r.background).length} tests in ${first.seconds.toFixed(1)}s and ${second.seconds.toFixed(1)}s; nondeterministic: ${nondeterministic.size}`,
-    )
-
     const ownersOf = (mutant) => owned.of(mutant.source, mutant.function)
-
-    // 3–5. Mutants.
-    const diffs = new Map(
-      options.sources.map((source) => [source, diffLines(pkg, options.diffBase, source)]),
-    )
-    const results = []
-    const started = Date.now()
     let queue = mutants.filter((m) => !options.only || options.only.has(m.id))
     if (options.sample !== undefined) {
       // A fixed-seed shuffle, so a survey samples the same mutants every run.
@@ -882,28 +875,103 @@ export default mergeConfig(base, {
         return own.slice(0, options.sample)
       })
     }
-    // Results are appended as they finish, so a stopped survey keeps them.
-    const partial = join(options.out, `results.jsonl`)
-    rmSync(partial, { force: true })
     // The tests of a file that a mutant must run: every test from the first
     // one that reached its site. A later test can see the mutant through
     // state that a reaching test changed, so only the tests before the
     // first reaching one are left out, and only when running the rest with
     // no mutant active reproduces what they recorded when the whole file
-    // ran: a later test can depend on state that a left-out test set.
-    const selectionChecks = new Map()
-    const selectionFor = async (slot, file, keys) => {
-      const all = [...baseline.firstRows.keys()].filter(
-        (k) => fileOf(k) === file && !baseline.firstRows.get(k).background,
+    // ran: a later test can depend on state that a left-out test set. Reach
+    // comes from the first pass alone, so every mutant's selections are
+    // known before the second, and their checks run beside it, on the
+    // contexts it leaves idle.
+    const selectionOf = (file, keys) => {
+      if (keys.some((k) => k === `${file} > (background)`)) return null
+      const all = [...first.rows.keys()].filter(
+        (k) => fileOf(k) === file && !first.rows.get(k).background,
       )
       const reaching = new Set(keys)
-      if (keys.some((k) => k === `${file} > (background)`)) return null
-      const first = all.findIndex((k) => reaching.has(k))
-      if (first <= 0) return null
-      const selection = all.slice(first)
-      const id = `${file}\0${selection.join(`\0`)}`
-      // The check runs once per selection, even when several contexts ask
-      // for it at the same time.
+      const at = all.findIndex((k) => reaching.has(k))
+      return at <= 0 ? null : all.slice(at)
+    }
+    const selectionId = (file, selection) => `${file}\0${selection.join(`\0`)}`
+    const reproduces = (selection, run) => {
+      const rows = new Map(run.rows ?? [])
+      return (
+        !run.timedOut &&
+        outcomeOf([run]).outcome === `survived` &&
+        selection.every(
+          (k) =>
+            rows.get(k)?.hash === first.rows.get(k)?.hash &&
+            rows.get(k)?.observed === first.rows.get(k)?.observed,
+        )
+      )
+    }
+    const selectionChecks = new Map()
+    const planned = new Map()
+    const reach = baselineOf(first.rows, first.rows, oracleFiles)
+    for (const mutant of queue) {
+      const owners = ownersOf(mutant)
+      if (owners.size === 0) continue
+      const { oracleKeys, oracleTargets } = targetsOf(mutant, reach, owners, oracleFiles)
+      for (const file of oracleTargets) {
+        const selection = selectionOf(file, oracleKeys)
+        if (selection) planned.set(selectionId(file, selection), { file, selection })
+      }
+    }
+    // Each context's share of the checks: contexts that run no second-pass
+    // file take theirs first.
+    const shares = contexts.map(() => [])
+    const byLoad = contexts
+      .map((_, index) => index)
+      .sort((a, b) => (a < files.length) - (b < files.length) || a - b)
+    ;[...planned.entries()].forEach(([id, item], i) =>
+      shares[byLoad[i % byLoad.length]].push({ id, ...item }),
+    )
+    const checkShare = async (index) => {
+      const share = shares[index]
+      if (share.length === 0) return
+      const slot = { context: contexts[index], index }
+      const runs = await unitsBatch(
+        slot,
+        share.map(({ file, selection }) => ({
+          file,
+          spec: `selected`,
+          mutant: null,
+          select: selection,
+          limitMs: limitFor(file),
+          stopOnKill: false,
+        })),
+      )
+      share.forEach(({ id, selection }, i) =>
+        selectionChecks.set(id, Promise.resolve(reproduces(selection, runs[i]))),
+      )
+    }
+    const second = await runAcross(files, 2, checkShare)
+    endPhase(`unmutated pass 2`, { files: files.length, selections: planned.size })
+    const baseline = baselineOf(first.rows, second.rows, oracleFiles)
+    const { nondeterministic } = baseline
+    // A nondeterministic test judges nothing, so its verdict must not stop
+    // a run at its first kill: a later test of the file may decide.
+    const ignoredIn = (file) => [...nondeterministic].filter((key) => fileOf(key) === file).sort()
+    log(
+      `unmutated: ${[...first.rows.values()].filter((r) => !r.background).length} tests in ${first.seconds.toFixed(1)}s and ${second.seconds.toFixed(1)}s; nondeterministic: ${nondeterministic.size}`,
+    )
+
+    // 3–5. Mutants.
+    const diffs = new Map(
+      options.sources.map((source) => [source, diffLines(pkg, options.diffBase, source)]),
+    )
+    const results = []
+    const started = Date.now()
+    // Results are appended as they finish, so a stopped survey keeps them.
+    const partial = join(options.out, `results.jsonl`)
+    rmSync(partial, { force: true })
+    // A selection no plan foresaw (the ordinary tier's) is checked when a
+    // mutant first asks for it, once even when several contexts ask at once.
+    const selectionFor = async (slot, file, keys) => {
+      const selection = selectionOf(file, keys)
+      if (!selection) return null
+      const id = selectionId(file, selection)
       if (!selectionChecks.has(id))
         selectionChecks.set(
           id,
@@ -913,28 +981,10 @@ export default mergeConfig(base, {
               limitMs: limitFor(file),
             })
             if (run.timedOut) await replace(slot)
-            const rows = new Map(run.rows ?? [])
-            return (
-              !run.timedOut &&
-              outcomeOf([run]).outcome === `survived` &&
-              selection.every(
-                (k) =>
-                  rows.get(k)?.hash === baseline.firstRows.get(k)?.hash &&
-                  rows.get(k)?.observed === baseline.firstRows.get(k)?.observed,
-              )
-            )
+            return reproduces(selection, run)
           })(),
         )
       return (await selectionChecks.get(id)) ? selection : null
-    }
-    // A cancelled run can leave work behind, so its context is replaced.
-    const replace = async (slot) => {
-      const started = Date.now()
-      await Promise.race([slot.context.close().catch(() => undefined), sleep(10_000)])
-      slot.context = await warmContext(settings, slot.index)
-      await globSpecs(slot.context)
-      contexts[slot.index] = slot.context
-      span(`replace context`, started, { slot: slot.index })
     }
     // Mutants run in groups per context, all in one batch: each undecided
     // mutant's owner files, file by file, so every mutant's first file runs
