@@ -28,10 +28,10 @@ export function parseArgs(argv, cwd = process.cwd()) {
     // a gap, and only report whether they would have caught a survivor.
     ordinary: args.ordinary === true,
     // Each warm context runs one mutant at a time with one worker. Measured on
-    // main's LocalStorage owners (320 mutants): 2 contexts 297 s, 4 185 s,
-    // 8 137 s, with identical oracle-tier classes.
+    // offline-transactions' FIFO executor (163 mutants, 18 cores): 8 contexts
+    // 124 s, 16 contexts 91 s, with identical classes.
     contexts: Number(
-      args.contexts ?? Math.min(8, Math.max(2, availableParallelism() - 2)),
+      args.contexts ?? Math.min(16, Math.max(2, availableParallelism() - 2)),
     ),
     sources: args.source.split(`,`),
     seed: args.seed,

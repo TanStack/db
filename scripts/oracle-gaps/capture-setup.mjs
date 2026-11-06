@@ -113,7 +113,52 @@ let inTest = false
 let currentFile
 const background = new Set()
 const active = state.mutant
-const hit = (id) => (inTest ? hits : background).add(id)
+const hit = (id) => {
+  ;(inTest ? hits : background).add(id)
+  historyHits?.add(id)
+}
+
+// Temporary profiling (ORACLE_GAPS_PROFILE): how many fast-check histories
+// each test ran, and in how many of them each site was hit, to measure what
+// replaying only the reaching histories would save.
+let histories = 0
+let siteHistories = new Map()
+let historyHits = null
+if (fc && process.env.ORACLE_GAPS_PROFILE) {
+  const samples = [
+    () => fc.property(fc.constant(0), () => true),
+    () => fc.asyncProperty(fc.constant(0), async () => true),
+  ]
+  for (const sample of samples) {
+    const prototype = Object.getPrototypeOf(sample())
+    const run = prototype.run
+    if (typeof run !== `function` || run.counted) continue
+    const counted = function (...args) {
+      const outer = historyHits
+      historyHits = new Set()
+      const done = () => {
+        if (inTest) {
+          histories += 1
+          for (const id of historyHits)
+            siteHistories.set(id, (siteHistories.get(id) ?? 0) + 1)
+        }
+        historyHits = outer
+      }
+      let result
+      try {
+        result = run.apply(this, args)
+      } catch (error) {
+        done()
+        throw error
+      }
+      if (typeof result?.then === `function`) return result.finally(done)
+      done()
+      return result
+    }
+    counted.counted = true
+    prototype.run = counted
+  }
+}
 const swapped = {
   '===': `!==`,
   '!==': `===`,
@@ -385,6 +430,8 @@ beforeEach((context) => {
   hits = new Set()
   outcomes = new Map()
   verdicts = new Map()
+  histories = 0
+  siteHistories = new Map()
   route = undefined
   inTest = true
 })
@@ -413,6 +460,9 @@ afterEach((context) => {
       outcomes: [...outcomes],
       verdicts: [...verdicts.values()],
       route,
+      ...(process.env.ORACLE_GAPS_PROFILE
+        ? { histories, siteHistories: [...siteHistories] }
+        : {}),
     })}\n`,
   )
   hits = new Set()

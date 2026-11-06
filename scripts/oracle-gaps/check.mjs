@@ -546,6 +546,14 @@ export default mergeConfig(base, {
     )
     const first = await runAcross(files, 1)
     endPhase(`unmutated pass 1`, { files: files.length })
+    if (profileFile)
+      for (const [key, row] of first.rows)
+        if (row.histories)
+          span(`baseline histories`, Date.now(), {
+            key,
+            histories: row.histories,
+            sites: row.siteHistories,
+          })
     // An oracle file that fails with no mutant active cannot judge the code
     // it owns, so the run refuses rather than report that code as unowned.
     const failingOwners = [...first.failed.keys()].filter((file) =>
