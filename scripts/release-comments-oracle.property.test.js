@@ -8,9 +8,10 @@
  * Comment operations succeed. Earlier release comments suppress new posts. Lookup
  * failures must warn without suppressing unrelated notifications. It does not
  * establish GitHub authentication, delivery, linked-issue pagination beyond ten,
- * retries, or concurrent releases. Failed existing-comment checks retain the
- * prior attempt-post fallback; their policy is outside this judgment pending
- * the maintainer's decision. The version/publish ledger has a separate owner.
+ * retries, or concurrent releases. Per the maintainer's 2026-11-06 decision,
+ * failed existing-comment checks warn with recipient/cause and attempt posting
+ * anyway. Duplicates after a failed check are allowed. The version/publish
+ * ledger has a separate owner.
  */
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -92,6 +93,7 @@ function history(core, target, reverse, linked) {
   return {
     repository: 'TanStack/db',
     existingComments: {},
+    failedCommentChecks: [],
     version: selected?.name ?? '9.9.9-rc.1',
     pre: selected?.pre ?? false,
     build: selected?.build ?? false,
@@ -299,6 +301,29 @@ for (const repository of ['TanStack/db', 'TanStack/query']) {
   }
 }
 
+// The maintainer chose to attempt posting after a failed duplicate check.
+// Cross PR/issue failures with both repositories and partial page responses.
+// A neighboring successful check still suppresses its existing notification.
+for (const repository of ['TanStack/db', 'TanStack/query']) {
+  for (const kind of ['pr', 'issue']) {
+    for (const partialResponse of [false, true]) {
+      const input = routedHistory([1, 0, 0], 0, false, 'foreign')
+      input.repository = repository
+      const pr = `https://github.com/${repository}/issues/200`
+      const linked = 'https://github.com/TanStack/db/issues/700'
+      const failed = kind === 'pr' ? pr : linked
+      const sibling = kind === 'pr' ? linked : pr
+      input.failedCommentChecks = [failed]
+      input.partialCommentResponse = partialResponse
+      input.existingComments = {
+        [failed]: partialResponse ? [0, 1] : [0],
+        [sibling]: [1],
+      }
+      histories.push(input)
+    }
+  }
+}
+
 // Independent ledger judgment: authored releases determine PR contributions;
 // authored per-PR edges determine each issue's union. Recipient identity is its
 // repository plus number. Expected results never parse production Markdown or
@@ -332,7 +357,7 @@ function expectedNotifications(input) {
         .flatMap((pr) => (input.edges[pr] ?? []).map(issueUrl)),
     ),
   ]
-  const comments = [
+  const contributions = [
     ...[...prs].map(([number, links]) => ({
       kind: 'pr',
       target: `https://github.com/${input.repository}/pull/${number}`,
@@ -357,8 +382,16 @@ function expectedNotifications(input) {
       }
     }),
   ]
+  const commentCheckFailures = contributions
+    .map((comment) => comment.target.replace('/pull/', '/issues/'))
+    .filter((target) => input.failedCommentChecks.includes(target))
+    .sort()
+  const comments = contributions
     .filter(
       (comment) =>
+        commentCheckFailures.includes(
+          comment.target.replace('/pull/', '/issues/'),
+        ) ||
         !(
           input.existingComments[
             comment.target.replace('/pull/', '/issues/')
@@ -373,6 +406,7 @@ function expectedNotifications(input) {
       .sort((a, b) => a - b),
     collision,
     prCount: prs.size,
+    commentCheckFailures,
   }
 }
 
@@ -454,6 +488,23 @@ function checkNotifications(input, calls, stderr) {
       stderr.includes('controlled lookup failure'),
       'diagnostic retains the lookup cause',
     )
+  const failedChecks = [
+    ...stderr.matchAll(
+      /Warning: Could not check existing comments for (https:\/\/github\.com\/[^\s;]+); attempting to post anyway:/g,
+    ),
+  ]
+    .map((match) => match[1])
+    .sort()
+  assert.deepEqual(
+    failedChecks,
+    expected.commentCheckFailures,
+    'existing-comment failure diagnostics after the script exits',
+  )
+  if (failedChecks.length)
+    assert.ok(
+      stderr.includes('controlled existing-comment lookup failure'),
+      'existing-comment diagnostic retains the error cause',
+    )
 }
 
 const reach = new Map(
@@ -478,6 +529,9 @@ const reach = new Map(
     'label disagrees with PR URL',
     'existing release comment',
     'release comment on later page',
+    'failed PR comment check',
+    'failed issue comment check',
+    'partial comment response before failure',
   ].map((state) => [state, 0]),
 )
 const script =
@@ -551,6 +605,11 @@ if (args[0] === 'api' && args[1] === 'graphql') {
 } else if (args[0] === 'api' && args[1].endsWith('/comments')) {
   const target = 'https://github.com/' + args[1].slice('repos/'.length, -'/comments'.length)
   const pages = JSON.parse(process.env.RELEASE_COMMENT_EXISTING)[target] ?? [0]
+  if (JSON.parse(process.env.RELEASE_COMMENT_CHECK_FAILURES).includes(target)) {
+    if (process.env.RELEASE_COMMENT_PARTIAL_RESPONSE === 'true') console.log(pages[0])
+    console.error('controlled existing-comment lookup failure')
+    process.exit(1)
+  }
   console.log((args.includes('--paginate') ? pages : pages.slice(0, 1)).join('\\n'))
 } else if ((args[0] === 'pr' || args[0] === 'issue') && args[1] === 'comment') {
 } else {
@@ -577,6 +636,12 @@ if (args[0] === 'api' && args[1] === 'graphql') {
         GITHUB_REPOSITORY: input.repository,
         RELEASE_COMMENT_REPOSITORY: input.repository,
         RELEASE_COMMENT_EXISTING: JSON.stringify(input.existingComments),
+        RELEASE_COMMENT_CHECK_FAILURES: JSON.stringify(
+          input.failedCommentChecks,
+        ),
+        RELEASE_COMMENT_PARTIAL_RESPONSE: String(
+          input.partialCommentResponse ?? false,
+        ),
         RELEASE_COMMENT_CALLS: calls,
         RELEASE_COMMENT_EDGES: JSON.stringify(input.edges),
         RELEASE_COMMENT_FAILURES: JSON.stringify(input.failedLookups),
@@ -658,6 +723,16 @@ if (args[0] === 'api' && args[1] === 'graphql') {
       )
     )
       states.push('release comment on later page')
+    if (expected.commentCheckFailures.length) {
+      states.push(
+        input.failedCommentChecks[0] ===
+          `https://github.com/${input.repository}/issues/200`
+          ? 'failed PR comment check'
+          : 'failed issue comment check',
+      )
+      if (input.partialCommentResponse)
+        states.push('partial comment response before failure')
+    }
     for (const state of states) reach.set(state, reach.get(state) + 1)
     checkNotifications(input, recorded, result.stderr)
   } catch (error) {

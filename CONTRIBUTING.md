@@ -194,7 +194,9 @@ version section in `CHANGELOG.md`, including prerelease and build suffixes,
 and groups the released packages into one comment per PR or linked issue.
 Contributing PR identities come from URLs in the source repository; incidental
 foreign PR links and misleading labels cannot create unrelated local recipients.
-The duplicate check reads every comment page before deciding whether to post.
+The duplicate check follows every comment page. If that lookup fails, it logs
+the recipient and error, then attempts posting anyway. A possible duplicate is
+acceptable in that case; the logs support investigating it.
 Linked issues retain their repository identity, and their comments link to the
 contributing PRs in the source repository. Changelog links account for colliding
 version-heading anchors. Failed issue lookups log the PR and error while other

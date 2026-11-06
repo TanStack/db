@@ -6740,7 +6740,7 @@ recipient URLs, source PR URLs, package/version/anchor unions and lookup stderr
 at script exit. Numeric recipients retain explicit `--repo`/`-R` overrides, and
 issue lookup fixtures belong to their requested source repository.
 
-All 149 finite histories pass, preserving all prior replay indexes. They cover
+All 157 finite histories pass, preserving all prior replay indexes. They cover
 stable/prerelease/build neighbors, both section orders, independent package
 versions/documents, duplicate PR references, source repositories, asymmetric
 contributions, shared/disjoint/absent issue edges, same-number foreign issues,
@@ -6749,21 +6749,22 @@ misleading display labels, existing comments on early/later pages, missing
 versions, empty sections and no publications. Source PR identity comes from the
 URL, not its label; foreign changelog references do not create local recipients.
 
-Declared reach: stable 80, prerelease 77, build metadata 44, reversed sections 62,
-linked issues 110, no linked issues 32, no matching PRs 7, asymmetric contributions 70,
-disjoint edges 12, shared edges 54, foreign issues 45, same-number foreign issues 38,
-lookup failure 6, colliding heading anchor 13, alternate source repository 26,
+Declared reach: stable 88, prerelease 77, build metadata 44, reversed sections 62,
+linked issues 118, no linked issues 32, no matching PRs 7, asymmetric contributions 78,
+disjoint edges 12, shared edges 54, foreign issues 51, same-number foreign issues 42,
+lookup failure 6, colliding heading anchor 13, alternate source repository 30,
 independent package versions 8, foreign changelog reference 12, label mismatch 4,
-existing release comment 12 and release comment on later page 8. All 20 states have
+existing release comment 20, release comment on later page 12, failed PR check 4,
+failed issue check 4 and partial response before failure 4. All 23 states have
 failing minima. Linked reach now requires a selected expected issue notification;
 no-selected case 64 counts zero rather than its earlier false reach of one.
 
-Before production edits, the initial pinned script failed64/67 comparisons;
-the first expanded owner rejected27/105. A fresh reviewer demonstrated three
+Before production edits, the initial pinned script failed 64/67 comparisons;
+the first expanded owner rejected 27/105. A fresh reviewer demonstrated three
 more surviving mutants; the 121-history owner rejected them and narrow variants.
-The149-history owner then rejected unchanged production in20 intended reference/
-comment-page comparisons, with129 passes. Repaired production passes149 plus
-all 11 existing release tests. Sixteen final-source mutants fail intended value
+The 149-history owner then rejected unchanged production in 20 intended reference/
+comment-page comparisons, with 129 passes. That repair passed all 149 histories
+and 11 existing release tests. Sixteen final-source mutants fail intended value
 assertions across routing, unions, repository identity, per-package selection,
 anchors, warnings, reference identity and pagination. Earlier parser calibrations
 remain recorded. [Versioned evidence and replays](oracle-reviews/2026-11-06-release-comments.md)
@@ -6772,12 +6773,16 @@ preserve all review stages, source identities, corrections and calibrated scope.
 The controlled comment API supplies per-page marker counts; raw GitHub comment
 body/JQ conformance and actual delivery are not established. Authentication,
 foreign-token permissions, linked-issue pagination beyond ten, retries, concurrent
-releases and alternative Markdown remain outside this claim. Existing-comment
-lookup failures currently warn and proceed; whether to skip instead is a pending
-maintainer policy decision from CodeRabbit review 5805246017, item R13. This owner
-must add failed-check histories and a distinguishing mutant once that decision
-is made. The PR does not claim that policy is settled or that duplicates cannot
-occur after failed checks. Real delivery needs an authorized host observation.
+releases and alternative Markdown remain outside this claim. The maintainer chose attempt-posting after failed existing-comment checks
+on 2026-11-06 (R13), accepting possible duplicates. Eight single-recipient failure
+histories cover PR/issue targets, both source repositories and failures before
+or after a page response. The exit comparison requires the post, recipient/cause
+warning and explicit continuation message; successful neighboring checks still
+suppress existing comments. All eight direct replays rejected the old diagnostic
+before production edits. The 157-history campaign and all 11 existing tests pass;
+skip-on-failure and missing-cause mutants fail intended assertions. R13 is
+accepted-design with its diagnostic coverage complete. Actual delivery still
+needs an authorized host observation.
 The release-history owner below continues to own version/publish planning.
 
 ## RC release histories and replay observations

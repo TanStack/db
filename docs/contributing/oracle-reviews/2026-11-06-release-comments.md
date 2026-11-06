@@ -411,3 +411,61 @@ Final source fingerprints (SHA-256):
 
 - `scripts/comment-on-release.ts`: `f174e6812edc0e5a3fa2124091c5107baf507e7ff5c251e2cb3d3a564e21ef4b`
 - `scripts/release-comments-oracle.property.test.js`: `9da4b7bc5a58a0ff2c915bd46d25727ad83ab9ef170bfab84af6d1998caee92d`
+
+## R13 decision: attempt posting and retain debugging context
+
+The maintainer answered on 2026-11-06: attempt posting when the existing-comment
+lookup fails. Possible duplicates are acceptable and can be investigated; add
+context to the logs. This resolves R13 as accepted-design and supersedes the
+pending-decision notes above. There is no remaining policy blocker from this
+review. The warning now includes the recipient URL, full process error and
+"attempting to post anyway". The existing false fallback is unchanged.
+
+The primary owner adds eight histories after the original 149 indexes: both
+source repositories, PR/issue recipients and failures before/after a page
+response. Failed checks permit the post even with an unseen existing marker;
+a neighboring successful check still suppresses its existing notification.
+The model derives expected recipients from the independent release ledger and
+marks only the authored failed checks. The fake gh supplies the failure and
+stderr/partial stdout. No real comment is posted.
+
+- **Law/authority:** The maintainer's explicit choice permits possible duplicates
+  after failed checks and requires debugging context. Successful checks retain
+  the existing duplicate-suppression law.
+- **RED:** Before production edits, direct replays 149-156 on unchanged parent
+  dd5c256 all failed the existing-comment diagnostic assertion after script
+  exit. Their notification comparisons already passed: posting and sibling
+  suppression match the chosen policy. These are diagnostic value failures,
+  not setup errors. The production source matched its recorded parent SHA.
+- **GREEN:** `pnpm test:release` passes all 157 histories and 11 existing tests.
+- **Mutants:** Changing the failed-check fallback to skip fails notifications
+  on replay 150. Removing the logged error object fails the cause assertion
+  on replay 151. Both scripts exit successfully before the intended assertion.
+- **Reach:** Failed PR check 4, failed issue check 4, partial response before
+  failure 4. All 23 failing reach minima pass. Current counts: stable 88,
+  prerelease 77, build 44, reversed 62, linked issues 118, no linked issues 32,
+  no matching PRs 7, asymmetric contributions 78, disjoint edges 12, shared edges
+  54, foreign issues 51, same-number foreign issues 42, issue lookup failure 6,
+  heading collision 13, alternate source 30, independent versions 8, foreign
+  changelog reference 12, label mismatch 4, existing comment 20, later-page
+  comment 12. No history or prior minimum was removed.
+- **Limits:** Eight controlled single-recipient failures; no guarantee against
+  duplicates after a failed check. Actual delivery/authentication, concurrent
+  releases, retries and raw GitHub/JQ conformance retain their earlier limits.
+
+The existing conformance evidence remains applicable. ORC-001 now has explicit
+maintainer authority for the failed-check rule; ORC-004 adds that missing failure
+dimension; ORC-005 observes posting and recipient/cause warnings at exit;
+ORC-006 includes both rejecting mutants; ORC-007 exhausts 157 cases; ORC-015
+measures 23 states. ORC-008 remains inapplicable to this stateless computation.
+The other numbered outcomes retain the earlier independent model, literate
+structure, vocabulary, failure fidelity and controlled-boundary limits.
+
+The review ledger now has 14 fixed items, one refuted claim and one accepted
+design, plus the separately fixed sibling S1. No review decision remains open.
+This does not substitute for final-head CI or a whole-PR readiness check.
+
+Source fingerprints (SHA-256):
+
+- `scripts/comment-on-release.ts`: `404e380684afeb237e28beeaaecf299270e5fac3287bc762ee6f3a717b761452`
+- `scripts/release-comments-oracle.property.test.js`: `472ffb7364f969fdd7cf6bd7e0a2b160dc963cdfa58a0caeb2ace2c1a3abc33c`

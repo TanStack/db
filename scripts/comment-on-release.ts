@@ -149,8 +149,11 @@ function hasExistingComment(url: string): boolean {
       { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     )
     return result.split('\n').some((count) => parseInt(count, 10) > 0)
-  } catch {
-    console.warn(`Warning: Could not check existing comments for ${url}`)
+  } catch (error) {
+    console.warn(
+      `Warning: Could not check existing comments for ${url}; attempting to post anyway:`,
+      error,
+    )
     return false
   }
 }
