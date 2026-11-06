@@ -4,7 +4,7 @@ import { realpathSync } from 'node:fs'
 import { availableParallelism } from 'node:os'
 import { resolve } from 'node:path'
 
-const flags = new Set([`daemon`, `stop-daemon`])
+const flags = new Set([`daemon`, `stop-daemon`, `ordinary`])
 /**
  * The options in `argv`. Paths are resolved against `cwd`, the caller's
  * working directory, which the daemon receives with each request.
@@ -24,6 +24,9 @@ export function parseArgs(argv, cwd = process.cwd()) {
   return {
     pkg,
     daemon: args.daemon === true,
+    // Ordinary (non-oracle) test files run only when asked: they never close
+    // a gap, and only report whether they would have caught a survivor.
+    ordinary: args.ordinary === true,
     // Each warm context runs one mutant at a time with one worker. Measured on
     // main's LocalStorage owners (320 mutants): 2 contexts 297 s, 4 185 s,
     // 8 137 s, with identical oracle-tier classes.

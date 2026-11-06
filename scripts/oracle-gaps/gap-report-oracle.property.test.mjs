@@ -74,7 +74,10 @@
  *    test's observation or asserted value changed, a `generator-gap` when an
  *    `if` on its line never took one of its outcomes in an owner test, and
  *    `no-observed-difference` otherwise. A test in a file that is not an
- *    oracle file never changes any of this. Only `killed` closes an owned
+ *    oracle file never changes any of this, and runs only when the run asks
+ *    for it (`--ordinary`, maintainer decision of 2026-11-06): then a
+ *    survivor or an unreached mutant that an ordinary test reached reports
+ *    the ordinary tests' outcome, for information. Only `killed` closes an owned
  *    mutant; every other class is a gap.
  * 5. **Authored mutants.** An authored mutant whose text occurs exactly once
  *    is judged by law 4 against the owners of the function it edits, without
@@ -229,7 +232,11 @@ const cleanEnv = () =>
  * daemon (law 9). A file of an earlier state that this state lacks is
  * removed.
  */
-function runCli(dir, files, { seed = 1, daemon = false, cli = here } = {}) {
+function runCli(
+  dir,
+  files,
+  { seed = 1, daemon = false, cli = here, ordinary = false } = {},
+) {
   writeFixture(dir, files)
   const out = join(dir, daemon ? `out-daemon` : `out`)
   rmSync(out, { recursive: true, force: true })
@@ -253,6 +260,7 @@ function runCli(dir, files, { seed = 1, daemon = false, cli = here } = {}) {
     `--out`,
     path(out),
   ]
+  if (ordinary) args.push(`--ordinary`)
   if (files[AUTHORED] !== undefined)
     args.push(`--mutants`, path(join(dir, `mutants`)))
   const env = cleanEnv()
@@ -311,6 +319,7 @@ function runCli(dir, files, { seed = 1, daemon = false, cli = here } = {}) {
       class: r.class,
       laws: r.laws,
       probe: r.probeGuard === true,
+      ordinaryOutcome: r.testOutcome !== undefined,
     })),
     ...readSummary(summary),
   }
@@ -362,10 +371,10 @@ function incremental(dir, plan, cli, observe, states) {
     )
     const files = fixtureFiles(resolveHistory(state.history), state)
     const key = fingerprint(files, state)
-    if (!cold.has(key))
-      cold.set(key, runCli(dir, files, { seed: state.seed, cli: copy }))
+    const how = { seed: state.seed, cli: copy, ordinary: plan.ordinary }
+    if (!cold.has(key)) cold.set(key, runCli(dir, files, how))
     const coldRun = cold.get(key)
-    const daemon = runCli(dir, files, { seed: state.seed, daemon: true, cli: copy })
+    const daemon = runCli(dir, files, { ...how, daemon: true })
     observe(`incremental`, {
       step,
       cold: {
@@ -423,7 +432,7 @@ async function driver(plan, observe) {
   const dir = mkdtempSync(join(here, `.scratch-`))
   try {
     const files = fixtureFiles(plan)
-    const cli = runCli(dir, files)
+    const cli = runCli(dir, files, { ordinary: plan.ordinary })
     // How many units were computed or reused says how the result was
     // produced, not what it is, so it is not observed.
     observe(`cli`, { ...cli, evidence: undefined })
@@ -534,9 +543,13 @@ async function driver(plan, observe) {
         states.add(`no observed difference`)
       if (m.class === `indeterminate`) states.add(`indeterminate`)
     }
+    if (plan.ordinary && cli.mutants.some((m) => m.ordinaryOutcome))
+      states.add(`ordinary tests run when asked`)
+    if (!plan.ordinary && plan.tests.some((t) => t.file === `c`))
+      states.add(`ordinary tests left out by default`)
     if (plan.stability !== `none` && cli.exit === 0) {
       const moved = { ...files, [SOURCE]: edited(plan) }
-      observe(`stability`, runCli(dir, moved))
+      observe(`stability`, runCli(dir, moved, { ordinary: plan.ordinary }))
       states.add(`stability rerun`)
     }
     if (plan.steps.length > 0) incremental(dir, plan, cli, observe, states)
@@ -669,6 +682,14 @@ function check(plan, observations, expected) {
         { actual: got, expected: owed },
       )
   }
+  for (const [owed, got] of pairs)
+    if (!owed.probe && got.ordinaryOutcome !== owed.ordinaryOutcome)
+      return violation(
+        `cli`,
+        `${site(got)}: the ordinary tests' outcome is ${got.ordinaryOutcome ? `` : `not `}reported, owed ${owed.ordinaryOutcome ? `reported` : `not reported`}`,
+        `ordinary tier`,
+        { actual: got, expected: owed },
+      )
   const authored = cli.mutants.find((m) => m.authored)
   const authoredKind = authored && (authored.class ?? authored.outcome)
   if (authoredKind !== expected.authored)
@@ -931,10 +952,13 @@ const required = [
   `a test that depends on an earlier test`,
   `a kill after a caught verdict`,
   `a kill through state an earlier test stored`,
+  `ordinary tests run when asked`,
+  `ordinary tests left out by default`,
   ...incrementalStates,
 ]
 const faults = [`badEntry`, `missingSource`, `nonLiteral`, `brokenOwner`]
 const separate = [
+  `ordinary tests left out by default`,
   `stale authored mutant`,
   `ambiguous authored mutant`,
   ...faults.map((fault) => `refused ${fault}`),
@@ -970,6 +994,7 @@ oracleProperty({
           authored: { stmt: 0, kind: `apply` },
           stability: `insertGuard`,
           steps: null,
+          ordinary: true,
         }),
       },
       {
@@ -1043,6 +1068,28 @@ oracleProperty({
             `cli`,
             `restart`,
           ],
+        }),
+      },
+      {
+        // An ordinary test exists, and the run does not ask for it.
+        name: `ordinary tests left out by default`,
+        enters: [`ordinary tests left out by default`],
+        // One owned function with no oracle test, so it is unreached, and
+        // an ordinary test that calls it: asked, its outcome is reported.
+        build: (generated) => ({
+          ...generated,
+          functions: [[{ kind: `push`, quote: `'` }]],
+          containers: [],
+          overloads: [],
+          owners: [`a`],
+          wholeFile: `none`,
+          witness: false,
+          tests: [{ ...judging(`c`, `case`, 1), fn: 0 }],
+          authored: null,
+          fault: `none`,
+          stability: `none`,
+          ordinary: false,
+          steps: null,
         }),
       },
       ...faults.map((fault) => ({

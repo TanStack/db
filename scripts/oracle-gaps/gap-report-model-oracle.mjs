@@ -197,6 +197,8 @@ const histories = fc.record({
     `reformat`,
   ),
   // Most histories have no steps, which keeps the campaign's cost down.
+  // Whether the run asks for the ordinary tests' outcome (`--ordinary`).
+  ordinary: fc.boolean(),
   steps: fc.oneof(
     { weight: 5, arbitrary: fc.constant(null) },
     {
@@ -740,6 +742,7 @@ function resolveHistory(history) {
     fault: history.fault,
     stability: history.stability,
     steps: history.steps ?? [],
+    ordinary: history.ordinary === true,
     history,
     source,
     librarySource,
@@ -1197,16 +1200,35 @@ function model(plan) {
       ? `generator-gap`
       : `no-observed-difference`
   }
-  const mutants = sites.map((site) => ({
-    key: site.key,
-    source: site.file,
-    function: site.function,
-    line: site.line,
-    operator: site.operator,
-    ordinal: site.ordinal,
-    probe: site.probe,
-    kind: site.probe ? undefined : kindOf(site),
-  }))
+  // The ordinary tests' outcome is reported, for information, only when the
+  // run asks for it, and only for a survivor or an unreached mutant that an
+  // ordinary test reached.
+  const ordinaryReaches = (site) =>
+    plan.tests
+      .filter((t) => t.file === `c`)
+      .some((t) => interpret(plan, t.fn, t.input, sites).reached.has(site.id))
+  const survivorKinds = new Set([
+    `comparison-gap`,
+    `generator-gap`,
+    `no-observed-difference`,
+    `indeterminate`,
+    `unreached`,
+  ])
+  const mutants = sites.map((site) => {
+    const kind = site.probe ? undefined : kindOf(site)
+    return {
+      key: site.key,
+      source: site.file,
+      function: site.function,
+      line: site.line,
+      operator: site.operator,
+      ordinal: site.ordinal,
+      probe: site.probe,
+      kind,
+      ordinaryOutcome:
+        plan.ordinary && survivorKinds.has(kind) && ordinaryReaches(site),
+    }
+  })
   const authored =
     plan.authored &&
     (!plan.authored.applies

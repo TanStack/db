@@ -27,8 +27,9 @@
 //    function no oracle owns is `unowned`, a warning. Survivors are sorted
 //    into `comparison-gap`, `generator-gap`, `no-observed-difference`, and
 //    `indeterminate`.
-// 5. Runs a survivor against the ordinary tests that reach it, for
-//    information only: an ordinary test never closes a gap.
+// 5. With --ordinary, runs a survivor against the ordinary tests that reach
+//    it, for information only: an ordinary test never closes a gap. Without
+//    it, ordinary test files do not run at all.
 //
 // The pipeline lives in check.mjs, as a session that keeps Vitest warm. A
 // cold run opens one session for one check. With --daemon, the CLI sends the
@@ -47,6 +48,7 @@
 // Usage:
 //   node scripts/oracle-gaps/index.mjs --package <dir> --source <src/x.ts,...>
 //     [--daemon]              (check through the package's daemon)
+//     [--ordinary]            (also run ordinary test files, for information)
 //     [--seed <n>] [--mutants <dir>] [--out <dir>] [--only <id,id>]
 //     [--diff-base <rev>]
 //     [--test-timeout <ms>]   (default 15000; also bounds hooks and teardown.

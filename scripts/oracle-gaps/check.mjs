@@ -505,7 +505,10 @@ export default mergeConfig(base, {
       )
       return { rows, failed, seconds: Math.max(0, ...units.map((u) => u.seconds)) }
     }
-    let files = [...fileSpecs.keys()]
+    // Without --ordinary, only oracle files run.
+    let files = [...fileSpecs.keys()].filter(
+      (file) => options.ordinary || oracleFiles.has(file),
+    )
     const first = await runAcross(files, 1)
     endPhase(`unmutated pass 1`, { files: files.length })
     // An oracle file that fails with no mutant active cannot judge the code
