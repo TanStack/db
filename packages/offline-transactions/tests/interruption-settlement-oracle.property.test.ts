@@ -188,10 +188,15 @@ async function driveInterruption(
   // A permanent provider failure logs once by design; this law ignores logs.
   const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
   const schedule = timing ? scheduleFrom(timing.choices) : undefined
+  // Settling yields ten macrotask turns. `setImmediate` yields a turn
+  // without the timer clamp of `setTimeout(0)`, which made this oracle the
+  // slowest owner in the gap check: the same reach at the fixed seed, about
+  // half the time. Production's only timer, the retry timer, waits its own
+  // delay either way.
   const settle = async () => {
     for (let index = 0; index < 10; index++) {
       await schedule?.waitIdle()
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      await new Promise<void>((resolve) => setImmediate(resolve))
     }
   }
   let phase: Phase = `before`
