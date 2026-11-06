@@ -1,8 +1,12 @@
-import { expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
-import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
+import {
+  atOracleCheckpoint,
+  cleanupOfflineOracle,
+  useControlledClock,
+} from './oracle-lifecycle'
 
 /**
  * # May a false browser online hint strand a visible tab's durable work?
@@ -29,6 +33,9 @@ import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
  * transaction path; public outbox, provider calls, and commit settlement are
  * compared before and after notification. Baseline main fails at the visible
  * checkpoint with zero provider calls; the fixture uses no elapsed-time retry.
+ * Each history runs on a controlled clock (timers and `Date` virtual,
+ * macrotask turns real), so a checkpoint that a retry backoff would end
+ * fails at its virtual bound at once.
  */
 function expectedAt(phase: `hidden` | `visible`): {
   providerCalls: number
@@ -49,6 +56,14 @@ declareOracle({
     `src/OfflineExecutor.ts#OfflineExecutor.peekOutbox`,
   ],
   model: [expectedAt],
+})
+
+let releaseClock: (() => void) | undefined
+beforeEach(() => {
+  releaseClock = useControlledClock()
+})
+afterEach(() => {
+  releaseClock?.()
 })
 
 it.each([`visibilitychange`, `explicit retry`] as const)(

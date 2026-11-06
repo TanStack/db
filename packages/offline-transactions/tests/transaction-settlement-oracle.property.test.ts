@@ -1,6 +1,6 @@
 import fc from 'fast-check'
 import { createCollection, createTransaction } from '@tanstack/db'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import {
@@ -19,6 +19,7 @@ import {
   atOracleCheckpoint,
   captureUnhandledRejections,
   cleanupOfflineOracle,
+  useControlledClock,
 } from './oracle-lifecycle'
 import { oracleCampaignOptions, readOfflineOracleConfig } from './oracle-config'
 import type { TestItem } from './harness'
@@ -73,6 +74,12 @@ import type { OfflineConfig } from '../src/types'
  * settlement from a global failure. Two transactions and one row are
  * the marginal peer and width cases. Fresh production IDs exclude duplicate-ID
  * histories; an outcome-less provider call is not a completed history here.
+ *
+ * Every history runs on a controlled clock: timers and `Date` are virtual,
+ * and macrotask turns stay real, so in-memory work finishes between clock
+ * steps. A checkpoint fails once virtual time passes its bound, so work left
+ * waiting on a retry backoff or a timer fails at once rather than after real
+ * seconds.
  *
  * Gates expose each provider boundary. The real executor, Collection, and
  * outbox are the driver. At each held-provider checkpoint, the refinement
@@ -155,6 +162,15 @@ import type { OfflineConfig } from '../src/types'
  * campaign's property (`offline.settlement.*`). The other campaigns in this
  * file stand aside.
  */
+
+// Every history runs on the controlled clock (see the opening prose).
+let releaseClock: (() => void) | undefined
+beforeEach(() => {
+  releaseClock = useControlledClock()
+})
+afterEach(() => {
+  releaseClock?.()
+})
 
 // Each campaign is its own replay property, because a recorded path belongs to
 // one generator. A path replay of a campaign's property runs only that campaign.
