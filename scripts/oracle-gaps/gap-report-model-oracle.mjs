@@ -408,6 +408,14 @@ const witness = [
       judging(`a`, `fixed seed`, 7),
     ],
   },
+  // A gap in one owner does not stop the mutant: a later owner's kill
+  // still decides.
+  {
+    id: `w_crosskill`,
+    owners: [`a`, `b`],
+    body: [kill],
+    tests: [judging(`a`, `random seed`, 7), judging(`b`, `fixed seed`, 7)],
+  },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -451,6 +459,7 @@ const captureWitness = new Set([
   `w_hangkill`,
   `w_hangsurvive`,
   `w_flakykill`,
+  `w_crosskill`,
 ])
 
 // ## Rendering and layout
