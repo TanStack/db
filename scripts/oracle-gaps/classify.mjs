@@ -242,11 +242,16 @@ export function judgeMutant(mutant, { owners, targets, units, baseline, mutants 
   }
   if (result.outcome !== `survived`) return result
   const rows = new Map(units.flatMap((u) => u.rows ?? []))
-  // Only owner tests that reach the site can judge it.
+  // Only owner tests that reach the site can judge it. Code that ran when a
+  // file loaded the module reaches every test of that file (maintainer
+  // decision, 2026-11-06).
   const reaching = new Set(targets.oracleKeys)
+  const loadedIn = new Set(
+    targets.oracleKeys.filter((k) => k.endsWith(` > (background)`)).map(fileOf),
+  )
   const compared = [...rows.keys()].filter(
     (k) =>
-      reaching.has(k) &&
+      (reaching.has(k) || loadedIn.has(fileOf(k))) &&
       !rows.get(k).background &&
       !baseline.nondeterministic.has(k),
   )

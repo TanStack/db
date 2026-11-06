@@ -68,8 +68,10 @@
  *    that fails with no verdict, whatever its message, makes it `crashed`;
  *    and a failing framework check alone (a calibration, a probe
  *    calibration, or the determinism test) makes it a `framework-error`. A
- *    mutant that no owner test reaches is `unreached`; one that only
- *    nondeterministic owner tests could judge is `indeterminate`. A mutant
+ *    mutant that no owner test reaches is `unreached`; code that runs when
+ *    a file loads the module reaches every test of that file (maintainer
+ *    decision of 2026-11-06); a mutant that only nondeterministic owner tests
+ *    could judge is `indeterminate`. A mutant
  *    that no owner test fails is a survivor: a `comparison-gap` when an owner
  *    test's observation or asserted value changed, a `generator-gap` when an
  *    `if` on its line never took one of its outcomes in an owner test, and
@@ -535,6 +537,10 @@ async function driver(plan, observe) {
         states.add(`a kill after a caught verdict`)
       if (m.function === `w_prop` && m.outcome === `killed`)
         states.add(`a kill through state an earlier test stored`)
+      if (m.function === `w_load` && m.outcome === `killed`)
+        states.add(`a mutant of code run at module load killed`)
+      if (m.function === `w_memo` && m.operator === `if-false` && m.outcome === `killed`)
+        states.add(`a module-level cache judged afresh`)
       if (m.function === `w_campaigns` && m.outcome === `random-only-kill`)
         states.add(`second campaign's route attributed`)
       if (m.function === `w_soft` && m.outcome === `random-only-kill`)
@@ -988,6 +994,8 @@ const required = [
   `a test that depends on an earlier test`,
   `a kill after a caught verdict`,
   `a kill through state an earlier test stored`,
+  `a mutant of code run at module load killed`,
+  `a module-level cache judged afresh`,
   `ordinary tests run when asked`,
   `ordinary tests left out by default`,
   `two authored mutants judged apart`,

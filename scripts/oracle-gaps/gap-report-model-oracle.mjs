@@ -314,6 +314,24 @@ const witness = [
       judging(`a`, `fixed seed`, 5, { judges: false, readsShared: true }),
     ],
   },
+  // Module state. `w_memo` caches its label in a module-level map, so a
+  // runner that keeps modules loaded between mutants would answer a later
+  // mutant from an earlier run's cache. `w_load` runs when the module loads,
+  // and `w_loaded` reads what it wrote, so its mutants take effect only in a
+  // freshly loaded module.
+  {
+    id: `w_memo`,
+    owners: [`a`],
+    body: [{ kind: `memoSet` }, { kind: `memoGet` }],
+    tests: [judging(`a`, `fixed seed`, 1)],
+  },
+  { id: `w_load`, owners: [`a`], body: [push], tests: [] },
+  {
+    id: `w_loaded`,
+    owners: [`a`],
+    body: [{ kind: `pushLoaded` }],
+    tests: [judging(`a`, `fixed seed`, 1)],
+  },
   // A test that fires a verdict and catches its failure passes, so it kills
   // nothing, and the tests after it must still run. It sits between a test
   // that reaches `w_late` and the one that judges it, so a runner that
@@ -376,6 +394,9 @@ const captureWitness = new Set([
   `w_caught`,
   `w_late`,
   `w_prop`,
+  `w_memo`,
+  `w_load`,
+  `w_loaded`,
 ])
 
 // ## Rendering and layout
@@ -425,6 +446,10 @@ const preamble = [
   `export function make(cls: new () => { run(x: number, out: Array<string>): void }, x: number, out: Array<string>): void {`,
   `  new cls().run(x, out);`,
   `}`,
+  // Module state: a cache that `w_memo` fills, and labels that the module
+  // writes when it loads (`w_load`, called at the end of the source).
+  `const memo = new Map<number, string>()`,
+  `export const loaded: Array<string> = []`,
 ]
 const preambleStatements = {
   devBuild: `return process.env.NODE_ENV !== 'production'`,
@@ -495,6 +520,12 @@ function renderStatement(stmt, callText) {
       return [`this.tag = 'b';`]
     case `pushTag`:
       return [`out.push(this.tag);`]
+    case `memoSet`:
+      return [`if (!memo.has(x)) memo.set(x, 's${stmt.label}');`]
+    case `memoGet`:
+      return [`out.push(String(memo.get(x)));`]
+    case `pushLoaded`:
+      return [`out.push(...loaded);`]
     case `call`:
     case `libCall`:
     case `valueCall`:
@@ -684,6 +715,13 @@ function resolveHistory(history) {
     for (const fn of functions) if (fn.container === cls) emit(fn, `  `)
     lines.push(`}`)
   }
+  // Code that runs when the module loads: `w_load` writes its labels into
+  // `loaded`, which `w_loaded` reads.
+  let moduleLoadLine
+  if (functions.some((fn) => fn.id === `w_load`)) {
+    moduleLoadLine = lines.length + 1
+    lines.push(`w_load(0, loaded);`)
+  }
   const source = `${lines.join(`\n`)}\n`
   // The library is laid out the same way, in its own file.
   {
@@ -751,6 +789,7 @@ function resolveHistory(history) {
     tests,
     authored,
     authoredList,
+    moduleLoadLine,
     wholeFile: history.wholeFile,
     template: history.template,
     fault: history.fault,
@@ -816,7 +855,7 @@ const routeOf = (t, part = t) =>
 /** Law 6's normalization: the statement's tokens, joined by single spaces. */
 function tokens(text) {
   const pattern =
-    /'[^']*'|`[^`]*`|[A-Za-z_$][\w$]*|\d+|\?\.|=>|!==|===|&&|\|\||<=|>=|[^\s\w]/g
+    /'[^']*'|`[^`]*`|[A-Za-z_$][\w$]*|\d+|\.\.\.|\?\.|=>|!==|===|&&|\|\||<=|>=|[^\s\w]/g
   return text.match(pattern).join(` `)
 }
 
@@ -901,6 +940,14 @@ function sitesOf(plan) {
       }
       if (stmt.kind === `push` || stmt.kind === `pushTag`)
         at(`delete-call`, `push`, stmt.line, whole)
+      if (stmt.kind === `memoSet`) {
+        at(`if-true`, `true`, stmt.line, whole)
+        at(`if-false`, `false`, stmt.line, whole)
+        at(`drop-not`, `not`, stmt.line, whole)
+        at(`delete-call`, `memoSet`, stmt.line, `memo.set(x, 's${stmt.label}');`)
+      }
+      if (stmt.kind === `memoGet` || stmt.kind === `pushLoaded`)
+        at(`delete-call`, stmt.kind, stmt.line, whole)
       if (stmt.kind === `primeCall`) at(`delete-call`, `call`, stmt.line, whole)
       if (stmt.kind === `if`) {
         condition()
@@ -955,6 +1002,10 @@ function sitesOf(plan) {
       }
     }
   }
+  if (plan.moduleLoadLine !== undefined)
+    add(`<module>`, plan.moduleLoadLine, `delete-call`, `w_load(0, loaded);`, {
+      role: `moduleLoad`,
+    })
   // Order on a line, and the anchor's occurrence index within a function.
   const onLine = new Map()
   const anchors = new Map()
@@ -1051,10 +1102,40 @@ function interpret(plan, fnId, x, sites, active) {
       active?.authored === stmt.label ? `s${stmt.label}!` : `s${stmt.label}`,
     )
   }
+  // Module state as a freshly loaded module has it: an empty cache, and
+  // the labels `w_load` wrote at load, under the same mutant.
+  const memo = new Map()
+  const loaded = () => {
+    const call = sites.find((s) => s.role === `moduleLoad`)
+    if (call) reached.add(call.id)
+    if (isActive(call)) return []
+    const load = interpret(plan, `w_load`, 0, sites, active)
+    for (const id of load.reached) reached.add(id)
+    return load.trace
+  }
   const run = (id, object = { tag: `a` }) => {
     const fn = plan.functions.find((f) => f.id === id)
     for (const stmt of fn.body) {
       if (stmt.kind === `push`) write(stmt)
+      if (stmt.kind === `memoSet`) {
+        for (const role of [`true`, `false`, `not`]) reached.add(siteOf(stmt, role).id)
+        let value = !memo.has(x)
+        if (isActive(siteOf(stmt, `not`))) value = !value
+        outcomes.push([stmt.line, value])
+        if (isActive(siteOf(stmt, `true`))) value = true
+        if (isActive(siteOf(stmt, `false`))) value = false
+        if (value) {
+          const set = siteOf(stmt, `memoSet`)
+          reached.add(set.id)
+          if (!isActive(set)) memo.set(x, `s${stmt.label}`)
+        }
+      }
+      if (stmt.kind === `memoGet` || stmt.kind === `pushLoaded`) {
+        const site = siteOf(stmt, stmt.kind)
+        reached.add(site.id)
+        if (!isActive(site))
+          trace.push(...(stmt.kind === `memoGet` ? [String(memo.get(x))] : loaded()))
+      }
       if (stmt.kind === `pushTag`) {
         const site = siteOf(stmt, `push`)
         reached.add(site.id)
@@ -1201,12 +1282,18 @@ function model(plan) {
         for (const [line, value] of run.outcomes)
           taken.set(line, new Set([...(taken.get(line) ?? []), value]))
       }
-    if (!reached.has(site.id)) return `unreached`
-    const reaching = tests.filter((t) =>
-      partsOf(t).some((part) =>
-        interpret(plan, t.fn, part.input, sites).reached.has(site.id),
-      ),
-    )
+    // Code that runs when the module loads (`w_load`, and the call at the
+    // end of the source) runs in every owner file that has a test, and
+    // reaches every test of that file (maintainer decision, 2026-11-06).
+    const atLoad = site.function === `w_load` || site.function === `<module>`
+    if (!reached.has(site.id) && !(atLoad && tests.length > 0)) return `unreached`
+    const reaching = atLoad
+      ? tests
+      : tests.filter((t) =>
+          partsOf(t).some((part) =>
+            interpret(plan, t.fn, part.input, sites).reached.has(site.id),
+          ),
+        )
     if (reaching.every((t) => t.flaky)) return `indeterminate`
     const kind = judge(plan, tests, sites, { site: site.id })
     if (kind !== `survived`) return kind

@@ -39,7 +39,9 @@
  *    determinism test) makes it a `framework-error`; and errors outside any
  *    test make it a `setup-error`.
  * 5. With no failure it survived: a `comparison-gap` when a reaching,
- *    deterministic owner test's asserted or observed value changed;
+ *    deterministic owner test's asserted or observed value changed (code
+ *    that ran when a file loaded the module reaches every test of that file,
+ *    maintainer decision of 2026-11-06);
  *    `indeterminate` when no such test judged it; a `generator-gap` when an
  *    `if` on its line, reached by an owner test, never took one of its
  *    outcomes in the owners' tests; and `no-observed-difference` otherwise.
@@ -232,8 +234,11 @@ function modelOutcome(h, mi) {
   if (failing.length > 0) return { outcome: `framework-error` }
   const unhandled = ran.some((x) => under(x) === `unhandled`)
   if (setup || unhandled) return { outcome: `setup-error` }
-  // A survivor. Only reaching, deterministic owner tests judge it.
-  const compared = ran.filter((x) => x.t.reaches[mi] && !x.t.flaky)
+  // A survivor. Only reaching, deterministic owner tests judge it; code that
+  // ran when a file loaded the module reaches every test of that file.
+  const compared = ran.filter(
+    (x) => (x.t.reaches[mi] || h.files[x.fi].background[mi]) && !x.t.flaky,
+  )
   if (compared.some((x) => [`changed`, `observedChanged`].includes(under(x))))
     return withOrdinary({ outcome: `survived`, class: `comparison-gap` })
   if (compared.length === 0) return withOrdinary({ outcome: `survived`, class: `indeterminate` })
