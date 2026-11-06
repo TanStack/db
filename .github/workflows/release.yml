@@ -173,9 +173,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Comment on PRs about release
         if: steps.changesets.outputs.published == 'true'
-        uses: tanstack/config/.github/comment-on-release@e4b48f16568324f76f467aa4c2aac2f05db632c3
-        with:
-          published-packages: ${{ steps.changesets.outputs.publishedPackages }}
+        run: node scripts/comment-on-release.ts
         env:
-          # The pinned action reads REPOSITORY but does not set it.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
           REPOSITORY: ${{ github.repository }}

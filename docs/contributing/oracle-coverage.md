@@ -6730,6 +6730,29 @@ unrelated same-code and body-local Promise<void> errors substituted for handler
 errors. Source imports do not establish packed declarations or npm consumers;
 O22 owns that receiving boundary. Full evidence is in the RC chunk record.
 
+## Release notification selection
+
+`scripts/release-comments-oracle.property.test.js` owns exact published-version
+selection and package/PR/linked-issue aggregation at the `gh` command boundary.
+Its independent structured release ledger drives the executable local copy,
+`scripts/comment-on-release.ts`, and compares every recorded comment after exit.
+All 67 finite histories pass: stable/prerelease/build versions, prefix neighbors,
+both section orders, duplicate PR links, shared packages/issues, missing versions,
+empty sections and no published packages. Declared reach is stable 25,
+prerelease 42, build metadata 24, reversed sections 32, linked issues 35,
+no linked issues 32 and no matching PRs 3. The original upstream parser fails
+64 comparisons; prefix, section-leakage and anchor mutants each fail their
+intended comparison. [Evidence and replay commands](oracle-reviews/2026-11-06-release-comments.md)
+record the source identity, production-first gate and calibration outcomes.
+
+This owner assumes successful GitHub responses and no prior release comments.
+Authentication, actual GitHub delivery, pagination beyond ten linked issues,
+API failures/retries, duplicate suppression across releases, concurrent releases,
+foreign-repository links and alternative Markdown headings remain outside its
+claim. Before extending the claim, this owner needs matching grammar and a
+receiving witness; real delivery needs an authorized release/host observation.
+The release-history owner below continues to own version/publish planning.
+
 ## RC release histories and replay observations
 
 The shared independent release owner is `scripts/release-history-oracle.js`,

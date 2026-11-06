@@ -187,3 +187,12 @@ patch or minor Changeset. When the candidates are ready for stable 1.0, run
 The next Version Packages PR promotes the candidate packages to `1.0.0`.
 Already stable packages keep their versions unless a pending Changeset
 explicitly releases them. Merge that PR to publish 1.0.
+
+After publishing, the release workflow comments on the contributing PRs and
+their linked issues. It selects PR links from each published package's exact
+version section in `CHANGELOG.md`, including prerelease and build suffixes,
+and groups the released packages into one comment per PR or linked issue.
+The workflow temporarily uses `scripts/comment-on-release.ts` while the shared
+TanStack/config action's prerelease parser is repaired. Restore the shared
+action after the upstream fix is available. `pnpm test:release` checks version
+selection and comment routing without posting to GitHub.
