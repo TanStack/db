@@ -44,6 +44,9 @@ export function parseArgs(argv, cwd = process.cwd()) {
     // A mutant can make a test hang. Oracles that run in milliseconds do not
     // need Vitest's default limits, which would make each hang cost seconds.
     testTimeout: Number(args[`test-timeout`] ?? 15000),
+    // The base of each mutant run's time limit, in milliseconds; the limit
+    // adds three times the file's unmutated duration (see limitFor).
+    hangLimit: Number(args[`hang-limit`] ?? 10000),
     // A directory of authored mutants (see loadAuthored).
     mutants: args.mutants ? resolve(cwd, args.mutants) : undefined,
   }

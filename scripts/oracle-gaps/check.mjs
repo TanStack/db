@@ -646,9 +646,13 @@ export default mergeConfig(base, {
         process.version,
         options.seed ?? null,
         settings,
+        // A run cut off under one limit may end under a longer one.
+        options.hangLimit,
       ]),
     )
-    const evidence = { reused: 0, computed: 0 }
+    // How the evidence was produced: units reused and computed, runs cut off
+    // at their time limit, and items rerun after a cut-off batch.
+    const evidence = { reused: 0, computed: 0, cut: 0, rerun: 0 }
     // Each file's imports in its unmutated run. A run that timed out reports
     // none, so it is stored under these: a mutant changes no import.
     const fileInputs = new Map()
@@ -687,6 +691,7 @@ export default mergeConfig(base, {
         ...runOptions,
       })
       evidence.computed += 1
+      if (result.timedOut) evidence.cut += 1
       const paths = result.timedOut ? fileInputs.get(file) : result.inputs
       if (!result.timedOut && spec.startsWith(`unmutated:`))
         fileInputs.set(file, result.inputs)
@@ -736,8 +741,10 @@ export default mergeConfig(base, {
         got[hung.i] = timedOut
         remember(hung.id, hung.file, timedOut, index)
         evidence.computed += 1
+        evidence.cut += 1
         await replace(slot)
         rest = rest.slice(batch.timedOutAt + 1)
+        evidence.rerun += rest.length
       }
       return got
     }
@@ -756,9 +763,9 @@ export default mergeConfig(base, {
     const fileSeconds = new Map()
     // A mutant can slow a run that still ends, for example by lengthening a
     // retry backoff. A 5 s base cut off such a run in offline-transactions
-    // and turned a kill into a timeout, so the base stays at 10 s; hangs are
-    // cached, so it costs only cold runs.
-    const limitFor = (file) => 10_000 + 3000 * (fileSeconds.get(file) ?? 10)
+    // and turned a kill into a timeout, so the base defaults to 10 s
+    // (`--hang-limit`); hangs are cached, so it costs only cold runs.
+    const limitFor = (file) => options.hangLimit + 3000 * (fileSeconds.get(file) ?? 10)
     const runAcross = async (files, pass) => {
       const parts = contexts.map(() => [])
       files.forEach((file, index) => parts[index % contexts.length].push(file))
@@ -1104,7 +1111,8 @@ export default mergeConfig(base, {
           nondeterministic: [...nondeterministic],
           mutantSeconds,
           // How the result was produced: units reused from the evidence
-          // store and units run in this check.
+          // store and units run in this check, runs cut off at their time
+          // limit, and items rerun after a cut-off batch.
           evidence,
           results,
         },

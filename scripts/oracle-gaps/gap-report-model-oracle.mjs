@@ -125,6 +125,10 @@ const testCase = fc.record({
   // (`expect.soft`) records its failure and lets the test go on to its next
   // campaign.
   judgeBy: fc.constantFrom(`verdict`, `verdict`, `assertion`, `soft`),
+  // A test may hang where it would judge: when the output differs, it waits
+  // on a promise that never settles. Rare, since each hang costs a run its
+  // whole time limit.
+  hangs: fc.constantFrom(false, false, false, false, false, false, false, true),
   // A test may run a second campaign, on its own route and input, as
   // `runOracleCampaign` does.
   then: fc.option(
@@ -236,6 +240,7 @@ const judging = (file, route, input, extra = {}) => ({
   channel: `observe`,
   flaky: false,
   judgeBy: `verdict`,
+  hangs: false,
   then: null,
   ...extra,
 })
@@ -365,6 +370,33 @@ const witness = [
       judging(`a`, `fixed seed`, 7, { judgesShared: true }),
     ],
   },
+  // Hangs. A test that hangs where it would judge cuts its file's run off
+  // at the time limit. Alone, the mutant is a timeout; a kill in another
+  // owner still decides, and a survivor in another owner does not.
+  {
+    id: `w_hang`,
+    owners: [`a`],
+    body: [kill],
+    tests: [judging(`a`, `fixed seed`, 7, { judges: false, hangs: true })],
+  },
+  {
+    id: `w_hangkill`,
+    owners: [`a`, `b`],
+    body: [kill],
+    tests: [
+      judging(`a`, `fixed seed`, 7, { judges: false, hangs: true }),
+      judging(`b`, `fixed seed`, 7),
+    ],
+  },
+  {
+    id: `w_hangsurvive`,
+    owners: [`a`, `b`],
+    body: [kill],
+    tests: [
+      judging(`a`, `fixed seed`, 7, { judges: false, hangs: true }),
+      judging(`b`, `fixed seed`, 7, { judges: false }),
+    ],
+  },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -404,6 +436,9 @@ const captureWitness = new Set([
   `w_memo`,
   `w_load`,
   `w_loaded`,
+  `w_hang`,
+  `w_hangkill`,
+  `w_hangsurvive`,
 ])
 
 // ## Rendering and layout
@@ -1237,6 +1272,8 @@ function judge(plan, tests, sites, active) {
         const route = routeOf(t, part)
         if (mutated.threw)
           return { t, route, crash: true, verdicts: found, changed: changedAny }
+        // A test that hangs where another would judge never ends.
+        if (changed && t.hangs) return { t, route, hang: true, verdicts: found, changed: true }
         if (changed && t.judges) {
           found.push({
             route,
@@ -1253,21 +1290,34 @@ function judge(plan, tests, sites, active) {
         changed: changedAny,
       }
     })
+  // A file's tests run in order, and a kill (a behavioral verdict on a
+  // reproducible route) stops the file. A hang before that cuts the file's
+  // run off, and a run that was cut off records nothing, not even its
+  // earlier verdicts. A kill in another file still decides (a kill outranks
+  // a timeout); failing that, the mutant is a timeout.
+  const kills = (r) =>
+    r.verdicts.some((v) => v.route === `reproducible` && v.law !== `reach agreement`)
+  const hung = new Set()
+  for (const file of new Set(runs.map((r) => r.t.file)))
+    for (const r of runs.filter((x) => x.t.file === file)) {
+      if (r.hang) hung.add(file)
+      if (r.hang || kills(r)) break
+    }
+  const live = runs.filter((r) => !hung.has(r.t.file))
   const verdicts = (route) =>
-    runs.flatMap((r) =>
+    live.flatMap((r) =>
       r.verdicts.filter((v) => v.route === route).map((v) => v.law),
     )
   const reproducible = verdicts(`reproducible`)
-  if (reproducible.length > 0)
-    return reproducible.every((law) => law === `reach agreement`)
-      ? `agreement-only-kill`
-      : `killed`
+  if (reproducible.some((law) => law !== `reach agreement`)) return `killed`
+  if (hung.size > 0) return `timeout`
+  if (reproducible.length > 0) return `agreement-only-kill`
   if (verdicts(`random`).length > 0) return `random-only-kill`
   if (verdicts(`unknown`).length > 0) return `unregistered-kill`
-  const failing = runs.filter((r) => r.crash || r.verdicts.length > 0)
+  const failing = live.filter((r) => r.crash || r.verdicts.length > 0)
   if (failing.some((r) => r.route !== `framework`)) return `crashed`
   if (failing.length > 0) return `framework-error`
-  return runs.some((r) => r.changed) ? `comparison-gap` : `survived`
+  return live.some((r) => r.changed) ? `comparison-gap` : `survived`
 }
 
 /** Which declaration fault, if any, must make the run fail, and its cause. */
@@ -1502,6 +1552,12 @@ function oracleTestFile(plan, file) {
               `    if (reads${i} !== 0) throw new Error('the payload was read')`,
             ]
           : []),
+        // A flaky test never hangs: the model leaves flaky tests out.
+        ...(t.hangs && !t.flaky
+          ? [
+              `    if (${gate} && JSON.stringify(${out}) !== '${expected}') await new Promise(() => {})`,
+            ]
+          : []),
         ...(!t.judges
           ? []
           : t.judgeBy !== `verdict`
@@ -1518,7 +1574,7 @@ function oracleTestFile(plan, file) {
     }
     out.push(
       `describe('t${index}', () => {`,
-      `  test('${testName(t, index)}', () => {`,
+      `  test('${testName(t, index)}', ${t.hangs && !t.flaky ? `async ` : ``}() => {`,
       ...partsOf(t).flatMap(campaign),
       `  })`,
       `})`,
