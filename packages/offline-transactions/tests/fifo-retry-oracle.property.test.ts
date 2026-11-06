@@ -35,14 +35,19 @@ declareOracle({
  * - Eligible work runs when it becomes eligible: at the head's deadline the
  *   executor runs the head and every ready transaction behind it, in order,
  *   until a retriable failure or a storage fault. This is a bounded liveness
- *   check on a controlled clock, not a wall-clock latency promise; timer count
- *   and polling strategy are outside the judgment. The `nextAttemptAt`
+ *   check on a controlled clock, not a wall-clock latency promise; while work
+ *   is pending, timer count and polling strategy are outside the judgment.
+ *   The `nextAttemptAt`
  *   eligibility boundary itself is the KeyScheduler oracle's
  *   (`KeyScheduler-oracle.property.test.ts`).
  * - A retriable provider failure retries the same transaction after its
  *   backoff; nothing behind it runs first.
  * - A `NonRetriableError` removes its row and rejects its caller with that
  *   error; queued rows then continue in creation order.
+ * - An idle executor goes quiet: once every plan has played out, so that no
+ *   transaction is due or waiting to retry, it holds no timer. An executor
+ *   that keeps waking with nothing to do spins the CPU for as long as the app
+ *   runs (maintainer decision, 2026-11-06: an idle spin is a bad bug).
  * - Success means the provider returned and the storage adapter acknowledged
  *   the outbox deletion. If recording the `deletion-pending` phase or
  *   removing the row fails, the caller rejects with the storage error and
@@ -68,12 +73,15 @@ declareOracle({
  * the scheduler, timers, or the outbox. At the deadline, attempts run until
  * the first retriable failure (whose backoff is at least a second) or a
  * storage fault; after every timer has run, every plan has played out up to
- * the first storage fault.
+ * the first storage fault, and the executor holds no timer.
  *
  * Driver: a real `TransactionExecutor`, `KeyScheduler`, and `OutboxManager`
  * over fake storage that fails as planned, with a controlled virtual clock
  * and jitter off. It records provider calls, the outbox, and each caller's
- * settlement at each checkpoint.
+ * settlement at each checkpoint, and after the last one the number of timers
+ * the executor still holds. It runs the retry timers one at a time, at most
+ * `TIMER_STEPS` of them, so an executor that never goes quiet cannot keep
+ * the driver busy forever; the idle law then judges the timers it left.
  *
  * Reach comes from what production did, never from the grammar's labels. The
  * four states that the model can predict from the plans are state probes
@@ -87,7 +95,9 @@ declareOracle({
  * row behind it). `deletion fault` is reported by the storage fake when it
  * rejects the removal that the executor issued: production reached the
  * removal and the storage refused it. `retried head` and `retried tail` are
- * measured only: the driver reports each provider call that fails retriably.
+ * measured only: the driver reports each provider call that fails retriably,
+ * and `queue drained` when the outbox ends empty, the history where an idle
+ * executor has nothing left at all.
  *
  * Limits: an online executor with one mutation function; no leadership
  * changes, no `shouldRetry` or `beforeRetry` hooks, no storage fault on a
@@ -192,6 +202,9 @@ function playOut({ plans }: History, untilRetry: boolean): State {
   return { calls, outbox: [...remaining], settled }
 }
 
+/** Timers an executor with nothing left to run may hold: none (idle law). */
+const idleTimers = 0
+
 function fifoModel(history: History) {
   const queued: State = {
     calls: [],
@@ -213,7 +226,7 @@ const permanentBeforePeer = `permanent failure before a peer`
 const phaseWriteFault = `phase write fault`
 const faultBeforePeer = `fault before a queued peer`
 const deletionFault = `deletion fault`
-const measuredStates = [`retried head`, `retried tail`] as const
+const measuredStates = [`retried head`, `retried tail`, `queue drained`] as const
 
 /**
  * Which probe-bound states a history enters, from its plans alone. The
@@ -242,6 +255,12 @@ function predictedStates({ plans }: History): Record<string, boolean> {
 // ---------------------------------------------------------------------------
 // Production driver
 // ---------------------------------------------------------------------------
+
+// Timers the driver runs after the deadline. A history's retries need a few
+// dozen; an executor that keeps arming timers is cut off here (in a few
+// milliseconds of virtual time) and judged by the idle law. Raise it if a
+// legal history needs more.
+const TIMER_STEPS = 1000
 
 async function driveFifo(
   { delay, plans }: History,
@@ -345,10 +364,13 @@ async function driveFifo(
     await record(`just before deadline`)
     await vi.advanceTimersByTimeAsync(1)
     await record(`at deadline`)
-    // Backoff doubles from a second to a minute; run every retry timer.
-    for (let round = 0; round < 20 && vi.getTimerCount() > 0; round++)
-      await vi.advanceTimersByTimeAsync(60_000)
+    // Backoff doubles from a second to a minute; run every retry timer, one
+    // at a time, up to the step budget.
+    for (let step = 0; step < TIMER_STEPS && vi.getTimerCount() > 0; step++)
+      await vi.advanceTimersToNextTimerAsync()
     await record(`after every retry`)
+    if ((await outbox.getAll()).length === 0) observe(`reach`, `queue drained`)
+    observe(`idle`, vi.getTimerCount())
   } catch (error) {
     primary = error
     failed = true
@@ -381,6 +403,7 @@ async function driveFifo(
 // equal the model's. Calls that are not a prefix of the full attempt order
 // break the FIFO law; a correct prefix of the wrong length at a cut breaks
 // the progress law (a late wakeup, or a queue that stalls); settlements and the outbox after a fault are the stop law.
+// After every retry, a timer the executor still holds breaks the idle law.
 
 function checkFifo(
   _history: History,
@@ -426,7 +449,15 @@ function checkFifo(
       )
     if (wrong) return wrong
   }
-  return pass
+  return (
+    differs(
+      `idle`,
+      `idle`,
+      trace.find((entry) => entry.checkpoint === `idle`)?.value,
+      idleTimers,
+      `the executor still holds timers with nothing left to run`,
+    ) ?? pass
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -438,9 +469,9 @@ const ok: Plan = { failures: 0, final: `success`, storageFault: `none` }
 oracleProperty({
   id: `offline.fifo-retry`,
   law: {
-    statement: `The executor runs transactions one at a time in creation order: a ready tail waits for a delayed or retrying head, eligible work runs when its deadline passes, a permanent failure lets queued rows continue, and a failed phase write or deletion rejects its caller with the storage error and stops the queue.`,
-    authority: `packages/offline-transactions/README.md: FIFO Sequential Processing, Retry decisions, and offline-execution settlement; the eligibility boundary from KeyScheduler-oracle.property.test.ts`,
-    limits: `An online executor with one mutation function, no retry hooks, and jitter off; no leadership changes; no storage fault on a permanent failure's removal; backoff lengths, timer counts, and polling strategy are not judged; liveness on a controlled clock, not wall-clock latency.`,
+    statement: `The executor runs transactions one at a time in creation order: a ready tail waits for a delayed or retrying head, eligible work runs when its deadline passes, a permanent failure lets queued rows continue, a failed phase write or deletion rejects its caller with the storage error and stops the queue, and an executor with nothing left to run holds no timer.`,
+    authority: `packages/offline-transactions/README.md: FIFO Sequential Processing, Retry decisions, and offline-execution settlement; the eligibility boundary from KeyScheduler-oracle.property.test.ts; the idle law is the maintainer's decision of 2026-11-06 (an idle spin is a bad bug)`,
+    limits: `An online executor with one mutation function, no retry hooks, and jitter off; no leadership changes; no storage fault on a permanent failure's removal; backoff lengths are not judged, and timer counts and polling strategy only once nothing is left to run; at most 1000 retry timers after the deadline; liveness on a controlled clock, not wall-clock latency.`,
     owner: `Offline execution`,
   },
   histories: {
@@ -567,9 +598,18 @@ oracleProperty({
   driver: driveFifo,
   check: checkFifo,
   // Wrong answers the check must reject: a ready tail that passes the
-  // delayed head, a scheduler that never wakes at eligibility, and a queue
-  // that keeps running after a storage fault.
+  // delayed head, a scheduler that never wakes at eligibility, a queue
+  // that keeps running after a storage fault, and an idle executor that
+  // keeps a timer armed.
   calibrations: [
+    {
+      name: `an idle executor keeps a timer armed`,
+      law: `idle`,
+      corrupt: (trace) =>
+        trace.map((entry) =>
+          entry.checkpoint === `idle` ? { ...entry, value: 1 } : entry,
+        ),
+    },
     {
       name: `a ready tail passes the delayed head`,
       law: `fifo`,
