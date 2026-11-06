@@ -6736,21 +6736,36 @@ O22 owns that receiving boundary. Full evidence is in the RC chunk record.
 selection and package/PR/linked-issue aggregation at the `gh` command boundary.
 Its independent structured release ledger drives the executable local copy,
 `scripts/comment-on-release.ts`, and compares every recorded comment after exit.
-All 67 finite histories pass: stable/prerelease/build versions, prefix neighbors,
-both section orders, duplicate PR links, shared packages/issues, missing versions,
-empty sections and no published packages. Declared reach is stable 25,
-prerelease 42, build metadata 24, reversed sections 32, linked issues 35,
-no linked issues 32 and no matching PRs 3. The original upstream parser fails
-64 comparisons; prefix, section-leakage and anchor mutants each fail their
-intended comparison. [Evidence and replay commands](oracle-reviews/2026-11-06-release-comments.md)
-record the source identity, production-first gate and calibration outcomes.
+All 105 finite histories pass, retaining the original 67: stable/prerelease/build
+versions, prefix neighbors, both section orders, duplicate PR links, asymmetric
+package contributions, shared/disjoint/absent per-PR issue edges, equal issue
+numbers in different repositories, lookup failures, colliding version-heading
+anchors, missing versions, empty sections and no published packages. The check
+compares full recipient URLs, source PR URLs, package/version/anchor unions and
+lookup diagnostics. Declared reach is stable 41, prerelease 64, build metadata
+36, reversed sections 48, linked issues 73, no linked issues 32, no matching PRs
+3, asymmetric contributions 30, disjoint issue edges 8, shared issue edges 54,
+foreign issue targets 8, same-number foreign issues 8, lookup failure 6 and
+colliding heading anchor 13. Every state has a failing minimum of one.
 
-This owner assumes successful GitHub responses and no prior release comments.
-Authentication, actual GitHub delivery, pagination beyond ten linked issues,
-API failures/retries, duplicate suppression across releases, concurrent releases,
-foreign-repository links and alternative Markdown headings remain outside its
-claim. Before extending the claim, this owner needs matching grammar and a
-receiving witness; real delivery needs an authorized release/host observation.
+The initial pinned upstream parser failed 64 of the original 67 comparisons.
+The expanded owner, run before the review repairs, rejected 27 of 105 histories.
+Six repair mutants fail intended notification/diagnostic assertions: fixed-PR
+lookup, global package union, wrong issue repository, relative source PR links,
+missing lookup warning and per-base-only anchor suffixing. Earlier prefix,
+section-leakage and build-anchor calibrations remain recorded.
+[Evidence and replay commands](oracle-reviews/2026-11-06-release-comments.md)
+preserve both the initial false-green gaps and the review repair evidence.
+
+This owner assumes successful comment operations and no prior release comments;
+selected issue lookups fail under controlled conditions. Authentication, actual
+GitHub delivery (including permission on foreign issues), pagination beyond ten
+linked issues, retries, other API failure modes, duplicate suppression across
+releases, concurrent releases, foreign changelog PR links and alternative
+Markdown headings remain outside its claim. Before extending the claim, this
+owner needs matching grammar and a receiving witness; real delivery needs an
+authorized release/host observation. GitHub-rendered changelog HTML independently
+confirms the heading collision rule, but is not a delivery witness.
 The release-history owner below continues to own version/publish planning.
 
 ## RC release histories and replay observations

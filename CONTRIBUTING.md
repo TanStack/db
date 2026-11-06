@@ -192,6 +192,11 @@ After publishing, the release workflow comments on the contributing PRs and
 their linked issues. It selects PR links from each published package's exact
 version section in `CHANGELOG.md`, including prerelease and build suffixes,
 and groups the released packages into one comment per PR or linked issue.
+Linked issues retain their repository identity, and their comments link to the
+contributing PRs in the source repository. Changelog links account for colliding
+version-heading anchors. Failed issue lookups log the PR and error while other
+notifications continue. Delivery still depends on the token's permissions in
+each recipient repository.
 The workflow temporarily uses `scripts/comment-on-release.ts` while the shared
 TanStack/config action's prerelease parser is repaired. Restore the shared
 action after the upstream fix is available. `pnpm test:release` checks version
