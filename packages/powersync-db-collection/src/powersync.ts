@@ -5,6 +5,7 @@ import {
   whenSyncAccepted,
   withCollectionConfigFactory,
 } from '@tanstack/db'
+import { createDirectDiffTrigger } from './direct-triggers'
 import { compileSQLite } from './sqlite-compiler'
 import { PendingOperationStore } from './PendingOperationStore'
 import { PowerSyncTransactor } from './PowerSyncTransactor'
@@ -276,6 +277,25 @@ function createPowerSyncCollectionConfig<
   const { viewName, trackMetadata: metadataIsTracked } = table
 
   /**
+   * Managed (`direct: true`) tables are stored as real SQLite tables with
+   * real columns instead of a view over a JSON `data` column. The SDK's
+   * trigger machinery only supports the view layout, so the adapter creates
+   * the tracking triggers itself for these tables. See
+   * {@link createDirectDiffTrigger}.
+   */
+  const isManagedTable = table.direct === true
+
+  if (isManagedTable && metadataIsTracked) {
+    // The PowerSync SDK does not materialize the `_metadata`/`_deleted`
+    // columns for managed tables, so the metadata persistence SQL the
+    // transactor relies on would fail at write time. Fail at configuration
+    // time instead.
+    throw new Error(
+      `PowerSync table ${viewName} is a managed table (direct: true) with trackMetadata: true. The PowerSync SDK does not support metadata columns for managed tables yet.`,
+    )
+  }
+
+  /**
    * Deserializes data from the incoming sync stream
    */
   const deserializeSyncRow = (value: TableType): OutputType => {
@@ -463,6 +483,62 @@ function createPowerSyncCollectionConfig<
           batchQuery,
         } = options
 
+        /**
+         * A load of every row is one snapshot transaction: during a
+         * reload it replaces the kept rows, so a row the table no
+         * longer has goes. A subset load commits each batch. A
+         * transaction begins only once its rows are read, so a batch
+         * that fails leaves none open.
+         */
+        const beforeCreate = async (context: LockContext) => {
+          const batches: Array<Array<TableType>> = []
+          const apply = () => {
+            begin({ snapshot })
+            for (const row of batches.splice(0).flat()) {
+              const type = writeType(row.id)
+              const value = deserializeSyncRow(row)
+              onInitialRow?.(value)
+              write({ type, value })
+            }
+            const applied = commit()
+            if (applied !== true) void applied.catch(() => undefined)
+            appliedReceipts.push(applied)
+          }
+          let currentBatchCount = syncBatchSize
+          let cursor = 0
+          while (currentBatchCount == syncBatchSize) {
+            const batchItems = await batchQuery(
+              context,
+              syncBatchSize,
+              cursor,
+            )
+            currentBatchCount = batchItems.length
+            cursor += currentBatchCount
+            batches.push(batchItems)
+            if (!snapshot) apply()
+          }
+          if (snapshot) apply()
+          if (afterRead) await afterRead()
+          database.logger.log({
+            level: LogLevels.info,
+            message: `Sync is ready for ${viewName} into ${trackedTableName}`,
+          })
+        }
+
+        if (isManagedTable) {
+          // Managed tables are real SQLite tables: the SDK's trigger manager
+          // cannot track them, so the adapter builds the tracking table and
+          // triggers itself.
+          return await createDirectDiffTrigger(database, {
+            source: viewName,
+            destination: trackedTableName,
+            columns: table.columns.map((column) => column.name),
+            setupContext,
+            when,
+            hooks: { beforeCreate },
+          })
+        }
+
         return await database.triggers.createDiffTrigger({
           source: viewName,
           destination: trackedTableName,
@@ -470,44 +546,7 @@ function createPowerSyncCollectionConfig<
           setupContext,
           when,
           hooks: {
-            beforeCreate: async (context) => {
-              // A retained reload uses one snapshot across its source reads.
-              // Other initial loads and subset loads keep batch commits. A
-              // transaction begins only once its rows are read, so a batch
-              // that fails leaves none open.
-              const batches: Array<Array<TableType>> = []
-              const apply = () => {
-                begin({ snapshot })
-                for (const row of batches.splice(0).flat()) {
-                  const type = writeType(row.id)
-                  const value = deserializeSyncRow(row)
-                  onInitialRow?.(value)
-                  write({ type, value })
-                }
-                const applied = commit()
-                if (applied !== true) void applied.catch(() => undefined)
-                appliedReceipts.push(applied)
-              }
-              let currentBatchCount = syncBatchSize
-              let cursor = 0
-              while (currentBatchCount == syncBatchSize) {
-                const batchItems = await batchQuery(
-                  context,
-                  syncBatchSize,
-                  cursor,
-                )
-                currentBatchCount = batchItems.length
-                cursor += currentBatchCount
-                batches.push(batchItems)
-                if (!snapshot) apply()
-              }
-              if (snapshot) apply()
-              if (afterRead) await afterRead()
-              database.logger.log({
-                level: LogLevels.info,
-                message: `Sync is ready for ${viewName} into ${trackedTableName}`,
-              })
-            },
+            beforeCreate,
           },
         })
       }
@@ -863,13 +902,20 @@ function createPowerSyncCollectionConfig<
                   active.length === 1
                     ? active[0]
                     : or(active[0], active[1], ...active.slice(2))
+                // Managed views store rows in a JSON `data` column, managed
+                // tables expose real columns, so trigger `when` clauses
+                // compile against NEW./OLD. row aliases instead.
+                const rowCompileOptions = (rowPrefix: 'NEW' | 'OLD') =>
+                  isManagedTable
+                    ? { rowPrefix }
+                    : { jsonColumn: `${rowPrefix}.data` }
                 const compiledNewData = compileSQLite(
                   { where: combinedWhere },
-                  { jsonColumn: 'NEW.data' },
+                  rowCompileOptions(`NEW`),
                 )
                 const compiledOldData = compileSQLite(
                   { where: combinedWhere },
-                  { jsonColumn: 'OLD.data' },
+                  rowCompileOptions(`OLD`),
                 )
                 const compiledView = compileSQLite({ where: combinedWhere })
                 const newDataWhenClause = toInlinedWhereClause(compiledNewData)

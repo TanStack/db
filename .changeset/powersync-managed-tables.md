@@ -1,0 +1,5 @@
+---
+'@tanstack/powersync-db-collection': minor
+---
+
+Support PowerSync managed tables (`direct: true`). The PowerSync SDK's diff trigger machinery only supports managed views: its trigger payloads read the single JSON `data` column of the `ps_data__<name>` view, which does not exist for a managed table (the real columns live on the table itself), so collections over managed tables failed with `no such table: main.ps_data__<name>`. The collection now detects the table's `direct` flag and creates its own tracking table and `AFTER INSERT/UPDATE/DELETE` triggers on the real table, with payloads built via `json_object` over the real columns and trigger `WHEN` clauses compiled against `NEW.`/`OLD.` row aliases for on-demand sync. Eager initial loads, sync-driven change tracking, optimistic mutation tracking, and disposal cleanup match the view-based path; managed views are untouched. Managed tables require `@powersync/common` >= 2.5.0 (dev dependency updated, `@powersync/node` test dependency bumped to `^1.3.0`). `trackMetadata` is not supported for managed tables yet (the SDK does not materialize the metadata columns) and configuring that combination now throws.
