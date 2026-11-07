@@ -139,6 +139,77 @@ function lockfileOf(pkg) {
 }
 
 /**
+ * One-file bundles of the package's workspace dependencies: the packages it
+ * reaches by name through a node_modules link to a directory outside any
+ * node_modules, and theirs in turn. Vitest otherwise fetches a dependency's
+ * built files one at a time, about 150 for `@tanstack/db`, in every context.
+ * A bundle sits in its package's own directory, so its bare imports resolve
+ * as the package's do; each bundle leaves them external, so a dependency of
+ * a dependency loads from its own bundle. It is outside node_modules, so
+ * Vitest inlines it, and every copy evaluates it afresh after its module
+ * reset (fresh module state, law 3). Its file name carries the hash of its
+ * text, so evidence that read it is keyed by what it contains. The package
+ * under test is never bundled: its sources are the mutated ones.
+ */
+export async function workspaceBundles(pkg) {
+  const linked = new Map()
+  const queue = [pkg]
+  while (queue.length > 0) {
+    const dir = queue.shift()
+    const manifest = JSON.parse(readFileSync(join(dir, `package.json`), `utf8`))
+    const names = Object.keys({
+      ...manifest.dependencies,
+      ...manifest.peerDependencies,
+      ...manifest.devDependencies,
+    })
+    for (const name of names) {
+      if (linked.has(name)) continue
+      const link = join(dir, `node_modules`, name)
+      if (!existsSync(link)) continue
+      const real = realpathSync(link)
+      if (real.includes(`/node_modules/`) || real === pkg) continue
+      linked.set(name, { dir: real, from: dir })
+      queue.push(real)
+    }
+  }
+  if (linked.size === 0) return new Map()
+  const requireVite = createRequire(createRequire(join(pkg, `package.json`)).resolve(`vite`))
+  const esbuild = await import(pathToFileURL(requireVite.resolve(`esbuild`)).href)
+  // A package's ESM entry: its `exports` for `.`, under `import`, else
+  // `node` or `default`, or its `module` or `main`.
+  const entryOf = (dir) => {
+    const manifest = JSON.parse(readFileSync(join(dir, `package.json`), `utf8`))
+    let entry = manifest.exports?.[`.`] ?? manifest.exports ?? manifest.module ?? manifest.main ?? `index.js`
+    while (entry && typeof entry === `object`) entry = entry.import ?? entry.node ?? entry.default
+    return join(dir, entry)
+  }
+  const bundles = new Map()
+  for (const [name, { dir }] of linked) {
+    const built = await esbuild.build({
+      entryPoints: [entryOf(dir)],
+      absWorkingDir: dir,
+      bundle: true,
+      write: false,
+      format: `esm`,
+      platform: `node`,
+      packages: `external`,
+      // A package's tsconfig `paths` can point a dependency at its sources;
+      // the bundle keeps every package import as the built code has it.
+      tsconfigRaw: `{}`,
+      logLevel: `silent`,
+    })
+    const text = built.outputFiles[0].text
+    const out = join(dir, `.oracle-gaps`, `bundle-${sha1(text).slice(0, 16)}.mjs`)
+    if (!existsSync(out)) {
+      mkdirSync(dirname(out), { recursive: true })
+      writeFileSync(out, text)
+    }
+    bundles.set(name, out)
+  }
+  return bundles
+}
+
+/**
  * A session over one package: the TypeScript and Vitest that the package
  * resolves, and warm Vitest contexts that later checks reuse. A cold run
  * opens a session for one check; the daemon keeps one open.
@@ -169,6 +240,10 @@ export default mergeConfig(base, {
   plugins: [{
     name: 'oracle-gaps-schemata',
     enforce: 'pre',
+    // A workspace dependency loads from its one-file bundle (workspaceBundles).
+    resolveId(source) {
+      return globalThis.__oracleGapsBundles?.get(source)
+    },
     load(id) {
       const path = id.split('?')[0]
       // This context's authored patch, or else the instrumented source of the
@@ -612,10 +687,16 @@ export default mergeConfig(base, {
     }
     // The state file is the fallback for setups that cannot `inject`.
     process.env.ORACLE_GAPS_STATE = join(options.out, `state.json`)
+    // Workspace dependencies load from one-file bundles (workspaceBundles),
+    // which are part of the settings: a changed dependency warms the
+    // contexts again and changes the evidence key.
+    const bundles = await workspaceBundles(pkg)
+    globalThis.__oracleGapsBundles = bundles
     const settings = {
       testTimeout: options.testTimeout,
       pool: options.pool,
       bail: Number(process.env.ORACLE_GAPS_BAIL ?? 0),
+      bundles: [...bundles],
     }
     // Contexts are warmed again when their settings or the Vite config they
     // loaded changed.

@@ -466,12 +466,13 @@ const witness = [
     tests: [judging(`a`, `fixed seed`, 1)],
   },
   // A workspace dependency (`state-dep`, linked through node_modules) keeps
-  // a log in module state. Every copy must load it afresh, or a later copy
-  // sees the notes of an earlier one.
+  // a log in module state. `w_dep` reads the log, then notes an entry, so
+  // a fresh module shows an empty log. Every copy must load it afresh, or a
+  // copy after one that noted sees that note.
   {
     id: `w_dep`,
     owners: [`a`],
-    body: [{ kind: `depNote` }, { kind: `depSeen` }],
+    body: [{ kind: `depSeen` }, { kind: `depNote` }],
     tests: [judging(`a`, `fixed seed`, 1)],
   },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
@@ -1842,7 +1843,7 @@ const initialState = (plan) => ({
 /** The fixture package's files in one state. */
 function fixtureFiles(plan, state = initialState(plan)) {
   const files = {
-    'package.json': `{ "name": "gap-fixture", "private": true, "type": "module" }\n`,
+    'package.json': `{ "name": "gap-fixture", "private": true, "type": "module", "dependencies": { "state-dep": "*" } }\n`,
     'vite.config.ts': `import { defineConfig } from 'vitest/config'\nexport default defineConfig({ test: { include: ['tests/**/*.test.ts'] } })\n`,
     [SOURCE]: state.prepend
       ? edited({ ...plan, stability: `prepend` })
