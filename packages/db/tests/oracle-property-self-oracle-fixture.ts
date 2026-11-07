@@ -187,6 +187,9 @@ function syntheticDriver(spec: SyntheticSpec, mutant = false) {
       )
     if (spec.reachVia === `observe`)
       for (const state of reachedStates(spec)(history)) observe(`reach`, state)
+    // A real timer first: a clock that an earlier history released must have
+    // given the real timers back, or this history never goes on.
+    if (spec.clock) await new Promise((resolve) => setTimeout(resolve, 1))
     const clock = spec.clock ? controlledClock() : undefined
     try {
       for (const [index, item] of history.entries()) {

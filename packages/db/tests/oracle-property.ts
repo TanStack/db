@@ -638,6 +638,10 @@ const takeClockSpin = () => {
 export function useOracleClock({ maxTimers = 1000 }: { maxTimers?: number } = {}): {
   release: () => void
 } {
+  // The timers the clock replaces. Vitest's own restore would leave the
+  // counting wrappers below in place.
+  const realTimeout = globalThis.setTimeout
+  const realInterval = globalThis.setInterval
   vi.useFakeTimers({
     toFake: [`setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, `Date`],
   })
@@ -669,6 +673,8 @@ export function useOracleClock({ maxTimers = 1000 }: { maxTimers?: number } = {}
   return {
     release: () => {
       vi.useRealTimers()
+      globalThis.setTimeout = realTimeout
+      globalThis.setInterval = realInterval
       if (historyTrace !== undefined) return
       const spin = takeClockSpin()
       if (!spin) return
