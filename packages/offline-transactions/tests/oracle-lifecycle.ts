@@ -1,4 +1,5 @@
 import { vi } from 'vitest'
+import { useOracleClock } from '../../db/tests/oracle-property'
 
 // The real macrotask yield, taken before any test fakes the clock.
 const realImmediate = globalThis.setImmediate
@@ -71,18 +72,19 @@ async function atVirtualCheckpoint<T>(
 }
 
 /**
- * Runs a history on a controlled clock: timers and `Date` are virtual, and
- * macrotask turns (`setImmediate`) stay real, so in-memory work finishes
- * between clock steps. Returns the release, which restores real timers.
+ * Runs a history on a controlled clock (the framework's `useOracleClock`):
+ * timers and `Date` are virtual, and macrotask turns (`setImmediate`) stay
+ * real, so in-memory work finishes between clock steps. Returns the release,
+ * which restores real timers and fails the test if its timers never went
+ * quiet.
  */
 export function useControlledClock(): () => void {
-  vi.useFakeTimers({
-    toFake: [`setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, `Date`],
-  })
+  // The framework's clock, which fails a test whose timers never go quiet.
+  const clock = useOracleClock()
   controlled = true
   return () => {
     controlled = false
-    vi.useRealTimers()
+    clock.release()
   }
 }
 

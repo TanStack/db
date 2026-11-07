@@ -8,6 +8,7 @@ import {
   differs,
   oracleProperty,
   pass,
+  useOracleClock,
   violation,
 } from '../../db/tests/oracle-property'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -270,8 +271,11 @@ async function driveFifo(
   let warn: { mockRestore: () => void } | undefined
   let primary: unknown
   let failed = false
+  let clock: { release: () => void } | undefined
   try {
-    vi.useFakeTimers()
+    // The framework's controlled clock: a history whose timers never go
+    // quiet fails under law `bounded clock`.
+    clock = useOracleClock()
     // A storage fault stops the executor, which logs the failed retry batch.
     warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
     // Fails the planned phase write or deletion for one transaction.
@@ -381,7 +385,7 @@ async function driveFifo(
   for (const release of [
     () => executor?.clear(),
     () => warn?.mockRestore(),
-    () => vi.useRealTimers(),
+    () => clock?.release(),
   ])
     try {
       release()

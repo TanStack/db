@@ -631,7 +631,9 @@ const takeClockSpin = () => {
  * at most `maxTimers` timers in the history; past that it stops firing them,
  * which ends a storm of timers that never goes quiet, and the history fails
  * under law `bounded clock`. Raise `maxTimers` for a legal history that needs
- * more. Call `release` in the driver's `finally`.
+ * more. Call `release` in the driver's `finally`. Outside an
+ * `oracleProperty` history, no history reports the spin, so `release`
+ * reports the verdict itself and throws.
  */
 export function useOracleClock({ maxTimers = 1000 }: { maxTimers?: number } = {}): {
   release: () => void
@@ -664,7 +666,22 @@ export function useOracleClock({ maxTimers = 1000 }: { maxTimers?: number } = {}
       ms,
       ...args,
     )) as typeof setInterval
-  return { release: () => vi.useRealTimers() }
+  return {
+    release: () => {
+      vi.useRealTimers()
+      if (historyTrace !== undefined) return
+      const spin = takeClockSpin()
+      if (!spin) return
+      globalThis.__oracleVerdict?.({
+        property: `useOracleClock`,
+        law: `bounded clock`,
+        checkpoint: `clock`,
+      })
+      throw new Error(
+        `bounded clock: the controlled clock fired more than ${spin.maxTimers} timers: work that never goes quiet (raise maxTimers if a legal test needs more)`,
+      )
+    },
+  }
 }
 
 /** Runs only the driver, for a history's recorded trace. */
