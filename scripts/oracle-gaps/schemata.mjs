@@ -15,6 +15,8 @@
 //   callee or the object of a property or element access, where
 //   `undefined` would only throw.
 // - `if-true` / `if-false`: force an `if` condition.
+// - `loop-false`: force the condition of a `for`, `while`, or `do` loop to
+//   `false` (a `for` with no condition, `for...of`, and `for...in` have none).
 // - `delete-call`: skip a call statement (`switch || call()`).
 //
 // Comparisons and `!` go through helpers that evaluate each operand once.
@@ -234,6 +236,15 @@ export function instrument(ts, path, text, source, offset = 0) {
       node.expression.kind !== ts.SyntaxKind.ImportKeyword
     )
       ids.value = add(node, `value-undefined`, node.getText(file), `undefined`)
+    // The loop's condition: a `for`'s may be absent.
+    const loopCondition =
+      ts.isForStatement(node)
+        ? node.condition
+        : ts.isWhileStatement(node) || ts.isDoStatement(node)
+          ? node.expression
+          : undefined
+    if (loopCondition)
+      ids.loop = add(loopCondition, `loop-false`, loopCondition.getText(file), `false`)
     if (ts.isIfStatement(node)) {
       const condition = node.expression.getText(file)
       ids.ifTrue = add(node.expression, `if-true`, condition, `true`)
@@ -274,6 +285,10 @@ export function instrument(ts, path, text, source, offset = 0) {
       return `${G}.not(${ids.not}, ${emitted.get(node.operand).text})`
     if (ids.bool !== undefined) return `${G}.b(${ids.bool}, ${node.getText(file)})`
     if (ids.value !== undefined) return `${G}.v(${G}.m(${ids.value}) ? void 0 : ${out})`
+    if (ids.loop !== undefined) {
+      const { text: condition, at } = emitted.get(loopCondition)
+      return `${out.slice(0, at)}${G}.v(${G}.m(${ids.loop}) ? false : ${condition})${out.slice(at + condition.length)}`
+    }
     if (ids.ifTrue !== undefined) {
       // Replace only the condition; the rest of the `if` stays as emitted.
       const { text: condition, at } = emitted.get(node.expression)

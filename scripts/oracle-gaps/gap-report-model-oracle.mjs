@@ -57,6 +57,8 @@ const statement = fc.oneof(
   fc.record({ kind: fc.constant(`push`), quote }),
   // A boolean literal in production code, written out as text.
   fc.record({ kind: fc.constant(`flag`), value: fc.boolean() }),
+  // A loop that pushes twice.
+  fc.record({ kind: fc.constant(`loop`), quote }),
   fc.record({
     kind: fc.constant(`if`),
     op: comparison,
@@ -475,6 +477,14 @@ const witness = [
     body: [{ kind: `depSeen` }, { kind: `depNote` }],
     tests: [judging(`a`, `fixed seed`, 1)],
   },
+  // A loop that a judging test sees: forcing its condition false empties
+  // the output.
+  {
+    id: `w_loop`,
+    owners: [`a`],
+    body: [{ kind: `loop`, quote: `'` }],
+    tests: [judging(`a`, `fixed seed`, 1)],
+  },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -524,6 +534,7 @@ const captureWitness = new Set([
   `w_shrink`,
   `w_flag`,
   `w_dep`,
+  `w_loop`,
 ])
 
 // ## Rendering and layout
@@ -611,6 +622,8 @@ function renderStatement(stmt, callText) {
       return [pushText(stmt)]
     case `flag`:
       return [`out.push(String(${stmt.value}));`]
+    case `loop`:
+      return [`for (let i = 0; i < 2; i += 1) ${pushText(stmt)}`]
     case `depNote`:
       return [`note('d');`]
     case `depSeen`:
@@ -1103,6 +1116,11 @@ function sitesOf(plan) {
         at(`value-undefined`, `string`, stmt.line, whole)
         at(`bool-flip`, `flag`, stmt.line, whole)
       }
+      if (stmt.kind === `loop`) {
+        at(`loop-false`, `loop`, stmt.line, whole)
+        at(`binary-swap`, `swap`, stmt.line, whole)
+        at(`delete-call`, `push`, stmt.line, pushText(stmt))
+      }
       if (stmt.kind === `depNote`) at(`delete-call`, `note`, stmt.line, whole)
       if (stmt.kind === `depSeen`) {
         at(`delete-call`, `push`, stmt.line, whole)
@@ -1292,6 +1310,18 @@ function interpret(plan, fnId, x, sites, active) {
     const fn = plan.functions.find((f) => f.id === id)
     for (const stmt of fn.body) {
       if (stmt.kind === `push`) write(stmt)
+      // The condition runs before each pass; a forced-false condition runs
+      // none, and `<=` runs one more.
+      if (stmt.kind === `loop`)
+        for (let i = 0; ; i += 1) {
+          const loopSite = siteOf(stmt, `loop`)
+          reached.add(loopSite.id)
+          if (isActive(loopSite)) break
+          const swapSite = siteOf(stmt, `swap`)
+          reached.add(swapSite.id)
+          if (!(isActive(swapSite) ? i <= 2 : i < 2)) break
+          write(stmt)
+        }
       // The workspace dependency's log, as a freshly loaded module has it.
       if (stmt.kind === `depNote`) {
         const call = siteOf(stmt, `note`)
