@@ -14,8 +14,10 @@
  *    CLI's documented interface (the header of `schemata.mjs`) promises for
  *    each source form: `if-true` and `if-false` for an `if` condition,
  *    `binary-swap` for a comparison or a logical operator, `drop-not` for
- *    `!`, `bool-flip` for a boolean literal outside a type, and
- *    `delete-call` for a call statement. Each names its function
+ *    `!`, `bool-flip` for a boolean literal outside a type,
+ *    `value-undefined` for a call whose value is used (not a callee or the
+ *    object of a property or element access), and `delete-call` for a call
+ *    statement. Each names its function
  *    (`name`, or `Class.method` for a method) and its line.
  * 2. **Probe-only code.** A mutant is left out as probe code exactly when its
  *    site is probe-only code: a probe statement in the decided form,
@@ -576,6 +578,8 @@ async function driver(plan, observe) {
       if (m.function === `reportAndPush`) states.add(`mixed helper judged`)
       if (m.operator === `bool-flip` && !m.probe && m.outcome === `killed`)
         states.add(`a boolean flip killed`)
+      if (m.operator === `value-undefined` && !m.probe && m.outcome === `killed`)
+        states.add(`a value-position call killed`)
       if (m.function === `w_leaf` && m.outcome !== `unowned`)
         states.add(`owned through a call chain`)
       if (m.function === `W0.step` && m.outcome !== `unowned`)
@@ -1056,6 +1060,7 @@ const required = [
   `a mutant that changes a value only at load killed`,
   `a mutant that changes no value judged without a run`,
   `a boolean flip killed`,
+  `a value-position call killed`,
   `a shrinking calibration passes under a mutant`,
   `each owner's value change killed its own mutant`,
   `a hang alone timed out`,

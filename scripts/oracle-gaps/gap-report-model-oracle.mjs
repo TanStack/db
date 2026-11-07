@@ -1030,10 +1030,12 @@ function sitesOf(plan) {
   // A decided probe statement: `&&`, then the guard's `!==`, then a
   // comparison in its condition. It has no call statement to delete.
   // A probe whose condition is the literal `true` has a `bool-flip` there.
+  // The probe call is the `&&`'s right operand, so it is also a value-position call.
   const guard = (fn, line, probe, condition, quote) => {
     const text = probeText(probe, condition, quote)
     add(fn, line, `binary-swap`, text, { probe: true })
     add(fn, line, `binary-swap`, text, { probe: true })
+    add(fn, line, `value-undefined`, text, { probe: true })
     add(fn, line, condition === `true` ? `bool-flip` : `binary-swap`, text, {
       probe: true,
     })
@@ -1078,16 +1080,22 @@ function sitesOf(plan) {
         at(`delete-call`, `push`, stmt.line, whole)
       if (stmt.kind === `flag`) {
         at(`delete-call`, `push`, stmt.line, whole)
+        at(`value-undefined`, `string`, stmt.line, whole)
         at(`bool-flip`, `flag`, stmt.line, whole)
       }
       if (stmt.kind === `memoSet`) {
         at(`if-true`, `true`, stmt.line, whole)
         at(`if-false`, `false`, stmt.line, whole)
         at(`drop-not`, `not`, stmt.line, whole)
+        at(`value-undefined`, `has`, stmt.line, whole)
         at(`delete-call`, `memoSet`, stmt.line, `memo.set(x, 's${stmt.label}');`)
       }
       if (stmt.kind === `memoGet` || stmt.kind === `pushLoaded`)
         at(`delete-call`, stmt.kind, stmt.line, whole)
+      if (stmt.kind === `memoGet`) {
+        at(`value-undefined`, `string`, stmt.line, whole)
+        at(`value-undefined`, `get`, stmt.line, whole)
+      }
       if (stmt.kind === `primeCall`) at(`delete-call`, `call`, stmt.line, whole)
       if (stmt.kind === `if`) {
         condition()
@@ -1106,6 +1114,7 @@ function sitesOf(plan) {
         at(`if-true`, `oldTrue`, stmt.line, whole)
         at(`if-false`, `oldFalse`, stmt.line, whole)
         at(`binary-swap`, `oldAnd`, stmt.line, whole)
+        at(`value-undefined`, `oldDevBuild`, stmt.line, whole)
         at(`binary-swap`, `oldNe`, stmt.line, whole)
         at(`delete-call`, `oldCall`, stmt.line, oldProbeCallText(`'p${stmt.label}'`))
       }
@@ -1262,14 +1271,20 @@ function interpret(plan, fnId, x, sites, active) {
         const call = siteOf(stmt, `push`)
         reached.add(call.id)
         if (!isActive(call)) {
-          const flip = siteOf(stmt, `flag`)
-          reached.add(flip.id)
-          trace.push(String(isActive(flip) ? !stmt.value : stmt.value))
+          // `String(...)` replaced by undefined never evaluates its literal.
+          const string = siteOf(stmt, `string`)
+          reached.add(string.id)
+          if (isActive(string)) trace.push(undefined)
+          else {
+            const flip = siteOf(stmt, `flag`)
+            reached.add(flip.id)
+            trace.push(String(isActive(flip) ? !stmt.value : stmt.value))
+          }
         }
       }
       if (stmt.kind === `memoSet`) {
-        for (const role of [`true`, `false`, `not`]) reached.add(siteOf(stmt, role).id)
-        let value = !memo.has(x)
+        for (const role of [`true`, `false`, `not`, `has`]) reached.add(siteOf(stmt, role).id)
+        let value = !(isActive(siteOf(stmt, `has`)) ? undefined : memo.has(x))
         if (isActive(siteOf(stmt, `not`))) value = !value
         outcomes.push([stmt.line, value])
         if (isActive(siteOf(stmt, `true`))) value = true
@@ -1283,8 +1298,17 @@ function interpret(plan, fnId, x, sites, active) {
       if (stmt.kind === `memoGet` || stmt.kind === `pushLoaded`) {
         const site = siteOf(stmt, stmt.kind)
         reached.add(site.id)
-        if (!isActive(site))
-          trace.push(...(stmt.kind === `memoGet` ? [String(memo.get(x))] : loaded()))
+        if (!isActive(site) && stmt.kind === `pushLoaded`) trace.push(...loaded())
+        if (!isActive(site) && stmt.kind === `memoGet`) {
+          const string = siteOf(stmt, `string`)
+          reached.add(string.id)
+          if (isActive(string)) trace.push(undefined)
+          else {
+            const get = siteOf(stmt, `get`)
+            reached.add(get.id)
+            trace.push(String(isActive(get) ? undefined : memo.get(x)))
+          }
+        }
       }
       if (stmt.kind === `pushTag`) {
         const site = siteOf(stmt, `push`)
@@ -1306,7 +1330,7 @@ function interpret(plan, fnId, x, sites, active) {
       if (stmt.kind === `oldProbe`) {
         // `devBuild()` is true under test, so the guard holds and the probe
         // is called; none of it writes output.
-        for (const role of [`oldTrue`, `oldFalse`, `oldAnd`, `oldNe`, `oldCall`])
+        for (const role of [`oldTrue`, `oldFalse`, `oldAnd`, `oldDevBuild`, `oldNe`, `oldCall`])
           reached.add(siteOf(stmt, role).id)
         reached.add(sites.find((s) => s.role === `devBuild`).id)
         outcomes.push([stmt.line, true])

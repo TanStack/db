@@ -10,6 +10,10 @@
 // - `binary-swap`: `===`↔`!==`, `<`↔`<=`, `>`↔`>=`, `&&`↔`||`, `??`→`&&`.
 // - `drop-not`: `!x` → `x`.
 // - `bool-flip`: a boolean literal `true` ↔ `false` (not a literal type).
+// - `value-undefined`: a call whose value is used → `undefined`, and the
+//   call does not run. Not a call statement (`delete-call`), and not a
+//   callee or the object of a property or element access, where
+//   `undefined` would only throw.
 // - `if-true` / `if-false`: force an `if` condition.
 // - `delete-call`: skip a call statement (`switch || call()`).
 //
@@ -217,6 +221,19 @@ export function instrument(ts, path, text, source, offset = 0) {
       const literal = node.getText(file)
       ids.bool = add(node, `bool-flip`, literal, literal === `true` ? `false` : `true`)
     }
+    if (
+      ts.isCallExpression(node) &&
+      !ts.isExpressionStatement(node.parent) &&
+      !(
+        (ts.isCallExpression(node.parent) ||
+          ts.isPropertyAccessExpression(node.parent) ||
+          ts.isElementAccessExpression(node.parent)) &&
+        node.parent.expression === node
+      ) &&
+      node.expression.kind !== ts.SyntaxKind.SuperKeyword &&
+      node.expression.kind !== ts.SyntaxKind.ImportKeyword
+    )
+      ids.value = add(node, `value-undefined`, node.getText(file), `undefined`)
     if (ts.isIfStatement(node)) {
       const condition = node.expression.getText(file)
       ids.ifTrue = add(node.expression, `if-true`, condition, `true`)
@@ -256,6 +273,7 @@ export function instrument(ts, path, text, source, offset = 0) {
     if (ids.not !== undefined)
       return `${G}.not(${ids.not}, ${emitted.get(node.operand).text})`
     if (ids.bool !== undefined) return `${G}.b(${ids.bool}, ${node.getText(file)})`
+    if (ids.value !== undefined) return `${G}.v(${G}.m(${ids.value}) ? void 0 : ${out})`
     if (ids.ifTrue !== undefined) {
       // Replace only the condition; the rest of the `if` stays as emitted.
       const { text: condition, at } = emitted.get(node.expression)
