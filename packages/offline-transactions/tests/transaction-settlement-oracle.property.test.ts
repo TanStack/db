@@ -6,6 +6,7 @@ import { OutboxManager } from '../src/outbox/OutboxManager'
 import {
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -1049,6 +1050,8 @@ describe(`restored snapshots and independent outbox settlement`, () => {
   it.each(restoredHistories)(
     `restores whole snapshots through independent outcomes: %j`,
     async (history) => {
+      // An enumerated history: a reproducible route for the gap report.
+      oracleRoute(`case`)
       reach.beginHistory()
       const rows = restoredRows(history)
       const storage = new FakeStorageAdapter()
@@ -1697,6 +1700,7 @@ it.each([
 ] as const)(
   `settles a started peer across %s hook failure and %s write`,
   async (failureKind, peerWriteCase) => {
+    oracleRoute(`case`)
     const providerError = new Error(`HTTP 401 Unauthorized`)
     const hookError = new Error(`retry decision failed`)
     const storageError = new Error(`peer outbox write failed`)
