@@ -7,6 +7,7 @@ import { registerOpaqueHash } from '../../src/hashing/hash.js'
 import { topKBatch } from '../../src/operators/topKState.js'
 import { D2 } from '../../src/d2.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
+import { oracleRoute } from '../../../db/tests/oracle-config.js'
 import { output } from '../../src/operators/index.js'
 import { declareOracle } from '../../../db/tests/oracle-declaration'
 
@@ -288,6 +289,8 @@ it.each([true, false])(
 )
 
 it(`compares shared subtrees without expanding every path`, () => {
+  // No seed: a random campaign.
+  oracleRoute(`random seed`)
   vi.spyOn(hashing, `hash`).mockReturnValue(7)
   fc.assert(
     fc.property(fc.integer({ min: 0, max: 20 }), (depth) => {

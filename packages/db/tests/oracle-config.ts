@@ -955,7 +955,7 @@ export { declareOracle } from './oracle-declaration.js'
  * the test: first, or, for a random campaign, in its predicate.
  */
 export function oracleRoute(
-  route: `fixed seed` | `fixed history` | `case` | `random seed`,
+  route: `fixed seed` | `fixed history` | `case` | `random seed` | `calibration`,
 ): void {
   globalThis.__oracleRoute?.(route)
 }

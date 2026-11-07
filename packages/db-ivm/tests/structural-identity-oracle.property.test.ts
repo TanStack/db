@@ -3,6 +3,7 @@ import { fc } from '@fast-check/vitest'
 import { equalHashValues, structuralIdentity } from '../src/hashing/hash.js'
 import {
   oraclePropertyOptions,
+  oracleRoute,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -574,6 +575,7 @@ describe(`structuralIdentity`, () => {
   ] as Array<[string, Spec, Spec]>)(
     `agrees with D2 value identity for %s`,
     (_name, left, right) => {
+      oracleRoute(`case`)
       expectAgreement(
         left,
         right,

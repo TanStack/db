@@ -1085,6 +1085,8 @@ describe(`DBSP incrementalization laws`, () => {
   })
 
   it(`rejects invalid negative and duplicate-key input states`, () => {
+    // A checker calibration: a failure here is the framework's, not a kill.
+    oracleRoute(`calibration`)
     expect(() =>
       assertUnaryIncrementalization({
         name: `negative input state excluded`,
@@ -1115,6 +1117,7 @@ describe(`DBSP incrementalization laws`, () => {
   })
 
   it(`rejects omitted, sign-flipped, wrong-member, wrong-window, wrong-limit, missing-promotion, and truthiness-filtered output`, () => {
+    oracleRoute(`calibration`)
     expect(() =>
       assertUnaryIncrementalization({
         name: `omitted output fault`,

@@ -1044,6 +1044,7 @@ describe(`hash identity oracle`, () => {
     ],
   ]
   it.each(fixedWitnesses)(`%s`, (_name, left, right) => {
+    oracleRoute(`case`)
     for (const seeds of [
       [1, 2],
       [3, 4],
@@ -1069,6 +1070,7 @@ describe(`hash identity oracle`, () => {
   })
 
   it(`keeps distinct identities separate when their digests collide`, () => {
+    oracleRoute(`case`)
     const pair: Pair = {
       left: { k: `map`, entries: [] },
       right: { k: `set`, items: [] },
