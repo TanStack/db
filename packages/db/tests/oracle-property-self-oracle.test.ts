@@ -41,6 +41,10 @@
  *   `predict` without one, fails to load. A call after its history ended is an
  *   unhandled error of the run, and a driver whose probe records differ between
  *   two runs fails the determinism test.
+ * - `clock`: a driver on `useOracleClock` whose clock passes its bound fails
+ *   that history under law `bounded clock` at checkpoint `clock`, ranked as
+ *   a driver error is: a violation recorded before the spin still decides,
+ *   and a driver error after it does not (maintainer decision, 2026-11-06).
  * - `timeout`: a property's `timeout` limits every test it registers.
  * - `replay`: replaying a failing campaign's seed and path runs only that
  *   property's random campaign, starts from the counterexample itself, and
@@ -53,7 +57,8 @@
  * Authority: the contract in the header of `oracle-property.ts`, including
  * its state probes (user decision of 2026-11-04 adopting differential reach); the
  * maintainer decisions of 2026-11-03 on calibration candidates, failure
- * precedence, and determinism scope; and the oracle rubric's replay
+ * precedence, and determinism scope; the maintainer decision of 2026-11-06
+ * that work which never goes quiet on a controlled clock fails its history; and the oracle rubric's replay
  * (ORC-007), calibration (ORC-006), and declared-reach (ORC-015) rules.
  *
  * Limits: synthetic properties with histories of one to three integers, one
@@ -119,6 +124,7 @@ type Draft = {
   overReport: boolean
   noisyProbe: boolean
   predictMode: `match` | `missing` | `extra`
+  clock: boolean
 }
 type Suite = { drafts: Array<Draft> }
 
@@ -220,6 +226,11 @@ const draft: fc.Arbitrary<Draft> = fc.record({
       arbitrary: fc.constantFrom(`missing` as const, `extra` as const),
     },
   ),
+  // A property whose driver runs on the framework's controlled clock.
+  clock: fc.oneof(
+    { weight: 3, arbitrary: fc.constant(false) },
+    { weight: 1, arbitrary: fc.constant(true) },
+  ),
 })
 const suite: fc.Arbitrary<Suite> = fc.record({
   drafts: fc.array(draft, { minLength: 1, maxLength: 2 }),
@@ -277,6 +288,7 @@ function resolveSuite({ drafts }: Suite): Plan {
         ...(d.noisyProbe ? { noisyProbe: true } : {}),
         ...(d.predictMode !== `match` ? { predictMode: d.predictMode } : {}),
         ...(d.timing === `slow` ? { slow: true, timeout: 100 } : {}),
+        ...(d.clock ? { clock: true } : {}),
         calibrations: d.calibrations.map((kind, at) => ({
           name: `cal-${at}`,
           kind,
@@ -313,7 +325,7 @@ type Kind =
   | `timeout`
 type Outcome = {
   kind: Kind
-  law?: `three` | `four` | `reach agreement`
+  law?: `three` | `four` | `reach agreement` | `bounded clock`
   /** A violation whose driver threw afterwards carries that error. */
   cause?: `driver`
   /** The checkpoint a framework-made violation names. */
@@ -323,22 +335,31 @@ type Outcome = {
 }
 type LogEntry ={ id: string; test: string; history: SyntheticHistory }
 
-const allowed = (item: number) => [0, 1, 2, 3, 4, 6].includes(item)
+const allowed = (item: number) => [0, 1, 2, 3, 4, 6, 7].includes(item)
 const member = (history: SyntheticHistory) =>
   history.length >= 1 && history.length <= 3 && history.every(allowed)
 // A constructed history builds its history from its prefix followed by a generated history, cut to
 // three items; generated items are always allowed.
 const constructedMember = (prefix: SyntheticHistory) =>
   prefix.length >= 1 && prefix.slice(0, 3).every(allowed)
-function verdictOf(history: SyntheticHistory): Outcome {
+// A 7 on a controlled clock spins it: past the clock's bound, the history
+// fails under law `bounded clock` at checkpoint `clock`, ranked as a driver
+// error is, by where it happens. A violation recorded before it still decides;
+// a driver error after it does not.
+function verdictOf(history: SyntheticHistory, clock = false): Outcome {
+  const stops = (item: number) => item === 6 || (clock && item === 7)
   for (const [at, item] of history.entries()) {
-    if (item === 3 || item === 4)
+    if (item === 3 || item === 4) {
+      const stop = history.slice(at + 1).find(stops)
       return {
         kind: `violation`,
         law: item === 3 ? `three` : `four`,
-        ...(history.slice(at + 1).includes(6) ? { cause: `driver` } : {}),
+        ...(stop === 6 ? { cause: `driver` } : {}),
       }
+    }
     if (item === 6) return { kind: `setup` }
+    if (clock && item === 7)
+      return { kind: `violation`, law: `bounded clock`, checkpoint: `clock` }
   }
   return { kind: `pass` }
 }
@@ -390,7 +411,7 @@ function judged(
   history: SyntheticHistory,
   forced?: boolean,
 ): Outcome {
-  const verdict = verdictOf(history)
+  const verdict = verdictOf(history, spec.clock === true)
   if (verdict.kind !== `pass` || !spec.probe) return verdict
   const predicts = predictsZero(history)
   if (enteredFor(spec, history, forced) === predicts)
@@ -551,7 +572,7 @@ function predictSpec(
   }
   if (spec.source.kind === `enumerated`)
     for (const history of spec.source.histories)
-      tests.set(label(history), verdictOf(history))
+      tests.set(label(history), verdictOf(history, spec.clock === true))
   else {
     tests.set(names[0]!, campaign(names[0]!))
     tests.set(`random seed`, campaign(`random seed`))
@@ -688,6 +709,7 @@ const frameworkStates = [
   `forced-probe-calibration-applied`,
   `late-probe-error`,
   `over-reported-reach`,
+  `clock-violation`,
 ] as const
 
 function frameworkReach(
@@ -714,6 +736,7 @@ function frameworkReach(
       if (name === `random seed`) reached.add(`random-campaign`)
       if (outcome.kind === `determinism`) reached.add(`determinism-caught`)
       if (outcome.law === agreementLaw) reached.add(`agreement-violation`)
+      if (outcome.law === `bounded clock`) reached.add(`clock-violation`)
       if (outcome.diagnosis === `never-reached`)
         reached.add(`agreement-never-reached`)
       if (outcome.diagnosis === `false-condition`)
@@ -1352,6 +1375,7 @@ const generatedDraft = (overrides: Partial<Draft>): Draft => ({
   overReport: false,
   noisyProbe: false,
   predictMode: `match`,
+  clock: false,
   ...overrides,
 })
 const fixedHistory = (
@@ -1386,6 +1410,21 @@ oracleProperty({
           ],
         },
       }),
+      fixedHistory(
+        `a clock that never goes quiet fails its history under bounded clock`,
+        [`clock-violation`],
+        generatedDraft({ clock: true, fixed: [at([7])] }),
+      ),
+      fixedHistory(
+        `a violation recorded before the clock spins still decides`,
+        [`campaign-violation`],
+        generatedDraft({ clock: true, constructed: [{ prefix: [3, 7], enters: [] }] }),
+      ),
+      fixedHistory(
+        `a driver error after the clock spins does not decide`,
+        [`clock-violation`],
+        generatedDraft({ clock: true, fixed: [at([7, 6])] }),
+      ),
       fixedHistory(
         `a driver error after a violation is the violation's cause`,
         [`cause-attached`],

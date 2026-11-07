@@ -10,6 +10,9 @@
  * - `3` and `4` violate the laws `three` and `four`. The check reports the
  *   first of them in the history.
  * - `6` makes the driver throw right after it records that item.
+ * - `7`, in a `clock` spec, makes the driver arm a timer that re-arms itself
+ *   at 0 ms and then advance the controlled clock by a second: work that
+ *   never goes quiet. Elsewhere it is an ordinary item.
  *
  * A constructed history builds its history as its prefix followed by a generated history,
  * cut to three items. The driver appends every history it runs, with the running test's name, to
@@ -35,8 +38,13 @@
  */
 import { appendFileSync } from 'node:fs'
 import fc from 'fast-check'
-import { expect } from 'vitest'
-import { oracleProperty, pass, violation } from './oracle-property.js'
+import { expect, vi } from 'vitest'
+import {
+  oracleProperty,
+  pass,
+  useOracleClock,
+  violation,
+} from './oracle-property.js'
 import type { Calibration } from './oracle-property.js'
 
 export const syntheticIds = [
@@ -85,18 +93,23 @@ export type SyntheticSpec = {
   noisyProbe?: boolean
   /** `missing` omits `predict` for a bound probe; `extra` passes it unbound. */
   predictMode?: `missing` | `extra`
+  /** Runs every history on a controlled clock, where a 7 spins it. */
+  clock?: boolean
 }
 
 /** The synthetic language: one to three items, mostly ordinary ones. */
 export const syntheticArbitrary: fc.Arbitrary<SyntheticHistory> = fc.array(
   fc.oneof(
     { arbitrary: fc.integer({ min: 0, max: 2 }), weight: 6 },
-    { arbitrary: fc.constantFrom(3, 4, 6), weight: 1 },
+    { arbitrary: fc.constantFrom(3, 4, 6, 7), weight: 1 },
   ),
   { minLength: 1, maxLength: 3 },
 )
 
 const allStates = [`saw-0`, `saw-1`, `saw-2`]
+// The clock a `clock` spec's driver runs on. A 7's spin would fire about a
+// thousand timers in its second.
+const controlledClock = () => useOracleClock({ maxTimers: 100 })
 const syntheticProbe = `synthetic#saw-0`
 let nonce = 0
 let noise = 0
@@ -174,10 +187,22 @@ function syntheticDriver(spec: SyntheticSpec, mutant = false) {
       )
     if (spec.reachVia === `observe`)
       for (const state of reachedStates(spec)(history)) observe(`reach`, state)
-    for (const [index, item] of history.entries()) {
-      observe(`item ${index}`, mutant && index === 0 ? 3 : item)
-      if (item === 6)
-        throw new Error(`synthetic driver failed at item ${index}`)
+    const clock = spec.clock ? controlledClock() : undefined
+    try {
+      for (const [index, item] of history.entries()) {
+        observe(`item ${index}`, mutant && index === 0 ? 3 : item)
+        if (item === 6)
+          throw new Error(`synthetic driver failed at item ${index}`)
+        if (item === 7 && clock) {
+          const spin = () => {
+            setTimeout(spin, 0)
+          }
+          spin()
+          await vi.advanceTimersByTimeAsync(1000)
+        }
+      }
+    } finally {
+      clock?.release()
     }
     // Last, so a comparison of only the first observations misses it.
     if (spec.nondeterministic) observe(`nonce`, nonce++)

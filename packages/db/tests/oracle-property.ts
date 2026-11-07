@@ -118,6 +118,14 @@
  *   the reported counterexample still shows the first failure (ORC-010).
  *   Within one history a driver error decides first, then a law violation,
  *   then a constructed history that missed its state.
+ * - **Bounded clock.** A driver that runs on `useOracleClock` has virtual
+ *   timers and `Date`; macrotask turns stay real. The clock fires at most
+ *   `maxTimers` timers (1,000 by default) in one history. Past that it stops
+ *   firing them, and the history fails under law `bounded clock` at
+ *   checkpoint `clock`: work that never goes quiet on a controlled clock is
+ *   a defect (maintainer decision, 2026-11-06). The spin ranks as a driver
+ *   error does, by where it happens: only a violation at a checkpoint
+ *   recorded before it still decides, and a driver error after it does not.
  *
  * `oracle-property-self-oracle.test.ts` checks these promises the way an
  * oracle checks production: it runs synthetic properties under real Vitest
@@ -131,7 +139,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { appendFileSync } from 'node:fs'
 import { isDeepStrictEqual } from 'node:util'
 import fc from 'fast-check'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   assertRegisteredOracleProperty,
   oraclePropertyOptions,
@@ -605,6 +613,60 @@ function enumeratedTest<History, Expected, Plan>(
   }
 }
 
+// The running history's trace, and where in it a controlled clock passed its
+// bound (see `useOracleClock`).
+let historyTrace: Array<Observation> | undefined
+let clockSpin: { at: number; maxTimers: number } | undefined
+/** The running history's spin, if its clock passed its bound; clears it. */
+const takeClockSpin = () => {
+  const spin = clockSpin
+  clockSpin = undefined
+  return spin
+}
+
+/**
+ * Runs the rest of a driver's history on a controlled clock: timers and
+ * `Date` are virtual, and macrotask turns (`setImmediate`) and microtasks
+ * stay real, so in-memory work finishes between clock steps. The clock fires
+ * at most `maxTimers` timers in the history; past that it stops firing them,
+ * which ends a storm of timers that never goes quiet, and the history fails
+ * under law `bounded clock`. Raise `maxTimers` for a legal history that needs
+ * more. Call `release` in the driver's `finally`.
+ */
+export function useOracleClock({ maxTimers = 1000 }: { maxTimers?: number } = {}): {
+  release: () => void
+} {
+  vi.useFakeTimers({
+    toFake: [`setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, `Date`],
+  })
+  let fired = 0
+  const counted =
+    <Args extends Array<unknown>>(callback: (...args: Args) => void) =>
+    (...args: Args) => {
+      fired += 1
+      if (fired > maxTimers) {
+        clockSpin ??= { at: historyTrace?.length ?? 0, maxTimers }
+        return
+      }
+      callback(...args)
+    }
+  const fakeTimeout = globalThis.setTimeout
+  const fakeInterval = globalThis.setInterval
+  globalThis.setTimeout = ((callback: unknown, ms?: number, ...args: Array<unknown>) =>
+    fakeTimeout(
+      typeof callback === `function` ? counted(callback as (...a: Array<unknown>) => void) : (callback as () => void),
+      ms,
+      ...args,
+    )) as typeof setTimeout
+  globalThis.setInterval = ((callback: unknown, ms?: number, ...args: Array<unknown>) =>
+    fakeInterval(
+      typeof callback === `function` ? counted(callback as (...a: Array<unknown>) => void) : (callback as () => void),
+      ms,
+      ...args,
+    )) as typeof setInterval
+  return { release: () => vi.useRealTimers() }
+}
+
 /** Runs only the driver, for a history's recorded trace. */
 async function recordTrace<Plan>(
   driver: (
@@ -619,12 +681,21 @@ async function recordTrace<Plan>(
     entered: new Set(),
     open: true,
   }
-  await probeWindows.run(window, () =>
-    driver(plan, (checkpoint, value) => {
-      observations.push({ checkpoint, value })
-    }),
-  )
+  historyTrace = observations
+  clockSpin = undefined
+  try {
+    await probeWindows.run(window, () =>
+      driver(plan, (checkpoint, value) => {
+        observations.push({ checkpoint, value })
+      }),
+    )
+  } finally {
+    historyTrace = undefined
+  }
   window.open = false
+  // Where a controlled clock passed its bound is part of the trace.
+  const spin = takeClockSpin()
+  if (spin) observations.push({ checkpoint: `clock`, value: spin.at })
   // The probe calls a history makes are part of what a deterministic driver repeats.
   observations.push({
     checkpoint: `probes`,
@@ -715,11 +786,37 @@ async function runOne<History, Expected, Plan>(
   forced?: ForcedProbe,
 ): Promise<{ verdict: Verdict; reached: Set<string> }> {
   const plan = planOf(options, history)
-  const { observations, driverError, probes } = await recordGuarded(
+  const { observations, driverError, probes, spin } = await recordGuarded(
     driver,
     plan,
     forced,
   )
+  // A spin ranks as a driver error does, by where it happens: the trace is
+  // judged up to it, and a driver error after it does not decide.
+  if (spin) {
+    const { verdict, reached } = judge(
+      options,
+      plan,
+      observations.slice(0, spin.at),
+      undefined,
+      probes,
+    )
+    const recorded =
+      verdict.kind === `violation` &&
+      observations
+        .slice(0, spin.at)
+        .some(({ checkpoint }) => checkpoint === verdict.checkpoint)
+    return recorded
+      ? { verdict, reached }
+      : {
+          verdict: violation(
+            `clock`,
+            `the controlled clock fired more than ${spin.maxTimers} timers in one history: work that never goes quiet (raise maxTimers if a legal history needs more)`,
+            `bounded clock`,
+          ),
+          reached,
+        }
+  }
   return judge(options, plan, observations, driverError, probes)
 }
 
@@ -735,6 +832,7 @@ async function recordGuarded<Plan>(
   observations: Array<Observation>
   driverError?: { error: unknown }
   probes: ProbeRecord
+  spin?: { at: number; maxTimers: number }
 }> {
   const observations: Array<Observation> = []
   const window: ProbeWindow = {
@@ -752,6 +850,13 @@ async function recordGuarded<Plan>(
     }
     return window
   }
+  historyTrace = observations
+  clockSpin = undefined
+  const settle = () => {
+    historyTrace = undefined
+    const spin = takeClockSpin()
+    return spin ? { spin } : {}
+  }
   try {
     await probeWindows.run(window, () =>
       driver(plan, (checkpoint, value) => {
@@ -760,9 +865,9 @@ async function recordGuarded<Plan>(
       }),
     )
   } catch (error) {
-    return { observations, driverError: { error }, probes: close() }
+    return { observations, driverError: { error }, probes: close(), ...settle() }
   }
-  return { observations, probes: close() }
+  return { observations, probes: close(), ...settle() }
 }
 
 /** The model predicts and the check judges a recorded trace. */
