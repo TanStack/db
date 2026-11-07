@@ -55,6 +55,8 @@ const quote = fc.constantFrom(`'`, `\``)
 const constant = fc.integer({ min: 0, max: 9 })
 const statement = fc.oneof(
   fc.record({ kind: fc.constant(`push`), quote }),
+  // A boolean literal in production code, written out as text.
+  fc.record({ kind: fc.constant(`flag`), value: fc.boolean() }),
   fc.record({
     kind: fc.constant(`if`),
     op: comparison,
@@ -456,6 +458,13 @@ const witness = [
     body: [kill],
     tests: [judging(`a`, `calibration`, 1, { judges: false, shrinks: true })],
   },
+  // A boolean literal that a judging test sees: its flip changes the output.
+  {
+    id: `w_flag`,
+    owners: [`a`],
+    body: [{ kind: `flag`, value: true }],
+    tests: [judging(`a`, `fixed seed`, 1)],
+  },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -503,6 +512,7 @@ const captureWitness = new Set([
   `w_slowkill`,
   `w_otherinfect`,
   `w_shrink`,
+  `w_flag`,
 ])
 
 // ## Rendering and layout
@@ -588,6 +598,8 @@ function renderStatement(stmt, callText) {
   switch (stmt.kind) {
     case `push`:
       return [pushText(stmt)]
+    case `flag`:
+      return [`out.push(String(${stmt.value}));`]
     case `if`:
       return [`if (${condText(stmt)}) ${pushText(stmt)}`]
     case `throwIf`:
@@ -1017,16 +1029,21 @@ function sitesOf(plan) {
     })
   // A decided probe statement: `&&`, then the guard's `!==`, then a
   // comparison in its condition. It has no call statement to delete.
+  // A probe whose condition is the literal `true` has a `bool-flip` there.
   const guard = (fn, line, probe, condition, quote) => {
     const text = probeText(probe, condition, quote)
     add(fn, line, `binary-swap`, text, { probe: true })
     add(fn, line, `binary-swap`, text, { probe: true })
-    if (condition !== `true`) add(fn, line, `binary-swap`, text, { probe: true })
+    add(fn, line, condition === `true` ? `bool-flip` : `binary-swap`, text, {
+      probe: true,
+    })
   }
   // `devBuild()` is an ordinary function now; only the older probe form calls it.
   add(`devBuild`, 4, `binary-swap`, preambleStatements.devBuild, {
     role: `devBuild`,
   })
+  // Its `return false` runs only when reading the environment throws.
+  add(`devBuild`, 6, `bool-flip`, `return false`, { role: `devBuildFalse` })
   guard(`report`, 10, `probe`, `true`)
   add(`reportTwice`, 13, `delete-call`, preambleStatements.reportTwice, {
     probe: true,
@@ -1059,6 +1076,10 @@ function sitesOf(plan) {
       }
       if (stmt.kind === `push` || stmt.kind === `pushTag`)
         at(`delete-call`, `push`, stmt.line, whole)
+      if (stmt.kind === `flag`) {
+        at(`delete-call`, `push`, stmt.line, whole)
+        at(`bool-flip`, `flag`, stmt.line, whole)
+      }
       if (stmt.kind === `memoSet`) {
         at(`if-true`, `true`, stmt.line, whole)
         at(`if-false`, `false`, stmt.line, whole)
@@ -1236,6 +1257,16 @@ function interpret(plan, fnId, x, sites, active) {
     const fn = plan.functions.find((f) => f.id === id)
     for (const stmt of fn.body) {
       if (stmt.kind === `push`) write(stmt)
+      if (stmt.kind === `flag`) {
+        // A deleted push never evaluates its literal.
+        const call = siteOf(stmt, `push`)
+        reached.add(call.id)
+        if (!isActive(call)) {
+          const flip = siteOf(stmt, `flag`)
+          reached.add(flip.id)
+          trace.push(String(isActive(flip) ? !stmt.value : stmt.value))
+        }
+      }
       if (stmt.kind === `memoSet`) {
         for (const role of [`true`, `false`, `not`]) reached.add(siteOf(stmt, role).id)
         let value = !memo.has(x)

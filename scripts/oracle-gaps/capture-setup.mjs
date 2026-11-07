@@ -240,6 +240,11 @@ globalThis.__oracleGaps = {
     infect(id)
     return id === active ? value : !value
   },
+  b(id, value) {
+    hit(id)
+    infect(id)
+    return id === active ? !value : value
+  },
   // Records whether the condition was truthy or falsy, then applies a forced
   // value if one of this `if`'s two mutants is active.
   cond(idTrue, idFalse, value) {

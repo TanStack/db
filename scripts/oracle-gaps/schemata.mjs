@@ -9,6 +9,7 @@
 // Operators, in the order the sites are numbered:
 // - `binary-swap`: `===`↔`!==`, `<`↔`<=`, `>`↔`>=`, `&&`↔`||`, `??`→`&&`.
 // - `drop-not`: `!x` → `x`.
+// - `bool-flip`: a boolean literal `true` ↔ `false` (not a literal type).
 // - `if-true` / `if-false`: force an `if` condition.
 // - `delete-call`: skip a call statement (`switch || call()`).
 //
@@ -208,6 +209,14 @@ export function instrument(ts, path, text, source, offset = 0) {
       node.operator === ts.SyntaxKind.ExclamationToken
     )
       ids.not = add(node, `drop-not`, `!`, ``)
+    if (
+      (node.kind === ts.SyntaxKind.TrueKeyword ||
+        node.kind === ts.SyntaxKind.FalseKeyword) &&
+      !ts.isLiteralTypeNode(node.parent)
+    ) {
+      const literal = node.getText(file)
+      ids.bool = add(node, `bool-flip`, literal, literal === `true` ? `false` : `true`)
+    }
     if (ts.isIfStatement(node)) {
       const condition = node.expression.getText(file)
       ids.ifTrue = add(node.expression, `if-true`, condition, `true`)
@@ -246,6 +255,7 @@ export function instrument(ts, path, text, source, offset = 0) {
     }
     if (ids.not !== undefined)
       return `${G}.not(${ids.not}, ${emitted.get(node.operand).text})`
+    if (ids.bool !== undefined) return `${G}.b(${ids.bool}, ${node.getText(file)})`
     if (ids.ifTrue !== undefined) {
       // Replace only the condition; the rest of the `if` stays as emitted.
       const { text: condition, at } = emitted.get(node.expression)
