@@ -18,6 +18,7 @@ import { MultiSet } from '../src/multiset.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -589,6 +590,8 @@ describe(`DBSP incrementalization laws`, () => {
     campaign.test(
       `checks consolidate, reduce, and groupBy against full recomputation (${campaign.name} campaign)`,
       async () => {
+        // The gap report counts a fixed campaign's verdict as reproducible.
+        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
         const reach = new CampaignReach()
         await fc.assert(
           fc.asyncProperty(
@@ -698,6 +701,7 @@ describe(`DBSP incrementalization laws`, () => {
     campaign.test(
       `checks simultaneous binary join deltas and split delivery (${campaign.name} campaign)`,
       async () => {
+        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
         const reach = new CampaignReach()
         await fc.assert(
           fc.asyncProperty(
@@ -808,6 +812,7 @@ describe(`DBSP incrementalization laws`, () => {
     campaign.test(
       `checks global ordering and window membership (${campaign.name} campaign)`,
       async () => {
+        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
         const reach = new CampaignReach()
         await fc.assert(
           fc.asyncProperty(orderedHistory, async (worlds) => {

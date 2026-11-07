@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
-import { oracleRuns } from '../../db/tests/oracle-config.js'
+import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config.js'
+import { runOracleCampaign } from '../../db/tests/oracle-campaign.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 /**
@@ -102,14 +103,17 @@ declareOracle({
 })
 
 describe(`MurmurHashStream`, () => {
-  it(`digests every chunk sequence as the byte-at-a-time stream does`, () => {
-    fc.assert(
-      fc.property(fc.array(chunk, { minLength: 1, maxLength: 8 }), (chunks) => {
-        expect(digests(Current, chunks)).toEqual(digests(Reference, chunks))
-      }),
-      { numRuns: oracleRuns(2000) },
-    )
-  })
+  // A fixed-seed campaign, then a random one, each registering its route,
+  // so a failure on the fixed seed is a reproducible verdict.
+  it(`digests every chunk sequence as the byte-at-a-time stream does`, () =>
+    runOracleCampaign(`IVM_MURMUR_STREAM`, [], (_reach, parameters) => {
+      fc.assert(
+        fc.property(fc.array(chunk, { minLength: 1, maxLength: 8 }), (chunks) => {
+          expect(digests(Current, chunks)).toEqual(digests(Reference, chunks))
+        }),
+        { numRuns: oracleRuns(2000), ...parameters },
+      )
+    }))
 
   it.each([
     [`two bytes, after a one-code-unit string`, [`x`, 1.5, -0, `yz`]],
@@ -118,6 +122,7 @@ describe(`MurmurHashStream`, () => {
   ] as Array<[string, Array<Chunk>]>)(
     `digests the words that follow a block offset of %s`,
     (_, chunks) => {
+      oracleRoute(`case`)
       expectDigestsMatchReference(Current, Reference, chunks)
     },
   )

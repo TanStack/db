@@ -9,6 +9,7 @@ import {
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -808,6 +809,7 @@ const it = oracleReplayTest(vitestIt)
 
 describe(`hash identity oracle`, () => {
   it(`matches the identity model across generated value pairs (${FIXED_SEED})`, () => {
+    oracleRoute(`fixed seed`)
     fc.assert(
       fc.property(pairArb, fc.nat(), fc.nat(), (pair, left, right) =>
         expectPair(pair, [left, right]),
@@ -820,10 +822,14 @@ describe(`hash identity oracle`, () => {
     oraclePropertyOptions(300, PAIR_IDENTITY),
   )(
     `matches the identity model across generated value pairs (random)`,
-    (pair, left, right) => expectPair(pair, [left, right]),
+    (pair, left, right) => {
+      oracleRoute(`random seed`)
+      expectPair(pair, [left, right])
+    },
   )
 
   it(`matches constructed verdicts across generated cyclic values (${FIXED_SEED})`, () => {
+    oracleRoute(`fixed seed`)
     fc.assert(fc.property(cyclicArb, expectCyclicPair), {
       numRuns: oracleRuns(300),
       seed: FIXED_SEED,
@@ -834,7 +840,10 @@ describe(`hash identity oracle`, () => {
     oraclePropertyOptions(300, CYCLIC_IDENTITY),
   )(
     `matches constructed verdicts across generated cyclic values (random)`,
-    expectCyclicPair,
+    (value: CyclicPair) => {
+      oracleRoute(`random seed`)
+      expectCyclicPair(value)
+    },
   )
 
   // Positive execution witness: the fixed campaign reaches every value kind

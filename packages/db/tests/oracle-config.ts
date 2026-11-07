@@ -947,6 +947,19 @@ export function oracleCalibrationTest<TRegistration extends { skip: unknown }>(
 
 export { declareOracle } from './oracle-declaration.js'
 
+/**
+ * Registers the running test's route for the gap report, which counts a
+ * verdict as a kill only on a reproducible route: a fixed seed, a fixed
+ * history, or an enumerated case. A test that builds its fast-check options
+ * when its file loads cannot register them there, so it calls this inside
+ * the test: first, or, for a random campaign, in its predicate.
+ */
+export function oracleRoute(
+  route: `fixed seed` | `fixed history` | `case` | `random seed`,
+): void {
+  globalThis.__oracleRoute?.(route)
+}
+
 /** Keeps ordinary CI bounded while allowing long randomized oracle campaigns. */
 export function oracleRuns(baseRuns: number): number {
   return baseRuns * multiplier
