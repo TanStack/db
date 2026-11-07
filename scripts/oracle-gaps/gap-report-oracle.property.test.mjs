@@ -598,6 +598,8 @@ async function driver(plan, observe) {
         cli.mutants.filter((x) => x.function === `w_otherinfect` && x.outcome === `killed`).length >= 2
       )
         states.add(`each owner's value change killed its own mutant`)
+      if (m.function === `w_dep` && m.operator === `delete-call` && m.outcome === `killed`)
+        states.add(`a workspace dependency's state judged fresh`)
       if (m.function === `w_shrink` && m.operator === `if-true` && m.class === `comparison-gap`)
         states.add(`a shrinking calibration passes under a mutant`)
       if (m.function === `w_slowkill` && m.outcome === `killed`)
@@ -1062,6 +1064,7 @@ const required = [
   `a boolean flip killed`,
   `a value-position call killed`,
   `a shrinking calibration passes under a mutant`,
+  `a workspace dependency's state judged fresh`,
   `each owner's value change killed its own mutant`,
   `a hang alone timed out`,
   `a hang in one owner and a kill in another killed`,

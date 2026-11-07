@@ -4,7 +4,7 @@
  * oracle runs the CLI's static half in-process on these fixtures; the
  * end-to-end oracle runs the real CLI on them.
  */
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -465,6 +465,15 @@ const witness = [
     body: [{ kind: `flag`, value: true }],
     tests: [judging(`a`, `fixed seed`, 1)],
   },
+  // A workspace dependency (`state-dep`, linked through node_modules) keeps
+  // a log in module state. Every copy must load it afresh, or a later copy
+  // sees the notes of an earlier one.
+  {
+    id: `w_dep`,
+    owners: [`a`],
+    body: [{ kind: `depNote` }, { kind: `depSeen` }],
+    tests: [judging(`a`, `fixed seed`, 1)],
+  },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -513,6 +522,7 @@ const captureWitness = new Set([
   `w_otherinfect`,
   `w_shrink`,
   `w_flag`,
+  `w_dep`,
 ])
 
 // ## Rendering and layout
@@ -600,6 +610,10 @@ function renderStatement(stmt, callText) {
       return [pushText(stmt)]
     case `flag`:
       return [`out.push(String(${stmt.value}));`]
+    case `depNote`:
+      return [`note('d');`]
+    case `depSeen`:
+      return [`out.push(...seen());`]
     case `if`:
       return [`if (${condText(stmt)}) ${pushText(stmt)}`]
     case `throwIf`:
@@ -791,7 +805,12 @@ function resolveHistory(history) {
     ),
   ]
   const libLines = []
-  const lines = [`import { ${imported.join(`, `)} } from './lib'`, ...preamble]
+  // The workspace dependency's import shares the first line, so the
+  // preamble's lines do not move.
+  const lines = [
+    `import { ${imported.join(`, `)} } from './lib'; import { note, seen } from 'state-dep'`,
+    ...preamble,
+  ]
   const emit = (fn, indent) => {
     const name = fn.container === `free` ? fn.id : fn.id.split(`.`)[1]
     if (fn.overload)
@@ -1083,6 +1102,11 @@ function sitesOf(plan) {
         at(`value-undefined`, `string`, stmt.line, whole)
         at(`bool-flip`, `flag`, stmt.line, whole)
       }
+      if (stmt.kind === `depNote`) at(`delete-call`, `note`, stmt.line, whole)
+      if (stmt.kind === `depSeen`) {
+        at(`delete-call`, `push`, stmt.line, whole)
+        at(`value-undefined`, `seen`, stmt.line, whole)
+      }
       if (stmt.kind === `memoSet`) {
         at(`if-true`, `true`, stmt.line, whole)
         at(`if-false`, `false`, stmt.line, whole)
@@ -1251,6 +1275,7 @@ function interpret(plan, fnId, x, sites, active) {
       active?.authored === stmt.label ? `s${stmt.label}!` : `s${stmt.label}`,
     )
   }
+  const depLog = []
   // Module state as a freshly loaded module has it: an empty cache, and
   // the labels `w_load` wrote at load, under the same mutant.
   const memo = new Map()
@@ -1266,6 +1291,23 @@ function interpret(plan, fnId, x, sites, active) {
     const fn = plan.functions.find((f) => f.id === id)
     for (const stmt of fn.body) {
       if (stmt.kind === `push`) write(stmt)
+      // The workspace dependency's log, as a freshly loaded module has it.
+      if (stmt.kind === `depNote`) {
+        const call = siteOf(stmt, `note`)
+        reached.add(call.id)
+        if (!isActive(call)) depLog.push(`d`)
+      }
+      if (stmt.kind === `depSeen`) {
+        const call = siteOf(stmt, `push`)
+        reached.add(call.id)
+        if (!isActive(call)) {
+          const seenSite = siteOf(stmt, `seen`)
+          reached.add(seenSite.id)
+          // Spreading undefined throws.
+          if (isActive(seenSite)) throw new TypeError(`seen() is undefined`)
+          trace.push(...depLog)
+        }
+      }
       if (stmt.kind === `flag`) {
         // A deleted push never evaluates its literal.
         const call = siteOf(stmt, `push`)
@@ -1807,6 +1849,9 @@ function fixtureFiles(plan, state = initialState(plan)) {
       : plan.source,
     [LIB]: plan.librarySource,
     'tests/strict.ts': `export const strict = ${state.strict}\n`,
+    // A workspace dependency with module state, linked through node_modules.
+    'deps/state-dep/package.json': `{ "name": "state-dep", "private": true, "type": "module", "exports": "./index.js" }\n`,
+    'deps/state-dep/index.js': `const log = []\nexport function note(entry) {\n  log.push(entry)\n}\nexport function seen() {\n  return [...log]\n}\n`,
     'tests/c.test.ts': ordinaryTestFile(plan),
   }
   for (const file of ORACLE_FILES)
@@ -1845,8 +1890,10 @@ function fixtureFiles(plan, state = initialState(plan)) {
 // the state before it removes that file.
 const written = new Map()
 function writeFixture(dir, files) {
-  for (const sub of [`src`, `tests`, `mutants`])
+  for (const sub of [`src`, `tests`, `mutants`, `deps/state-dep`, `node_modules`])
     mkdirSync(join(dir, sub), { recursive: true })
+  if (!existsSync(join(dir, `node_modules/state-dep`)))
+    symlinkSync(`../deps/state-dep`, join(dir, `node_modules/state-dep`), `dir`)
   for (const path of written.get(dir) ?? [])
     if (!(path in files)) rmSync(join(dir, path), { force: true })
   for (const [path, text] of Object.entries(files))
