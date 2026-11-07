@@ -6909,6 +6909,37 @@ retains exact source/evidence hashes and all ORC outcomes. Actual production
 bundle erasure, Typedoc generation, tooling GREEN and restored-old-tooling
 mutants remain required receiving checks. Generated docs remain CI-owned.
 
+### Electric cold mutation admission
+
+The `electric.sdk-mutation-startup` property in
+`packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`
+checks the proposed stream-position admission contract through the installed
+Electric SDK and controlled HTTP. Every generated history exercises direct and
+manual inserts, a derived materialized descriptor after its original owner
+retires, two participating collections in either release order, cancellation
+before readiness, external abort, a prepared participant that resets while its
+sibling waits, and retirement of a prepared participant. Three receiving paths
+cross the real persistence wrapper with controlled managed storage: held startup
+metadata followed by success, rejection with the same storage error, and cleanup
+before the source enters. A twelfth path retires the run from its readiness
+callback after an active batch was accepted: its transaction evidence remains
+available, but its optimistic write is never dispatched. This is distinct from
+a callback entering after retirement, which has no publication authority.
+Every history reaches all thirteen declared paths, including a coordinator
+index held after metadata and the Electric baseline arrive. Mutation dispatch
+waits for that remaining persistence startup work to settle.
+At each held baseline the mutation handler has not run; after all live source
+positions are established it runs once and stays persisting until its txid echo.
+The payload and release order vary in equal fixed/random campaigns. This owner
+does not establish offline delivery, automatic write retries, native SQLite I/O,
+prompt cancellation of held storage I/O, GC ownership, or arbitrary delayed
+callback/restart interleavings. The persisted cleanup observation follows storage
+release and cleanup completion; it promises no subsequent backend dispatch.
+The same persisted-cleanup path records cache-claim requests and live claims,
+plus coordinator subscriptions. Late metadata settlement cannot restart storage
+or retain either resource. The generated release-order flag also varies whether
+cleanup settles before metadata is released. This is controlled managed storage;
+it does not establish native SQLite claim release or timer behavior.
 
 ### Replay successful-retirement ownership, October 30
 

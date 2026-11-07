@@ -6231,8 +6231,20 @@ function createWrappedSyncConfig<
   runtime: PersistedCollectionRuntime<T, TKey>,
   persistedReadiness?: PersistedReadinessTracker,
 ): SyncConfig<T, TKey> {
+  let sourceStartup: Promise<unknown> | undefined
   return {
     ...sourceSyncConfig,
+    beforeMutation: sourceSyncConfig.beforeMutation
+      ? async (collection) => {
+          const lifecycleGeneration = runtime.getLifecycleGeneration()
+          await sourceStartup
+          if (lifecycleGeneration !== runtime.getLifecycleGeneration()) {
+            throw new SyncTransactionAbortedError()
+          }
+          await runtime.ensureStarted()
+          return sourceSyncConfig.beforeMutation!(collection)
+        }
+      : undefined,
     sync: (params) => {
       const transactionStack: Array<OpenSyncTransaction<T, TKey>> = []
       const pendingPublicationTransactions: Array<
@@ -7479,6 +7491,7 @@ function createWrappedSyncConfig<
         )
         return sourceResult
       })()
+      sourceStartup = sourceResultPromise
       resolveSourceResultAssigned()
       void sourceResultPromise.catch((error) => {
         reportUpstreamError(error)

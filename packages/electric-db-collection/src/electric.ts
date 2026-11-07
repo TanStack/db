@@ -942,6 +942,30 @@ class ElectricLifecycle<T extends Row<unknown>> {
   // The current run's failure: no evidence can arrive after it (EVID-2).
   private failure: { error: unknown } | undefined
 
+  mutationReady: Promise<() => boolean> = Promise.resolve(() => false)
+  resolveMutationReady: () => void = () => {}
+  rejectMutationReady: (error: unknown) => void = () => {}
+
+  resetMutationReady(): void {
+    const ready = new Promise<() => boolean>((resolve, reject) => {
+      this.resolveMutationReady = () =>
+        resolve(() => this.active && this.mutationReady === ready)
+      this.rejectMutationReady = (error) => {
+        reject(error)
+        // Rejection must invalidate an already-resolved preparation too.
+        this.mutationReady = Promise.reject(error)
+        void this.mutationReady.catch(() => undefined)
+      }
+    })
+    this.mutationReady = ready
+    void ready.catch(() => undefined)
+  }
+
+  prepareMutation(): Promise<() => boolean> {
+    if (!this.active) throw new StreamAbortedError(this.collectionId)
+    return this.mutationReady
+  }
+
   constructor(private readonly collectionId?: string) {}
 
   readonly utils: ElectricCollectionUtils<T> = {
@@ -952,6 +976,7 @@ class ElectricLifecycle<T extends Row<unknown>> {
   start(): number {
     if (this.active) this.retire()
     this.active = true
+    this.resetMutationReady()
     this.runReady = false
     this.failure = undefined
     this.epoch++
@@ -966,6 +991,7 @@ class ElectricLifecycle<T extends Row<unknown>> {
   retire(epoch?: number): void {
     if (epoch !== undefined && !this.isActive(epoch)) return
     this.active = false
+    this.rejectMutationReady(new StreamAbortedError(this.collectionId))
     this.rejectWaits(new StreamAbortedError(this.collectionId))
     this.matchBuffer = { committedMessages: [], pendingMessages: [] }
     for (const txid of this.evidence.seenTxids) this.retired.seenTxids.add(txid)
@@ -1312,6 +1338,14 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   const syncTemplate = withCollectionSyncConfigFactory(
     {
       ...sync,
+      beforeMutation:
+        internalSyncMode === `on-demand`
+          ? (collection) => {
+              const lifecycle = boundLifecycles.get(collection)
+              if (!lifecycle) throw new StreamAbortedError(collection.id)
+              return lifecycle.prepareMutation()
+            }
+          : undefined,
       exportSyncMeta: () => descriptorLifecycle.exportMeta(),
       importSyncMeta: (meta) => descriptorLifecycle.importMeta(meta),
       mergeSyncMeta: mergeElectricSyncMeta,
@@ -1994,6 +2028,8 @@ function createElectricSync<T extends Row<unknown>>(
     // decision). Cleanup aborts internally instead.
     const forwardExternalAbort = () => {
       const active = isActiveLifecycle()
+      if (active)
+        lifecycle.rejectMutationReady(new StreamAbortedError(collectionId))
       abortController.abort()
       if (active) {
         const error = new StreamAbortedError(collectionId)
@@ -2091,6 +2127,8 @@ function createElectricSync<T extends Row<unknown>>(
         // settle on the snapshot it establishes.
         // Waiting loads and readiness waits reject with the same cause.
         const failWaits = (cause: unknown) => {
+          if (!isActiveLifecycle()) return
+          lifecycle.rejectMutationReady(cause)
           rejectFullSnapshot(cause)
           if (!ready) failInitialSync(cause)
           // No retry follows, so the open transaction can never commit. A
@@ -2596,7 +2634,10 @@ function createElectricSync<T extends Row<unknown>>(
             processMoveInEvent(message.headers.patterns)
           }
         } else if (isMustRefetchMessage(message)) {
-          if (hasReceivedUpToDate) resetFullSnapshot()
+          if (hasReceivedUpToDate) {
+            resetFullSnapshot()
+            lifecycle.resetMutationReady()
+          }
           debug(
             `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
           )
@@ -2799,10 +2840,12 @@ function createElectricSync<T extends Row<unknown>>(
             snapshot,
           ),
         )
+        if (commitPoint === `up-to-date` && isActiveLifecycle())
+          lifecycle.resolveMutationReady()
         lifecycle.publishEvidence(newTxids, newSnapshots)
         newTxids.clear()
         newSnapshots.length = 0
-        lifecycle.commitMatches()
+        if (isActiveLifecycle()) lifecycle.commitMatches()
       }
     }
 
@@ -2818,6 +2861,7 @@ function createElectricSync<T extends Row<unknown>>(
         // The SDK gave up: it rejected the retry decision or exhausted its
         // retry loop. No provider batch will settle the gate.
         rejectFullSnapshot(error)
+        if (isActiveLifecycle()) lifecycle.rejectMutationReady(error)
         if (isActiveLifecycle() && !abortController.signal.aborted) {
           if (!ready) failInitialSync(error)
           else giveUp(error)
