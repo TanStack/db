@@ -591,6 +591,8 @@ async function driver(plan, observe) {
         cli.mutants.filter((x) => x.function === `w_otherinfect` && x.outcome === `killed`).length >= 2
       )
         states.add(`each owner's value change killed its own mutant`)
+      if (m.function === `w_shrink` && m.operator === `if-true` && m.class === `comparison-gap`)
+        states.add(`a shrinking calibration passes under a mutant`)
       if (m.function === `w_slowkill` && m.outcome === `killed`)
         states.add(`a slow kill past the first time limit killed`)
       if (m.function === `w_hang` && m.outcome === `timeout`)
@@ -619,6 +621,8 @@ async function driver(plan, observe) {
     }
     // A batch that a hang cut off reran its other items in a new context.
     if (cli.evidence?.rerun > 0) states.add(`a batch cut off by a hang reran the rest`)
+    // A mutant that changed no value was judged from the unmutated runs.
+    if (cli.evidence?.unchanged > 0) states.add(`a mutant that changes no value judged without a run`)
     if (plan.ordinary && cli.mutants.some((m) => m.ordinaryOutcome))
       states.add(`ordinary tests run when asked`)
     if (!plan.ordinary && plan.tests.some((t) => t.file === `c`))
@@ -1047,6 +1051,8 @@ const required = [
   `a kill in one owner after a gap in another`,
   `a slow kill past the first time limit killed`,
   `a mutant that changes a value only at load killed`,
+  `a mutant that changes no value judged without a run`,
+  `a shrinking calibration passes under a mutant`,
   `each owner's value change killed its own mutant`,
   `a hang alone timed out`,
   `a hang in one owner and a kill in another killed`,

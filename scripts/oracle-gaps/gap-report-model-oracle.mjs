@@ -135,6 +135,8 @@ const testCase = fc.record({
   hangs: fc.constantFrom(false, false, false, false, false, false, false, true),
   // Slow tests cost seconds of real time each, so only a witness has one.
   slow: fc.constant(false),
+  // Only a witness checks that fast-check shrinks an injected failure.
+  shrinks: fc.constant(false),
   // A test may run a second campaign, on its own route and input, as
   // `runOracleCampaign` does.
   then: fc.option(
@@ -248,6 +250,7 @@ const judging = (file, route, input, extra = {}) => ({
   judgeBy: `verdict`,
   hangs: false,
   slow: false,
+  shrinks: false,
   then: null,
   ...extra,
 })
@@ -443,6 +446,16 @@ const witness = [
     body: [kill],
     tests: [judging(`a`, `fixed seed`, 1), judging(`b`, `fixed seed`, 7)],
   },
+  // A calibration that injects a property failure and checks that it
+  // shrinks, as framework calibrations do. The runner must not change how
+  // fast-check runs a property, or this test fails under every mutant that
+  // reaches it.
+  {
+    id: `w_shrink`,
+    owners: [`a`],
+    body: [kill],
+    tests: [judging(`a`, `calibration`, 1, { judges: false, shrinks: true })],
+  },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -489,6 +502,7 @@ const captureWitness = new Set([
   `w_crosskill`,
   `w_slowkill`,
   `w_otherinfect`,
+  `w_shrink`,
 ])
 
 // ## Rendering and layout
@@ -1554,6 +1568,7 @@ function oracleTestFile(plan, file) {
       : [`declareOracle({ owns: [${entries.join(`, `)}] })`]
   const out = [
     `import { describe, expect, test } from 'vitest'`,
+    ...(plan.tests.some((t) => t.file === file && t.shrinks) ? [`import fc from 'fast-check'`] : []),
     `import * as sut from '../src/sut'`,
     ...(file === `b` ? [`import { strict } from './strict'`] : []),
     `function declareOracle(_parts: { owns: Array<string> }): void {}`,
@@ -1618,6 +1633,13 @@ function oracleTestFile(plan, file) {
         ...(t.slow
           ? [
               `    if (${gate} && JSON.stringify(${out}) !== '${expected}') await new Promise((r) => setTimeout(r, ${SLOW_MS}))`,
+            ]
+          : []),
+        // An injected failure shrinks to its smallest counterexample.
+        ...(t.shrinks
+          ? [
+              `    const shrunk${i} = fc.check(fc.property(fc.integer({ min: 0, max: 1000 }), (n) => n < 5), { seed: 1 })`,
+              `    if (shrunk${i}.counterexample?.[0] !== 5) throw new Error('the injected failure did not shrink')`,
             ]
           : []),
         // A flaky test never hangs: the model leaves flaky tests out.

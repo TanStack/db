@@ -56,11 +56,12 @@ const fc = await import(`fast-check`).catch(() => undefined)
 if (fc) {
   // A property that takes no seed from the shared config would draw new
   // histories on every run; a global seed makes every run draw the same ones.
-  // A mutant run stops a property at its first failure.
+  // Nothing else changes: a mutant run that stopped properties at their
+  // first failure would also stop the shrinking that a calibration checks,
+  // and fail it under every mutant.
   fc.configureGlobal({
     ...fc.readConfigureGlobal(),
     seed: fc.readConfigureGlobal().seed ?? 20251102,
-    ...(state.mutant !== null ? { endOnFailure: true } : {}),
   })
 }
 
@@ -131,6 +132,19 @@ const hit = (id) => {
   ;(inTest ? hits : background).add(id)
   historyHits?.add(id)
 }
+// The sites whose mutant would have changed a value here, in the running
+// test or, outside any test, in the file's background. A mutant that
+// changes no value in any unmutated run of its owners runs exactly as the
+// unmutated code does, so it needs no run of its own (check.mjs). Calls, `!`,
+// and logical operators always change a value. A comparison's mutant changes
+// its value only when the two operators disagree on these operands; an
+// operand that is not a primitive might run code when compared, so it counts
+// as a change without a second comparison.
+let infected = new Set()
+const backgroundInfected = new Set()
+const infect = (id) => (inTest ? infected : backgroundInfected).add(id)
+const primitive = (value) =>
+  value === null || (typeof value !== `object` && typeof value !== `function`)
 
 // Temporary profiling (ORACLE_GAPS_PROFILE): how many fast-check histories
 // each test ran, and in how many of them each site was hit, to measure what
@@ -211,15 +225,19 @@ function compare(op, a, b) {
 globalThis.__oracleGaps = {
   m(id) {
     hit(id)
+    infect(id)
     return id === active
   },
   v: (value) => value,
   cmp(id, a, b, op) {
     hit(id)
+    if (active === null && (!primitive(a) || !primitive(b) || compare(op, a, b) !== compare(swapped[op], a, b)))
+      infect(id)
     return compare(id === active ? swapped[op] : op, a, b)
   },
   not(id, value) {
     hit(id)
+    infect(id)
     return id === active ? value : !value
   },
   // Records whether the condition was truthy or falsy, then applies a forced
@@ -227,6 +245,7 @@ globalThis.__oracleGaps = {
   cond(idTrue, idFalse, value) {
     hit(idTrue)
     hit(idFalse)
+    infect(value ? idFalse : idTrue)
     if (inTest) {
       const seen = outcomes.get(idTrue) ?? [false, false]
       seen[value ? 0 : 1] = true
@@ -470,6 +489,7 @@ beforeEach((context) => {
   uuids = new Map()
   identities = new Map()
   hits = new Set()
+  infected = new Set()
   outcomes = new Map()
   verdicts = new Map()
   testStarted = performance.now()
@@ -506,6 +526,7 @@ afterEach((context) => {
       count,
       observed: observations > 0 ? observed.digest(`hex`) : undefined,
       hits: [...hits],
+      infected: [...infected],
       outcomes: [...outcomes],
       verdicts: [...verdicts.values()],
       route,
@@ -527,6 +548,7 @@ afterEach((context) => {
     })}\n`,
   )
   hits = new Set()
+  infected = new Set()
 })
 
 const thisFile = globalThis.__vitest_worker__?.filepath
@@ -535,7 +557,7 @@ afterAll(() => {
   if (currentFile)
     appendFileSync(
       state.capture,
-      `${JSON.stringify({ key: `${currentFile} > (background)`, background: true, hits: [...background] })}\n`,
+      `${JSON.stringify({ key: `${currentFile} > (background)`, background: true, hits: [...background], infected: [...backgroundInfected] })}\n`,
     )
   // A batch's watchdog reads this row to know that the copy finished; a
   // skipped copy says so, and its run is no evidence.

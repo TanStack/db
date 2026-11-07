@@ -674,8 +674,9 @@ export default mergeConfig(base, {
       ]),
     )
     // How the evidence was produced: units reused and computed, runs cut off
-    // at their time limit, and items rerun after a cut-off batch.
-    const evidence = { reused: 0, computed: 0, cut: 0, rerun: 0 }
+    // at their time limit, items rerun after a cut-off batch, and mutants
+    // that changed no value and so needed no run.
+    const evidence = { reused: 0, computed: 0, cut: 0, rerun: 0, unchanged: 0 }
     // Each file's imports in its unmutated run. A run that timed out reports
     // none, so it is stored under these: a mutant changes no import.
     const fileInputs = new Map()
@@ -864,7 +865,7 @@ export default mergeConfig(base, {
           .filter((u) => outcomeOf([u]).outcome !== `survived`)
           .map((u) => [u.file, failureOf(u)]),
       )
-      return { rows, failed, seconds: Math.max(0, ...units.map((u) => u.seconds)) }
+      return { rows, units, failed, seconds: Math.max(0, ...units.map((u) => u.seconds)) }
     }
     // Without --ordinary, only oracle files run.
     let files = [...fileSpecs.keys()].filter(
@@ -994,6 +995,23 @@ export default mergeConfig(base, {
     // A nondeterministic test judges nothing, so its verdict must not stop
     // a run at its first kill: a later test of the file may decide.
     const ignoredIn = (file) => [...nondeterministic].filter((key) => fileOf(key) === file).sort()
+    // The mutants that change a value somewhere in each file's unmutated
+    // runs (both passes), at load or in a test (capture-setup.mjs). A mutant
+    // that changes no value in any of its owners' runs runs exactly as the
+    // unmutated code does, as long as no nondeterministic test reaches it,
+    // so its units are the unmutated ones and it needs no run of its own.
+    const valueChanges = new Map()
+    for (const rows of [first.rows, second.rows])
+      for (const [key, row] of rows) {
+        const file = fileOf(key)
+        if (!valueChanges.has(file)) valueChanges.set(file, new Set())
+        for (const number of row.infected ?? []) valueChanges.get(file).add(number)
+      }
+    const unmutatedUnits = new Map(first.units.map((u) => [u.file, u]))
+    const changesNothing = (mutant, targets) =>
+      targets.oracleTargets.every(
+        (file) => unmutatedUnits.has(file) && !valueChanges.get(file)?.has(mutant.number),
+      ) && targets.oracleKeys.every((key) => !nondeterministic.has(key))
     log(
       `unmutated: ${[...first.rows.values()].filter((r) => !r.background).length} tests in ${first.seconds.toFixed(1)}s and ${second.seconds.toFixed(1)}s; nondeterministic: ${nondeterministic.size}`,
     )
@@ -1088,12 +1106,17 @@ export default mergeConfig(base, {
         mutant.inDiff = diffs.get(mutant.source)?.has(mutant.line)
         const owners = ownersOf(mutant)
         const targets = targetsOf(mutant, baseline, owners, oracleFiles)
+        const decided = owners.size === 0 || targets.oracleTargets.length === 0
+        const unchanged = !decided && changesNothing(mutant, targets)
+        if (unchanged) evidence.unchanged += 1
         return {
           mutant,
           owners,
           targets,
-          units: [],
-          done: owners.size === 0 || targets.oracleTargets.length === 0,
+          units: unchanged
+            ? targets.oracleTargets.map((file) => ({ ...unmutatedUnits.get(file), seconds: 0 }))
+            : [],
+          done: decided || unchanged,
         }
       })
       await runOwners(
