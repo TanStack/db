@@ -149,7 +149,7 @@ type ControlledStream = {
 const streams: Array<ControlledStream> = []
 
 vi.mock(
-  `../../electric-db-collection/node_modules/@electric-sql/client`,
+  `../../electric-db-collection/node_modules/@electric-sql/client/dist/index.mjs`,
   async (importOriginal) => {
     const actual = await importOriginal<Record<string, unknown>>()
     return {

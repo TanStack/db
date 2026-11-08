@@ -11,6 +11,13 @@ const config = defineConfig({
     typecheck: {
       enabled: true,
       include: [`tests/**/*.test.ts`, `tests/**/*.test-d.ts`],
+      // Vitest 5 fails a typecheck file with no suite. This wrapper only
+      // registers the shared contract suite when it runs as a test.
+      exclude: [
+        `**/node_modules/**`,
+        `**/.git/**`,
+        `tests/node-sqlite-core-adapter-contract.test.ts`,
+      ],
     },
   },
 })
