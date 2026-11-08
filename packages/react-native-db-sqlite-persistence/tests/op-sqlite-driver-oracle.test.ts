@@ -3,6 +3,7 @@ import { afterEach, expect, it } from 'vitest'
 import {
   oracleRandomParameters,
   oracleReplayTest,
+  oracleRoute,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -98,12 +99,14 @@ function registerAliasOracle(
     aliasOracleReplay,
     property,
   )
-  oracleReplayTest(it)(`${title} [fixed]`, () =>
-    check({ numRuns: aliasOracleRuns, seed: FIXED_ALIAS_ORACLE_SEED }),
-  )
-  oracleReplayTest(it, property)(`${title} [random]`, () =>
-    check(randomParameters),
-  )
+  oracleReplayTest(it)(`${title} [fixed]`, () => {
+    oracleRoute(`fixed seed`)
+    return check({ numRuns: aliasOracleRuns, seed: FIXED_ALIAS_ORACLE_SEED })
+  })
+  oracleReplayTest(it, property)(`${title} [random]`, () => {
+    oracleRoute(`random seed`)
+    return check(randomParameters)
+  })
 }
 
 const writeResultAliasesArbitrary = fc.uniqueArray(
@@ -175,6 +178,7 @@ function expectAliasGrammar<TAlias extends string>(
 }
 
 it(`controls alias grammar reconstruction, ablation, range, and exclusion`, () => {
+  oracleRoute(`calibration`)
   expectAliasGrammar(writeResultAliasesArbitrary, writeResultFieldNames)
   expectAliasGrammar(statementResultAliasesArbitrary, statementResultAliasNames)
 })
@@ -299,6 +303,7 @@ function aliasQueryCase(aliases: ReadonlyArray<string>): {
 }
 
 it(`preserves every statement-result field name when used as a SQL alias`, async () => {
+  oracleRoute(`case`)
   await withColumnarDriver(async ({ driver, queryExecutions }) => {
     const aliases = statementResultFieldNames
     const { sql, params, expected } = aliasQueryCase(aliases)
@@ -310,6 +315,7 @@ it(`preserves every statement-result field name when used as a SQL alias`, async
 })
 
 it(`preserves statement-result field names in direct row arrays`, async () => {
+  oracleRoute(`case`)
   const dbPath = createTempSqlitePath()
   const database = createOpSQLiteTestDatabase({
     filename: dbPath,
@@ -361,6 +367,7 @@ registerAliasOracle(
 // The reference rows for a SQL alias case come from the alias list alone: no
 // production decoder runs here. Each row maps every alias to its own scalar.
 declareOracle({
+  owns: [`src/op-sqlite-driver.ts`],
   model: [aliasQueryCase],
   grammar: [writeResultAliasesArbitrary, statementResultAliasesArbitrary],
 })
@@ -395,6 +402,7 @@ const reservedAliasWrongAnswers = (() => {
 it.each(reservedAliasWrongAnswers)(
   `reserved-alias checker rejects wrong answer: $name`,
   ({ actual }) => {
+    oracleRoute(`calibration`)
     const { expected } = aliasQueryCase([
       `rows`,
       `rowsAffected`,
@@ -407,11 +415,13 @@ it.each(reservedAliasWrongAnswers)(
 )
 
 it(`reserved-alias checker accepts the independent reference rows`, () => {
+  oracleRoute(`calibration`)
   const { expected } = aliasQueryCase([`rows`, `rowsAffected`, `ordinary_name`])
   expectExactAliasRows(expected, expected)
 })
 
 it(`reserved-alias checker shrinks and replays the same row-law violation`, () => {
+  oracleRoute(`calibration`)
   const challenge = (aliases: ReadonlyArray<string>) => {
     const { expected } = aliasQueryCase(aliases)
     expectExactAliasRows([], expected)

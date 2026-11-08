@@ -12,6 +12,7 @@
  */
 import { expect, test } from '@playwright/test'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import type { Page } from '@playwright/test'
 import type { OPFSOracleResult } from './shared-driver-fairness.opfs'
 
@@ -66,22 +67,25 @@ function expectLawsHold(result: OPFSOracleResult): void {
   expect(result.opfsCleanupFailures).toEqual([])
 }
 
-declareOracle({ check: [expectLawsHold] })
+declareOracle({ owns: [`src/wa-sqlite-driver.ts`], check: [expectLawsHold] })
 
 test(`real Chromium OPFS fixture reaches and cleans up cold hydration`, async ({
   page,
 }) => {
+  oracleRoute(`fixed history`)
   expectLawsHold(await readOracleResult(page, `neutral`))
 })
 
 test(`real Chromium OPFS fixture bounds cold hydration and completes persists in FIFO order`, async ({
   page,
 }) => {
+  oracleRoute(`fixed history`)
   expectLawsHold(await readOracleResult(page, `storm`))
 })
 
 test(`real Chromium OPFS fixture bounds hydrates queued ahead of later persists`, async ({
   page,
 }) => {
+  oracleRoute(`fixed history`)
   expectLawsHold(await readOracleResult(page, `interleaved`))
 })

@@ -49,6 +49,7 @@ import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { createServer, preview } from 'vite'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { buildForProduction } from './packaged-consumer'
 import type { Browser } from '@playwright/test'
 import type { BrowserWASQLiteDatabase } from '../src'
@@ -170,6 +171,7 @@ const layoutCases: Array<LayoutCase> = [
   })),
 ]
 
+// Owns nothing: this file checks the installed package layout (build outputs), not a src function.
 declareOracle({
   check: [expectLayoutOutcome],
   model: [expectedOutcome],
@@ -199,6 +201,7 @@ afterAll(async () => {
 it.each(layoutCases)(
   `$server $layout install (cache $cache, excluded by $exclusion) matches the layout model`,
   async (layoutCase) => {
+    oracleRoute(`case`)
     const temporaryDirectory = realpathSync(
       mkdtempSync(join(realpathSync(tmpdir()), `db-wasm-layout-`)),
     )
@@ -217,6 +220,7 @@ it.each(layoutCases)(
 // Grammar coverage: the cases above must reach every outcome the model can
 // predict. Runs after them, because the predictions read installed trees.
 it(`covers every promised layout outcome`, () => {
+  oracleRoute(`case`)
   expect([...coveredOutcomes].sort()).toEqual(
     [
       { opens: false, workers: 0 },

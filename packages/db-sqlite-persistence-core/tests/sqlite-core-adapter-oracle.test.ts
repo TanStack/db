@@ -22,6 +22,7 @@ import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
   recordOracleReplay,
 } from '../../db/tests/oracle-config.js'
@@ -49,8 +50,7 @@ import type {
   Todo,
 } from './sqlite-core-adapter-support'
 
-declareOracle({
-  check: [expectResetResumeLaw, violation],
+declareOracle({ owns: [`src/sqlite-core-adapter.ts`],   check: [expectResetResumeLaw, violation],
   model: [expectedResetResumeMetadata, expectedBindingRows],
 })
 
@@ -542,6 +542,7 @@ export function runSQLiteResetResumeOracleTests(
   oracleReplayTest(it, `sqlite-resume.baseline-lineage`)(
     `resets collection metadata with its persisted baseline across generated adapter reopen histories`,
     async () => {
+      oracleRoute(`fixed seed`)
       const historyArbitrary = fc
         .constantFrom<ResetResumeHistory[`transition`]>(
           `compatible-reopen`,
@@ -666,6 +667,7 @@ export function runSQLiteResetResumeOracleTests(
   )
 
   it(`leaves externally inconsistent metadata reachable for consumer validation`, async () => {
+    oracleRoute(`fixed history`)
     const observation = await observeResetResumeHistory(
       {
         fromSchemaVersion: 1,
@@ -700,6 +702,7 @@ export function runSQLiteResetResumeOracleTests(
   }, 30_000)
 
   it(`requires complete metadata reset while preserving non-reset metadata`, () => {
+    oracleRoute(`fixed history`)
     const compatibleEmpty: ResetResumeHistory = {
       fromSchemaVersion: 1,
       rows: [],
@@ -900,6 +903,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
     bindingFixedIt(
       `returns exact rows at single-list, statement-total, and typed boundaries`,
       async () => {
+        oracleRoute(`case`)
         const failures: Array<string> = []
         for (const spec of fixed) {
           const observation = await observe(spec)
@@ -916,6 +920,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
     bindingFixedIt(
       `honors total capacity through transactionWithDriver`,
       async () => {
+        oracleRoute(`fixed history`)
         const failures: Array<string> = []
         for (const spec of [
           single(`string`, 999),
@@ -937,6 +942,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
     bindingFixedIt(
       `honors the root connection limit when a distinct transaction driver omits it`,
       async () => {
+        oracleRoute(`fixed history`)
         for (const count of [100, 101]) {
           const spec: Spec = {
             label: `${count}-scalar-conjunction`,
@@ -962,6 +968,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
     bindingFixedIt(
       `never submits an over-capacity statement with many scalar predicates`,
       async () => {
+        oracleRoute(`fixed history`)
         const scalarStress: Spec = {
           label: `1000-scalar-conjunction`,
           valueKind: `string`,
@@ -1021,6 +1028,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
     bindingFixedIt(
       `preserves exact rows across fixed-seed binding histories`,
       async () => {
+        oracleRoute(`fixed seed`)
         await campaign(`fixed seed`, {
           numRuns: oracleRuns(BINDING_RUNS),
           seed: BINDING_FIXED_SEED,
@@ -1031,6 +1039,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
     oracleReplayTest(it, BINDING_PROPERTY)(
       `preserves exact rows across random-seed binding histories`,
       async () => {
+        oracleRoute(`random seed`)
         await campaign(
           `random seed`,
           oraclePropertyOptions(BINDING_RUNS, BINDING_PROPERTY),

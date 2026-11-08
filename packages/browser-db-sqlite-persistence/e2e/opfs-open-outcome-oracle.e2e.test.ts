@@ -28,9 +28,12 @@ import { createServer } from 'vite'
 import {
   describeHistory,
   expectOpenOutcome,
+  expectedOpenOutcome,
   openHistories,
   reachedOutcomes,
 } from '../tests/opfs-open-outcome-oracle'
+import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { createPackagedConsumer, probeWorkers } from './packaged-consumer'
 import type { Browser } from '@playwright/test'
 import type { ViteDevServer } from 'vite'
@@ -332,8 +335,16 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
   }
 }
 
+declareOracle({
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+  check: [expectOpenOutcome],
+  model: [expectedOpenOutcome],
+  grammar: [openHistories],
+})
+
 describe(`OPFS open outcome oracle (Chromium driver)`, () => {
   it(`reaches every outcome that this driver controls`, () => {
+    oracleRoute(`case`)
     expect(reachedOutcomes(histories)).toEqual([
       `lookup: AbortError`,
       `lookup: PersistenceUnavailableError`,
@@ -347,6 +358,7 @@ describe(`OPFS open outcome oracle (Chromium driver)`, () => {
   it.each(histories.map((history) => [describeHistory(history), history]))(
     `%s`,
     async (_name, history) => {
+      oracleRoute(`case`)
       expectOpenOutcome(history, await runOpenHistory(history))
     },
     120_000,

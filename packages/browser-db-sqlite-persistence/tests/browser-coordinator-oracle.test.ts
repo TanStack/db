@@ -54,6 +54,7 @@
 
 import fc from 'fast-check'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import {
   bindTransportControls,
   cleanupGlobals,
@@ -120,6 +121,7 @@ describe(`BrowserCollectionCoordinator`, () => {
   })
   describe(`RPC - applyLocalMutations`, () => {
     it(`preserves one durable mutation result across generated response-delivery histories`, async () => {
+      oracleRoute(`fixed seed`)
       vi.useFakeTimers()
       let run = 0
       try {
@@ -218,6 +220,7 @@ describe(`BrowserCollectionCoordinator`, () => {
 
   describe(`RPC - ensurePersistedIndex`, () => {
     it(`routes generated collection and RPC histories through their owning adapter`, async () => {
+      oracleRoute(`fixed seed`)
       let run = 0
       await fc.assert(
         fc.asyncProperty(
@@ -331,6 +334,7 @@ describe(`BrowserCollectionCoordinator`, () => {
 
   describe(`dispose`, () => {
     it(`makes disposal terminal across generated RPC kinds and lifecycle phases`, async () => {
+      oracleRoute(`fixed seed`)
       vi.useFakeTimers()
       let run = 0
       try {
@@ -448,6 +452,7 @@ describe(`BrowserCollectionCoordinator`, () => {
 
   describe(`collection and retry-result retention`, () => {
     it(`releases generated collection-owned state after the last subscriber`, async () => {
+      oracleRoute(`fixed seed`)
       let run = 0
       await fc.assert(
         fc.asyncProperty(
@@ -527,6 +532,7 @@ describe(`BrowserCollectionCoordinator`, () => {
     })
 
     it(`bounds generated retry-result histories by retention and collection lifecycle`, async () => {
+      oracleRoute(`fixed seed`)
       vi.useFakeTimers()
       let run = 0
       try {

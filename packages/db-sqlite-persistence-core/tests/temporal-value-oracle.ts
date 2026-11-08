@@ -182,4 +182,6 @@ export function temporalQueryCases(family: TemporalFamily) {
   ]
 }
 
+// Owns nothing: this module holds the typed-value fixtures and query cases. The
+// production path is driven by sqlite-temporal-value-oracle.test.ts, which declares it.
 declareOracle({ model: [temporalQueryCases] })

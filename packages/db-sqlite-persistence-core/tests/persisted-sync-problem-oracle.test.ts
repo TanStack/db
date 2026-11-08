@@ -3,6 +3,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { persistedCollectionOptions } from '../src/index.js'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import type {
   PersistedCollectionCoordinator,
   PersistenceAdapter,
@@ -489,6 +490,7 @@ describe(`persisted sync problem oracle`, () => {
         ] as const,
     ),
   )(`%s`, async (name, history) => {
+    oracleRoute(`case`)
     const source = createSource(history, `sync-problem ${name}`)
     const { collection, runs } = source
     const capture = captureUncaught()
@@ -594,4 +596,4 @@ describe(`persisted sync problem oracle`, () => {
   })
 })
 
-declareOracle({ model: [expected], grammar: [histories] })
+declareOracle({ owns: [`src/persisted.ts`], model: [expected], grammar: [histories] })

@@ -6,6 +6,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -329,7 +330,10 @@ describe(`SQLite resume snapshots`, () => {
     { oldClaim: `renew`, middleClaim: `renew`, rowCount: 2, checkAtMs: 1_230 },
   ] as const)(
     `collects only unclaimed retired storage after $oldClaim and $middleClaim`,
-    assertRetiredStorageHistory,
+    (...args: Parameters<typeof assertRetiredStorageHistory>) => {
+      oracleRoute(`case`)
+      return assertRetiredStorageHistory(...args)
+    },
   )
   const retiredStorageHistory = fc.record({
     oldClaim: fc.constantFrom<RetiredStorageHistory[`oldClaim`]>(
@@ -355,13 +359,19 @@ describe(`SQLite resume snapshots`, () => {
   fcTest.prop([retiredStorageHistory], {
     seed: 2069,
     numRuns: oracleRuns(24),
-  })(`checks retired storage reachability (fixed)`, assertRetiredStorageHistory)
+  })(`checks retired storage reachability (fixed)`, (...args: Parameters<typeof assertRetiredStorageHistory>) => {
+    oracleRoute(`fixed seed`)
+    return assertRetiredStorageHistory(...args)
+  })
   fcTest.prop(
     [retiredStorageHistory],
     oraclePropertyOptions(24, `sqlite-resume.retired-storage`),
   )(
     `checks retired storage reachability (random or replayed)`,
-    assertRetiredStorageHistory,
+    (...args: Parameters<typeof assertRetiredStorageHistory>) => {
+      oracleRoute(`random seed`)
+      return assertRetiredStorageHistory(...args)
+    },
   )
 
   // A resume snapshot may pass its preliminary claim check and then wait to
@@ -594,12 +604,15 @@ describe(`SQLite resume snapshots`, () => {
   ])(
     `checks a cache claim $clockCut inside a resume transaction with includeRows=$includeRows`,
     ({ elapsedMs, includeRows }) =>
-      assertManagedClaimReadHistory({
+      {
+      oracleRoute(`case`)
+      return assertManagedClaimReadHistory({
         elapsedMs,
         includeRows,
         peerDelayMs: 50,
         rowCount: 1,
-      }),
+      })
+    },
   )
 
   const managedClaimReadHistory = fc.record({
@@ -613,14 +626,20 @@ describe(`SQLite resume snapshots`, () => {
     numRuns: oracleRuns(30),
   })(
     `checks generated managed-claim read histories (fixed)`,
-    assertManagedClaimReadHistory,
+    (...args: Parameters<typeof assertManagedClaimReadHistory>) => {
+      oracleRoute(`fixed seed`)
+      return assertManagedClaimReadHistory(...args)
+    },
   )
   fcTest.prop(
     [managedClaimReadHistory],
     oraclePropertyOptions(30, `sqlite-resume.managed-claim-read`),
   )(
     `checks generated managed-claim read histories (random or replayed)`,
-    assertManagedClaimReadHistory,
+    (...args: Parameters<typeof assertManagedClaimReadHistory>) => {
+      oracleRoute(`random seed`)
+      return assertManagedClaimReadHistory(...args)
+    },
   )
 
   const startupHistoryArbitrary = fc.record({
@@ -793,6 +812,7 @@ describe(`SQLite resume snapshots`, () => {
   }
 
   it(`fixed startup corpus reaches every baseline size and transition`, () => {
+    oracleRoute(`fixed history`)
     const histories = fc.sample(startupHistoryArbitrary, {
       seed: 1659,
       numRuns: 12,
@@ -960,22 +980,27 @@ describe(`SQLite resume snapshots`, () => {
   }
   it.skipIf(oracleReplayRequested())(
     `preserves source progress evidence (fixed seed)`,
-    () => runProgressCampaign({ numRuns: oracleRuns(80), seed: 2281 }),
+    () => {
+      oracleRoute(`fixed seed`)
+      return runProgressCampaign({ numRuns: oracleRuns(80), seed: 2281 })
+    },
   )
   oracleReplayTest(it, `sqlite-resume.source-progress`)(
     `preserves source progress evidence (random or replayed)`,
     () =>
-      runProgressCampaign(
+      {
+      oracleRoute(`random seed`)
+      return runProgressCampaign(
         oraclePropertyOptions(80, `sqlite-resume.source-progress`),
-      ),
+      )
+    },
   )
 
   // The retired-storage and managed-claim checks compare production with independent
   // models of retained generations and claim intervals. The fixed and generated
   // cases share those checks. The startup grammar is the generator whose coverage
   // the fixed startup corpus calibrates.
-  declareOracle({
-    check: [
+  declareOracle({ owns: [`src/sqlite-core-adapter.ts`],     check: [
       assertRetiredStorageHistory,
       assertManagedClaimReadHistory,
       runProgressCampaign,
@@ -989,7 +1014,10 @@ describe(`SQLite resume snapshots`, () => {
     numRuns: oracleRuns(12),
   })(
     `preserves local-only startup histories across managed generation advancement (fixed)`,
-    assertStartupHistory,
+    (...args: Parameters<typeof assertStartupHistory>) => {
+      oracleRoute(`fixed seed`)
+      return assertStartupHistory(...args)
+    },
   )
 
   fcTest.prop(
@@ -997,7 +1025,10 @@ describe(`SQLite resume snapshots`, () => {
     oraclePropertyOptions(12, `sqlite-resume.startup-generation`),
   )(
     `preserves local-only startup histories across managed generation advancement (random or replayed)`,
-    assertStartupHistory,
+    (...args: Parameters<typeof assertStartupHistory>) => {
+      oracleRoute(`random seed`)
+      return assertStartupHistory(...args)
+    },
   )
 })
 

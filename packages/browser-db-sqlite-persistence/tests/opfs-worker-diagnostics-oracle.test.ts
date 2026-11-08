@@ -4,6 +4,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -329,19 +330,27 @@ TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and
 TANSTACK_DB_ORACLE_PROPERTY=opfs-worker.diagnostics for direct replay.
 TANSTACK_DB_ORACLE_RUNS_MULTIPLIER scales the generated campaign.
 */
-declareOracle({ check: [checkDiagnostic], model: [referenceMessage] })
+declareOracle({
+  owns: [`src/opfs-worker.ts`],
+  check: [checkDiagnostic],
+  model: [referenceMessage],
+})
 
 describe(`OPFS worker diagnostics oracle`, () => {
   if (!oracleReplayRequested()) {
     it.each(diagnosticExamples)(
       `preserves the fixed open-failure diagnostic (%#)`,
-      checkDiagnostic,
+      (input) => {
+        oracleRoute(`case`)
+        return checkDiagnostic(input)
+      },
     )
   }
 
   it.skipIf(oracleReplayRequested())(
     `rejects a diagnostic that drops an exposed VFS cause`,
     async () => {
+      oracleRoute(`calibration`)
       const input = diagnosticExamples[6]![0] as OpenFailure
       const response = await initialize(input)
       const expected = referenceResponse(input).response
@@ -358,15 +367,21 @@ describe(`OPFS worker diagnostics oracle`, () => {
     })
   oracleReplayTest(it)(
     `matches the independent diagnostic formatter (fixed campaign)`,
-    () => checkDiagnostics({ seed: 1846, numRuns: oracleRuns(diagnosticRuns) }),
+    () => {
+      oracleRoute(`fixed seed`)
+      return checkDiagnostics({ seed: 1846, numRuns: oracleRuns(diagnosticRuns) })
+    },
     15_000,
   )
   oracleReplayTest(it, diagnosticProperty)(
     `matches the independent diagnostic formatter (random campaign)`,
     () =>
-      checkDiagnostics(
+      {
+      oracleRoute(`random seed`)
+      return checkDiagnostics(
         oraclePropertyOptions(diagnosticRuns, diagnosticProperty),
-      ),
+      )
+    },
     15_000,
   )
 })

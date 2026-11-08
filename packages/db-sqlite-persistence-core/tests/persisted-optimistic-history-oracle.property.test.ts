@@ -15,6 +15,7 @@ import {
   wrappingSteps,
   wrappingSyncHistory,
 } from '../../db/tests/optimistic-history-oracle'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import { persistedCollectionOptions } from '../src'
 import type { CollectionConfig } from '@tanstack/db'
@@ -263,6 +264,12 @@ const abortReleasingHold = (
     { type: `release-store` },
   ]
 }
+
+declareOracle({
+  owns: [`src/persisted.ts`],
+  check: [checkOptimisticHistory],
+  model: [optimisticHistoryModel],
+})
 
 oracleProperty({
   id: `sqlite-persistence.optimistic-history`,

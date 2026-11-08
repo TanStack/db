@@ -73,6 +73,7 @@ import {
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -904,6 +905,7 @@ function expectedNativePolarityKeys(
 }
 
 declareOracle({
+  owns: [`src/node-driver.ts`],
   check: [assertExpressionIndexHistory],
   model: [expectedKeysFromScan, expectedRangeKeys, expectedNativePolarityKeys],
   grammar: [generatedScenarioMatrixArbitrary],
@@ -913,6 +915,7 @@ describe(`SQLite expression-index oracle`, () => {
   const it = oracleReplayTest(vitestIt)
 
   it(`keeps large Number matches across BigInt range directions and boolean wrappers`, async () => {
+    oracleRoute(`case`)
     const field = new IR.PropRef([`n`])
     const cases = [
       {
@@ -980,6 +983,7 @@ describe(`SQLite expression-index oracle`, () => {
   })
 
   async function roundTripGeneratedBigInt(campaign: GeneratedPropertyCampaign) {
+    oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
     await fc.assert(
       fc.asyncProperty(
         fc.bigInt({ min: SQLITE_BIGINT_MIN, max: SQLITE_BIGINT_MAX }),
@@ -1037,6 +1041,7 @@ describe(`SQLite expression-index oracle`, () => {
   )
 
   async function rejectGeneratedBigInt(campaign: GeneratedPropertyCampaign) {
+    oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
     const outOfRangeBigIntArbitrary = fc.oneof(
       fc
         .bigInt({ min: 1n, max: 1_000n })
@@ -1090,6 +1095,7 @@ describe(`SQLite expression-index oracle`, () => {
   )
 
   it(`uses the expression index for the fixed filter witness`, async () => {
+    oracleRoute(`fixed history`)
     await assertExpressionIndexHistory(
       {
         path: [`threadId`],
@@ -1103,6 +1109,7 @@ describe(`SQLite expression-index oracle`, () => {
   async function reachGeneratedExpressionIndex(
     campaign: GeneratedPropertyCampaign,
   ) {
+    oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
     const details = await runGeneratedScenarioProperty(campaign)
     const parameters = generatedCampaignParameters(campaign)
 
@@ -1133,6 +1140,7 @@ describe(`SQLite expression-index oracle`, () => {
   generatedControlTest.each(GENERATED_SCENARIO_KINDS)(
     `rejects the generated grammar when the %s axis is ablated`,
     async (kind) => {
+      oracleRoute(`calibration`)
       const details = await fc.check(
         generatedScenarioProperty({ ablateKind: kind }),
         {
@@ -1159,6 +1167,7 @@ describe(`SQLite expression-index oracle`, () => {
   generatedControlTest(
     `reconstructs the retained generated grammar and rejects a nearby duplicate axis`,
     () => {
+      oracleRoute(`calibration`)
       const [matrix] = fc.sample(generatedScenarioMatrixArbitrary, {
         seed: DEFAULT_ORACLE_SEED,
         numRuns: 1,
@@ -1181,6 +1190,7 @@ describe(`SQLite expression-index oracle`, () => {
   generatedControlTest.each(GENERATED_SCENARIO_FAULTS)(
     `rejects the plausible $wrongAnswer for the $kind axis`,
     async ({ kind }) => {
+      oracleRoute(`calibration`)
       const details = await fc.check(
         generatedScenarioProperty({ faultKind: kind }),
         {
@@ -1241,6 +1251,7 @@ describe(`Temporal expression-index refinement`, () => {
   it.each(temporalFamilies)(
     `uses native keys and identity for $kind / $name`,
     async (family) => {
+      oracleRoute(`case`)
       vi.stubGlobal(`Temporal`, Temporal)
       try {
         for (const query of temporalQueryCases(family)) {
@@ -1297,6 +1308,7 @@ describe(`Temporal expression-index refinement`, () => {
   it.each(temporalFamilies)(
     `retains mixed-domain matches under native predicate polarity / $name`,
     async (family) => {
+      oracleRoute(`case`)
       vi.stubGlobal(`Temporal`, Temporal)
       try {
         const ref = new IR.PropRef([`stamp`])
