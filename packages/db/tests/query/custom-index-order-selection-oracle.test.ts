@@ -77,7 +77,6 @@ declareOracle({
     'src/collection/index.ts#createCollection',
     'src/indexes/basic-index.ts',
     'src/indexes/btree-index.ts',
-    'src/query/ir.ts',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
     'src/query/live-query-collection.ts#liveQueryCollectionOptions',
   ],

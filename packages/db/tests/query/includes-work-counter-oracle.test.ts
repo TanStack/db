@@ -1085,11 +1085,6 @@ declareOracle({
     'src/collection/index.ts#createCollection',
     'src/indexes/btree-index.ts',
     'src/local-only.ts#localOnlyCollectionOptions',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/functions.ts#inArray',
-    'src/query/builder/include-functions.ts#include',
-    'src/query/builder/include-functions.ts#materialize',
-    'src/query/builder/include-functions.ts#toArray',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],
   check: [

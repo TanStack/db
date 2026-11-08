@@ -631,17 +631,12 @@ describe(`compound join identity and output`, () => {
 declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
-    'src/query/builder/functions.ts#and',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/index.ts',
-    'src/query/builder/query-ir.ts#getQueryIR',
     'src/query/compiler/evaluators.ts#compileExpression',
     'src/query/compiler/index.ts#compileQuery',
     'src/query/compiler/query-equivalence.ts#queriesMatchForCaching',
     'src/query/equality-value-identity.ts#getEqualityValueIdentity',
     'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
     'src/query/ir-stable-identity.ts#getQueryIdentity',
-    'src/query/ir.ts',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],
   check: [runShapes],

@@ -554,7 +554,6 @@ declareOracle({
     `src/operators/reduce.ts#reduce`,
     `src/operators/groupBy.ts#groupBy`,
     `src/operators/join.ts#join`,
-    `src/operators/output.ts#output`,
     `src/operators/orderBy.ts#orderByWithFractionalIndex`,
     `src/operators/groupedOrderBy.ts#groupedOrderByWithFractionalIndex`,
   ],

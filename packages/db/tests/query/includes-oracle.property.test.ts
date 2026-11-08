@@ -498,13 +498,6 @@ declareOracle({
   owns: [
     'src/collection/change-events.ts#createFilterFunctionFromExpression',
     'src/collection/index.ts#createCollection',
-    'src/query/builder/functions.ts#and',
-    'src/query/builder/functions.ts#concat',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/functions.ts#not',
-    'src/query/builder/include-functions.ts#include',
-    'src/query/builder/include-functions.ts#materialize',
-    'src/query/builder/include-functions.ts#toArray',
     'src/query/equality-value-identity.ts#createValueIdentity',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
     'src/query/live/public-key-reduction.ts#routeKey',

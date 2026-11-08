@@ -607,14 +607,6 @@ function expectedChainRows(
 declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
-    'src/query/builder/functions.ts#add',
-    'src/query/builder/functions.ts#caseWhen',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/functions.ts#isUndefined',
-    'src/query/builder/functions.ts#max',
-    'src/query/builder/functions.ts#or',
-    'src/query/builder/functions.ts#sum',
-    'src/query/ir.ts',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
     'src/query/optimizer.ts#optimizeQuery',
   ],

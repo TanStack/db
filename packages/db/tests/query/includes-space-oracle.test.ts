@@ -40,8 +40,6 @@ declareOracle({
     'src/collection/index.ts#createCollection',
     'src/indexes/btree-index.ts',
     'src/local-only.ts#localOnlyCollectionOptions',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/include-functions.ts#include',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
     'src/query/live/bucket-facade-adapter.ts',
   ],

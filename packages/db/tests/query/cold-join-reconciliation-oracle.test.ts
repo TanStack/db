@@ -842,8 +842,6 @@ declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
     'src/indexes/btree-index.ts',
-    'src/query/builder/functions.ts#and',
-    'src/query/builder/functions.ts#eq',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],
   check: [runColdJoin, runCompoundHistory, expectEqualityJoinMatchesPredicate],

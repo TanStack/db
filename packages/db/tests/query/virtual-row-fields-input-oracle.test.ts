@@ -157,15 +157,8 @@ afterAll(() => {
 declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/include-functions.ts#include',
-    'src/query/builder/include-functions.ts#materialize',
-    'src/query/builder/include-functions.ts#toArray',
-    'src/query/builder/index.ts',
-    'src/query/builder/query-ir.ts#getQueryIR',
     'src/query/compiler/index.ts#compileQuery',
     'src/query/effect.ts#createEffect',
-    'src/query/ir.ts',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],
   check: [metadataInputViolations, metadataOutputViolations],

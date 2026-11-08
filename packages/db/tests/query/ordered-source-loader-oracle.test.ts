@@ -38,7 +38,7 @@ const expectedStagedWindowTrace = (
 ]
 
 declareOracle({
-  owns: ['src/query/ir.ts', 'src/query/live/ordered-source-loader.ts'],
+  owns: ['src/query/live/ordered-source-loader.ts'],
   model: [expectedStagedWindowTrace],
   grammar: [stagedWindowCases],
 })

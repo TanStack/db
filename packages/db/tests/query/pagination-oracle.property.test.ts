@@ -836,13 +836,7 @@ async function runPaginationScenario(
 declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
-    'src/deferred.ts#createDeferred',
     'src/indexes/btree-index.ts',
-    'src/query/builder/functions.ts#and',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/index.ts',
-    'src/query/builder/query-ir.ts#getQueryIR',
-    'src/query/ir.ts',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
     'src/utils/comparison.ts#makeComparator',
   ],

@@ -454,8 +454,6 @@ declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
     'src/indexes/basic-index.ts',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/include-functions.ts#materialize',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],
   model: [

@@ -150,11 +150,6 @@ declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
     'src/indexes/btree-index.ts',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/include-functions.ts#include',
-    'src/query/builder/include-functions.ts#materialize',
-    'src/query/builder/include-functions.ts#toArray',
-    'src/query/builder/index.ts',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
     'src/virtual-props.ts#hasVirtualProps',
   ],

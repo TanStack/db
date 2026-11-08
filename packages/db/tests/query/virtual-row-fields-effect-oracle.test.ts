@@ -422,9 +422,6 @@ afterAll(() => {
 declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
-    'src/query/builder/functions.ts#coalesce',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/index.ts',
     'src/query/effect.ts#createEffect',
     'src/transactions.ts#createTransaction',
   ],

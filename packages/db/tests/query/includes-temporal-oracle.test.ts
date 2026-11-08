@@ -1297,14 +1297,8 @@ function temporalCampaigns(property: string, fixedSeed: number) {
 declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
-    'src/deferred.ts#createDeferred',
-    'src/errors.ts',
     'src/indexes/basic-index.ts',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/include-functions.ts#materialize',
-    'src/query/builder/include-functions.ts#toArray',
     'src/query/effect.ts#createEffect',
-    'src/query/expression-helpers.ts#extractSimpleComparisons',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
     'src/query/live/subset-demand-controller.ts',
     'src/query/query-once.ts#queryOnce',

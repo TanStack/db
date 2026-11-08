@@ -2363,7 +2363,6 @@ declareOracle({
     'src/collection/index.ts#createCollection',
     'src/indexes/btree-index.ts',
     'src/query/effect.ts#createEffect',
-    'src/query/ir.ts',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
     'src/query/live/ordered-source-loader.ts',
   ],

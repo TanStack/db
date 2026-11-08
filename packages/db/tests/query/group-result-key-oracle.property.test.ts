@@ -263,11 +263,7 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
 }
 
 declareOracle({
-  owns: [
-    'src/collection/index.ts#createCollection',
-    'src/query/builder/functions.ts#count',
-    'src/query/live-query-collection.ts#createLiveQueryCollection',
-  ],
+  owns: ['src/query/live-query-collection.ts#createLiveQueryCollection'],
   check: [runHistory],
   model: [expectedGroups],
 })

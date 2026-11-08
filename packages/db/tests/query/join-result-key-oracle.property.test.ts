@@ -274,10 +274,6 @@ async function runHistory(history: History): Promise<void> {
 
 declareOracle({
   owns: [
-    `src/collection/index.ts#createCollection`,
-    `src/query/builder/include-functions.ts#include`,
-    `src/query/builder/include-functions.ts#materialize`,
-    `src/query/builder/include-functions.ts#toArray`,
     `src/query/compiler/joins.ts#processJoins`,
     `src/query/live-query-collection.ts#createLiveQueryCollection`,
   ],

@@ -711,13 +711,6 @@ declareOracle({
   owns: [
     'src/collection/change-events.ts#createFilterFunctionFromExpression',
     'src/collection/index.ts#createCollection',
-    'src/query/builder/functions.ts#and',
-    'src/query/builder/functions.ts#count',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/functions.ts#isNull',
-    'src/query/builder/functions.ts#lt',
-    'src/query/builder/functions.ts#not',
-    'src/query/builder/include-functions.ts#toArray',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
     'src/query/query-once.ts#queryOnce',
   ],

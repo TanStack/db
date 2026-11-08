@@ -278,11 +278,7 @@ const exactScenarioRuns = 40 * multiplier
 // attempt with the transports that it expects. The grammar is the exact-demand
 // trace arbitrary, which the calibration test below reads for coverage.
 declareOracle({
-  owns: [
-    'src/deferred.ts#createDeferred',
-    'src/query/ir.ts',
-    'src/query/subset-dedupe.ts',
-  ],
+  owns: ['src/query/subset-dedupe.ts'],
   check: [
     assertCompletedExactDemandTrace,
     assertConcurrentExactDemandTrace,

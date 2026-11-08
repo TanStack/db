@@ -131,7 +131,6 @@ function expectedRowsAfterQueuedBatches(batches: number): Array<Row> {
 declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
-    'src/deferred.ts#createDeferred',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
     'src/transactions.ts#createTransaction',
   ],

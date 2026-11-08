@@ -127,12 +127,7 @@ function expectedFindOneCandidates(
 declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
-    'src/query/builder/functions.ts#count',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/include-functions.ts#materialize',
-    'src/query/builder/index.ts#buildQuery',
     'src/query/compiler/index.ts#compileQuery',
-    'src/query/ir.ts#collectCollectionSources',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],
   check: [expectPublicSnapshotFollowsModel],

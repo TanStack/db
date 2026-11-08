@@ -228,10 +228,7 @@ function describeCase(testCase: InCase): string {
 }
 
 declareOracle({
-  owns: [
-    'src/query/compiler/evaluators.ts#compileExpression',
-    'src/query/ir.ts',
-  ],
+  owns: ['src/query/compiler/evaluators.ts#compileExpression'],
   check: [check],
   model: [referenceIn],
 })

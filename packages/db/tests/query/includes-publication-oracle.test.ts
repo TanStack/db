@@ -590,8 +590,6 @@ declareOracle({
     'src/collection/index.ts#createCollection',
     'src/indexes/basic-index.ts',
     'src/indexes/btree-index.ts',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/include-functions.ts#materialize',
     'src/query/effect.ts#createEffect',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],

@@ -2538,12 +2538,7 @@ describe(`synchronous initial full-source settlement refinement`, () => {
 declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
-    'src/deferred.ts#createDeferred',
     'src/indexes/btree-index.ts',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/functions.ts#isUndefined',
-    'src/query/builder/functions.ts#not',
-    'src/query/builder/include-functions.ts#toArray',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],
   check: [

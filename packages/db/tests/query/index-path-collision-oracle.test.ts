@@ -109,12 +109,6 @@ declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
     'src/indexes/btree-index.ts',
-    'src/query/builder/functions.ts#add',
-    'src/query/builder/functions.ts#and',
-    'src/query/builder/functions.ts#gt',
-    'src/query/builder/functions.ts#lt',
-    'src/query/builder/functions.ts#lte',
-    'src/query/ir.ts',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],
   model: [modelKeys, modelSelectedOrder],

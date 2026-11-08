@@ -800,11 +800,6 @@ declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
     'src/indexes/basic-index.ts',
-    'src/query/builder/functions.ts#and',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/functions.ts#not',
-    'src/query/builder/functions.ts#or',
-    'src/query/ir.ts',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],
   check: [runHistory],

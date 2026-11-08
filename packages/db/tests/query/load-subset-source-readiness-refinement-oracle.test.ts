@@ -51,11 +51,7 @@ function expectedRows(
 declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
-    'src/deferred.ts#createDeferred',
     'src/indexes/btree-index.ts',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/include-functions.ts#toArray',
-    'src/query/expression-helpers.ts#extractSimpleComparisons',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],
   model: [expectedRows],

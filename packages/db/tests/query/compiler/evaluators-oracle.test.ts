@@ -165,10 +165,7 @@ function findLikeMismatch(
 }
 
 declareOracle({
-  owns: [
-    'src/query/compiler/evaluators.ts#compileExpression',
-    'src/query/ir.ts',
-  ],
+  owns: ['src/query/compiler/evaluators.ts#compileExpression'],
   check: [findLikeMismatch],
   model: [referenceLike],
   grammar: [seededLikeCases],

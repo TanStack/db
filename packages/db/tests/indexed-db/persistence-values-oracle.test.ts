@@ -33,7 +33,6 @@ import type { ValueRow } from './structured-clone-oracle'
 declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
-    'src/errors.ts',
     'src/indexed-db.ts#createIndexedDB',
     'src/indexed-db.ts#indexedDBCollectionOptions',
   ],

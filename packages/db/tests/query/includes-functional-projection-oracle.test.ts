@@ -67,10 +67,6 @@ import type {
 declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/include-functions.ts#include',
-    'src/query/builder/include-functions.ts#materialize',
-    'src/query/builder/include-functions.ts#toArray',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
   ],
   model: [expectedGroupChildren, expectedOperatorRows],

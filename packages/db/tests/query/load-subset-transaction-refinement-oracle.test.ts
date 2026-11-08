@@ -63,8 +63,6 @@ function expectedOutcome(
 declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
-    'src/deferred.ts#createDeferred',
-    'src/errors.ts',
     'src/transactions.ts#createTransaction',
   ],
   model: [expectedOutcome],

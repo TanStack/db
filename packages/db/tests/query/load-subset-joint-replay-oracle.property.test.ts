@@ -45,8 +45,6 @@ import type {
 declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
-    'src/deferred.ts#createDeferred',
-    'src/query/builder/functions.ts#eq',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
     'src/transactions.ts#createTransaction',
   ],

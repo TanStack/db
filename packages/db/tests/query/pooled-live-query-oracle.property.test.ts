@@ -1063,11 +1063,6 @@ declareOracle({
   owns: [
     'src/collection/index.ts#createCollection',
     'src/live-query-observer.ts#createLiveQueryObserver',
-    'src/query/builder/functions.ts#and',
-    'src/query/builder/functions.ts#eq',
-    'src/query/builder/functions.ts#not',
-    'src/query/builder/index.ts',
-    'src/query/ir.ts',
     'src/query/live-query-collection.ts#createLiveQueryCollection',
     'src/query/pooled-live-query.ts#createPooledLiveQuery',
   ],
