@@ -1330,12 +1330,12 @@ importers:
         specifier: workspace:*
         version: link:../db
       fast-check:
-        specifier: ^3.23.0
-        version: 3.23.2
+        specifier: ^4.10.2
+        version: 4.10.2
     devDependencies:
       '@fast-check/vitest':
-        specifier: ^0.4.1
-        version: 0.4.1(vitest@4.1.12)
+        specifier: ^0.5.0
+        version: 0.5.0(vitest@4.1.12)
       '@neon/realtime':
         specifier: 0.1.2
         version: 0.1.2
@@ -6179,7 +6179,7 @@ packages:
     engines: {node: '>=20.19'}
 
   '@tanstack/oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@0774648':
-    resolution: {integrity: sha512-Rt841IlNud6oIs4T6aEhAuArO7KyhhHpikVEms00cpShINLjzG3o1t8Hz/yHHKi4vbEyKV1ncKGbJgvrQqX1rg==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@0774648}
+    resolution: {tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@0774648}
     version: 0.0.0
     engines: {node: '>=20'}
     hasBin: true
