@@ -1,7 +1,7 @@
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
 import { CleanupQueue } from '../src/collection/cleanup-queue'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { oraclePropertyOptions, oracleRoute, oracleRuns } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
 import { resetCleanupQueue } from './utils'
 
@@ -124,7 +124,13 @@ function expectQueueState(
   ).toEqual([...model.errors].sort())
 }
 
-declareOracle({ check: [expectQueueState], model: [stepModel] })
+// What this oracle owns: the gap report judges every function in
+// cleanup-queue.ts by this file's tests.
+declareOracle({
+  owns: [`src/collection/cleanup-queue.ts`],
+  check: [expectQueueState],
+  model: [stepModel],
+})
 
 async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
   vi.useFakeTimers()
@@ -251,6 +257,7 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
 it.each([20260913, undefined])(
   `obeys appointment histories (seed %s)`,
   async (seed) => {
+    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
     await fc.assert(
       fc.asyncProperty(
         fc.array(actionArbitrary, { maxLength: 50 }),
@@ -315,6 +322,7 @@ it.each([20260913, undefined])(
 it.each([`ignore-cancel`, `lose-replacement`, `duplicate`, `late`] as const)(
   `rejects the %s faulty queue`,
   async (fault) => {
+    oracleRoute(`calibration`)
     await expect(
       runHistory(
         [

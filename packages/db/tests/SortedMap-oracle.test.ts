@@ -4,6 +4,7 @@ import { SortedMap } from '../src/SortedMap'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from './oracle-config'
 import { createOracleReach } from './oracle-reach'
@@ -347,7 +348,11 @@ function withDeferredChange(actions: Array<Action>): Array<Action> {
   ]
 }
 
+// What this oracle owns: the gap report judges every function in
+// SortedMap.ts, and its reference tree within the package, by this file's
+// tests.
 declareOracle({
+  owns: [`src/SortedMap.ts`],
   check: [expectMap, expectView],
   model: [modelOrder, restoreBound],
   grammar: [withDeferredChange],
@@ -372,6 +377,7 @@ describe.each([`key`, `ascending`, `descending`] as const)(
     it.each([20260912, undefined])(
       `agrees with full recomputation (seed %s)`,
       async (seed) => {
+        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
         const reach = createOracleReach(
           property,
           [
@@ -458,6 +464,7 @@ describe.each([`ascending`, `descending`] as const)(
       `unpromised order`,
       `prune observation`,
     ] as const)(`credits only a restoring comparison: %s`, (control) => {
+      oracleRoute(`calibration`)
       const state = `deferred-row-changed-before-restore`
       const reach = createOracleReach<ReachState>(
         `sorted-map.${order}.${control}`,

@@ -3,7 +3,11 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { ReverseIndex } from '../src/indexes/reverse-index.js'
 import { PropRef } from '../src/query/ir.js'
-import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
+import {
+  oracleRandomParameters,
+  oracleRoute,
+  readOracleRunConfig,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 
 /**
@@ -172,7 +176,10 @@ const readCase: fc.Arbitrary<ReadCase> = fc.record({
   rejected: fc.uniqueArray(fc.integer({ min: 0, max: 15 }), { maxLength: 6 }),
 })
 
+// What this oracle owns: the gap report judges every function in
+// reverse-index.ts by this file's tests.
 declareOracle({
+  owns: [`src/indexes/reverse-index.ts`],
   check: [checkRead],
   model: [modelOrder, after, expectedRead],
 })
@@ -184,6 +191,7 @@ describe(`reversed index reads`, () => {
   it.each([`first`, `last`] as const)(
     `reads 50 keys among 5,000 nullish keys with nulls %s in bounded non-null work`,
     (nulls) => {
+      oracleRoute(`case`)
       const entries: Array<Entry> = Array.from({ length: 10_000 }, (_, key) => [
         key,
         key % 2 === 0 ? null : key,
@@ -202,7 +210,10 @@ describe(`reversed index reads`, () => {
 
   fcTest.prop([readCase], { numRuns: runs, seed: 2045 })(
     `matches the query order in bounded work for a fixed seed`,
-    checkRead,
+    (read) => {
+      oracleRoute(`fixed seed`)
+      checkRead(read)
+    },
   )
 
   fcTest.prop(
@@ -210,6 +221,9 @@ describe(`reversed index reads`, () => {
     oracleRandomParameters(runs, replay, `reverse-index.reads`),
   )(
     `matches the query order in bounded work for a random or replayed seed`,
-    checkRead,
+    (read) => {
+      oracleRoute(`random seed`)
+      checkRead(read)
+    },
   )
 })
