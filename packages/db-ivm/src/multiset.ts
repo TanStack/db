@@ -82,6 +82,13 @@ export class MultiSet<T> {
    * changed.
    */
   consolidate(): MultiSet<T> {
+    // Development-only oracle probes read this. A bundler that sets NODE_ENV
+    // folds it to `false`, inlines it, and removes them; the typeof check keeps
+    // an unbundled module from throwing where `process` does not exist.
+    const probing =
+      typeof process === `undefined`
+        ? false
+        : process.env.NODE_ENV !== `production`
     const inner = this.#inner
     // Keyed multisets hold [string | number key, value] pairs. Their values are
     // compared by reference, which avoids hashing. Join tuples (values of
@@ -93,7 +100,7 @@ export class MultiSet<T> {
         (typeof data[0] === `string` || typeof data[0] === `number`),
     )
     // Development-only oracle probe; a production build removes it.
-    process.env.NODE_ENV !== `production` &&
+    probing &&
       (
         globalThis as {
           __oracleProbe?: (name: string, condition: unknown) => void
@@ -111,14 +118,14 @@ export class MultiSet<T> {
       primitiveType ??= type
       return type !== primitiveType
     })
-    process.env.NODE_ENV !== `production` &&
+    probing &&
       (
         globalThis as {
           __oracleProbe?: (name: string, condition: unknown) => void
         }
       ).__oracleProbe?.(`db-ivm#primitive-identity`, !requireHash)
     if (!requireHash) return consolidateBy(inner, (data) => data, true)
-    process.env.NODE_ENV !== `production` &&
+    probing &&
       (
         globalThis as {
           __oracleProbe?: (name: string, condition: unknown) => void
@@ -126,7 +133,7 @@ export class MultiSet<T> {
       ).__oracleProbe?.(`db-ivm#structural-identity`, true)
     // The pairs-without-key scan runs only in development builds, where the
     // probe's condition is evaluated.
-    process.env.NODE_ENV !== `production` &&
+    probing &&
       (
         globalThis as {
           __oracleProbe?: (name: string, condition: unknown) => void
@@ -166,6 +173,11 @@ export class MultiSet<T> {
  * looked up element by element, and leaves and tuples use separate maps.
  */
 function consolidateKeyed<T>(inner: MultiSetArray<T>): MultiSet<T> {
+  // Read by this function's development-only oracle probes, as above.
+  const probing =
+    typeof process === `undefined`
+      ? false
+      : process.env.NODE_ENV !== `production`
   const leaves = new Map<unknown, Map<unknown, [T, number]>>()
   const tuples = new Map<unknown, Map<unknown, Map<unknown, [T, number]>>>()
   const entries: MultiSetArray<T> = []
@@ -179,13 +191,13 @@ function consolidateKeyed<T>(inner: MultiSetArray<T>): MultiSet<T> {
       if (!bySecond) byFirst.set(value[0], (bySecond = new Map()))
       entry = bySecond.get(value[1])
       // Development-only oracle probes; a production build removes them.
-      process.env.NODE_ENV !== `production` &&
+      probing &&
         (
           globalThis as {
             __oracleProbe?: (name: string, condition: unknown) => void
           }
         ).__oracleProbe?.(`db-ivm#records-merged`, entry !== undefined)
-      process.env.NODE_ENV !== `production` &&
+      probing &&
         (
           globalThis as {
             __oracleProbe?: (name: string, condition: unknown) => void
@@ -199,7 +211,7 @@ function consolidateKeyed<T>(inner: MultiSetArray<T>): MultiSet<T> {
       let byValue = leaves.get(key)
       if (!byValue) leaves.set(key, (byValue = new Map()))
       entry = byValue.get(value)
-      process.env.NODE_ENV !== `production` &&
+      probing &&
         (
           globalThis as {
             __oracleProbe?: (name: string, condition: unknown) => void
@@ -225,12 +237,17 @@ function consolidateBy<T>(
   identityOf: (data: T) => unknown,
   keepIdentity = false,
 ): MultiSet<T> {
+  // Read by this function's development-only oracle probes, as above.
+  const probing =
+    typeof process === `undefined`
+      ? false
+      : process.env.NODE_ENV !== `production`
   const consolidated = new Map<unknown, [T, number]>()
   for (const [data, multiplicity] of inner) {
     const identity = identityOf(data)
     const entry = consolidated.get(identity)
     // Development-only oracle probe; a production build removes it.
-    process.env.NODE_ENV !== `production` &&
+    probing &&
       (
         globalThis as {
           __oracleProbe?: (name: string, condition: unknown) => void

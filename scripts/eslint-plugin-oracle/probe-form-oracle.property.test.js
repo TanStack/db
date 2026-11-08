@@ -3,12 +3,28 @@
  * one expression statement of this exact form, and every other mention of
  * `__oracleProbe` is reported:
  *
- *   process.env.NODE_ENV !== 'production' && globalThis.__oracleProbe?.(name, condition)
+ *   probing && globalThis.__oracleProbe?.(name, condition)
  *
- * The guard is the comparison on the left of `&&`, so a production build drops
- * the probe. The guard's `'production'` may be written with any of the three
+ * `probing` is a declaration at the top of the probe's nearest enclosing
+ * function, in exactly this form:
+ *
+ *   const probing = typeof process === 'undefined' ? false : process.env.NODE_ENV !== 'production'
+ *
+ * The guard is that identifier on the left of `&&`, resolved to that
+ * declaration. A `let`, a declaration in another form, a missing declaration,
+ * a declaration at module level, in a block, or in an outer function, or a
+ * nearer `probing` that shadows it, makes the probe illegal. Why this form:
+ * a bundler that sets `NODE_ENV` folds the initializer to the literal `false`,
+ * and esbuild inlines a function-local constant, so a production build drops
+ * every probe. esbuild does not inline a module-level constant once the module
+ * imports anything (it keeps `var t=!1` and every probe), and it folds the
+ * `&&` form `typeof process !== 'undefined' && ...` only to
+ * `typeof process < "u" && false`, so both ship their probes. The `typeof`
+ * check keeps an unbundled module from throwing where `process` does not
+ * exist, and the function reads `process.env` once per call, not once per
+ * record of a loop. The quoted strings may be written with any of the three
  * quote styles, because the repository writes strings with backticks. The
- * receiver is `globalThis`, or `globalThis` cast with `as`. The name is a
+ * bare comparison `process.env.NODE_ENV !== 'production'` is no longer a guard. The receiver is `globalThis`, or `globalThis` cast with `as`. The name is a
  * string literal or a template literal without substitutions, and it names a
  * state as `package#name`. The statement has exactly two arguments,
  * and the condition contains no assignment, update, `new`, `delete`, `await`,
@@ -20,19 +36,30 @@
  *
  * Authority: the maintainer's decision on the probe form, which replaces the
  * `devBuild()` guard ("this is a standalone framework now so we can't use the
- * devBuild() stuff", "our default lint forces the guard"), and the state probe
+ * devBuild() stuff", "our default lint forces the guard"); the maintainer's
+ * decision of 2026-11-08 (option B, with the function-local placement that
+ * the coordinator confirmed after the esbuild measurement), which replaces
+ * the bare `NODE_ENV` comparison with a `probing` constant, because the bare
+ * comparison throws in an unbundled browser module and reads `process.env`
+ * per record inside loops; and the state probe
  * entry in docs/contributing/glossary.md, which names the call
  * `globalThis.__oracleProbe?.("package#name")`. AGENTS.md "Lint feedback while
  * you work" requires that an oracle-owned shortcut is reported, not disabled.
  *
  * Structure, following ORC-003:
- *   1. The grammar draws a program of sites. Each site has a kind: a legal
- *      probe, or one near-miss that breaks exactly one part of the form.
+ *   1. The grammar draws a program: one `probing` declaration at the top of
+ *      the function, legal or one near-miss of its form or placement (or
+ *      none), and a list of sites.
+ *      Each site has a kind: a legal probe, or one near-miss that breaks
+ *      exactly one part of the form.
  *   2. The model predicts the reports from the drawn kinds alone. A legal
- *      site has no report. A near-miss has one report for each mention of
- *      `__oracleProbe` on its line. The model does not read the rule.
- *   3. The drivers render the program as one TypeScript function, one site per
- *      line, and lint it on two receiving paths: the repository's root ESLint
+ *      site under a legal declaration has no report. Every other site has one
+ *      report for each mention of `__oracleProbe` on its line. The model does
+ *      not read the rule.
+ *   3. The drivers render the program as one TypeScript module: a module
+ *      line, then one function whose first line is the declaration, then one
+ *      site per line. They
+ *      lint it on two receiving paths: the repository's root ESLint
  *      config, which is what CI and `pnpm lint` use, and the plugin's
  *      `production` config alone. The root config also lints the same program
  *      under a test file name, which must report nothing: the rule covers
@@ -83,15 +110,25 @@ const one = () => 1
 const two = () => 2
 
 const MODEL = {
-  probe: { legal: true, mentions: () => 0 },
+  // `legal: 'declared'`: legal exactly when the function's declaration is.
+  probe: { legal: `declared`, mentions: castMentions },
+  // Its own arrow function declares `probing` in the exact form, so it is
+  // legal under any outer declaration.
+  'inner-declared': { legal: true, mentions: castMentions },
+  // Its nearest function is an arrow without a declaration; the outer
+  // function's `probing` does not count.
+  'nested-function': { legal: false, mentions: castMentions },
+  // The exact declaration in a block is not at the top of a function.
+  'block-declared': { legal: false, mentions: castMentions },
   'if-guard': { legal: false, mentions: castMentions },
   'devbuild-and-guard': { legal: false, mentions: castMentions },
   'devbuild-only': { legal: false, mentions: castMentions },
   'no-guard': { legal: false, mentions: castMentions },
   'or-guard': { legal: false, mentions: castMentions },
-  'equal-guard': { legal: false, mentions: castMentions },
-  'reversed-guard': { legal: false, mentions: castMentions },
-  'computed-env-guard': { legal: false, mentions: castMentions },
+  'negated-guard': { legal: false, mentions: castMentions },
+  'other-guard': { legal: false, mentions: castMentions },
+  'env-guard': { legal: false, mentions: castMentions },
+  'shadowed-guard': { legal: false, mentions: castMentions },
   'optional-receiver': { legal: false, mentions: one },
   'non-optional-call': { legal: false, mentions: castMentions },
   'one-argument': { legal: false, mentions: castMentions },
@@ -108,6 +145,25 @@ const MODEL = {
   'variable-initializer': { legal: false, mentions: castMentions },
   sequence: { legal: false, mentions: castMentions },
   ternary: { legal: false, mentions: castMentions },
+}
+
+// The module-level declaration of `probing`. Only `declared` is legal; each
+// other kind breaks one part of its form, and `absent` writes none. A
+// declaration that is not legal makes every probe site of the module illegal.
+const DECLARATIONS = {
+  declared: { legal: true },
+  'let-declared': { legal: false },
+  'no-typeof': { legal: false },
+  'and-combined': { legal: false },
+  'typeof-not-equal': { legal: false },
+  'typeof-other-global': { legal: false },
+  'true-branch': { legal: false },
+  'equal-env': { legal: false },
+  'reversed-env': { legal: false },
+  'computed-env': { legal: false },
+  // The exact form, but at module level, where esbuild keeps it.
+  'module-level': { legal: false },
+  absent: { legal: false },
 }
 
 // -- 1. Grammar ---------------------------------------------------------------
@@ -157,7 +213,11 @@ const LEGAL_CONDITIONS = [
   { text: `void 0`, calls: false },
   // Arrows with an expression body (maintainer decision, 2026-11-05).
   { text: `items.every((item) => item > 0)`, calls: true, arrow: true },
-  { text: `items.some(([a, b]) => a === b && typeof a === 'string')`, calls: true, arrow: true },
+  {
+    text: `items.some(([a, b]) => a === b && typeof a === 'string')`,
+    calls: true,
+    arrow: true,
+  },
   { text: `(() => flag)()`, calls: true, arrow: true },
 ]
 
@@ -201,15 +261,40 @@ const siteArbitrary = fc.record({
   wrap: fc.constantFrom(...WRAPS),
 })
 
-// A program is a list of sites. Each site is one line in the rendered function.
-const programArbitrary = fc
-  .array(siteArbitrary, { minLength: 1, maxLength: 6 })
-  .map((sites) => ({ sites }))
+// Legal declarations are weighted, so most programs judge their sites under a
+// legal declaration, and every near-miss declaration still appears.
+const declarationArbitrary = fc.record({
+  kind: fc.oneof(
+    { weight: 3, arbitrary: fc.constant(`declared`) },
+    { weight: 1, arbitrary: fc.constantFrom(...Object.keys(DECLARATIONS)) },
+  ),
+  quote: quoteArb,
+  parens: fc.boolean(),
+})
+
+// A program is a declaration and a list of sites. Each site is one line in the
+// rendered function.
+const programArbitrary = fc.record({
+  declaration: declarationArbitrary,
+  sites: fc.array(siteArbitrary, { minLength: 1, maxLength: 6 }),
+})
 
 // The census gives every kind every pool value once, by index, so the
-// declared reach does not depend on random draws. It is a fixed history, and
-// it runs through the same model, drivers, and comparison.
-function censusProgram() {
+// declared reach does not depend on random draws, and it runs every site kind
+// under every declaration kind. Each program is a fixed history, and it runs
+// through the same model, drivers, and comparison.
+function censusPrograms() {
+  return Object.keys(DECLARATIONS).map((kind, i) => ({
+    ...censusSites(),
+    declaration: {
+      kind,
+      quote: QUOTES[i % QUOTES.length],
+      parens: i % 2 === 0,
+    },
+  }))
+}
+
+function censusSites() {
   const sites = []
   const width = Math.max(
     LEGAL_NAMES.length,
@@ -247,13 +332,16 @@ function censusProgram() {
 // from the kind and the cast flag. A legal probe exempts its own mentions: the
 // callee property, and the cast's type member when it casts.
 
-// The header is line 1, so site `index` is on line `index + 2`.
-const siteLine = (index) => index + 2
+// The module line is 1, the function header 2, and the declaration 3, so
+// site `index` is on line `index + 4`.
+const siteLine = (index) => index + 4
 
 function predictReports(program) {
+  const declared = DECLARATIONS[program.declaration.kind].legal
   return program.sites.flatMap((site, index) => {
     const form = MODEL[site.kind]
-    if (form.legal) return []
+    if (form.legal === true || (form.legal === `declared` && declared))
+      return []
     return Array.from({ length: form.mentions(site) }, () => ({
       line: siteLine(index),
       messageId: MESSAGE_ID,
@@ -270,8 +358,43 @@ function predictSeverity(filePath) {
 
 // -- 3. Drivers ---------------------------------------------------------------
 
-const guardText = (site) =>
-  `process.env.NODE_ENV !== ${site.quote}production${site.quote}`
+const envText = (q) => `process.env.NODE_ENV !== ${q}production${q}`
+const paren = (text, parens) => (parens ? `(${text})` : text)
+const typeofText = (q) => `typeof process === ${q}undefined${q}`
+const ternary = (test, env, parens) =>
+  `${paren(test, parens)} ? false : ${paren(env, parens)}`
+const DECLARATION_RENDER = {
+  declared: (d) =>
+    `const probing = ${ternary(typeofText(d.quote), envText(d.quote), d.parens)}`,
+  'let-declared': (d) =>
+    `let probing = ${ternary(typeofText(d.quote), envText(d.quote), false)}`,
+  'no-typeof': (d) => `const probing = ${envText(d.quote)}`,
+  'and-combined': (d) =>
+    `const probing = typeof process !== ${d.quote}undefined${d.quote} && ${envText(d.quote)}`,
+  'typeof-not-equal': (d) =>
+    `const probing = typeof process !== ${d.quote}undefined${d.quote} ? false : ${envText(d.quote)}`,
+  'typeof-other-global': (d) =>
+    `const probing = typeof window === ${d.quote}undefined${d.quote} ? false : ${envText(d.quote)}`,
+  'true-branch': (d) =>
+    `const probing = ${typeofText(d.quote)} ? true : ${envText(d.quote)}`,
+  'equal-env': (d) =>
+    `const probing = ${typeofText(d.quote)} ? false : process.env.NODE_ENV === ${d.quote}production${d.quote}`,
+  'reversed-env': (d) =>
+    `const probing = ${typeofText(d.quote)} ? false : ${d.quote}production${d.quote} !== process.env.NODE_ENV`,
+  'computed-env': (d) =>
+    `const probing = ${typeofText(d.quote)} ? false : process.env[${d.quote}NODE_ENV${d.quote}] !== ${d.quote}production${d.quote}`,
+  'module-level': () => `// declared at module level`,
+  absent: () => `// no probing declaration`,
+}
+// The exact declaration, for a site that declares its own.
+const exactDeclaration = (q) =>
+  `const probing = ${ternary(typeofText(q), envText(q), false)}`
+// The module line: the exact declaration for `module-level`, else a comment.
+const moduleLine = (d) =>
+  d.kind === `module-level`
+    ? `const probing = ${ternary(typeofText(d.quote), envText(d.quote), d.parens)}`
+    : `// module`
+const guardText = () => `probing`
 const receiverText = (site) => {
   if (!site.cast) return `globalThis`
   return site.paren ? `(${CAST})` : CAST
@@ -285,18 +408,24 @@ const withBadCondition = (site) => site.wrap.split(`X`).join(site.badCond)
 const RENDER = {
   probe: (s) =>
     `${s.guardParens ? `(${guardText(s)})` : guardText(s)} && ${legalCall(s)};`,
+  'inner-declared': (s) =>
+    `void (() => { ${exactDeclaration(s.quote)}; ${guardText(s)} && ${legalCall(s)}; })();`,
+  'nested-function': (s) =>
+    `void (() => { ${guardText(s)} && ${legalCall(s)}; })();`,
+  'block-declared': (s) =>
+    `if (flag) { ${exactDeclaration(s.quote)}; ${guardText(s)} && ${legalCall(s)}; }`,
+  'negated-guard': (s) => `!${guardText(s)} && ${legalCall(s)};`,
+  'other-guard': (s) => `debugging && ${legalCall(s)};`,
+  'env-guard': (s) =>
+    `process.env.NODE_ENV !== ${s.quote}production${s.quote} && ${legalCall(s)};`,
+  'shadowed-guard': (s) =>
+    `{ const probing = flag; ${guardText(s)} && ${legalCall(s)}; }`,
   'if-guard': (s) => `if (${guardText(s)}) ${legalCall(s)};`,
   'devbuild-and-guard': (s) =>
     `devBuild() && ${guardText(s)} && ${legalCall(s)};`,
   'devbuild-only': (s) => `devBuild() && ${legalCall(s)};`,
   'no-guard': (s) => `${legalCall(s)};`,
   'or-guard': (s) => `${guardText(s)} || ${legalCall(s)};`,
-  'equal-guard': (s) =>
-    `process.env.NODE_ENV === ${s.quote}production${s.quote} && ${legalCall(s)};`,
-  'reversed-guard': (s) =>
-    `${s.quote}production${s.quote} !== process.env.NODE_ENV && ${legalCall(s)};`,
-  'computed-env-guard': (s) =>
-    `process.env[${s.quote}NODE_ENV${s.quote}] !== ${s.quote}production${s.quote} && ${legalCall(s)};`,
   'optional-receiver': (s) =>
     `${guardText(s)} && globalThis?.__oracleProbe?.(${nameText(s)}, ${s.cond.text});`,
   'non-optional-call': (s) =>
@@ -329,9 +458,15 @@ const RENDER = {
   ternary: (s) => `${guardText(s)} ? ${legalCall(s)} : undefined;`,
 }
 
+// A declaration ends in a semicolon, so a site that starts with `(` cannot
+// continue it as a call.
+const statement = (line) => (line.startsWith(`//`) ? line : `${line};`)
+
 function renderProgram(program) {
   return [
+    statement(moduleLine(program.declaration)),
     `export async function* run(input: number, flag: boolean): AsyncGenerator<number> {`,
+    `  ${statement(DECLARATION_RENDER[program.declaration.kind](program.declaration))}`,
     ...program.sites.map(
       (site, index) => `  ${RENDER[site.kind](site, index)}`,
     ),
@@ -399,13 +534,28 @@ const LEGAL_SUBSTATES = [
   `legal:call-condition`,
   `legal:arrow-condition`,
 ]
-const STATES = [...Object.keys(MODEL), ...LEGAL_SUBSTATES]
+const DECLARATION_STATES = Object.keys(DECLARATIONS).map(
+  (kind) => `declaration:${kind}`,
+)
+const STATES = [
+  ...Object.keys(MODEL),
+  ...LEGAL_SUBSTATES,
+  ...DECLARATION_STATES,
+  `declaration:parenthesized`,
+  `declaration:template-quotes`,
+]
 const reach = createOracleReach(PROPERTY, STATES, { minimum: 1 })
 
 function recordStates(program) {
+  const declaration = program.declaration
+  reach.reach(`declaration:${declaration.kind}`)
+  const declared = DECLARATIONS[declaration.kind].legal
+  if (declared && declaration.parens) reach.reach(`declaration:parenthesized`)
+  if (declared && declaration.quote === '`')
+    reach.reach(`declaration:template-quotes`)
   for (const site of program.sites) {
     reach.reach(site.kind)
-    if (!MODEL[site.kind].legal) continue
+    if (MODEL[site.kind].legal !== `declared` || !declared) continue
     if (site.cast) reach.reach(`legal:cast`)
     if (site.cast && site.paren) reach.reach(`legal:parenthesized-cast`)
     if (site.quote === '`') reach.reach(`legal:template-name`)
@@ -454,7 +604,7 @@ function campaign(name) {
 
 describe(`probe form in production source`, () => {
   it(`census: every kind and every pool value is linted as predicted`, async () => {
-    await checkProgram(censusProgram())
+    for (const program of censusPrograms()) await checkProgram(program)
   }, 600_000)
   campaign(`random programs`)
   afterAll(() => {

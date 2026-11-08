@@ -5,11 +5,18 @@ export class KeyScheduler {
   private activeTransactionId: string | undefined
 
   schedule(transaction: OfflineTransaction): boolean {
+    // Development-only oracle probes read this. A bundler that sets NODE_ENV
+    // folds it to `false`, inlines it, and removes them; the typeof check keeps
+    // an unbundled module from throwing where `process` does not exist.
+    const probing =
+      typeof process === `undefined`
+        ? false
+        : process.env.NODE_ENV !== `production`
     const duplicate = this.pendingTransactions.some(
       (pending) => pending.id === transaction.id,
     )
     // Development-only oracle probe; a production build removes it.
-    process.env.NODE_ENV !== `production` &&
+    probing &&
       (
         globalThis as {
           __oracleProbe?: (name: string, condition: unknown) => void

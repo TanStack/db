@@ -2,11 +2,25 @@
  * A state probe is the only development code that a production build must not
  * carry, so its call has one form, which the production build strips:
  *
- *   process.env.NODE_ENV !== 'production' && globalThis.__oracleProbe?.(name, condition)
+ *   probing && globalThis.__oracleProbe?.(name, condition)
+ *
+ * where `probing` is declared at the top of the probe's nearest enclosing
+ * function, in this form:
+ *
+ *   const probing = typeof process === 'undefined' ? false : process.env.NODE_ENV !== 'production'
+ *
+ * A bundler that sets `NODE_ENV` folds that initializer to the literal
+ * `false`, and esbuild inlines a function-local constant, so every probe
+ * drops. esbuild keeps a module-level constant once the module imports
+ * anything (`var t=!1` and every probe ship), and it folds the `&&` form
+ * (`typeof process !== 'undefined' && ...`) only to
+ * `typeof process < "u" && false`, so those forms ship their probes.
  *
  * This rule reports every mention of `__oracleProbe` that is not the callee of
  * a probe statement in that form. The statement is one expression statement,
- * its guard is the `NODE_ENV` comparison on the left of `&&`, and its receiver
+ * its guard is the identifier `probing` on the left of `&&`, which resolves to
+ * that `const` declaration in the scope of the probe's nearest enclosing
+ * function, and its receiver
  * is `globalThis`, optionally cast with `as`. Its name is a literal or a
  * template literal without substitutions, of the form `package#name`. It has
  * exactly two arguments, and the condition contains no assignment, update,
@@ -22,7 +36,10 @@
  * source, so the rule reads no other file.
  */
 
+import { findVariable } from '../registration.js'
+
 const PROBE = `__oracleProbe`
+const GUARD = `probing`
 const NAME = /^[a-z][a-z0-9-]*#[a-zA-Z][a-zA-Z0-9.-]*$/
 const PRODUCTION = `production`
 
@@ -93,6 +110,55 @@ function isProductionGuard(node) {
   )
 }
 
+// `typeof process === 'undefined'`, with the `typeof` on the left.
+function isProcessCheck(node) {
+  return (
+    node.type === `BinaryExpression` &&
+    node.operator === `===` &&
+    node.left.type === `UnaryExpression` &&
+    node.left.operator === `typeof` &&
+    node.left.argument.type === `Identifier` &&
+    node.left.argument.name === `process` &&
+    staticText(node.right) === `undefined`
+  )
+}
+
+// `typeof process === 'undefined' ? false : process.env.NODE_ENV !== 'production'`.
+function isProbingInit(node) {
+  return (
+    node?.type === `ConditionalExpression` &&
+    isProcessCheck(node.test) &&
+    node.consequent.type === `Literal` &&
+    node.consequent.value === false &&
+    isProductionGuard(node.alternate)
+  )
+}
+
+// The identifier `probing`, resolved to
+// `const probing = typeof process === 'undefined' ? false : process.env.NODE_ENV !== 'production'`
+// in the scope of the nearest enclosing function. A declaration in a block, in
+// an outer function, or at module level does not count, and a nearer
+// declaration of the name shadows it.
+function isProbingGuard(node, sourceCode) {
+  if (node.type !== `Identifier` || node.name !== GUARD) return false
+  const scope = sourceCode.getScope(node)
+  const variable = findVariable(scope, GUARD)
+  if (
+    variable === undefined ||
+    scope.variableScope.type !== `function` ||
+    variable.scope !== scope.variableScope ||
+    variable.defs.length !== 1
+  ) {
+    return false
+  }
+  const [definition] = variable.defs
+  return (
+    definition.type === `Variable` &&
+    definition.parent.kind === `const` &&
+    isProbingInit(definition.node.init)
+  )
+}
+
 // `globalThis`, or `globalThis as ...`. A cast returns its type annotation's
 // `__oracleProbe` member keys, which mention the probe too.
 function receiverKeys(node) {
@@ -118,11 +184,11 @@ function receiverKeys(node) {
 
 // The nodes of a probe statement's `__oracleProbe` mentions, or undefined when
 // the expression is not a probe in the required form.
-function probeMentions(expression) {
+function probeMentions(expression, sourceCode) {
   if (
     expression.type !== `LogicalExpression` ||
     expression.operator !== `&&` ||
-    !isProductionGuard(expression.left)
+    !isProbingGuard(expression.left, sourceCode)
   ) {
     return undefined
   }
@@ -153,7 +219,7 @@ function probeMentions(expression) {
   return [callee.property, ...receiver]
 }
 
-const message = `\`__oracleProbe\` may be called only as a state probe: one expression statement, \`process.env.NODE_ENV !== 'production' && globalThis.__oracleProbe?.('package#name', condition)\`, with a name literal of the form package#name and a condition that has no assignment, update, new, delete, await, yield, function or class expression, or arrow with a block body.`
+const message = `\`__oracleProbe\` may be called only as a state probe: one expression statement, \`probing && globalThis.__oracleProbe?.('package#name', condition)\`, where the enclosing function declares \`const probing = typeof process === 'undefined' ? false : process.env.NODE_ENV !== 'production'\` at its top, with a name literal of the form package#name and a condition that has no assignment, update, new, delete, await, yield, function or class expression, or arrow with a block body.`
 
 export default {
   meta: {
@@ -177,7 +243,7 @@ export default {
         if (staticText(node) === PROBE) mentions.push(node)
       },
       ExpressionStatement(node) {
-        const owns = probeMentions(node.expression)
+        const owns = probeMentions(node.expression, context.sourceCode)
         if (owns !== undefined) for (const mention of owns) owned.add(mention)
       },
       'Program:exit'() {

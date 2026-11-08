@@ -176,6 +176,13 @@ export class TransactionExecutor {
     transaction: OfflineTransaction,
     error: Error,
   ): Promise<void> {
+    // Development-only oracle probes read this. A bundler that sets NODE_ENV
+    // folds it to `false`, inlines it, and removes them; the typeof check keeps
+    // an unbundled module from throwing where `process` does not exist.
+    const probing =
+      typeof process === `undefined`
+        ? false
+        : process.env.NODE_ENV !== `production`
     let shouldRetry: boolean
     let hookFailure: Error | undefined
     if (error instanceof NonRetriableError) {
@@ -225,7 +232,7 @@ export class TransactionExecutor {
         console.warn(`Transaction ${transaction.id} failed permanently:`, error)
       }
       // Development-only oracle probe; a production build removes it.
-      process.env.NODE_ENV !== `production` &&
+      probing &&
         (
           globalThis as {
             __oracleProbe?: (name: string, condition: unknown) => void
@@ -261,7 +268,7 @@ export class TransactionExecutor {
     }
 
     // Development-only oracle probe; a production build removes it.
-    process.env.NODE_ENV !== `production` &&
+    probing &&
       (
         globalThis as {
           __oracleProbe?: (name: string, condition: unknown) => void
@@ -293,6 +300,11 @@ export class TransactionExecutor {
     transaction: OfflineTransaction,
     persistMarker: boolean,
   ): Promise<void> {
+    // Read by this function's development-only oracle probes, as above.
+    const probing =
+      typeof process === `undefined`
+        ? false
+        : process.env.NODE_ENV !== `production`
     try {
       if (persistMarker) {
         try {
@@ -301,7 +313,7 @@ export class TransactionExecutor {
           // A public removal can finish while the provider is still running.
           if (!(error instanceof OutboxTransactionNotFoundError)) {
             // Development-only oracle probe; a production build removes it.
-            process.env.NODE_ENV !== `production` &&
+            probing &&
               (
                 globalThis as {
                   __oracleProbe?: (name: string, condition: unknown) => void
@@ -317,7 +329,7 @@ export class TransactionExecutor {
       const storageError = toError(error)
       // Development-only oracle probe; a production build removes it. The
       // failed transaction is still pending, so any other pending one is a peer.
-      process.env.NODE_ENV !== `production` &&
+      probing &&
         (
           globalThis as {
             __oracleProbe?: (name: string, condition: unknown) => void
