@@ -26,6 +26,8 @@ import { createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { oracleRoute } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import { lazyOracleRuns, receiveBothSdks } from './lazy-paging-campaign'
@@ -33,6 +35,10 @@ import { assertLazySourceFacts, copyLazyRows } from './lazy-paging-model-oracle'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import { LazyVersionModel } from './lazy-paging-version-model-oracle'
 import type { LazyRow } from './lazy-paging-model-oracle'
+
+declareOracle({
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+})
 
 const turns = async () => {
   for (let i = 0; i < 30; i++) await Promise.resolve()
@@ -338,6 +344,7 @@ it(`receives equal-valued and superseding revalidation through actual receipts`,
 }, 60000)
 
 it(`rejects applied-content substitution for an equal-valued held receipt`, async () => {
+  oracleRoute(`calibration`)
   await expect(
     receive(
       { size: 5, pageSize: 2, descending: false, cancelFirst: true, text: `` },
@@ -348,6 +355,7 @@ it(`rejects applied-content substitution for an equal-valued held receipt`, asyn
 })
 
 it(`calibrates cleanup authority without treating cleanup as receipt application`, () => {
+  oracleRoute(`calibration`)
   const model = new LazyReceiptModel()
   model.acquire(`a`, [`equal`])
   model.accept(`actual`, [`equal`], [`a`])
@@ -368,6 +376,7 @@ it(`calibrates cleanup authority without treating cleanup as receipt application
 })
 
 it(`calibrates exact window order while accepting coherent skipped revisions`, () => {
+  oracleRoute(`calibration`)
   const a = { id: `a`, rank: 0, text: `old` }
   const b = { id: `b`, rank: 1, text: `old` }
   const latest = [

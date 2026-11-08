@@ -4,6 +4,7 @@ import { hash } from '../src/hashing/hash'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -96,9 +97,11 @@ function hashProp<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
   return (name: string, check: (...values: Ts) => void): void => {
     const property = fc.property(...arbitraries, check)
     oracleReplayTest(it)(`${name} (fixed)`, () => {
+      oracleRoute(`fixed seed`)
       fc.assert(property, { numRuns: oracleRuns(100), seed: 1657021 })
     })
     oracleReplayTest(it, valueProperty)(`${name} (random)`, () => {
+      oracleRoute(`random seed`)
       fc.assert(property, oraclePropertyOptions(100, valueProperty))
     })
   }
@@ -333,6 +336,7 @@ describe(`hash property-based tests`, () => {
 
   describe(`law checker calibration`, () => {
     it(`rejects an insertion-order-sensitive result but accepts equal structures`, () => {
+      oracleRoute(`calibration`)
       const entries: Array<[string, number]> = [
         [`key:left`, 1],
         [`key:right`, 2],
@@ -353,6 +357,7 @@ describe(`hash property-based tests`, () => {
     })
 
     it(`shrinks and replays an injected equality-law failure`, () => {
+      oracleRoute(`calibration`)
       const property = fc.property(arbitraryNonIndexEntries, (entries) => {
         let calls = 0
         expectPermutedHashes(entries, () => ++calls)

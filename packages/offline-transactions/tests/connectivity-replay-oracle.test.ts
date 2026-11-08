@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import {
   atOracleCheckpoint,
@@ -69,6 +70,7 @@ afterEach(() => {
 it.each([`visibilitychange`, `explicit retry`] as const)(
   `replays a committed outbox write on %s in a visible tab with a false online hint`,
   async (signal) => {
+    oracleRoute(`case`)
     const visibilityListeners = new Set<() => void>()
     vi.stubGlobal(`navigator`, { ...navigator, onLine: false })
     vi.stubGlobal(`document`, {

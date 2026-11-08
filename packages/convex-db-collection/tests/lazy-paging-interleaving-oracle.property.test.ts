@@ -19,10 +19,14 @@ import { createCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRuns } from '../../db/tests/oracle-config'
+import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import type { SyncAppliedReceipt, SyncConfig } from '@tanstack/db'
+
+// Owns no convex source: this grammar drives @tanstack/db Collection sync with its own SyncConfig, not the convex pager.
+declareOracle({})
 
 type Row = { id: string }
 const gate = () => {
@@ -396,6 +400,7 @@ it(`generates legal response/receipt/application/cancellation interleavings`, as
 it.each([`borrow-peer`, `first-only`, `premature-inflight-cancel`] as const)(
   `rejects %s under interleaving`,
   async (fault) => {
+    oracleRoute(`calibration`)
     await expect(
       runInterleaving(
         {
@@ -413,6 +418,7 @@ it.each([`borrow-peer`, `first-only`, `premature-inflight-cancel`] as const)(
 )
 
 it(`permits core fulfillment after abort once an uncancelable baseline applies`, () => {
+  oracleRoute(`case`)
   const model = new LazyReceiptModel()
   model.acquire(`a`, [`v1`])
   model.initiate(`a`, `baseline`)

@@ -4,6 +4,7 @@ import { hash } from '../src/hashing/hash'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -137,6 +138,7 @@ const graphWitnesses: Array<{
 
 describe(`structural hash graph boundary`, () => {
   it.each(graphWitnesses)(`matches the $name witness`, ({ edges, acyclic }) => {
+    oracleRoute(`case`)
     // These expected categories are specified independently of Kahn's result.
     expect(isAcyclic(edges)).toBe(acyclic)
     expectGraphHash(edges)
@@ -145,6 +147,7 @@ describe(`structural hash graph boundary`, () => {
   oracleReplayTest(it)(
     `matches reachable graph cycles and shared DAGs (fixed)`,
     () => {
+      oracleRoute(`fixed seed`)
       fc.assert(
         fc.property(graphArbitrary, (edges) => {
           expectGraphHash(edges)
@@ -156,6 +159,7 @@ describe(`structural hash graph boundary`, () => {
   oracleReplayTest(it, graphProperty)(
     `matches reachable graph cycles and shared DAGs (random)`,
     () => {
+      oracleRoute(`random seed`)
       fc.assert(
         fc.property(graphArbitrary, (edges) => {
           expectGraphHash(edges)
@@ -166,6 +170,7 @@ describe(`structural hash graph boundary`, () => {
   )
 
   it(`rejects cycle acceptance while accepting its acyclic near-neighbor`, () => {
+    oracleRoute(`calibration`)
     expect(() => expectGraphHash([[1], [0]], () => 0)).toThrow()
     expectGraphHash([[1], []], () => 0)
     expectGraphHash([[1], [0]])
@@ -173,6 +178,7 @@ describe(`structural hash graph boundary`, () => {
   })
 
   it(`replays a cycle-acceptance mismatch at the same checkpoint`, () => {
+    oracleRoute(`calibration`)
     const property = fc.property(fc.integer({ min: 1, max: 3 }), (length) => {
       const edges = Array.from({ length: length + 1 }, (_, node) => [
         node === length ? 0 : node + 1,
@@ -196,6 +202,7 @@ describe(`structural hash graph boundary`, () => {
   })
 
   it(`rejects false cycle rejection for unreachable cycles and shared DAGs`, () => {
+    oracleRoute(`calibration`)
     const rejectAll = (): number => {
       throw new TypeError(`Cannot hash cyclic structural values`)
     }
@@ -213,6 +220,7 @@ describe(`structural hash graph boundary`, () => {
   })
 
   it(`rejects unequal hashes of a shared DAG and its unfolding`, () => {
+    oracleRoute(`calibration`)
     let calls = 0
     expect(() =>
       expectGraphHash([[1, 2], [3], [3], []], () => ++calls),

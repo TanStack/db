@@ -6,6 +6,7 @@ import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -414,6 +415,7 @@ fixedCase.each([
 ])(
   `settles restart demand with tagged=$tagged legacy=$legacyResume cold=$cold reset=$fresh`,
   async ({ cold, fresh, ...history }) => {
+    oracleRoute(`case`)
     await runTagHistory(
       {
         ...history,
@@ -437,14 +439,20 @@ oracleReplayTest(fcTest).prop([tagHistory], {
   numRuns: oracleRuns(10),
 })(
   `persisted tag histories preserve membership across warm and cold restart (fixed)`,
-  (history) => runTagHistory(history),
+  (history) => {
+    oracleRoute(`fixed seed`)
+    return runTagHistory(history)
+  },
 )
 oracleReplayTest(fcTest, `electric.persisted-tag-history`).prop(
   [tagHistory],
   oraclePropertyOptions(10, `electric.persisted-tag-history`),
 )(
   `persisted tag histories preserve membership across warm and cold restart (random)`,
-  (history) => runTagHistory(history),
+  (history) => {
+    oracleRoute(`random seed`)
+    return runTagHistory(history)
+  },
 )
 
 beforeEach(() => {
@@ -514,6 +522,7 @@ beforeEach(() => {
 fixedCase.each([`eager`, `on-demand`, `progressive`] as const)(
   `delivers abandoned tag-recovery callbacks after replacement starts in %s mode`,
   async (syncMode) => {
+    oracleRoute(`case`)
     await runTagHistory({
       syncMode,
       tagged: true,
@@ -612,14 +621,20 @@ oracleReplayTest(fcTest).prop([ownerHistory], {
   numRuns: oracleRuns(12),
 })(
   `config derivation preserves independent owner histories (fixed)`,
-  runOwnerHistory,
+  (history) => {
+    oracleRoute(`fixed seed`)
+    return runOwnerHistory(history)
+  },
 )
 oracleReplayTest(fcTest, `electric.bound-descriptor-history`).prop(
   [ownerHistory],
   oraclePropertyOptions(20, `electric.bound-descriptor-history`),
 )(
   `config derivation preserves independent owner histories (random)`,
-  runOwnerHistory,
+  (history) => {
+    oracleRoute(`random seed`)
+    return runOwnerHistory(history)
+  },
 )
 
 // The Electric descriptor may be reused across independent persisted wrappers.
@@ -629,4 +644,7 @@ oracleReplayTest(fcTest, `electric.bound-descriptor-history`).prop(
 // public checkpoints are admission, the first receipt, and each Collection's
 // rows after only the first provider session acknowledges its transaction.
 
-declareOracle({ check: [runTagHistory, runOwnerHistory] })
+declareOracle({
+  check: [runTagHistory, runOwnerHistory],
+  owns: [`src/electric.ts#electricCollectionOptions`],
+})

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { serialize } from '../src/pg-serializer'
-import { oracleReplayTest, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oracleReplayTest,
+  oracleRoute,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   parseFiniteArray,
@@ -60,7 +64,10 @@ function expectFiniteArrayContents(
   expect(parseFiniteArray(output)).toEqual(input.map((value) => value ?? null))
 }
 
-declareOracle({ check: [expectFiniteArrayContents] })
+declareOracle({
+  check: [expectFiniteArrayContents],
+  owns: [`src/pg-serializer.ts#serialize`],
+})
 
 describe(`pg-serializer property-based tests`, () => {
   describe(`string serialization`, () => {
@@ -297,6 +304,7 @@ describe(`pg-serializer property-based tests`, () => {
     example.each(validArrays)(
       `decodes the independent $name control and the real serializer`,
       ({ input, output }) => {
+        oracleRoute(`case`)
         expectFiniteArrayContents(input, output)
         expectFiniteArrayContents(input, serialize(input))
       },
@@ -346,12 +354,14 @@ describe(`pg-serializer property-based tests`, () => {
       { name: `numeric suffix`, input: [1.25], output: `{1.25junk}` },
     ]
     example.each(corruptArrays)(`rejects $name`, ({ input, output }) => {
+      oracleRoute(`calibration`)
       // The same observer judges production outputs above; these outputs come
       // from test-owned faults, not a mutation of the serializer or its inputs.
       expect(() => expectFiniteArrayContents(input, output)).toThrow()
     })
 
     example(`shrinks and exactly replays omitted nonempty arrays`, () => {
+      oracleRoute(`calibration`)
       const property = fc.property(
         fc.array(fc.boolean(), { minLength: 1, maxLength: 10 }),
         (input) => expectFiniteArrayContents(input, `{}`),

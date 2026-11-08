@@ -7,6 +7,7 @@ import { electricCollectionOptions } from '../src/electric'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -133,6 +134,7 @@ declareOracle({
     checkManagedRotation,
   ],
   model: [createRetryModel, applyRetryModel, expectedRetryObservation],
+  owns: [`src/electric.ts#electricCollectionOptions`],
 })
 
 function sdkCampaigns(
@@ -424,14 +426,20 @@ sdkCampaigns(
   `applies installed-SDK snapshot deliveries against an independent overlapping source`,
   20260917,
   snapshotViolation,
-  (seed) =>
-    fc.assert(snapshotProperty, {
+  (seed) => {
+    const options = {
       ...oraclePropertyOptions(12, `electric.sdk-snapshot-delivery`),
       ...(seed === undefined ? {} : { seed }),
-    }),
+    }
+    // oraclePropertyOptions registers `random seed` when it runs inside a test,
+    // so the route for this campaign is registered after its options are built.
+    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+    return fc.assert(snapshotProperty, options)
+  },
 )
 
 fixedCase(`detects dropped snapshot rows`, async () => {
+  oracleRoute(`calibration`)
   await expect(checkSnapshots(2, `payload`, true)).rejects.toMatchObject({
     name: `AssertionError`,
     message: expect.stringContaining(`snapshot 0 applied rows`),
@@ -441,6 +449,7 @@ fixedCase(`detects dropped snapshot rows`, async () => {
 fixedCase(
   `retains the snapshot law and checkpoint when cleanup also fails`,
   async () => {
+    oracleRoute(`calibration`)
     const cleanupFailure = new Error(`injected cleanup failure`)
     const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
     const subscribe = ShapeStream.prototype.subscribe
@@ -477,6 +486,7 @@ fixedCase(
 fixedCase(
   `restores the SDK setup resources after construction fails`,
   async () => {
+    oracleRoute(`case`)
     const primary = new Error(`collection construction failed`)
     const secondary = new Error(`provider release failed`)
     const subscribe = ShapeStream.prototype.subscribe
@@ -684,14 +694,20 @@ sdkCampaigns(
   `preserves DNF visibility through installed-SDK silent move-in cycles`,
   20260918,
   membershipViolation,
-  (seed) =>
-    fc.assert(membershipProperty, {
+  (seed) => {
+    const options = {
       ...oraclePropertyOptions(12, `electric.sdk-dnf-membership`),
       ...(seed === undefined ? {} : { seed }),
-    }),
+    }
+    // oraclePropertyOptions registers `random seed` when it runs inside a test,
+    // so the route for this campaign is registered after its options are built.
+    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+    return fc.assert(membershipProperty, options)
+  },
 )
 
 fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
+  oracleRoute(`calibration`)
   await expect(checkMembership(1, 1, 1, true)).rejects.toMatchObject({
     name: `AssertionError`,
     message: expect.stringContaining(`after silent move-in`),
@@ -924,7 +940,10 @@ async function runClientRetryCell(
 
 fixedCase.each(clientRetryCells)(
   `installed client: %s in %s mode with an onError %s follows the retry-decision model`,
-  (outcome, mode, decision) => runClientRetryCell(outcome, mode, decision),
+  (outcome, mode, decision) => {
+    oracleRoute(`case`)
+    return runClientRetryCell(outcome, mode, decision)
+  },
   60_000,
 )
 
@@ -1280,9 +1299,10 @@ async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
   ])
 }
 
-fixedCase(`discards an old SDK snapshot after managed cache rotation`, () =>
-  checkManagedRotation([`after-snapshots`]),
-)
+fixedCase(`discards an old SDK snapshot after managed cache rotation`, () => {
+  oracleRoute(`case`)
+  return checkManagedRotation([`after-snapshots`])
+})
 const rotationViolation = sameViolation()
 sdkCampaigns(
   `electric.sdk-rotation-release`,
@@ -1291,6 +1311,13 @@ sdkCampaigns(
   rotationViolation,
   async (seed) => {
     rotationReach = createRotationReach()
+    const options = {
+      ...oraclePropertyOptions(40, `electric.sdk-rotation-release`),
+      ...(seed === undefined ? {} : { seed }),
+    }
+    // oraclePropertyOptions registers `random seed` when it runs inside a test,
+    // so the route for this campaign is registered after its options are built.
+    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
     await fc.assert(
       fc.asyncProperty(
         fc.array(
@@ -1304,10 +1331,7 @@ sdkCampaigns(
         (cuts) =>
           rotationViolation.check(cuts, () => checkManagedRotation(cuts)),
       ),
-      {
-        ...oraclePropertyOptions(40, `electric.sdk-rotation-release`),
-        ...(seed === undefined ? {} : { seed }),
-      },
+      options,
     )
     rotationReach.assertReached()
   },
@@ -1574,6 +1598,7 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
 fixedCase.each([`eager`, `on-demand`, `progressive`] as const)(
   `releases listeners after incomplete delivery in %s mode`,
   async (mode) => {
+    oracleRoute(`case`)
     for (const answer of [`row`, `reset`] as const)
       for (const end of [
         `open`,
@@ -1626,10 +1651,14 @@ sdkCampaigns(
   releaseViolation,
   async (seed) => {
     releaseReach = createReleaseReach()
-    await fc.assert(releaseProperty, {
+    const options = {
       ...oraclePropertyOptions(40, `electric.sdk-source-release`),
       ...(seed === undefined ? {} : { seed }),
-    })
+    }
+    // oraclePropertyOptions registers `random seed` when it runs inside a test,
+    // so the route for this campaign is registered after its options are built.
+    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+    await fc.assert(releaseProperty, options)
     releaseReach.assertReached()
   },
 )

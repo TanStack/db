@@ -5,6 +5,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -191,6 +192,7 @@ function mixedGraphProperty(
 
 describe(`mixed-carrier structural graph laws`, () => {
   it.each(carriers)(`rejects a reachable cycle through %s`, (carrier) => {
+    oracleRoute(`calibration`)
     const graph: Graph = [{ label: 0, edges: [{ target: 0, carrier }] }]
     expect(isAcyclic(graph)).toBe(false)
     expectMixedGraph(graph)
@@ -200,6 +202,7 @@ describe(`mixed-carrier structural graph laws`, () => {
   it.each(carriers)(
     `preserves distinct equal nodes and sharing through %s`,
     (carrier) => {
+      oracleRoute(`case`)
       const distinct: Graph = [
         {
           label: 0,
@@ -228,6 +231,7 @@ describe(`mixed-carrier structural graph laws`, () => {
   )
 
   it(`distinguishes a mixed-container back edge from its disconnected near-neighbor`, () => {
+    oracleRoute(`case`)
     const cycle: Graph = [
       { label: 0, edges: [{ carrier: `map-key`, target: 1 }] },
       { label: 0, edges: [{ carrier: `set`, target: 2 }] },
@@ -243,6 +247,7 @@ describe(`mixed-carrier structural graph laws`, () => {
   })
 
   it(`preserves a shared mixed-carrier DAG when unfolded`, () => {
+    oracleRoute(`case`)
     const diamond: Graph = [
       {
         label: 0,
@@ -282,17 +287,21 @@ describe(`mixed-carrier structural graph laws`, () => {
 
   oracleReplayTest(it)(
     `matches independent labels and mixed-carrier topology (fixed seed 205203)`,
-    () => expectMixedGraphCampaign({ numRuns: oracleRuns(150), seed: 205203 }),
+    () => {
+      oracleRoute(`fixed seed`)
+      expectMixedGraphCampaign({ numRuns: oracleRuns(150), seed: 205203 })
+    },
   )
   oracleReplayTest(it, mixedGraphPropertyId)(
     `matches independent labels and mixed-carrier topology (random)`,
-    () =>
-      expectMixedGraphCampaign(
-        oraclePropertyOptions(150, mixedGraphPropertyId),
-      ),
+    () => {
+      oracleRoute(`random seed`)
+      expectMixedGraphCampaign(oraclePropertyOptions(150, mixedGraphPropertyId))
+    },
   )
 
   it(`replays a generated cycle-acceptance mismatch at the same law`, () => {
+    oracleRoute(`calibration`)
     const acceptsCycles = (): number => 0
     const failed = fc.check(mixedGraphProperty(acceptsCycles), {
       seed: 205203,
@@ -315,6 +324,7 @@ describe(`mixed-carrier structural graph laws`, () => {
   })
 
   it(`rejects unequal DAG and unfolding output and preserves the witness on replay`, () => {
+    oracleRoute(`calibration`)
     const property = fc.property(fc.integer({ min: 0, max: 2 }), (label) => {
       const graph: Graph = [
         {

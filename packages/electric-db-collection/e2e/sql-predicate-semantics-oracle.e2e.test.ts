@@ -4,6 +4,7 @@ import { IR } from '@tanstack/db'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { makePgClient } from '../../db-collection-e2e/support/global-setup'
 import { compileSQL } from '../src/sql-compiler'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import type { Client } from 'pg'
 
@@ -256,7 +257,10 @@ function evaluate(value: Predicate, row: Row): Truth {
   return actual <= value.value
 }
 
-declareOracle({ model: [evaluate] })
+declareOracle({
+  model: [evaluate],
+  owns: [`src/sql-compiler.ts#compileSQL`],
+})
 
 describe(`Electric predicate compiler semantics`, () => {
   let client: Client
@@ -286,6 +290,7 @@ describe(`Electric predicate compiler semantics`, () => {
   })
 
   it(`matches PostgreSQL over finite row worlds`, async () => {
+    oracleRoute(`fixed seed`)
     let executedCells = 0
     const reached = new Set<string>()
     const version = await client.query<{ server_version: string }>(
@@ -373,6 +378,7 @@ describe(`Electric predicate compiler semantics`, () => {
   })
 
   it(`rejects representative compiler faults against PostgreSQL`, async () => {
+    oracleRoute(`calibration`)
     const world: Array<Row> = [
       { id: 1, count: 2, label: null, enabled: true },
       { id: 2, count: 2, label: null, enabled: false },

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import { OfflineExecutor } from '../src/OfflineExecutor'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
-import { oracleReplayTest } from '../../db/tests/oracle-config'
+import { oracleReplayTest, oracleRoute } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   FakeStorageAdapter,
@@ -815,6 +815,7 @@ oracleReplayTest(it, STALE_READ_PROPERTY).each([undefined])(
 )
 
 it(`append-only replay judgment rejects stale admission after durable removal`, () => {
+  oracleRoute(`case`)
   const ledger: Array<ReplayLedgerEvent> = [
     { type: `stored`, id: `removed` },
     { type: `stored`, id: `peer` },

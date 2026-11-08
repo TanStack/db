@@ -4,8 +4,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import {
   oraclePropertyOptions,
+  oracleRoute,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createCursorPager } from '../src/index.js'
 import { createBackend } from './cursor-pagination/backend.js'
 import { expectedRows } from './cursor-pagination/model-oracle.js'
@@ -44,8 +46,11 @@ async function assertCacheProperty<Ts>(
 ): Promise<void> {
   if (replay.replayPath !== undefined && replay.replayProperty !== name) return
   const options = oraclePropertyOptions(runs, name)
-  if (replay.campaignSeed === undefined)
+  if (replay.campaignSeed === undefined) {
+    oracleRoute(`fixed seed`)
     await fc.assert(property, { ...options, seed: fixedSeed })
+  }
+  oracleRoute(`random seed`)
   await fc.assert(property, options)
 }
 
@@ -66,6 +71,15 @@ async function checkWindow(
     `window matches the permitted source snapshot`,
   ).toEqual(expectedRows(source, scope, { offset: 0, limit: width }))
 }
+
+// What this oracle owns: cache reuse, expiry, invalidation and cancellation of
+// the pager's Query pages (createCursorPager). Window values are judged by
+// checkWindow against the full-relation model.
+declareOracle({
+  owns: [`src/cursor-pagination.ts#createCursorPager`],
+  check: [checkWindow],
+  model: [expectedRows],
+})
 
 describe(`cursor cache lifecycle`, () => {
   it.each([
@@ -261,6 +275,7 @@ describe(`cursor cache lifecycle`, () => {
   )
 
   it(`the cache oracle rejects reuse after invalidation and accepts a real refresh`, async () => {
+    oracleRoute(`calibration`)
     for (const ignoreInvalidation of [false, true]) {
       const client = new QueryClient({
         defaultOptions: {
@@ -297,6 +312,7 @@ describe(`cursor cache lifecycle`, () => {
   })
 
   it(`reuses a cache one millisecond before expiry and refreshes at expiry`, async () => {
+    oracleRoute(`case`)
     // A 99 ms cutoff refetches too soon; a 101 ms cutoff reuses stale rows.
     vi.useFakeTimers({ toFake: [`Date`] })
     vi.setSystemTime(1000)
@@ -332,6 +348,7 @@ describe(`cursor cache lifecycle`, () => {
   })
 
   it(`QueryClient cancellation rejects held work without installing its late page`, async () => {
+    oracleRoute(`case`)
     const client = new QueryClient({
       defaultOptions: {
         queries: { staleTime: Infinity, gcTime: Infinity, retry: false },
@@ -486,6 +503,7 @@ describe(`cursor cache lifecycle`, () => {
   it.each([0, 25])(
     `collects inactive pages independently of freshness with gcTime %i`,
     async (gcTime) => {
+      oracleRoute(`case`)
       vi.useFakeTimers()
       const client = new QueryClient({
         defaultOptions: { queries: { retry: false } },
@@ -524,6 +542,7 @@ describe(`cursor cache lifecycle`, () => {
   it.each([`expiry`, `invalidate`] as const)(
     `keeps cached data while a %s refresh is held or fails`,
     async (cause) => {
+      oracleRoute(`case`)
       vi.useFakeTimers({ toFake: [`Date`] })
       vi.setSystemTime(1000)
       const client = new QueryClient({
@@ -573,6 +592,7 @@ describe(`cursor cache lifecycle`, () => {
   )
 
   it(`shares Query fetches across readers without letting one abort cancel its peer`, async () => {
+    oracleRoute(`case`)
     const client = new QueryClient({
       defaultOptions: {
         queries: { retry: false, gcTime: Infinity, staleTime: Infinity },

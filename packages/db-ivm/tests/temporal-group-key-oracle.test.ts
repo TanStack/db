@@ -9,6 +9,7 @@ import {
   serializeValue,
 } from '../src/index.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../db/tests/oracle-config.js'
 
 /**
  * Temporal values are valid db-ivm group keys. The established hash key domain
@@ -118,6 +119,7 @@ describe('Temporal group keys', () => {
   it.each(temporalCases)(
     '$name keeps distinct values in distinct groups',
     ({ first, second }) => {
+      oracleRoute(`case`)
       const rows = [{ date: first() }, { date: second() }]
       expect(observedGroupCounts(rows)).toEqual(
         expectedGroupCounts(['first', 'second']),
@@ -131,6 +133,7 @@ describe('Temporal group keys', () => {
   it.each(temporalCases)(
     '$name groups matching fresh values together',
     ({ first }) => {
+      oracleRoute(`case`)
       const rows = [{ date: first() }, { date: first() }]
       expect(serializeValue(rows[0]!.date)).toBe(serializeValue(rows[1]!.date))
       expect(observedGroupCounts(rows)).toEqual(
@@ -140,6 +143,7 @@ describe('Temporal group keys', () => {
   )
 
   it('keeps equal-comparing Duration representations in separate groups', () => {
+    oracleRoute(`case`)
     const hour = Temporal.Duration.from('PT1H')
     const minutes = Temporal.Duration.from('PT60M')
     expect(Temporal.Duration.compare(hour, minutes)).toBe(0)
@@ -149,6 +153,7 @@ describe('Temporal group keys', () => {
   })
 
   it('keeps a plain object with a Temporal tag distinct from a Temporal value', () => {
+    oracleRoute(`case`)
     const date = Temporal.PlainDate.from('2024-01-15')
     const taggedObject = {
       [Symbol.toStringTag]: 'Temporal.PlainDate',
@@ -166,6 +171,7 @@ describe('Temporal group keys', () => {
   })
 
   it('keeps an own-tagged plain object with no enumerable fields distinct', () => {
+    oracleRoute(`case`)
     const date = Temporal.PlainDate.from('2024-01-15')
     const taggedObject = {}
     Object.defineProperty(taggedObject, Symbol.toStringTag, {
@@ -182,6 +188,7 @@ describe('Temporal group keys', () => {
   })
 
   it('still groups a Temporal value with an own matching tag', () => {
+    oracleRoute(`case`)
     const date = Temporal.PlainDate.from('2024-01-15')
     const matchingDate = Temporal.PlainDate.from('2024-01-15')
     Object.defineProperty(matchingDate, Symbol.toStringTag, {

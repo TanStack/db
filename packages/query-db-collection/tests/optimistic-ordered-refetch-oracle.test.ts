@@ -10,6 +10,7 @@ import { createDeferred } from '../../db/src/deferred.js'
 import { queryCollectionOptions } from '../src/query.js'
 import { applyPredicates } from '../e2e/query-filter.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../db/tests/oracle-config.js'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { withOracleCleanup } from '../../db/tests/utils'
 import { atMutationCheckpoint } from '../../db/tests/mutation-confirmation-support'
@@ -376,6 +377,7 @@ function checkOrderedMutationObservation(
 }
 
 declareOracle({
+  owns: [`src/query.ts#queryCollectionOptions`],
   check: [checkOptimisticOrderedRefetch, checkOrderedMutationObservation],
   model: [expectedPublicWindow],
   grammar: [orderedMutationHistories],
@@ -393,7 +395,10 @@ describe(`ordered mutation histories`, () => {
   })
   it.each(orderedMutationHistories)(
     `preserves ordered mutation outcomes: %j`,
-    checkOptimisticOrderedRefetch,
+    (history) => {
+      oracleRoute(`case`)
+      return checkOptimisticOrderedRefetch(history)
+    },
   )
 })
 
@@ -404,6 +409,7 @@ it.each([
   `discarded-value-failure`,
   `reversed-order`,
 ] as const)(`rejects ordered wrong observation: %s`, (fault) => {
+  oracleRoute(`calibration`)
   const remote: Array<Row> = [
     { id: 1, folder: `inbox`, at: 1 },
     { id: 2, folder: `inbox`, at: 2 },

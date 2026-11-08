@@ -8,8 +8,10 @@ import {
 import { createDeferred } from '../../db/src/deferred.js'
 import {
   oraclePropertyOptions,
+  oracleRoute,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createBackend } from './cursor-pagination/backend.js'
 import { expectedRows } from './cursor-pagination/model-oracle.js'
 import { createCursorPager } from './cursor-pagination/pager.js'
@@ -75,8 +77,10 @@ async function assertCursorProperty<Ts>(
   if (replay.replayPath !== undefined && replay.replayProperty !== name) return
   const options = oraclePropertyOptions(runs, name)
   if (replay.campaignSeed === undefined) {
+    oracleRoute(`fixed seed`)
     await fc.assert(property, { ...options, seed: fixedSeed })
   }
+  oracleRoute(`random seed`)
   await fc.assert(property, options)
 }
 
@@ -125,6 +129,7 @@ async function checkRead(
 
 describe(`cursor pagination reference`, () => {
   it(`preserves ties, filtering and reverse total order`, () => {
+    oracleRoute(`case`)
     expect(
       expectedRows(
         fixtureRows,
@@ -138,6 +143,7 @@ describe(`cursor pagination reference`, () => {
   })
 
   it(`rejects capped-page, wrong-order and duplicate-row answers`, async () => {
+    oracleRoute(`calibration`)
     const window = { offset: 0, limit: 8 }
     const expected = expectedRows(fixtureRows, allAscending, window)
     for (const wrong of [
@@ -184,6 +190,7 @@ describe(`opaque cursor adapter`, () => {
   it.each([`abort`, `reject`, `reset`] as const)(
     `keeps a healthy peer usable after held response %s`,
     async (action) => {
+      oracleRoute(`case`)
       const backend = createBackend(fixtureRows, allAscending, 2)
       const gate = createDeferred<void>()
       const abort = new AbortController()
@@ -317,6 +324,16 @@ describe(`opaque cursor adapter`, () => {
       `cursor-pagination.failure`,
     )
   })
+})
+
+// What this oracle owns: the opaque cursor pager that createCursorPager builds
+// over a backend. The pager's reads must equal the full-relation model (see
+// the declaration below), and its fetched-page counts must follow the
+// transport rules.
+declareOracle({
+  owns: [`src/cursor-pagination.ts#createCursorPager`],
+  check: [checkRead],
+  model: [expectedRows],
 })
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import { hash } from '../src/hashing/hash'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -135,21 +136,25 @@ describe(`getter failure does not publish partial structural hashes`, () => {
   it.each([0, 1, 2, 3])(
     `retries the same root after %s completed siblings`,
     (completed) => {
+      oracleRoute(`case`)
       expectRetryHistory({ completed, tail: 2, failures: 2, value: 10 })
     },
   )
 
   it(`retries a first-getter failure without an untouched tail`, () => {
+    oracleRoute(`case`)
     expectRetryHistory({ completed: 0, tail: 0, failures: 1, value: -20 })
   })
 
   it(`retries three failures at the last getter`, () => {
+    oracleRoute(`case`)
     expectRetryHistory({ completed: 3, tail: 0, failures: 3, value: 20 })
   })
 
   oracleReplayTest(it)(
     `preserves failure causes and retry cuts (fixed seed 205206)`,
     () => {
+      oracleRoute(`fixed seed`)
       fc.assert(
         fc.property(retryHistoryArbitrary, (history) =>
           expectRetryHistory(history),
@@ -161,6 +166,7 @@ describe(`getter failure does not publish partial structural hashes`, () => {
   oracleReplayTest(it, retryProperty)(
     `preserves failure causes and retry cuts (random seed)`,
     () => {
+      oracleRoute(`random seed`)
       fc.assert(
         fc.property(retryHistoryArbitrary, (history) =>
           expectRetryHistory(history),
@@ -171,6 +177,7 @@ describe(`getter failure does not publish partial structural hashes`, () => {
   )
 
   it(`rejects cached-sibling and substituted-error observations`, () => {
+    oracleRoute(`calibration`)
     const error = new Error(`getter rejected`)
     expectFailureCut(error, [2, 2, 0], error, [2, 2, 0])
     expect(() => expectFailureCut(error, [1, 2, 0], error, [2, 2, 0])).toThrow()

@@ -1,6 +1,14 @@
 import fc from 'fast-check'
 import { createCollection, createTransaction } from '@tanstack/db'
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 import { NonRetriableError } from '../src/types'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import {
@@ -1250,6 +1258,7 @@ it.each([
   `early-peer`,
   `missing-row`,
 ] as const)(`rejects a wrong restored observation: %s`, (fault) => {
+  oracleRoute(`calibration`)
   const history: RestoredHistory = {
     layout: `shared`,
     width: 2,

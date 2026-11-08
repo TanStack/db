@@ -447,8 +447,11 @@ describe(`structuralIdentity`, () => {
       2000,
       `structural-identity.equal-representations`,
     )
-    if (campaignSeed === undefined)
+    if (campaignSeed === undefined) {
+      oracleRoute(`fixed seed`)
       await fc.assert(property, { numRuns: options.numRuns, seed: 20261014 })
+    }
+    oracleRoute(`random seed`)
     await fc.assert(property, options)
   })
 
@@ -608,8 +611,11 @@ describe(`structuralIdentity`, () => {
       2000,
       `structural-identity.independent-values`,
     )
-    if (campaignSeed === undefined)
+    if (campaignSeed === undefined) {
+      oracleRoute(`fixed seed`)
       await fc.assert(property, { numRuns: options.numRuns, seed: 1158727847 })
+    }
+    oracleRoute(`random seed`)
     await fc.assert(property, options)
   })
 })

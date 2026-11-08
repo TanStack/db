@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { declareOracle } from '../../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../../db/tests/oracle-config.js'
 import { TopKRelation } from './topk-relation-oracle.js'
 
+// What this oracle owns: nothing. It calibrates the TopKRelation checker
+// against planted wrong answers and drives no production operator, so no
+// `owns` entry applies.
 declareOracle({ check: [TopKRelation] })
 
 /**
@@ -20,6 +24,7 @@ declareOracle({ check: [TopKRelation] })
 
 describe(`Signed top-K observation controls`, () => {
   it(`shrinks and replays duplicate-weight detection through the same checker`, () => {
+    oracleRoute(`calibration`)
     const property = fc.property(fc.integer({ min: 10, max: 100 }), (id) => {
       const valid = new TopKRelation<null>()
       valid.add([[[null, [{ id, value: `a` }, `a0`]], 1]])
@@ -44,6 +49,7 @@ describe(`Signed top-K observation controls`, () => {
   it.each([`index`, `retraction`, `weight`, `update`] as const)(
     `rejects a wrong moved-row %s while preserving unchanged anchors`,
     (fault) => {
+      oracleRoute(`calibration`)
       const check = (corrupt: boolean) => {
         const relation = new TopKRelation<number>()
         relation.add([
@@ -85,6 +91,7 @@ describe(`Signed top-K observation controls`, () => {
   )
 
   it(`retains negative residue and copies captured payloads`, () => {
+    oracleRoute(`case`)
     const row = { id: 1, value: `a` }
     const relation = new TopKRelation<null>()
     relation.add([[[null, [row, `a0`]], 1]])

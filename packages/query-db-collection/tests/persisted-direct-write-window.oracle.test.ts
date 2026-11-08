@@ -3,6 +3,7 @@ import { DuplicateKeySyncError, createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../db/tests/oracle-config.js'
 import {
   checked,
   createAdapter,
@@ -292,6 +293,7 @@ async function compareWriteWithReference(
 }
 
 declareOracle({
+  owns: [`src/query.ts#queryCollectionOptions`],
   check: [
     compareWriteWithReference,
     compareLaterRefetchOrder,
@@ -304,6 +306,7 @@ describe(`persisted direct writes behind a waiting refetch`, () => {
     for (const keyCase of keyCases) {
       for (const op of ops) {
         it(`${op} with ${holder} holding the lock, key ${keyCase}`, async () => {
+          oracleRoute(`case`)
           await compareWriteWithReference(op, holder, keyCase)
         })
       }
@@ -513,6 +516,7 @@ describe(`a later refetch while a persisted direct write waits`, () => {
   for (const start of [`before`, `after`] as const) {
     for (const touch of [`same`, `different`] as const) {
       it(`R3 started ${start} the write, ${touch} key`, async () => {
+        oracleRoute(`case`)
         await compareLaterRefetchOrder(start, touch)
       })
     }
@@ -531,6 +535,7 @@ describe(`a later refetch while a persisted direct write waits`, () => {
 describe(`real SQLite: persisted direct writes behind a waiting refetch`, () => {
   for (const op of ops) {
     it(`${op} with source-write holding the lock, key refetch-only`, async () => {
+      oracleRoute(`case`)
       await compareWriteWithReference(
         op,
         `source-write`,
@@ -542,6 +547,7 @@ describe(`real SQLite: persisted direct writes behind a waiting refetch`, () => 
   for (const start of [`before`, `after`] as const) {
     for (const touch of [`same`, `different`] as const) {
       it(`R3 started ${start} the write, ${touch} key`, async () => {
+        oracleRoute(`case`)
         await compareLaterRefetchOrder(start, touch, `sqlite`)
       })
     }
@@ -612,6 +618,7 @@ async function compareDuplicateInsert(): Promise<void> {
 
 describe(`a persisted direct insert of an existing key`, () => {
   it(`rejects like the reference and keeps the row`, async () => {
+    oracleRoute(`fixed history`)
     await compareDuplicateInsert()
   })
 })

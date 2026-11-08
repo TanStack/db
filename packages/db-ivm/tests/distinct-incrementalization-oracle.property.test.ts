@@ -14,6 +14,7 @@ import { createOracleReach } from '../../db/tests/oracle-reach.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -55,6 +56,7 @@ for (const mode of [`selected`, `tuple`] as const) {
     oracleReplayTest(it, ...(campaign === `random` ? [PROPERTY] : []))(
       `preserves distinct collisions by ${mode} (${campaign})`,
       () => {
+        oracleRoute(campaign === 'fixed' ? `fixed seed` : `random seed`)
         const reach = createOracleReach(PROPERTY, DISTINCT_REACH_STATES)
         fc.assert(
           fc.property(distinctHistory, (worlds) => {
@@ -103,6 +105,7 @@ for (const mode of [`selected`, `tuple`] as const) {
 }
 
 it(`rejects omitted, duplicate and wrong-member snapshots`, () => {
+  oracleRoute(`calibration`)
   const values = distinctCollisionValues(hash)
   const input: Weighted<DistinctValue> = values.map((value) => [value, 1])
   for (const bad of [

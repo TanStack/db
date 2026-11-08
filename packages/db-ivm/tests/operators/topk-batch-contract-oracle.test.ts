@@ -181,6 +181,7 @@ it.each(
 )(
   `preserves $name cancellation (large group $largeGroup, collision $collision)`,
   ({ pair, largeGroup, collision }) => {
+    oracleRoute(`fixed seed`)
     if (collision) vi.spyOn(hashing, `hash`).mockReturnValue(7)
     fc.assert(
       fc.property(
@@ -248,6 +249,7 @@ it.each(
 it.each([true, false])(
   `replaces ordinary rows with File available=%s`,
   (available) => {
+    oracleRoute(`fixed seed`)
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, `File`)
     if (!available) Reflect.deleteProperty(globalThis, `File`)
     try {
@@ -289,8 +291,7 @@ it.each([true, false])(
 )
 
 it(`compares shared subtrees without expanding every path`, () => {
-  // No seed: a random campaign.
-  oracleRoute(`random seed`)
+  oracleRoute(`fixed seed`)
   vi.spyOn(hashing, `hash`).mockReturnValue(7)
   fc.assert(
     fc.property(fc.integer({ min: 0, max: 20 }), (depth) => {
@@ -322,6 +323,7 @@ it(`compares shared subtrees without expanding every path`, () => {
 })
 
 it(`short-circuits replacements without hashing unrelated payloads`, () => {
+  oracleRoute(`fixed seed`)
   fc.assert(
     fc.property(fc.integer({ min: 1, max: 100 }), (count) => {
       let reads = 0
@@ -344,6 +346,7 @@ it(`short-circuits replacements without hashing unrelated payloads`, () => {
 })
 
 it(`cancels long same-key histories with independently allocated values`, () => {
+  oracleRoute(`fixed seed`)
   fc.assert(
     fc.property(fc.integer({ min: 10, max: 150 }), (count) => {
       const make = (value: number) => ({ value })

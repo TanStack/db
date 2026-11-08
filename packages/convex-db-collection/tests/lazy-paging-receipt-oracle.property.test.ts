@@ -23,7 +23,8 @@ import { createCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRuns } from '../../db/tests/oracle-config'
+import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import type {
@@ -31,6 +32,9 @@ import type {
   SyncAppliedReceipt,
   SyncConfig,
 } from '@tanstack/db'
+
+// Owns no convex source: this grammar drives @tanstack/db Collection receipts with its own adapter, not the convex pager.
+declareOracle({})
 
 type Row = { id: string; text: string }
 const gate = () => {
@@ -414,6 +418,7 @@ it.each([
 ] as const)(
   `rejects the %s faulty adapter at the real Collection boundary`,
   async (fault) => {
+    oracleRoute(`calibration`)
     await expect(
       receiptHistory(
         {

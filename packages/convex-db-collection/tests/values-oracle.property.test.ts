@@ -23,10 +23,15 @@ import { convexMutationCodec } from '../src/offline'
 import { cleanupOfflineOracle } from '../../offline-transactions/tests/oracle-lifecycle'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
 import { oracleRuns } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import type {
   OfflineTransaction,
   StorageAdapter,
 } from '@tanstack/offline-transactions'
+
+declareOracle({
+  owns: [`src/offline.ts`],
+})
 
 type Tree =
   | undefined
@@ -46,7 +51,7 @@ const leaf: fc.Arbitrary<Tree> = fc.oneof(
   fc.double({ noNaN: true, noDefaultInfinity: true }),
   fc.constantFrom(NaN, Infinity, -Infinity, -0),
   fc.bigInt({ min: -(2n ** 63n), max: 2n ** 63n - 1n }),
-  fc.uint8Array({ maxLength: 8 }).map((value) => value.buffer as ArrayBuffer),
+  fc.uint8Array({ maxLength: 8 }).map((value) => value.buffer),
 )
 function tree(depth: number): fc.Arbitrary<Tree> {
   if (!depth) return leaf

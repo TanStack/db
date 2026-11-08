@@ -19,6 +19,7 @@ import { createOracleReach } from '../../db/tests/oracle-reach.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import {
@@ -104,6 +105,7 @@ for (const split of [false, true])
     oracleReplayTest(it, ...(campaign === `random` ? [PROPERTY] : []))(
       `conserves full representative contributions, split=${split} (${campaign})`,
       () => {
+        oracleRoute(campaign === 'fixed' ? `fixed seed` : `random seed`)
         const reach = createOracleReach(PROPERTY, [
           ...DISTINCT_BUCKET_REACH_STATES,
           `fresh equal selections`,
