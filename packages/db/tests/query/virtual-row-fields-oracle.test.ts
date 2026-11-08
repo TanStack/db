@@ -525,6 +525,7 @@ declareOracle({
 test.each(boundaryPublicationHistories)(
   `publishes implicit and materialized-input metadata: %j`,
   async (history) => {
+    oracleRoute(`case`)
     boundaryPublicationReach.beginHistory()
     let parent: AttributionRow = {
       id: `parent`,
@@ -717,6 +718,7 @@ test.each(
     ({ kind }) => kind === `grouped` || kind === `aggregate`,
   ),
 )(`rejects source metadata on a grouped output: %j`, (history) => {
+  oracleRoute(`calibration`)
   const parent = { id: `parent`, parentId: `root`, label: `parent` }
   const child = { id: `child`, parentId: `parent`, label: `held` }
   const expected = expectedBoundaryPublication(

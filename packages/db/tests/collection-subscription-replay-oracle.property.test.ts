@@ -2089,6 +2089,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   // only by a zero's sign, where a diff without signed zeros publishes
   // nothing.
   it(`reaches a zero-sign replacement in the fixed campaign`, async () => {
+    oracleRoute(`fixed seed`)
     zeroSignReplacements = 0
     for (const scenario of fc.sample(replayScenarioArbitrary, {
       seed: 1756,

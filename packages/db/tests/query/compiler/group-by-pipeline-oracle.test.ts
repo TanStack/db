@@ -5,6 +5,7 @@ import { processGroupBy } from '../../../src/query/compiler/group-by.js'
 import { grouping } from '../../../src/query/compiler/grouping.js'
 import { createValueIdentity } from '../../../src/query/equality-value-identity.js'
 import { Aggregate, Func, PropRef, Value } from '../../../src/query/ir.js'
+import { oracleRoute } from '../../oracle-config.js'
 import { declareOracle } from '../../oracle-declaration.js'
 import { createOracleReach } from '../../oracle-reach.js'
 import type { Select } from '../../../src/query/ir.js'
@@ -109,6 +110,7 @@ function compareGroupRows(
 }
 
 declareOracle({
+  owns: [`src/query/compiler/group-by.ts#processGroupBy`],
   model: [expectedGroupRows],
   check: [compareGroupRows],
   grammar: [cases, snapshots],
@@ -118,6 +120,7 @@ describe(`group-by component batch refinement`, () => {
   test.each(cases)(
     `recomputes keyed selections: grouped=$grouped, select=$selection, having=$having`,
     (scenario) => {
+      oracleRoute(`case`)
       const { grouped, selection, having } = scenario
       const graph = new D2()
       const input = graph.newInput<KeyedNamespacedRow>()
@@ -224,6 +227,7 @@ describe(`group-by component batch refinement`, () => {
     `wrong value`,
     `duplicate weight`,
   ] as const)(`rejects a batch observation with %s`, (fault) => {
+    oracleRoute(`calibration`)
     const expected = expectedGroupRows(initial, {
       grouped: true,
       selection: `plain`,

@@ -880,6 +880,9 @@ describe(`draft revert oracle`, () => {
         let histories = 0
         fc.assert(
           fc.property(signedZeroArb, (input) => {
+            // oraclePropertyOptions registers `random seed` when it builds these
+            // options, so the fixed campaign registers its route in each run.
+            if (campaign === `fixed`) oracleRoute(`fixed seed`)
             reach.beginHistory({ fixed: histories++ < zeroExamples.length })
             expectHistory(signedZeroHistory(input))
             reach.reach(input.path)

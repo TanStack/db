@@ -1766,6 +1766,7 @@ const payloadExamples: Array<[number]> = [[0], [1], [20], [40]]
 it.each(payloadExamples)(
   `rejects a source payload mutated in place (%i blocks)`,
   (blockCount) => {
+    oracleRoute(`calibration`)
     const document = expectedPayloadDocument(blockCount, 0)
     document.tick = -1
     expect(() =>
@@ -1796,6 +1797,11 @@ for (const campaign of [
       : oracleReplayTest(fcTest, payloadProperty)
   register.prop([fc.integer({ min: 0, max: 40 })], campaign.options)(
     `nested source payloads need no metadata descriptor scans (${campaign.name})`,
-    expectPayloadWork,
+    (blockCount) => {
+      // The options are built when the file loads, so each run registers its
+      // campaign's route.
+      oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
+      return expectPayloadWork(blockCount)
+    },
   )
 }

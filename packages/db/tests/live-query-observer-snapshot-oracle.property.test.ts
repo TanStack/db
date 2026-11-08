@@ -632,8 +632,9 @@ async function checkHealthHistory(
 
 describe(`a snapshot shows the current health tree`, () => {
   it(`every read matches the model across attach cuts`, async () => {
+    // The fixed campaign runs first; oraclePropertyOptions registers
+    // `random seed` when it builds the second campaign's options.
     oracleRoute(`fixed seed`)
-    oracleRoute(`random seed`)
     const reach = createOracleReach<HealthReach>(
       `live-query-observer.snapshot-health`,
       [
@@ -984,6 +985,9 @@ describe(`metadata snapshots share immutable row containers`, () => {
       let histories = 0
       await fc.assert(
         fc.asyncProperty(containerHistory, async (scenario) => {
+          // oraclePropertyOptions registers `random seed` when it builds these
+          // options, so the fixed campaign registers its route in each run.
+          if (campaign === `fixed`) oracleRoute(`fixed seed`)
           reach.beginHistory({ fixed: histories++ < examples.length })
           await checkContainerHistory(scenario, reach)
         }),
@@ -1328,6 +1332,7 @@ describe(`snapshot capture paths preserve row and layout laws`, () => {
   // failure cannot hide the distinct layout premise during RED verification.
   for (const action of [`discard-write`, `discard-move`] as const)
     it(`reads committed rows after ${action}`, async () => {
+      oracleRoute(`fixed history`)
       const reach = createOracleReach<CapturePathReach>(
         `capture-discard-replay`,
         [
@@ -1431,6 +1436,9 @@ describe(`snapshot capture paths preserve row and layout laws`, () => {
       let histories = 0
       await fc.assert(
         fc.asyncProperty(capturePathHistory, async (scenario) => {
+          // oraclePropertyOptions registers `random seed` when it builds these
+          // options, so the fixed campaign registers its route in each run.
+          if (campaign === `fixed`) oracleRoute(`fixed seed`)
           reach.beginHistory({ fixed: histories++ < examples.length })
           await checkCapturePathHistory(scenario, reach)
         }),
@@ -1757,6 +1765,9 @@ describe(`publications preserve nested record shape`, () => {
       let histories = 0
       await fc.assert(
         fc.asyncProperty(payloadHistory, async (scenario) => {
+          // oraclePropertyOptions registers `random seed` when it builds these
+          // options, so the fixed campaign registers its route in each run.
+          if (campaign === `fixed`) oracleRoute(`fixed seed`)
           reach.beginHistory({ fixed: histories++ < examples.length })
           // Both receiving paths run before reporting a mismatch, so an early
           // direct-Collection failure cannot hide the query's pre-edit result.
@@ -1986,6 +1997,9 @@ describe(`array value publication`, () => {
         )
         await fc.assert(
           fc.asyncProperty(sparseArrayCase, async (spec) => {
+            // oraclePropertyOptions registers `random seed` when it builds these
+            // options, so the fixed campaign registers its route in each run.
+            if (campaign === `fixed`) oracleRoute(`fixed seed`)
             reach.beginHistory()
             const results = await Promise.allSettled(
               sparseArrayCarriers.flatMap((carrier) =>

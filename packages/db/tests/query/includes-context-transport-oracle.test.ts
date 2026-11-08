@@ -2954,6 +2954,7 @@ declareOracle({
 
 describe(`parent route after inherited inline input materialization`, () => {
   test(`expands every declared input boundary without duplicates`, () => {
+    oracleRoute(`case`)
     const expected =
       materializedInputGrammar.boundaries.length *
       materializedInputGrammar.selections.length *
@@ -2970,6 +2971,7 @@ describe(`parent route after inherited inline input materialization`, () => {
   })
 
   test(`rejects lost children and cross-parent reuse at the public checkpoint`, () => {
+    oracleRoute(`calibration`)
     const children = [
       { id: 10, parentGroup: 1 },
       { id: 20, parentGroup: 2 },
@@ -2994,8 +2996,10 @@ describe(`parent route after inherited inline input materialization`, () => {
   })
 
   for (const cell of materializedInputCells) {
-    test(`${cell.boundary} / ${cell.selection} / ${cell.input}`, () =>
-      runMaterializedInputCell(cell))
+    test(`${cell.boundary} / ${cell.selection} / ${cell.input}`, () => {
+      oracleRoute(`case`)
+      return runMaterializedInputCell(cell)
+    })
   }
 })
 
@@ -3065,6 +3069,7 @@ declareOracle({
   check: [checkOuterJoinKeyRows],
 })
 test(`rejects missing and duplicated joined contributions`, () => {
+  oracleRoute(`calibration`)
   const mains = [{ id: 10, link: 10, parentGroup: 1 }]
   const children = [
     { id: 20, link: 10, parentGroup: 1 },
@@ -3081,6 +3086,7 @@ test(`rejects missing and duplicated joined contributions`, () => {
 test.each(outerJoinKeyGrammar)(
   `preserves outer-join child identities across independent source keys: %j`,
   async ({ join, mainRef, joinedRef, keys }) => {
+    oracleRoute(`case`)
     const cuts = [`initial`, `main-departed`, `main-returned`, `child-departed`]
     const reach = createOracleReach(
       `outer join independent source keys`,

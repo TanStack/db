@@ -2600,6 +2600,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   // later source write of 0 must reconcile as an update, since -0 and 0 are
   // distinct row values (maintainer decision, 2026-10-29).
   it(`reconciles a retained -0 row with a later source write of 0`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory(
       [
         { type: `source`, key: `b`, action: `upsert`, value: -0 },
@@ -3020,6 +3021,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   // carried row): the random grammar inserts source writes into green
   // lifecycle histories. The pinned zero-sign history below covers that path.
   it(`reaches a zero-sign source write in the fixed campaign`, async () => {
+    oracleRoute(`fixed seed`)
     const reach = createOracleReach(
       `lifecycle-publication.zero-sign`,
       [`zero-sign-write`],

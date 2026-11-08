@@ -789,15 +789,24 @@ describe(`whole-source joined occurrences`, () => {
   if (!oracleReplayRequested()) {
     it.each(selectionExamples)(
       `preserves every selected occurrence: %j`,
-      runSelectionHistory,
+      (history) => {
+        oracleRoute(`case`)
+        return runSelectionHistory(history)
+      },
     )
     fcTest.prop([selectionHistoryArbitrary], {
       seed: 15_811_743,
       numRuns: oracleRuns(80),
-    })(`preserves selected occurrences (fixed)`, runSelectionHistory)
+    })(`preserves selected occurrences (fixed)`, (history) => {
+      oracleRoute(`fixed seed`)
+      return runSelectionHistory(history)
+    })
   }
   oracleReplayTest(fcTest, selectionProperty).prop(
     [selectionHistoryArbitrary],
     oraclePropertyOptions(80, selectionProperty),
-  )(`preserves selected occurrences (random)`, runSelectionHistory)
+  )(`preserves selected occurrences (random)`, (history) => {
+    oracleRoute(`random seed`)
+    return runSelectionHistory(history)
+  })
 })

@@ -13,6 +13,7 @@ import { Query, eq, include } from '../../src/query/index.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -86,6 +87,11 @@ function expectCopyFollowsLaw(
 }
 
 declareOracle({
+  owns: [
+    `src/query/compiler/route-metadata.ts#stripInternalCallbackMetadata`,
+    `src/query/compiler/route-metadata.ts#transformPublicContainers`,
+    `src/query/live/materialized-pipeline.ts#compileValueResolver`,
+  ],
   model: [expectedCopy],
   check: [expectCopyFollowsLaw, checkCopyPrograms],
   grammar: [programs, inputGrammar],
@@ -223,6 +229,11 @@ for (const campaign of [
       : oracleReplayTest(fcTest, property)
   register.prop([inputGrammar], campaign.options)(
     `cleanup preserves authored public copies (${campaign.name})`,
-    checkCopyPrograms,
+    (description) => {
+      // The options are built when the file loads, so each run registers its
+      // campaign's route.
+      oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
+      checkCopyPrograms(description)
+    },
   )
 }
