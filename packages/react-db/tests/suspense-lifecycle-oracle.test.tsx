@@ -52,6 +52,7 @@ import {
   declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import type { WindowRow } from '../../db/tests/conformance/window-history-oracle'
@@ -818,6 +819,10 @@ async function checkPreload(
 }
 
 declareOracle({
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   model: [advance],
   grammar: [retryArbitrary, replacementArbitrary, preloadArbitrary],
   check: [compare, checkRetry, checkReplacement, checkPreload],
@@ -833,6 +838,7 @@ describe(`Suspense lifecycle histories`, () => {
             ? oracleReplayTest(it)
             : oracleReplayTest(it, property)
         test(`${scope}/${keyed ? `keyed` : `derived`} retry (${campaign})`, async () => {
+          oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
           const reach = createOracleReach(
             `${property}/${scope}/${keyed}/${campaign}`,
             retryStates,
@@ -876,6 +882,7 @@ describe(`Suspense lifecycle histories`, () => {
         ? oracleReplayTest(it)
         : oracleReplayTest(it, property)
     test(`client request replacement (${campaign})`, async () => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(
         `${property}/${campaign}`,
         replacementStates,
@@ -922,6 +929,7 @@ describe(`Suspense lifecycle histories`, () => {
           ? oracleReplayTest(it)
           : oracleReplayTest(it, property)
       test(`${scope} preload restart (${campaign})`, async () => {
+        oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
         const reach = createOracleReach(
           `${property}/${scope}/${campaign}`,
           preloadStates,
@@ -1635,6 +1643,7 @@ for (const scope of [`none`, `provider`, `explicit`] as const)
           ? oracleReplayTest(it)
           : oracleReplayTest(it, property)
       test(`co-mounted siblings/${scope}/${keyed}/${campaign}`, async () => {
+        oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
         const reach = createOracleReach(
           `${property}/${scope}/${keyed}/${campaign}`,
           siblingStates,

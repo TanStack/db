@@ -40,6 +40,7 @@ import {
   declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import {
@@ -378,6 +379,7 @@ describe(`client page identity`, () => {
                 ? oracleReplayTest(it)
                 : oracleReplayTest(it, property)
             test(`${keyed ? `keyed` : `derived`}/${suspense ? `suspense` : `ordinary`}/${clientMode}/${move}/${campaign}`, async () => {
+              oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
               const reach = createOracleReach(
                 `${property}/${keyed}/${suspense}/${clientMode}/${move}/${campaign}`,
                 reactStates,
@@ -426,6 +428,11 @@ describe(`client page identity`, () => {
           }
 })
 declareOracle({
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   grammar: [clientWindowArbitrary],
   check: [checkClientWindowHistory, checkClientSwitch],
 })
