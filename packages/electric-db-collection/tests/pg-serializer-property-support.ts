@@ -2,6 +2,7 @@ import { test as fcTest } from '@fast-check/vitest'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import type { fc } from '@fast-check/vitest'
@@ -24,10 +25,16 @@ export function serializerProp<T>(
     oracleReplayTest(fcTest).prop([arbitrary], {
       numRuns: oracleRuns(100),
       seed: 20260930,
-    })(`${name} (fixed)`, check)
+    })(`${name} (fixed)`, (value) => {
+      oracleRoute(`fixed seed`)
+      check(value)
+    })
     oracleReplayTest(fcTest, property).prop(
       [arbitrary],
       oraclePropertyOptions(100, property),
-    )(`${name} (random)`, check)
+    )(`${name} (random)`, (value) => {
+      oracleRoute(`random seed`)
+      check(value)
+    })
   }
 }
