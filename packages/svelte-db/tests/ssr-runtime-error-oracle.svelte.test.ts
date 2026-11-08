@@ -27,6 +27,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -218,15 +219,22 @@ async function checkRuntimeHistory(
 
 // checkRuntimeHistory compares the server view, the browser's first hydration
 // view and its committed view with the shared runtime model's expected views.
-declareOracle({ check: [checkRuntimeHistory] })
+declareOracle({
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
+  check: [checkRuntimeHistory],
+})
 
 describe(`Svelte SSR runtime errors`, () => {
   for (const history of ssrRuntimeErrorExamples)
     it.skipIf(oracleReplayRequested())(
       `runtime ${history.serverOutcome}/${history.browserOutcome} preload=${history.browserPreload} cause=${history.definedError}`,
-      () => checkRuntimeHistory(history, makeRuntimeReach()),
+      () => {
+        oracleRoute(`case`)
+        return checkRuntimeHistory(history, makeRuntimeReach())
+      },
     )
   const runCampaign = async (campaign: `fixed` | `random`) => {
+    oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
     const reach = makeRuntimeReach()
     try {
       await fc.assert(
