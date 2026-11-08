@@ -7,6 +7,7 @@ import { TransactionSerializer } from '../src/outbox/TransactionSerializer'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
 import {
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config'
@@ -404,6 +405,7 @@ const twin: Pair = {
 }
 
 it(`preserves marker-shaped user data through current wire encoding`, async () => {
+  oracleRoute(`case`)
   const runtime = {
     __type: `Temporal`,
     type: `Temporal.PlainDate`,
@@ -427,6 +429,7 @@ it(`preserves marker-shaped user data through current wire encoding`, async () =
 it.each([`modified`, `original`, `changes`] as const)(
   `rejects malformed escaped objects anywhere in %s`,
   async (field) => {
+    oracleRoute(`fixed seed`)
     const collection = createCollection<Row>({
       getKey: (row) => row.id,
       sync: { sync: ({ markReady }) => markReady() },
@@ -611,6 +614,7 @@ oracleReplayTest(it, MUTATION_WIRE_PROPERTY)(
 )
 
 it(`retains the wire mismatch when cleanup also fails`, async () => {
+  oracleRoute(`calibration`)
   let failure: unknown
   try {
     await checkRoundtrip(
@@ -732,6 +736,7 @@ it.each(
 )(
   `rejects the $fault $boundary mutant at its own boundary`,
   async ({ fault, boundary }) => {
+    oracleRoute(`calibration`)
     const decode = vi.spyOn(TransactionSerializer.prototype, `deserialize`)
     try {
       const expectedFailure =
