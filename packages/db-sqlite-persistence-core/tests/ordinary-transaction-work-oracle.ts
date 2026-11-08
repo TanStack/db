@@ -941,7 +941,7 @@ async function assertGeneratedHistory(
 // committed work. The generated histories and independent-key cases come from
 // the grammars, and the work bound is the write-count law at each checkpoint.
 declareOracle({
-  check: [assertGeneratedHistory, assertIndependentWork],
+  owns: [`src/sqlite-core-adapter.ts`],  check: [assertGeneratedHistory, assertIndependentWork],
   model: [modelAfter],
   grammar: [generatedHistoryArbitrary, independentWorkArbitrary],
 })

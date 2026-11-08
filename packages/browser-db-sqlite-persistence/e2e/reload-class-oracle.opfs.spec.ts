@@ -7,6 +7,7 @@
  */
 import { expect, test } from '@playwright/test'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import type { ReloadClassResult } from './reload-class.opfs'
 
 // The page's comparison of each fixed reload history with the oracle: every
@@ -23,11 +24,12 @@ function expectReloadClassLawsHold(
   ).toEqual([])
 }
 
-declareOracle({ check: [expectReloadClassLawsHold] })
+declareOracle({ owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`], check: [expectReloadClassLawsHold] })
 
 test(`real Chromium OPFS reload is free of avoidable work ahead of its reads`, async ({
   page,
 }) => {
+  oracleRoute(`fixed history`)
   test.setTimeout(300_000)
   const pageErrors: Array<string> = []
   page.on(`pageerror`, (error) => pageErrors.push(error.message))

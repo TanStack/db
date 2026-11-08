@@ -965,6 +965,8 @@ export async function observeSharedDriverFairness(
   return observation
 }
 
+// Owns nothing: this module holds the model and check only. The production
+// path is driven by shared-driver-fairness-oracle.test.ts, which declares the owned entry.
 declareOracle({
   check: [
     findSharedDriverFairnessViolation,
