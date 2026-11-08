@@ -70,6 +70,11 @@ const jsonFragment = (columns: Array<string>, source: `NEW` | `OLD`) => {
     .join(', ')})`
 }
 
+/**
+ * Mirrors the SDK's trigger naming scheme (`__ps_temp_trigger_<op>__<destination>__<id>`)
+ * so adapter-managed triggers are recognizable and collision-free alongside
+ * SDK-created ones.
+ */
 const generateTriggerName = (
   operation: DiffTriggerOperation,
   destinationTable: string,
@@ -77,6 +82,11 @@ const generateTriggerName = (
 ) =>
   `__ps_temp_trigger_${operation.toLowerCase()}__${destinationTable}__${triggerId}`
 
+/**
+ * Resolves the unique id used in trigger names, preferring the setup
+ * transaction's UUID provider so ids are stable across multi-tab
+ * coordination contexts (same contract as the SDK's trigger manager).
+ */
 async function getUUID(context: LockContext | CommonPowerSyncDatabase) {
   const { id: uuid } = await context.get<{ id: string }>(`SELECT uuid() as id`)
   // Replace dashes with underscores for SQLite table/trigger name compatibility

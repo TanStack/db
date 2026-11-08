@@ -455,6 +455,13 @@ function createPowerSyncCollectionConfig<
         }
       }
 
+      /**
+       * Establishes change tracking for the collection's table: creates the
+       * tracking table + AFTER triggers (SDK trigger manager for managed
+       * views, {@link createDirectDiffTrigger} for managed tables), wiring
+       * the `beforeCreate` hook that performs the initial eager load.
+       * Returns the disposal callback for teardown.
+       */
       async function createDiffTrigger(
         options: {
           setupContext?: LockContext
