@@ -334,8 +334,12 @@ export default mergeConfig(base, {
     // cleared.
     context.clearSpecificationsCache?.()
     const map = new Map()
-    for (const spec of await context.globTestSpecifications())
+    for (const spec of await context.globTestSpecifications()) {
+      // A runner copy (runBatch), this process's or one a check that died
+      // left behind, is never a test file.
+      if (basename(spec.moduleId).startsWith(`.oracle-gaps-`)) continue
       map.set(spec.moduleId, [...(map.get(spec.moduleId) ?? []), spec])
+    }
     contextSpecs.set(context, map)
   }
   async function closeContexts() {

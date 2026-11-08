@@ -1943,6 +1943,18 @@ function fixtureFiles(plan, state = initialState(plan)) {
     'deps/state-dep/package.json': `{ "name": "state-dep", "private": true, "type": "module", "exports": "./index.js" }\n`,
     'deps/state-dep/index.js': `const log = []\nexport function note(entry) {\n  log.push(entry)\n}\nexport function seen() {\n  return [...log]\n}\n`,
     'tests/c.test.ts': ordinaryTestFile(plan),
+    // A copy that a check which died left behind (the runner names its
+    // copies `.oracle-gaps-<pid>-<n>-<file>`). It is no test file: a check
+    // that took it for one would refuse the run.
+    'tests/.oracle-gaps-1-1-a.test.ts': [
+      `import { test } from 'vitest'`,
+      `function declareOracle(_parts: { owns: Array<string> }): void {}`,
+      `declareOracle({ owns: ['${SOURCE}#w_kill'] })`,
+      `test('fixed seed 1', () => {`,
+      `  throw new Error('a copy that a check which died left behind')`,
+      `})`,
+      ``,
+    ].join(`\n`),
   }
   for (const file of ORACLE_FILES)
     files[`tests/${file}.test.ts`] = oracleTestFile(plan, file)
