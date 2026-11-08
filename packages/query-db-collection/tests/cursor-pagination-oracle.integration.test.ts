@@ -4,9 +4,11 @@ import { describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import {
   oraclePropertyOptions,
+  oracleRoute,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createLiveQueryWindowController } from '../../db/src/live-query-window-controller.js'
 import { createCursorPager, queryCollectionOptions } from '../src/index.js'
 import {
@@ -58,6 +60,17 @@ const manualWriteCampaigns =
       ? ([`replay`] as const)
       : ([] as const)
 
+// What this oracle owns: the opaque pager through a real QueryCollection and
+// live-query window (createCursorPager, queryCollectionOptions). Its model is
+// the full-relation window in cursor-pagination/model-oracle.ts.
+declareOracle({
+  owns: [
+    `src/cursor-pagination.ts#createCursorPager`,
+    `src/query.ts#queryCollectionOptions`,
+  ],
+  model: [expectedWindow],
+})
+
 describe(`cursor adapter through production pagination`, () => {
   // A handler-free direct write surgically changes an eager Query Collection's
   // rows and compatible row-cache arrays. It must preserve an envelope's other
@@ -90,6 +103,7 @@ describe(`cursor adapter through production pagination`, () => {
   )(
     `manual writes preserve cache shapes: $wrapped/$nested ($campaign)`,
     async ({ wrapped, nested, campaign }) => {
+      if (campaign === `fixed`) oracleRoute(`fixed seed`)
       const cleanupFailures: Array<unknown> = []
       let lawFailure: unknown
       try {
@@ -242,6 +256,7 @@ describe(`cursor adapter through production pagination`, () => {
   )(
     `refreshes changed backend rows before growing the window $descending/$backendSize`,
     async ({ descending, backendSize }) => {
+      oracleRoute(`case`)
       const rows = Array.from({ length: 3 }, (_, id) => ({
         id,
         rank: 0,
@@ -303,6 +318,7 @@ describe(`cursor adapter through production pagination`, () => {
   it.each(matrix)(
     `publishes exact pages and exhaustion $count/$backendSize/$pageSize/$descending`,
     async ({ count, backendSize, pageSize, descending }) => {
+      oracleRoute(`case`)
       const rows = Array.from({ length: count }, (_, id) => ({
         id,
         rank: Math.floor(id / 6),

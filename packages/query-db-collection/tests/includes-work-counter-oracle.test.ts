@@ -8,6 +8,8 @@ import {
 import { QueryClient } from '@tanstack/query-core'
 import { describe, expect, it } from 'vitest'
 import { evaluateReferenceExpression } from '../../db/tests/reference-expression-oracle'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../db/tests/oracle-config.js'
 import { queryCollectionOptions } from '../src/query'
 import type { Collection } from '@tanstack/db'
 
@@ -502,12 +504,27 @@ function expectIrrelevantBranchWork(
   )
 }
 
+// What this oracle owns: the source Query collections that queryCollectionOptions
+// builds for each level of the nested includes tree. Its model is the
+// reachable tree derived from the source foreign keys.
+declareOracle({
+  owns: [`src/query.ts#queryCollectionOptions`],
+  model: [expectedTreeEntries, expectedTreeCounts],
+  check: [
+    checkNestedTreeShape,
+    expectNestedTreeShape,
+    expectNestedTreeWork,
+    expectIrrelevantBranchWork,
+  ],
+})
+
 describe(`nested includes reachable-shape oracle`, () => {
   // Keep every value from the former fixed-seed sample (2, 3, 4, 13, 17),
   // plus nearby sizes. The empty and reported-size endpoints stay explicit.
   it.each([1, 2, 3, 4, 5, 10, 13, 17])(
     `preserves the complete reachable nested tree shape for %i roots`,
     async (rootCount) => {
+      oracleRoute(`case`)
       await checkNestedTreeShape(rootCount, (observation) =>
         expectNestedTreeShape(observation, rootCount),
       )
@@ -515,12 +532,14 @@ describe(`nested includes reachable-shape oracle`, () => {
   )
 
   it(`exposes no nested collections for an empty root query`, async () => {
+    oracleRoute(`case`)
     await checkNestedTreeShape(0, (observation) =>
       expectNestedTreeShape(observation, 0),
     )
   })
 
   it(`checks the reported 20-by-2-by-5-by-10 tree`, async () => {
+    oracleRoute(`case`)
     // These semantic counters do not claim to measure elapsed time or internal
     // allocations. They fix source delivery at preload and reachable shape.
     await checkNestedTreeShape(20, (observation) =>
@@ -529,6 +548,7 @@ describe(`nested includes reachable-shape oracle`, () => {
   })
 
   it(`does not deliver more source rows while traversing the result`, async () => {
+    oracleRoute(`case`)
     await checkNestedTreeShape(20, (observation) => {
       expect(observation.sourceRowsDeliveredAfterTraversal).toEqual(
         observation.sourceRowsDeliveredAtPreload,
@@ -539,6 +559,7 @@ describe(`nested includes reachable-shape oracle`, () => {
   it.each([1, 3])(
     `does not acquire or deliver %i disconnected branches at preload`,
     async (irrelevantBranchCount) => {
+      oracleRoute(`case`)
       const observations: Array<NestedTreeShape> = []
       await checkNestedTreeShape(
         2,
@@ -580,6 +601,7 @@ describe(`nested includes reachable-shape oracle`, () => {
   )
 
   it(`rejects a repeated source row delivery after traversal`, async () => {
+    oracleRoute(`calibration`)
     await checkNestedTreeShape(2, (observation) => {
       expectNestedTreeShape(observation, 2)
       const repeatedDelivery: NestedTreeShape = {
@@ -596,6 +618,7 @@ describe(`nested includes reachable-shape oracle`, () => {
   it.each([`subtree swap`, `value corruption`] as const)(
     `rejects %s even when reachable cardinality and source work agree`,
     async (fault) => {
+      oracleRoute(`calibration`)
       await checkNestedTreeShape(2, (observation) =>
         expectNestedTreeShape(observation, 2),
       )

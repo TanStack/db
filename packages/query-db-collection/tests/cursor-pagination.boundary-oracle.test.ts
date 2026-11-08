@@ -5,8 +5,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import {
   oraclePropertyOptions,
+  oracleRoute,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createCursorPager, queryCollectionOptions } from '../src/index.js'
 import {
   makeClient,
@@ -43,8 +45,11 @@ async function assertBoundaryProperty<Ts>(
 ): Promise<void> {
   if (replay.replayPath !== undefined && replay.replayProperty !== name) return
   const options = oraclePropertyOptions(30, name)
-  if (replay.campaignSeed === undefined)
+  if (replay.campaignSeed === undefined) {
+    oracleRoute(`fixed seed`)
     await fc.assert(property, { ...options, seed: fixedSeed })
+  }
+  oracleRoute(`random seed`)
   await fc.assert(property, options)
 }
 
@@ -69,6 +74,16 @@ async function finishBoundaryCleanup(
       },
     )
 }
+
+// What this oracle owns: the cursor pager's reader and nested-query boundaries
+// (createCursorPager) and the QueryCollection preload that reads through it
+// (queryCollectionOptions). Its generated properties carry their own checks.
+declareOracle({
+  owns: [
+    `src/cursor-pagination.ts#createCursorPager`,
+    `src/query.ts#queryCollectionOptions`,
+  ],
+})
 
 describe(`cursor Query fetch boundaries`, () => {
   it.each([false, true])(

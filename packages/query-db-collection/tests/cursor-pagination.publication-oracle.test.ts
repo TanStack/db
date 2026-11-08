@@ -4,8 +4,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import {
   oraclePropertyOptions,
+  oracleRoute,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createCursorPager } from '../src/index.js'
 import { createBackend } from './cursor-pagination/backend.js'
 import { expectedRows } from './cursor-pagination/model-oracle.js'
@@ -61,8 +63,11 @@ async function assertPublicationProperty<Ts>(
 ): Promise<void> {
   if (replay.replayPath !== undefined && replay.replayProperty !== name) return
   const options = oraclePropertyOptions(runs, name)
-  if (replay.campaignSeed === undefined)
+  if (replay.campaignSeed === undefined) {
+    oracleRoute(`fixed seed`)
     await fc.assert(property, { ...options, seed: fixedSeed })
+  }
+  oracleRoute(`random seed`)
   await fc.assert(property, options)
 }
 
@@ -108,6 +113,15 @@ async function checkCachedSlice(
     client.clear()
   }
 }
+
+// What this oracle owns: which cursor sequence publishes the next Query result
+// and how a cached slice reads its rows (createCursorPager). Slice values are
+// judged by checkCachedSlice against the full-relation model.
+declareOracle({
+  owns: [`src/cursor-pagination.ts#createCursorPager`],
+  check: [checkCachedSlice],
+  model: [expectedRows],
+})
 
 describe(`cursor cache publication`, () => {
   it.each(
@@ -385,6 +399,7 @@ describe(`cursor cache publication`, () => {
   })
 
   it(`a one-row cached slice does not visit its preceding row`, async () => {
+    oracleRoute(`case`)
     // A full-prefix traversal visits two rows; the requested slice visits one.
     await checkCachedSlice(2, 1, 1)
   })
