@@ -2835,11 +2835,14 @@ export interface ReachCounter {
  * comparison, counts as passing, so the reported counterexample violates the
  * law and observation that the campaign found.
  *
- * A calibration names the law it calibrates (`law`: a substring of the
- * violation's law, or a pattern for a mutant that either of two laws may
- * reject). Only that law's violations fail a history then, so the calibration
- * checks that this law rejects the mutant, whichever other law a generated
- * history happens to break first.
+ * A calibration names the law it calibrates (`law`: the violation's whole
+ * law, such as `FID-1 (values)`, or a pattern that must match the whole law,
+ * for a mutant that either of two laws may reject). Only that law's
+ * violations fail a history then, so the calibration checks that this law
+ * rejects the mutant, whichever other law a generated history happens to
+ * break first. A name that is only part of a law, such as `FID-1` or
+ * `HEALTH-`, matches nothing, so a calibration cannot pass on a broader law
+ * than it names.
  */
 export function eagerLiveSourceProperty(
   driver: EagerLiveSourceDriver,
@@ -2860,14 +2863,21 @@ export function eagerLiveSourceProperty(
           error instanceof ConformanceViolation
             ? error.law
             : `failure outside the comparison`
-        const calibrated =
-          law === undefined ||
-          (typeof law === `string` ? violated.includes(law) : law.test(violated))
+        const calibrated = law === undefined || namesLaw(law, violated)
         if (calibrated) target ??= violated
         if (violated === target) throw error
       }
     },
   )
+}
+
+/**
+ * Whether a calibration's `law` names the violated law: the same string, or a
+ * pattern that matches the whole of it.
+ */
+function namesLaw(law: string | RegExp, violated: string): boolean {
+  if (typeof law === `string`) return violated === law
+  return violated.match(law)?.[0] === violated
 }
 
 // Exported for calibration tests: the model's prediction for a history.

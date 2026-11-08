@@ -62,6 +62,15 @@ const runs = 600
 // Timed waits sleep past their timeout, so a campaign takes several seconds.
 const campaignTimeoutMs = 120_000
 
+// A calibration names the whole law that its violation carries, such as
+// `FID-1 (values)`, or a pattern that matches the whole law where the table
+// accepts several. A part of a law, such as `FID-1`, names none, so a
+// calibration cannot pass on a broader law than it names.
+function expectNamedLaw(violated: string, law: string | RegExp) {
+  if (typeof law === `string`) expect(violated).toBe(law)
+  else expect(violated).toMatch(new RegExp(`^(?:${law.source})$`))
+}
+
 async function campaign(options: fc.Parameters<[unknown]>) {
   const reach = createOracleReach(property, reachStatesFor(driver), {
     minimum: 5,
@@ -92,53 +101,55 @@ describe(`eager live-source conformance: reference adapter`, () => {
     campaignTimeoutMs,
   )
 
-  // Each mutant breaks one law; the check must report that law.
+  // Each mutant breaks one law; the check must report that law, by its whole
+  // name. A pattern accepts several observations of one law (the txid a wait
+  // names) or, where a comment says so, either of two laws.
   const mutants: Array<[ReferenceMutant, string | RegExp]> = [
-    [`ready-before-delivery`, `READY-2`],
-    [`wraps-loading-failure`, `READY-4`],
-    [`failure-clears-rows`, `HEALTH-1`],
-    [`transient-is-fatal`, `HEALTH-1`],
-    [`delivery-error-is-fatal`, `HEALTH-1`],
-    [`never-recovers`, `HEALTH-2`],
-    [`transient-fails-loading`, `RETRY-1`],
-    [`splits-batch`, `PUB-1`],
-    [`drops-deletes`, `PUB-3`],
+    [`ready-before-delivery`, `READY-2 (status)`],
+    [`wraps-loading-failure`, `READY-4 (health error cause)`],
+    [`failure-clears-rows`, `HEALTH-1 (rows)`],
+    [`transient-is-fatal`, `HEALTH-1 (health error)`],
+    [`delivery-error-is-fatal`, `HEALTH-1 (health error)`],
+    [`never-recovers`, `HEALTH-2 (health failureReason)`],
+    [`transient-fails-loading`, `RETRY-1 (status)`],
+    [`splits-batch`, `PUB-1 (publication)`],
+    [`drops-deletes`, `PUB-3/FID-4 (rows)`],
     // It merges a later delivery, so it also applies one that must be
     // rejected for a duplicate key.
-    [`snapshot-merges`, /PUB-7|PUB-4/],
-    [`leaks-subscription`, `LIFE-2`],
-    [`restart-replays-rows`, `LIFE-5`],
-    [`swallows-prompt-failure`, `READY-4`],
-    [`ready-at-restart`, `LIFE-5`],
-    [`keeps-failed-source`, `LIFE-10`],
-    [`double-release`, `LIFE-10`],
+    [`snapshot-merges`, /PUB-7 \(rows\)|PUB-4 \(rows\)/],
+    [`leaks-subscription`, `LIFE-2/LIFE-10 (releases per subscription)`],
+    [`restart-replays-rows`, `LIFE-2/LIFE-5 (rows)`],
+    [`swallows-prompt-failure`, `READY-4 (status)`],
+    [`ready-at-restart`, `LIFE-2/LIFE-5 (status)`],
+    [`keeps-failed-source`, `LIFE-10 (open provider subscriptions)`],
+    [`double-release`, `LIFE-10 (releases per subscription)`],
     [`detached-rejection`, `HEALTH-5`],
     [`logs-failure`, `HEALTH-5`],
     // Its early fulfillment also answers a wait for a retired run's txid
     // before the new run is ready.
-    [`wait-off-by-one`, /EVID-1|EVID-2/],
-    [`retired-evidence-before-ready`, `EVID-2`],
-    [`forgets-retired-evidence`, `EVID-2`],
-    [`leaks-waits-after-fail`, `EVID-2`],
-    [`wait-ignores-timeout`, `EVID-3`],
-    [`disconnect-fails`, `RECON-1`],
-    [`renew-resubscribes`, `RENEW-1`],
-    [`drops-buffered`, `READY-10`],
+    [`wait-off-by-one`, /EVID-1 \(awaitTxId \d+\)|EVID-2 \(awaitTxId \d+\)/],
+    [`retired-evidence-before-ready`, `EVID-2 (awaitTxId 0)`],
+    [`forgets-retired-evidence`, /EVID-2 \(awaitTxId \d+\)/],
+    [`leaks-waits-after-fail`, /EVID-2 \(awaitTxId \d+\)/],
+    [`wait-ignores-timeout`, /EVID-3 \(awaitTxId \d+\)/],
+    [`disconnect-fails`, `RECON-1 (health error)`],
+    [`renew-resubscribes`, `RENEW-1 (open provider subscriptions)`],
+    [`drops-buffered`, `READY-10/PUB-9 (rows)`],
     // It applies buffered batches before the rows, also before a delivery
     // that must write nothing.
-    [`buffer-before-rows`, /PUB-9|PUB-4/],
-    [`replays-per-batch`, `PUB-5`],
+    [`buffer-before-rows`, /READY-10\/PUB-9 \(rows\)|PUB-4 \(rows\)/],
+    [`replays-per-batch`, `PUB-5/PUB-9 (publication)`],
     [`ready-before-buffer`, `READY-10 (rows when ready)`],
-    [`shows-buffered`, `READY-10/PUB-9`],
-    [`merges-updates`, `FID-1`],
+    [`shows-buffered`, `READY-10/PUB-9 (rows)`],
+    [`merges-updates`, `FID-1 (fields)`],
     [`dates-as-strings`, `FID-1 (values)`],
     [`bigints-as-numbers`, `FID-1 (values)`],
     [`drops-nulls`, `FID-1 (values)`],
     [`loses-negative-zero`, `FID-1 (values)`],
     [`typed-booleans-as-numbers`, `FID-1 (values)`],
-    [`commits-malformed-prefix`, `PUB-4`],
-    [`ignores-malformed`, `PUB-4`],
-    [`relabels-inserts`, `PUB-2`],
+    [`commits-malformed-prefix`, `PUB-4 (rows)`],
+    [`ignores-malformed`, `PUB-4 (status)`],
+    [`relabels-inserts`, `PUB-2 (change events)`],
   ]
   oracleReplayTest(it).each(mutants)(
     `rejects the %s mutant with %s`,
@@ -153,7 +164,7 @@ describe(`eager live-source conformance: reference adapter`, () => {
       )
       expect(result.failed).toBe(true)
       expect(result.errorInstance).toBeInstanceOf(ConformanceViolation)
-      expect((result.errorInstance as ConformanceViolation).law).toMatch(law)
+      expectNamedLaw((result.errorInstance as ConformanceViolation).law, law)
     },
     campaignTimeoutMs,
   )
@@ -202,15 +213,16 @@ describe(`eager live-source conformance: per-change commits`, () => {
       oracleRoute(`calibration`)
       const reversed = referenceDriver(`reverses-batch`, { perChange: true })
       const result = await fc.check(
-        eagerLiveSourceProperty(reversed, undefined, `PUB-1`),
+        eagerLiveSourceProperty(reversed, undefined, `PUB-1 (publication)`),
         {
           seed: 2118,
           numRuns: runs,
         },
       )
       expect(result.failed).toBe(true)
-      expect((result.errorInstance as ConformanceViolation).law).toContain(
-        `PUB-1`,
+      expectNamedLaw(
+        (result.errorInstance as ConformanceViolation).law,
+        `PUB-1 (publication)`,
       )
     },
     campaignTimeoutMs,
@@ -243,15 +255,15 @@ describe(`eager live-source conformance: outage threshold, client values`, () =>
     campaignTimeoutMs,
   )
 
-  const outageMutants: Array<[ReferenceMutant, string]> = [
-    [`stale-outage-value`, `HEALTH-`],
-    [`replaces-outage-value`, `RETRY-1`],
-    [`reports-outage-early`, `HEALTH-1`],
-    [`outage-count-survives-delivery`, `HEALTH-1`],
-    [`empty-response-keeps-count`, `HEALTH-1`],
-    [`empty-response-recovers`, `RETRY-1`],
-    [`rejected-delivery-fails`, `PUB-4`],
-    [`wraps-loading-failure`, `READY-4`],
+  const outageMutants: Array<[ReferenceMutant, string | RegExp]> = [
+    [`stale-outage-value`, `HEALTH-1 (health failureReason)`],
+    [`replaces-outage-value`, `RETRY-1 (health failureReason)`],
+    [`reports-outage-early`, `HEALTH-1 (health failureReason)`],
+    [`outage-count-survives-delivery`, `HEALTH-1 (health failureReason)`],
+    [`empty-response-keeps-count`, `HEALTH-1 (health failureReason)`],
+    [`empty-response-recovers`, `RETRY-1 (health failureReason)`],
+    [`rejected-delivery-fails`, `PUB-4 (health error)`],
+    [`wraps-loading-failure`, `READY-4 (health error cause)`],
   ]
   oracleReplayTest(it).each(outageMutants)(
     `rejects the %s mutant with %s`,
@@ -267,7 +279,7 @@ describe(`eager live-source conformance: outage threshold, client values`, () =>
       )
       expect(result.failed).toBe(true)
       expect(result.errorInstance).toBeInstanceOf(ConformanceViolation)
-      expect((result.errorInstance as ConformanceViolation).law).toContain(law)
+      expectNamedLaw((result.errorInstance as ConformanceViolation).law, law)
     },
     campaignTimeoutMs,
   )
