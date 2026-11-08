@@ -29,6 +29,7 @@ import { useLiveQuery } from '../src/useLiveQuery'
 import { createRowStore } from '../src/store-materialization'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { ScenarioLifetime } from '../../db/tests/conformance/scenario-lifetime'
 import type { InitialQueryBuilder } from '@tanstack/db'
@@ -136,6 +137,7 @@ function compareArray(
 }
 
 async function runHistory(history: History) {
+  oracleRoute(`case`)
   const parentState =
     history.initialParent === history.nextParent
       ? `same-parent-control`
@@ -494,6 +496,7 @@ function compareVisibility(
 it.each([...visibilityHistories()])(
   `notifies helper visibility for $kind, initially=$initial`,
   async ({ kind, initial }) => {
+    oracleRoute(`case`)
     const reach = createOracleReach(
       `solid.materialization.visibility.${kind}.${initial}`,
       [`unchanged`, `hidden`, `visible`, `visibility-restored`],
@@ -597,6 +600,7 @@ function compareLabel(
 // The getter is nested: spreading a root getter in a query projection would
 // evaluate it in Core before it could reach the framework adapter boundary.
 async function runGetterHistory(history: GetterHistory) {
+  oracleRoute(`case`)
   const reach = createOracleReach(
     `solid.getter.${history.input}.${history.object}.${history.later}.${history.stable}`,
     [
@@ -817,6 +821,7 @@ function compareGraph(
 it.each([...graphHistories()].filter((history) => history.crossed))(
   `rejects mixed-path corruption at crossed depth=$depth`,
   ({ depth, shared, crossed }) => {
+    oracleRoute(`calibration`)
     const expected = semanticGraph(depth, 0, shared, crossed)
     function corrupted(graph: Graph, remaining: number): Graph {
       if (`value` in graph) return { value: 99 }
@@ -838,6 +843,7 @@ async function runGraphHistory({
   shared: boolean
   crossed: boolean
 }) {
+  oracleRoute(`case`)
   const reach = createOracleReach(`solid.graph.${depth}.${shared}.${crossed}`, [
     `graph-admission`,
     `graph-replacement`,
@@ -1075,6 +1081,7 @@ function compareCallable(
 }
 
 async function runCallableHistory(history: CallableHistory) {
+  oracleRoute(`case`)
   const reach = createOracleReach(
     `solid.callable.${history.input}.${history.location}.${history.property}.${history.shape}`,
     [
@@ -1357,6 +1364,7 @@ function compareReservedField(observed: unknown, expected: unknown) {
   )
 }
 async function runReservedFieldHistory(history: ReservedFieldHistory) {
+  oracleRoute(`case`)
   const reach = createOracleReach(
     `solid.own-field.${history.input}.${history.key}.${history.initial}`,
     [
@@ -1553,6 +1561,7 @@ function compareMethods(actual: MethodObservation, version: number) {
   ).toEqual(expectedMethods(version))
 }
 async function runMethodHistory(history: MethodHistory) {
+  oracleRoute(`case`)
   const reach = createOracleReach(
     `solid.methods.${history.input}.${history.subclass}.${history.shape}`,
     [
@@ -1682,6 +1691,10 @@ it.each([...methodHistories()])(
   runMethodHistory,
 )
 declareOracle({
+  owns: [
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/store-materialization.ts#createRowStore`,
+  ],
   model: [expectedMethods],
   grammar: [methodHistories],
   check: [compareMethods],
