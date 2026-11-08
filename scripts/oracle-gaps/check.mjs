@@ -415,12 +415,12 @@ export default mergeConfig(base, {
       limitMs,
     }
     if (result === undefined) {
-      const cancelled = Date.now()
-      await Promise.race([
-        context.cancelCurrentRun(`keyboard-input`).catch(() => undefined),
-        sleep(5000),
-      ])
-      span(`cancel`, cancelled, profiled)
+      // A run cut off is cancelled without waiting: a worker stuck in a
+      // synchronous loop never answers. The cancel lets the caller's
+      // replacement close the context at once, which stops the worker (a
+      // close with no cancel waits for the run).
+      running.catch(() => undefined)
+      context.cancelCurrentRun(`keyboard-input`).catch(() => undefined)
       span(`run`, started, { ...profiled, timedOut: true })
       rmSync(capture, { force: true })
       return { file, timedOut: true, seconds }
@@ -603,10 +603,10 @@ export default mergeConfig(base, {
     const skippedUnit = (item) => ({ file: item.file, skipped: true })
     try {
       if (result === undefined) {
-        await Promise.race([
-          context.cancelCurrentRun(`keyboard-input`).catch(() => undefined),
-          sleep(5000),
-        ])
+        // Cancelled without waiting; the caller replaces the context (see
+        // runUnit).
+        running.catch(() => undefined)
+        context.cancelCurrentRun(`keyboard-input`).catch(() => undefined)
         span(`run`, started, { file: `batch`, items: items.length, timedOut: current })
         // The copies before the one that hung finished: their units come
         // from their capture rows.
@@ -823,8 +823,9 @@ export default mergeConfig(base, {
       return result
     }
     // Units for many requests at once. Each is looked up first; the rest run
-    // as one batch (runBatch). A batch cut off by a hang records that item
-    // as timed out and reruns the rest in a fresh context; a batch with
+    // as one batch (runBatch). A batch cut off by a hang queues that item's
+    // confirming run, which any free slot takes, and reruns the rest in a
+    // fresh context; a batch with
     // errors outside any test runs its items alone. `needed` says, from the
     // units found so far, whether a request must still run; a request that
     // need not run, or whose copy skipped its tests, gets no unit.
@@ -832,6 +833,14 @@ export default mergeConfig(base, {
       const index = indexOf.get(slot.context)
       const got = new Array(requests.length)
       let rest = []
+      // The confirming runs of hung copies, which may run on other slots.
+      const confirming = []
+      const settle = (request, u, at) => {
+        if (u.skipped) return
+        got[request.i] = u
+        remember(request.id, request.file, u, at)
+        evidence.computed += 1
+      }
       requests.forEach((request, i) => {
         const id = idOf(request.file, request.spec, request.select, request.ignore)
         const valid = lookup(id, index)
@@ -846,7 +855,7 @@ export default mergeConfig(base, {
         const batch = await runBatch(slot.context, options.out, rest, options.seed ?? null)
         if (batch.unattributed) {
           for (const r of rest)
-            if (needed(r, got))
+            if (needed(r, got)) {
               got[r.i] = await unit(slot.context, r.file, r.spec, {
                 mutant: r.mutant,
                 select: r.select,
@@ -854,6 +863,8 @@ export default mergeConfig(base, {
                 ignore: r.ignore,
                 limitMs: r.limitMs,
               })
+              if (got[r.i].timedOut) await replace(slot)
+            }
           break
         }
         batch.units.forEach((u, k) => {
@@ -871,47 +882,61 @@ export default mergeConfig(base, {
         evidence.cut += 1
         if (batch.idle) evidence.idle += 1
         await replace(slot)
-        // A copy that already had the full limit, or that sat idle in a file
-        // with no I/O, is a timeout as it stands: an idle copy waits on
-        // nothing that can come.
-        const alone =
-          hung.limitMs >= full || batch.idle
-            ? { timedOutAt: 0, units: [] }
-            : await runBatch(
-                slot.context,
-                options.out,
-                [{ ...hung, limitMs: full }],
-                options.seed ?? null,
-              )
-        const hadFullLimit = hung.limitMs >= full || batch.idle
-        if (alone.unattributed)
-          got[hung.i] = await unit(slot.context, hung.file, hung.spec, {
-            mutant: hung.mutant,
-            select: hung.select,
-            stopOnKill: hung.stopOnKill,
-            ignore: hung.ignore,
-            limitMs: full,
-          })
-        else {
-          const confirmed =
-            alone.timedOutAt === 0
-              ? { file: hung.file, timedOut: true, seconds: full / 1000 }
-              : alone.units[0]
-          if (alone.timedOutAt === 0 && !hadFullLimit) {
-            evidence.cut += 1
-            if (alone.idle) evidence.idle += 1
-            await replace(slot)
-          }
-          if (!confirmed.skipped) {
-            got[hung.i] = confirmed
-            remember(hung.id, hung.file, confirmed, index)
-            evidence.computed += 1
-          }
-        }
+        // A copy that already had the full limit, or that sat idle, is
+        // final; any other is confirmed on the next free slot, so a mutant
+        // that hangs in several files confirms them in parallel.
+        if (hung.limitMs >= full || batch.idle)
+          settle(hung, { file: hung.file, timedOut: true, seconds: full / 1000 }, index)
+        else
+          confirming.push(
+            new Promise((resolve, reject) =>
+              confirm((other) =>
+                confirmAlone(other, hung, full).then(resolve, reject),
+              ),
+            ).then(({ unit: u, at }) =>
+              // A run with errors outside any test is not remembered.
+              at === undefined ? (got[hung.i] = u) : settle(hung, u, at),
+            ),
+          )
         rest = rest.slice(batch.timedOutAt + 1)
         evidence.rerun += rest.length
       }
+      // This slot takes what no other slot has, then waits for the rest.
+      await confirmOn(slot)
+      await Promise.all(confirming)
       return got
+    }
+    // A hung copy's confirming run: alone, in a clean context, with the full
+    // limit. Only a run cut off there too is a timeout. An idle copy in a
+    // file with no I/O is final at once (see unitsBatch): it waits on
+    // nothing that can come.
+    async function confirmAlone(slot, hung, full) {
+      const alone = await runBatch(
+        slot.context,
+        options.out,
+        [{ ...hung, limitMs: full }],
+        options.seed ?? null,
+      )
+      if (alone.unattributed) {
+        const u = await unit(slot.context, hung.file, hung.spec, {
+          mutant: hung.mutant,
+          select: hung.select,
+          stopOnKill: hung.stopOnKill,
+          ignore: hung.ignore,
+          limitMs: full,
+        })
+        if (u.timedOut) await replace(slot)
+        return { unit: u }
+      }
+      // The index of the context that ran it, before any replacement.
+      const at = indexOf.get(slot.context)
+      if (alone.timedOutAt === 0) {
+        evidence.cut += 1
+        if (alone.idle) evidence.idle += 1
+        await replace(slot)
+        return { unit: { file: hung.file, timedOut: true, seconds: full / 1000 }, at }
+      }
+      return { unit: alone.units[0], at }
     }
 
     const vitest = contexts[0]
@@ -935,7 +960,8 @@ export default mergeConfig(base, {
     const limitFor = (file) => options.hangLimit + 3000 * (fileSeconds.get(file) ?? 10)
     const firstLimitFor = (file) =>
       Math.min(limitFor(file), options.firstLimit + 3000 * (fileSeconds.get(file) ?? 10))
-    // A cancelled run can leave work behind, so its context is replaced.
+    // A run cut off is still running, so its context is replaced; closing
+    // it stops the worker.
     const replace = async (slot) => {
       const started = Date.now()
       await Promise.race([slot.context.close().catch(() => undefined), sleep(10_000)])
@@ -943,6 +969,21 @@ export default mergeConfig(base, {
       await globSpecs(slot.context)
       contexts[slot.index] = slot.context
       span(`replace context`, started, { slot: slot.index })
+    }
+    // Confirming runs of hung copies (unitsBatch), waiting for a free slot.
+    // A slot takes them before its next group, and a slot with no groups
+    // left waits for more until every slot is done with its groups.
+    const confirmations = []
+    const waiting = []
+    const wake = () => {
+      for (const resolve of waiting.splice(0)) resolve()
+    }
+    const confirm = (job) => {
+      confirmations.push(job)
+      wake()
+    }
+    const confirmOn = async (slot) => {
+      for (let job = confirmations.shift(); job; job = confirmations.shift()) await job(slot)
     }
     // `after(index)` is more work for context `index` once its files ran.
     const runAcross = async (files, pass, after = async () => {}) => {
@@ -1278,11 +1319,21 @@ export default mergeConfig(base, {
         )
       }
     }
+    let evaluating = contexts.length
     await Promise.all(
       contexts.map(async (context, index) => {
         const slot = { context, index }
-        for (let group = queue.splice(0, GROUP); group.length > 0; group = queue.splice(0, GROUP))
+        for (let group = queue.splice(0, GROUP); group.length > 0; group = queue.splice(0, GROUP)) {
+          await confirmOn(slot)
           await evaluateGroup(group, slot)
+        }
+        evaluating -= 1
+        wake()
+        for (;;) {
+          await confirmOn(slot)
+          if (evaluating === 0) break
+          await new Promise((resolve) => waiting.push(resolve))
+        }
       }),
     )
     results.sort((a, b) => a.number - b.number || a.source.localeCompare(b.source))
