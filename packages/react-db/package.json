@@ -17,7 +17,7 @@
     "tanstack-intent"
   ],
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && node scripts/check-use-client.mjs",
     "build:minified": "vite build --minify",
     "dev": "vite build --watch",
     "test": "vitest --run",
