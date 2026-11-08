@@ -980,7 +980,7 @@ describe(`metadata snapshots share immutable row containers`, () => {
         ],
         { fixedHistories: examples.length },
       )
-      // fast-check 3 emits examples before generated histories. A failed
+      // fast-check runs examples before generated histories. A failed
       // campaign throws before aggregate reach; path replay disables it.
       let histories = 0
       await fc.assert(

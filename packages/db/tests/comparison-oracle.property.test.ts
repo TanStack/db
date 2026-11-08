@@ -753,16 +753,19 @@ describe(`ascComparator property-based tests`, () => {
     )
 
     comparisonProperty([
-      // Use bounded dates to avoid overflow when adding offset
-      fc.date({ min: new Date(0), max: new Date(`2100-01-01`) }),
+      // Bounded valid dates keep every later date valid after the offset, so
+      // each generated pair checks the order. fast-check 4 draws Invalid Dates
+      // unless noInvalidDate is set, and such a draw would check nothing.
+      fc.date({
+        noInvalidDate: true,
+        min: new Date(0),
+        max: new Date(`2100-01-01`),
+      }),
       fc.integer({ min: 1, max: 1000000 }),
     ])(`earlier date comes before later date`, (date, offset) => {
       const later = new Date(date.getTime() + offset)
-      // Only test if the later date is valid
-      if (!isNaN(later.getTime())) {
-        expect(ascComparator(date, later, defaultOpts)).toBeLessThan(0)
-        expect(ascComparator(later, date, defaultOpts)).toBeGreaterThan(0)
-      }
+      expect(ascComparator(date, later, defaultOpts)).toBeLessThan(0)
+      expect(ascComparator(later, date, defaultOpts)).toBeGreaterThan(0)
     })
   })
 
