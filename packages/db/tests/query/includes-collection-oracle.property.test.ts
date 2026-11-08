@@ -15,6 +15,7 @@ import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -329,6 +330,16 @@ function expectedOrderedRows(
 // the expected events from the prior and current rows. The projection passes it
 // to every trace as `recompute`, so each history reaches it.
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/query/builder/functions.ts#concat',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/include-functions.ts#include',
+    'src/query/builder/include-functions.ts#materialize',
+    'src/query/builder/include-functions.ts#toArray',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   model: [recompute, diffParents, expectedOrderedRows],
 })
 
@@ -421,6 +432,7 @@ describe(`Collection-valued includes oracle`, () => {
   fcTest(
     `root event observations reject missing, repeated, and corrupt changed-row events`,
     async () => {
+      oracleRoute(`calibration`)
       const driver = createCollectionDriver(
         [{ id: 1, group: 1 }],
         [{ id: 10, parentGroup: 1, value: 1 }],
@@ -471,6 +483,7 @@ describe(`Collection-valued includes oracle`, () => {
       fcTest(
         `settles ${kind} after a checkpoint failure (rollback throws=${failRollback})`,
         async () => {
+          oracleRoute(`case`)
           const row = { id: 10, parentGroup: 1, value: 1 }
           const { driver, pending } = createOptimisticCollectionDriver(
             1,
@@ -563,7 +576,10 @@ describe(`Collection-valued includes oracle`, () => {
     seed: 1_658_101,
   })(
     `keeps Collection, toArray, and materialize equivalent across fixed relationship histories`,
-    runRelationshipHistory,
+    (...args: Parameters<typeof runRelationshipHistory>) => {
+      oracleRoute(`fixed seed`)
+      return runRelationshipHistory(...args)
+    },
   )
 
   oracleReplayTest(fcTest, relationshipProperty).prop(
@@ -571,12 +587,16 @@ describe(`Collection-valued includes oracle`, () => {
     oraclePropertyOptions(30, relationshipProperty),
   )(
     `keeps Collection, toArray, and materialize equivalent across random or replayed relationship histories`,
-    runRelationshipHistory,
+    (...args: Parameters<typeof runRelationshipHistory>) => {
+      oracleRoute(`random seed`)
+      return runRelationshipHistory(...args)
+    },
   )
 
   fcTest(
     `exhaustively matches every two-step history in the smallest relationship domain`,
     async () => {
+      oracleRoute(`case`)
       const initialStates = [
         { parents: [] as Array<ParentRow>, children: [] as Array<ChildRow> },
         { parents: [{ id: 0, group: 0 }], children: [] as Array<ChildRow> },
@@ -612,8 +632,9 @@ describe(`Collection-valued includes oracle`, () => {
 
   fcTest(
     `publishes independently compiled equivalent child relations coherently`,
-    () =>
-      runTrace({
+    () => {
+      oracleRoute(`fixed history`)
+      return runTrace({
         steps: [{ type: `deleteChild`, id: 10 }],
         driver: createCollectionDriver(
           [{ id: 0, group: 0 }],
@@ -621,21 +642,27 @@ describe(`Collection-valued includes oracle`, () => {
           false,
         ),
         projection: collectionProjection,
-      }),
+      })
+    },
   )
 
-  fcTest(`replays a dormant bucket when its first parent route activates`, () =>
-    runTrace({
-      steps: [{ type: `putParent`, row: { id: 1, group: 7 } }],
-      driver: createCollectionDriver(
-        [],
-        [{ id: 10, parentGroup: 7, value: 1 }],
-      ),
-      projection: collectionProjection,
-    }),
+  fcTest(
+    `replays a dormant bucket when its first parent route activates`,
+    () => {
+      oracleRoute(`fixed history`)
+      return runTrace({
+        steps: [{ type: `putParent`, row: { id: 1, group: 7 } }],
+        driver: createCollectionDriver(
+          [],
+          [{ id: 10, parentGroup: 7, value: 1 }],
+        ),
+        projection: collectionProjection,
+      })
+    },
   )
 
   fcTest(`retiring a route leaves a held facade empty and ready`, async () => {
+    oracleRoute(`fixed history`)
     let retiredFacade: IncludedChildCollection | undefined
     const heldSnapshots: Array<{
       status: string | undefined
@@ -708,6 +735,7 @@ describe(`Collection-valued includes oracle`, () => {
   })
 
   fcTest(`a delete event preserves the published facade identity`, async () => {
+    oracleRoute(`fixed history`)
     let publishedFacade: IncludedChildCollection | undefined
     const events: Array<DeleteIdentityObservation> = []
     const eventSnapshots: Array<Array<DeleteIdentityObservation>> = []
@@ -772,8 +800,9 @@ describe(`Collection-valued includes oracle`, () => {
     assertDeleteIdentityEvents(eventSnapshots[1]!, true)
   })
 
-  fcTest(`reactivating a retired route restores its current snapshot`, () =>
-    runTrace({
+  fcTest(`reactivating a retired route restores its current snapshot`, () => {
+    oracleRoute(`fixed history`)
+    return runTrace({
       steps: [
         { type: `putParent`, row: { id: 1, group: 2 } },
         { type: `putParent`, row: { id: 1, group: 1 } },
@@ -786,12 +815,13 @@ describe(`Collection-valued includes oracle`, () => {
         ],
       ),
       projection: collectionProjection,
-    }),
-  )
+    })
+  })
 
   fcTest(
     `facade application failure leaves no partial state or publication`,
     async () => {
+      oracleRoute(`fixed history`)
       const driver = createCollectionDriver(
         [{ id: 1, group: 1 }],
         [
@@ -865,6 +895,7 @@ describe(`Collection-valued includes oracle`, () => {
   )
 
   fcTest(`facade events observe the matching root publication`, async () => {
+    oracleRoute(`fixed history`)
     const driver = createCollectionDriver(
       [{ id: 1, group: 1 }],
       [
@@ -900,6 +931,7 @@ describe(`Collection-valued includes oracle`, () => {
   fcTest(
     `shared facades remain active until their last parent departs`,
     async () => {
+      oracleRoute(`fixed history`)
       const driver = createCollectionDriver(
         [
           { id: 1, group: 1 },
@@ -1047,7 +1079,10 @@ describe(`Collection-valued includes oracle`, () => {
     seed: 1_658_102,
   })(
     `uses one raw public-key order across Collection and inline materializations with a fixed seed`,
-    runPublicKeyOrder,
+    (...args: Parameters<typeof runPublicKeyOrder>) => {
+      oracleRoute(`fixed seed`)
+      return runPublicKeyOrder(...args)
+    },
   )
 
   oracleReplayTest(fcTest, publicKeyOrderProperty).prop(
@@ -1055,7 +1090,10 @@ describe(`Collection-valued includes oracle`, () => {
     oraclePropertyOptions(20, publicKeyOrderProperty),
   )(
     `uses one raw public-key order across Collection and inline materializations with a random or replayed seed`,
-    runPublicKeyOrder,
+    (...args: Parameters<typeof runPublicKeyOrder>) => {
+      oracleRoute(`random seed`)
+      return runPublicKeyOrder(...args)
+    },
   )
 
   const runLayoutSwap = async ({
@@ -1176,7 +1214,10 @@ describe(`Collection-valued includes oracle`, () => {
     seed: 1_658_103,
   })(
     `propagates order-only child swaps through every materialization with a fixed seed`,
-    runLayoutSwap,
+    (...args: Parameters<typeof runLayoutSwap>) => {
+      oracleRoute(`fixed seed`)
+      return runLayoutSwap(...args)
+    },
   )
 
   oracleReplayTest(fcTest, layoutSwapProperty).prop(
@@ -1184,7 +1225,10 @@ describe(`Collection-valued includes oracle`, () => {
     oraclePropertyOptions(20, layoutSwapProperty),
   )(
     `propagates order-only child swaps through every materialization with a random or replayed seed`,
-    runLayoutSwap,
+    (...args: Parameters<typeof runLayoutSwap>) => {
+      oracleRoute(`random seed`)
+      return runLayoutSwap(...args)
+    },
   )
 
   for (const { intermediate, final } of [
@@ -1195,6 +1239,7 @@ describe(`Collection-valued includes oracle`, () => {
     fcTest(
       `a held ordered child repair publishes ${intermediate}-to-${final} through the facade`,
       async () => {
+        oracleRoute(`case`)
         type OrderedChild = {
           id: number
           parentGroup: number
@@ -1405,6 +1450,7 @@ describe(`Collection-valued includes oracle`, () => {
   fcTest(
     `a held child truncate replay publishes an A-to-B-to-A reorder through the facade`,
     async () => {
+      oracleRoute(`fixed history`)
       type OrderedChild = {
         id: number
         parentGroup: number
@@ -1588,6 +1634,7 @@ describe(`Collection-valued includes oracle`, () => {
   fcTest(
     `optimistic rollback comparison rejects a retained child row`,
     async () => {
+      oracleRoute(`calibration`)
       const row = { id: 10, parentGroup: 1, value: 2 }
       const { driver } = createOptimisticCollectionDriver(1)
       const context = await driver.setup()
@@ -1618,7 +1665,10 @@ describe(`Collection-valued includes oracle`, () => {
     seed: 1_658_104,
   })(
     `matches optimistic child settlement histories with a fixed seed`,
-    runOptimisticChildHistory,
+    (...args: Parameters<typeof runOptimisticChildHistory>) => {
+      oracleRoute(`fixed seed`)
+      return runOptimisticChildHistory(...args)
+    },
   )
 
   oracleReplayTest(fcTest, optimisticChildProperty).prop(
@@ -1626,7 +1676,10 @@ describe(`Collection-valued includes oracle`, () => {
     oraclePropertyOptions(20, optimisticChildProperty),
   )(
     `matches optimistic child settlement histories with a random or replayed seed`,
-    runOptimisticChildHistory,
+    (...args: Parameters<typeof runOptimisticChildHistory>) => {
+      oracleRoute(`random seed`)
+      return runOptimisticChildHistory(...args)
+    },
   )
 })
 
@@ -1641,6 +1694,7 @@ test.each([
   `missing-group`,
   `active-status`,
 ] as const)(`rejects a hostile facade interval observation: %s`, (fault) => {
+  oracleRoute(`calibration`)
   const original: MetadataFacade = {
     id: `original`,
     status: `ready`,

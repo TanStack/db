@@ -15,6 +15,7 @@ import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
 import {
   oraclePropertyOptions,
+  oracleRoute,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
@@ -2020,7 +2021,19 @@ async function checkOrderedReplay(
 // the published window at each checkpoint with the expectation that the history
 // implies. Its expectation is computed inside the function body, not by a named
 // model part yet.
-declareOracle({ check: [checkOrderedReplay] })
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/collection/subscription.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/functions.ts#isUndefined',
+    'src/query/builder/functions.ts#not',
+    'src/query/builder/include-functions.ts#toArray',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  check: [checkOrderedReplay],
+})
 
 const orderedReplayProperty = `replay.ordered-window-faults`
 const orderedReplayConfig = readOracleRunConfig()
@@ -2630,6 +2643,7 @@ describe(`Ordered windows across truncate replays`, () => {
   }>)(
     `keeps the ordered window for $name (generated replay)`,
     async ({ history, scenario, ...replay }) => {
+      oracleRoute(`case`)
       const entered = new Set<ReplayDemandState>()
       const reach = await checkOrderedReplay(history, scenario, (state) =>
         entered.add(state),
@@ -2654,6 +2668,7 @@ describe(`Ordered windows across truncate replays`, () => {
   // discarded that replay and published an empty window while the second
   // failure held nothing; that failure now holds its own subscription.
   it(`keeps the last publication when a marker change follows two failed replay loads`, async () => {
+    oracleRoute(`fixed history`)
     await checkOrderedReplay(
       [
         { type: `hold` },
@@ -2686,6 +2701,7 @@ describe(`Ordered windows across truncate replays`, () => {
   // and the independent retention account above. A move can retire the failed
   // demand; a later truncate can replace it with successful own coverage.
   it(`keeps new include failures behind a loading sibling replay`, async () => {
+    oracleRoute(`fixed history`)
     const states = [
       `newSiblingReplayFailures`,
       `newSiblingReplayRetirements`,
@@ -2750,6 +2766,7 @@ describe(`Ordered windows across truncate replays`, () => {
   // A waiting move distinguishes publication retention from replay verdicts:
   // Atomic window publication allows rejection despite a later retry.
   it(`keeps publication across sibling and include settlement orders`, async () => {
+    oracleRoute(`fixed history`)
     const states = [`lateSiblingSettlements`, `retryWhileSiblingLoads`] as const
     const declared = createOracleReach(
       `replay.sibling-settlement-order`,
@@ -2845,6 +2862,7 @@ describe(`Ordered windows across truncate replays`, () => {
   // failures. The same comparison checks both, without an expected error
   // copied from production or a source-wide error order.
   it(`keeps replay error order within each subscription`, async () => {
+    oracleRoute(`fixed history`)
     const declared = createOracleReach(
       `replay.subscription-error-order`,
       [
@@ -2905,6 +2923,7 @@ describe(`Ordered windows across truncate replays`, () => {
   // the two-failure grammar above. Real adapter subscriptions supply identity;
   // the shared account comparison requires a sibling's failure to survive.
   it(`retains sibling replay failures through successful coverage`, async () => {
+    oracleRoute(`fixed history`)
     const declared = createOracleReach(
       `replay.subscription-success-scope`,
       [`siblingSuccessfulCoverage`, `siblingRequestErrorChecks`] as const,
@@ -2961,6 +2980,7 @@ describe(`Ordered windows across truncate replays`, () => {
   it.each(orderedReplayCampaigns)(
     `keeps the ordered window under load and release faults (%s campaign)`,
     async (campaign) => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const total: OrderedReach = {
         settlementThrows: 0,
         throwsAfterReplay: 0,
@@ -3437,6 +3457,7 @@ describe(`Ordered windows across truncate replays`, () => {
   it.each(preloadCampaigns)(
     `recovers replays that start during the initial preload (%s campaign)`,
     async (campaign) => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       // Declared reach: a replay participant that fails before the first
       // ready, which must end the query or let the preload settle, and a
       // window move that waits behind a replay a newer truncate discards,
@@ -3478,6 +3499,7 @@ describe(`Ordered windows across truncate replays`, () => {
   it.each(failedReplayCampaigns)(
     `keeps the last publication through a failed replay (%s campaign)`,
     async (campaign) => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       // Declared reach: histories where the retention law judged a failed
       // replay, judged a replay that still held publication, and saw a
       // demand that the graph started after the commit fail while its replay
@@ -3583,6 +3605,7 @@ const replayDemandHistory = fc.record({
 it.each(replayDemandCampaigns)(
   `distinguishes failed demand origins (%s campaign)`,
   async (campaign) => {
+    oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
     const declared = createOracleReach(replayDemandProperty, replayDemandStates)
     await fc.assert(
       fc.asyncProperty(replayDemandHistory, async (generated) => {
@@ -3649,6 +3672,7 @@ it.each(replayDemandCampaigns)(
 it.each(orderedFailureCampaigns)(
   `distinguishes keyed request failure from reacquisition (%s campaign)`,
   async (campaign) => {
+    oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
     const failureReach = createOracleReach<OrderedFailureState>(
       orderedFailureProperty,
       [`initiating-keyed-request-failed`, `keyed-reacquisition-failed`],

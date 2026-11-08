@@ -40,6 +40,7 @@ import {
 import { CollectionRef, Func, PropRef } from '../../src/query/ir.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
+import { oracleRoute } from '../oracle-config.js'
 import {
   expectedTerms,
   inertCollection,
@@ -61,6 +62,7 @@ describe('optimizer aggregate semantics', () => {
     `caseWhenDefault`,
   ] as const) {
     test(`${shape} global aggregate keeps post-aggregate filtering`, () => {
+      oracleRoute(`case`)
       const source = createCollection(
         mockSyncCollectionOptions<Row>({
           id: `optimizer-aggregate-source-${shape}`,
@@ -144,6 +146,7 @@ describe('optimizer aggregate semantics', () => {
   // predicates toward sources; one on a literal field must stay outside the
   // aggregate subquery, where it would remove every source row.
   test('literal-field filtering keeps each aggregate whole under a left join', () => {
+    oracleRoute(`fixed history`)
     const source = createCollection(
       mockSyncCollectionOptions<Row>({
         id: `optimizer-literal-source`,
@@ -185,6 +188,7 @@ describe('optimizer aggregate semantics', () => {
   })
 
   test('group-key filtering keeps each grouped aggregate under a left join', () => {
+    oracleRoute(`fixed history`)
     const source = createCollection(
       mockSyncCollectionOptions<Row>({
         id: `optimizer-grouped-source`,
@@ -263,6 +267,7 @@ describe(`optimizer residual convergence`, () => {
       for (const reversed of [false, true]) {
         for (const twoActive of [false, true]) {
           test(`${join.type} ${form} reversed=${reversed} twoActive=${twoActive} preserves each predicate once`, () => {
+            oracleRoute(`case`)
             const teamKeys = [`team.active=true`]
             const memberKeys = [`member.userId=100`]
             const clauses = [
@@ -331,6 +336,7 @@ describe(`optimizer residual convergence`, () => {
 
   for (const joinType of [`left`, `right`] as const) {
     test(`${joinType} join publishes the independently joined rows`, () => {
+      oracleRoute(`case`)
       const teamCollection = createCollection(
         mockSyncCollectionOptions<Team>({
           id: `optimizer-residual-${joinType}-teams`,
@@ -396,6 +402,7 @@ describe(`optimizer residual convergence`, () => {
   }
 
   test(`two active sources publish the independently joined rows`, () => {
+    oracleRoute(`fixed history`)
     const tags = [
       { id: 20, teamId: 1, region: `west` },
       { id: 21, teamId: 2, region: `west` },
@@ -598,6 +605,19 @@ function expectedChainRows(
 }
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/builder/functions.ts#add',
+    'src/query/builder/functions.ts#caseWhen',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/functions.ts#isUndefined',
+    'src/query/builder/functions.ts#max',
+    'src/query/builder/functions.ts#or',
+    'src/query/builder/functions.ts#sum',
+    'src/query/ir.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/optimizer.ts#optimizeQuery',
+  ],
   model: [
     expectedAggregateTotals,
     expectedLiteralFieldRows,

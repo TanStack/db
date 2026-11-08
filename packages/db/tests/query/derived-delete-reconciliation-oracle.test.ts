@@ -5,7 +5,11 @@ import { createDeferred } from '../../src/deferred.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { stripVirtualProps } from '../utils.js'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRuns,
+} from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import type { SyncConfig } from '../../src/types.js'
 
@@ -125,6 +129,12 @@ function expectedRowsAfterQueuedBatches(batches: number): Array<Row> {
 }
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/deferred.ts#createDeferred',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/transactions.ts#createTransaction',
+  ],
   check: [runFlushHistory],
   model: [expectedRowsAfterQueuedBatches],
 })
@@ -132,6 +142,7 @@ declareOracle({
 it.each([`initial`, `update`, `insert`] as const)(
   `detects driver-only row mutation at the %s boundary`,
   async (phase) => {
+    oracleRoute(`calibration`)
     const steps = [{ inserts: 2, update: phase === `update` }]
     await expect(
       runFlushHistory(steps, (row, at) => {
@@ -145,20 +156,27 @@ it.each([`initial`, `update`, `insert`] as const)(
 
 fcTest.prop([flushHistory], { numRuns: oracleRuns(40), seed: 41703 })(
   `shares membership work only for balanced deltas across fixed queue histories`,
-  runFlushHistory,
+  (steps) => {
+    oracleRoute(`fixed seed`)
+    return runFlushHistory(steps)
+  },
 )
 fcTest.prop(
   [flushHistory],
   oraclePropertyOptions(60, `derived-publication.membership-work`),
 )(
   `shares membership work only for balanced deltas across random queue histories`,
-  runFlushHistory,
+  (steps) => {
+    oracleRoute(`random seed`)
+    return runFlushHistory(steps)
+  },
 )
 
 describe(`derived updates beneath optimistic deletes`, () => {
   it.each(cases)(
     `$shape / layered=$layered / $outcome / $batches batches`,
     async ({ shape, layered, outcome, batches }) => {
+      oracleRoute(`case`)
       let sync!: Parameters<SyncConfig<Row>[`sync`]>[0]
       const source = createCollection<Row>({
         getKey: (row) => row.id,

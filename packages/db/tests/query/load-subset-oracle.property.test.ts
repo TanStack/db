@@ -6,6 +6,7 @@ import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import {
   oracleRandomParameters,
+  oracleRoute,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -277,6 +278,11 @@ const exactScenarioRuns = 40 * multiplier
 // attempt with the transports that it expects. The grammar is the exact-demand
 // trace arbitrary, which the calibration test below reads for coverage.
 declareOracle({
+  owns: [
+    'src/deferred.ts#createDeferred',
+    'src/query/ir.ts',
+    'src/query/subset-dedupe.ts',
+  ],
   check: [
     assertCompletedExactDemandTrace,
     assertConcurrentExactDemandTrace,
@@ -289,6 +295,7 @@ describe(`exact loadSubset demand oracle`, () => {
   it.each(exactDemandAxisPairs)(
     `distinguishes a change to %s in completed and concurrent demands`,
     async (_axis, first, second) => {
+      oracleRoute(`case`)
       assertCompletedExactDemandTrace([first, second, first])
       await assertConcurrentExactDemandTrace({
         trace: [first, second, first],
@@ -298,6 +305,7 @@ describe(`exact loadSubset demand oracle`, () => {
   )
 
   it(`uses SQL unknown for nullish comparisons in the independent model`, () => {
+    oracleRoute(`fixed history`)
     const missing = new PropRef<number | null>([`missing`])
 
     expect(
@@ -312,6 +320,7 @@ describe(`exact loadSubset demand oracle`, () => {
   })
 
   it(`generates repeated, cursor, empty, and unbounded exact demands`, () => {
+    oracleRoute(`fixed seed`)
     const traces = fc.sample(exactDemandTraceArbitrary, {
       seed: 1656,
       numRuns: 200,
@@ -337,7 +346,10 @@ describe(`exact loadSubset demand oracle`, () => {
     seed: 1657,
   })(
     `starts each completed exact demand once for a fixed seed`,
-    assertCompletedExactDemandTrace,
+    (...args: Parameters<typeof assertCompletedExactDemandTrace>) => {
+      oracleRoute(`fixed seed`)
+      return assertCompletedExactDemandTrace(...args)
+    },
   )
 
   fcTest.prop(
@@ -349,7 +361,10 @@ describe(`exact loadSubset demand oracle`, () => {
     ),
   )(
     `starts each completed exact demand once for a random or replayed seed`,
-    assertCompletedExactDemandTrace,
+    (...args: Parameters<typeof assertCompletedExactDemandTrace>) => {
+      oracleRoute(`random seed`)
+      return assertCompletedExactDemandTrace(...args)
+    },
   )
 
   fcTest.prop([concurrentExactScenarioArbitrary], {
@@ -357,7 +372,10 @@ describe(`exact loadSubset demand oracle`, () => {
     seed: 1661,
   })(
     `shares only identical in-flight demands for a fixed seed`,
-    assertConcurrentExactDemandTrace,
+    (...args: Parameters<typeof assertConcurrentExactDemandTrace>) => {
+      oracleRoute(`fixed seed`)
+      return assertConcurrentExactDemandTrace(...args)
+    },
   )
 
   fcTest.prop(
@@ -369,10 +387,14 @@ describe(`exact loadSubset demand oracle`, () => {
     ),
   )(
     `shares only identical in-flight demands for a random or replayed seed`,
-    assertConcurrentExactDemandTrace,
+    (...args: Parameters<typeof assertConcurrentExactDemandTrace>) => {
+      oracleRoute(`random seed`)
+      return assertConcurrentExactDemandTrace(...args)
+    },
   )
 
   it(`reports one rejection to every exact waiter and then retries`, async () => {
+    oracleRoute(`fixed history`)
     await expectExactWaitersShareRejection({
       demand: {
         values: [1, 2],
@@ -414,7 +436,10 @@ describe(`exact loadSubset demand oracle`, () => {
     ],
   })(
     `retries failed exact demand histories through fresh success for a fixed seed`,
-    expectExactWaitersShareRejection,
+    (...args: Parameters<typeof expectExactWaitersShareRejection>) => {
+      oracleRoute(`fixed seed`)
+      return expectExactWaitersShareRejection(...args)
+    },
   )
 
   fcTest.prop(
@@ -426,6 +451,9 @@ describe(`exact loadSubset demand oracle`, () => {
     ),
   )(
     `retries failed exact demand histories through fresh success for a random or replayed seed`,
-    expectExactWaitersShareRejection,
+    (...args: Parameters<typeof expectExactWaitersShareRejection>) => {
+      oracleRoute(`random seed`)
+      return expectExactWaitersShareRejection(...args)
+    },
   )
 })

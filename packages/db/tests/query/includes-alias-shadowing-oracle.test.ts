@@ -17,6 +17,7 @@ import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises } from '../utils.js'
 import { declareOracle } from '../oracle-declaration.js'
+import { oracleRoute } from '../oracle-config.js'
 import { createScopedSource } from './includes-scope-identity-oracle.js'
 import {
   initialLocks,
@@ -179,6 +180,26 @@ function expectRowsFollowModel(
 }
 
 declareOracle({
+  owns: [
+    'src/collection/change-events.ts#createFilterFunctionFromExpression',
+    'src/collection/index.ts#createCollection',
+    'src/indexes/basic-index.ts',
+    'src/query/builder/functions.ts#add',
+    'src/query/builder/functions.ts#and',
+    'src/query/builder/functions.ts#count',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/functions.ts#gt',
+    'src/query/builder/functions.ts#isUndefined',
+    'src/query/builder/functions.ts#multiply',
+    'src/query/builder/functions.ts#not',
+    'src/query/builder/include-functions.ts#materialize',
+    'src/query/builder/include-functions.ts#toArray',
+    'src/query/builder/index.ts',
+    'src/query/builder/query-ir.ts#getQueryIR',
+    'src/query/ir-stable-identity.ts#getQueryIdentity',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/optimizer.ts#optimizeQuery',
+  ],
   check: [expectRowsFollowModel],
   model: [modelRows],
 })
@@ -352,6 +373,7 @@ describe(`captured alias scope oracle`, () => {
       for (const order of [`childFirst`, `parentFirst`] as const) {
         for (const mode of [`eager`, `onDemand`] as const) {
           test(`${form}, ${alias}, ${order}, ${mode}: exact rows follow source roles`, async () => {
+            oracleRoute(`case`)
             const locks = createScopedSource(
               `shadow-locks`,
               initialLocks,
@@ -418,6 +440,7 @@ describe(`captured alias scope oracle`, () => {
   }
 
   test(`one captured child plan remains correct in two include positions`, async () => {
+    oracleRoute(`fixed history`)
     const locks = createScopedSource(`reuse-locks`, initialLocks, `eager`)
     const votes = createScopedSource(`reuse-votes`, initialVotes, `eager`)
     const live = createLiveQueryCollection({
@@ -484,6 +507,7 @@ describe(`captured alias scope oracle`, () => {
   for (const placement of [`queryRef`, `union`, `joined`] as const) {
     for (const mode of [`eager`, `onDemand`] as const) {
       test(`a shared ${placement} builder remains legal in a sibling include with ${mode} sources`, async () => {
+        oracleRoute(`case`)
         type Employee = { id: number; managerId: number }
         const employeeRows = new Map<number, Employee>([
           [1, { id: 1, managerId: 0 }],
@@ -602,6 +626,7 @@ describe(`captured alias scope oracle`, () => {
    * source update; it never consults the builder's binding IDs.
    */
   test(`fresh inner QueryRef declarations do not impersonate a captured parent`, async () => {
+    oracleRoute(`fixed history`)
     const rows = [
       { id: 1, parentId: 1 },
       { id: 2, parentId: 1 },
@@ -649,6 +674,7 @@ describe(`captured alias scope oracle`, () => {
   })
 
   test(`a local child equality cannot impersonate a shadowed correlation`, async () => {
+    oracleRoute(`fixed history`)
     const locks = createScopedSource(
       `local-equality-locks`,
       initialLocks,
@@ -701,6 +727,7 @@ describe(`captured alias scope oracle`, () => {
   })
 
   test(`a nested include can capture its grandparent beside a shadowed child`, async () => {
+    oracleRoute(`fixed history`)
     const locks = createScopedSource(`nested-locks`, initialLocks, `eager`)
     const votes = createScopedSource(`nested-votes`, initialVotes, `eager`)
     const currentVotes = new Map(initialVotes.map((vote) => [vote.id, vote]))
@@ -808,6 +835,7 @@ describe(`outer filters stay with their source under alias shadowing`, () => {
     for (const mode of [`eager`, `onDemand`] as const) {
       for (const childId of [1, 2] as const) {
         test(`${form}, ${mode}, child ID ${childId}: projected rows follow source roles`, async () => {
+          oracleRoute(`case`)
           const parentRow = { id: 1, linkId: childId }
           const childRow = { id: childId, linkId: 1 }
           const expected = model(
@@ -945,6 +973,7 @@ describe(`captured projections keep their binding during predicate pushdown`, ()
 
   for (const mode of [`eager`, `onDemand`] as const) {
     test(`${mode}: parent rank controls the child result under both child aliases`, async () => {
+      oracleRoute(`case`)
       const parentRow = { id: 1, rank: `A` }
       const childRow = { id: 10, parentId: 1, rank: `Z` }
       const anchorRow = { id: 10 }
@@ -1122,6 +1151,7 @@ describe(`same-path group keys across alias scopes`, () => {
   for (const alias of [`parent`, `child`] as const) {
     for (const order of [`parentFirst`, `childFirst`] as const) {
       test(`group values retain ${alias} child binding with ${order} keys`, async () => {
+        oracleRoute(`case`)
         const parentRows = new Map(initialParents.map((row) => [row.id, row]))
         const childRows = new Map(initialChildren.map((row) => [row.id, row]))
         const parents = createScopedSource(
@@ -1256,6 +1286,7 @@ describe(`group keys through nested source filtering`, () => {
   for (const innerAlias of [`x`, `u`] as const) {
     for (const mode of [`eager`, `onDemand`] as const) {
       test(`${mode} groups preserve the ${innerAlias} source through filtered joins and writes`, async () => {
+        oracleRoute(`case`)
         const sourceRows = new Map(initialSources.map((row) => [row.id, row]))
         const tagRows = new Map(initialTags.map((row) => [row.id, row]))
         const source = createScopedSource(
@@ -1365,6 +1396,7 @@ declareOracle({ model: [expectedWrapperRows] })
  * has the same identity.
  */
 test(`optimized redundant wrappers erase alias spelling`, async () => {
+  oracleRoute(`fixed history`)
   const initial = { id: 1, label: `first` }
   const source = createScopedSource(`wrapper-alpha`, [initial], `eager`)
   const model = new Map([[initial.id, initial]])
@@ -1569,6 +1601,7 @@ describe(`lazy join demand across nested alias scopes`, () => {
   }
 
   test(`direct and wrapped shadowed includes preserve keyed user demand through writes`, async () => {
+    oracleRoute(`fixed history`)
     const anchors = new Map([[initialAnchor.id, initialAnchor]])
     const users = new Map(initialUsers.map((user) => [user.id, user]))
     // In this one-way history, a key requested at an earlier checkpoint is
@@ -1692,6 +1725,7 @@ describe(`lexical bindings through recursive joins and selections`, () => {
   test.each([`eager`, `onDemand`] as const)(
     `a shadowed FROM subquery preserves joined rows with %s loading`,
     async (mode) => {
+      oracleRoute(`case`)
       type Manager = { id: number; name: string }
       type User = { id: number; managerId: number; name: string }
       const managerRows: Array<Manager> = [
@@ -1867,6 +1901,7 @@ describe(`nested source placement preserves captured outer rows`, () => {
     for (const capture of [`fields`, `spread`] as const) {
       for (const mode of [`eager`, `onDemand`] as const) {
         test(`${placement}, ${capture}, ${mode}: shadowing and renaming agree at every write cut`, async () => {
+          oracleRoute(`case`)
           const managersModel = new Map(
             initialManagers.map((row) => [row.id, row]),
           )
@@ -2181,6 +2216,7 @@ describe(`outer joins preserve absent source bindings under shadowing`, () => {
   ] as const) {
     for (const mode of [`eager`, `onDemand`] as const) {
       test(`${kind} with ${correlationSide} correlation and ${mode} sources keeps absent sides absent`, async () => {
+        oracleRoute(`case`)
         const parentRows = new Map<number, Parent>([
           [1, { id: 1, marker: `PARENT` }],
           [2, { id: 2, marker: `OTHER` }],
@@ -2443,6 +2479,7 @@ describe(`chained joins keep an absent local source absent`, () => {
 
   for (const mode of [`eager`, `onDemand`] as const) {
     test(`${mode} chained joins preserve absence under shadowing and renaming`, async () => {
+      oracleRoute(`case`)
       const parentRows = new Map<number, Issue>([
         [1, { id: 1, label: `first parent` }],
         [2, { id: 2, label: `second parent` }],
@@ -2674,6 +2711,7 @@ describe(`joined QueryRef lazy targets retain lexical source identity`, () => {
 
   for (const alias of [`u`, `post`] as const) {
     test(`${alias} post alias: projected tag drives on-demand rows`, async () => {
+      oracleRoute(`case`)
       const userRows = new Map<number, User>([
         [1, { id: 1, tagId: 7, name: `USER` }],
       ])
@@ -2904,6 +2942,7 @@ describe(`mixed outer-join chains retain absent source roles`, () => {
   for (const { first, second, correlation } of chains) {
     for (const mode of [`eager`, `onDemand`] as const) {
       test(`${first} then ${second}, ${correlation} correlation, ${mode} sources`, async () => {
+        oracleRoute(`case`)
         const parentRows = new Map<number, Parent>([
           [1, { id: 1, marker: `ONE` }],
           [2, { id: 2, marker: `TWO` }],
@@ -3146,6 +3185,7 @@ describe(`captured ancestor join operands retain their bindings`, () => {
 
   for (const mode of [`eager`, `onDemand`] as const) {
     test(`${mode} sources preserve captured operands across alias and equality order`, async () => {
+      oracleRoute(`case`)
       const parentRows = new Map<number, Parent>([[1, { id: 1, offset: 1 }]])
       const childRows = new Map<number, Child>([
         [10, { id: 10, parentId: 1, base: 6 }],
@@ -3346,6 +3386,7 @@ describe(`grouped includes keep valid ancestor references`, () => {
 
   for (const mode of [`eager`, `onDemand`] as const) {
     test(`${mode} grouped includes use ancestors across shadowing and updates`, async () => {
+      oracleRoute(`case`)
       const parentRows = new Map<number, Parent>([
         [1, { id: 1, threshold: 0, direction: 1 }],
         [2, { id: 2, threshold: 0, direction: -1 }],
@@ -3500,6 +3541,7 @@ describe(`joined subqueries reject captured sibling sources`, () => {
   for (const mode of [`eager`, `onDemand`] as const) {
     for (const alias of [`issue`, `inner`] as const) {
       test(`${mode} joined subquery may capture an actual ancestor with inner alias ${alias}`, async () => {
+        oracleRoute(`case`)
         const parentRows = [{ id: 1 }, { id: 2 }]
         const mainRows = [{ id: 1 }, { id: 2 }]
         const innerRows = [{ id: 1 }, { id: 2 }]

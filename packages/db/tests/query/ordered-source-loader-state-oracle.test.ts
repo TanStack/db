@@ -9,6 +9,7 @@ import { createOracleReach } from '../oracle-reach.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
   oraclePropertyOptions,
+  oracleRoute,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
@@ -2358,6 +2359,14 @@ const authorityCampaigns =
 // the request ledger. The grammar is authorityCaseArbitrary, which the campaigns
 // and the calibration witnesses below read for coverage.
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/query/effect.ts#createEffect',
+    'src/query/ir.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/live/ordered-source-loader.ts',
+  ],
   check: [checkAuthorityCase, checkRetirementProgress, checkRetirementReceiver],
   grammar: [authorityCaseArbitrary],
 })
@@ -2384,6 +2393,7 @@ describe(`Ordered source request authority`, () => {
   )(
     `rejects substituted participant errors across current failures: %j`,
     async (axes) => {
+      oracleRoute(`case`)
       const testCase: AuthorityCase = {
         ...ordinaryScenario,
         ...axes,
@@ -2416,6 +2426,7 @@ describe(`Ordered source request authority`, () => {
   // The model's strand trace: a repair supersedes the in-flight tie and
   // finishes; a newer invalidation's reaction is deferred; the old tie fails.
   it(`recovers a superseded tie that fails after its repair finished (generated campaign replay)`, async () => {
+    oracleRoute(`fixed history`)
     await checkAuthorityCase({
       indexed: true,
       limit: 1,
@@ -2899,6 +2910,7 @@ describe(`Ordered source request authority`, () => {
   ] satisfies Array<{ name: string; testCase: AuthorityCase }>)(
     `keeps request authority for $name (generated campaign replay)`,
     async ({ testCase }) => {
+      oracleRoute(`case`)
       await checkAuthorityCase(testCase)
     },
   )
@@ -2908,6 +2920,7 @@ describe(`Ordered source request authority`, () => {
   // leases before the pass resumed that refill. It remains one repair chain.
   // Source: https://github.com/TanStack/db/issues/2296
   it(`keeps a deferred repair refill in its chain after replay retirement`, async () => {
+    oracleRoute(`fixed history`)
     await checkAuthorityCase({
       indexed: false,
       limit: 1,
@@ -2980,6 +2993,7 @@ describe(`Ordered source request authority`, () => {
   it.each(handoffCampaigns)(
     `preserves repair continuation identity across replay bookkeeping (%s campaign)`,
     async (campaign) => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(
         handoffProperty,
         [`deferred-refill`, `reset-continuation`] as const,
@@ -3057,6 +3071,7 @@ describe(`Ordered source request authority`, () => {
   it.each(retirementCampaigns)(
     `repairs an invalidation delivered during completed repair retirement (%s campaign)`,
     async (campaign) => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(
         retirementProperty,
         [
@@ -3186,6 +3201,7 @@ describe(`Ordered source request authority`, () => {
   it.each(retirementReceiverCampaigns)(
     `repairs retirement invalidation through a real subscription (%s campaign)`,
     async (campaign) => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(
         retirementReceiverProperty,
         [
@@ -3242,6 +3258,7 @@ describe(`Ordered source request authority`, () => {
   ] as const)(
     `receives retirement invalidation in a held %s replay (unload: %s)`,
     async (kind, unloadChange) => {
+      oracleRoute(`case`)
       await checkRetirementReceiver(
         {
           indexed: false,
@@ -3271,6 +3288,7 @@ describe(`Ordered source request authority`, () => {
   it.each([`before-invalidation`, `after-publication`] as const)(
     `rejects a retirement start observed %s`,
     (fault) => {
+      oracleRoute(`calibration`)
       const startedAt = fault === `before-invalidation` ? 1 : 4
       expect(() => checkRetirementProgress(2, [startedAt], 4)).toThrow(
         `retirement invalidation`,
@@ -3283,6 +3301,7 @@ describe(`Ordered source request authority`, () => {
   // at comparison. This works for source and minified builds without reading
   // private members. The same history first proves the unmodified path agrees.
   it(`rejects retained successful acquisition observations after a covering repair`, async () => {
+    oracleRoute(`calibration`)
     const testCase: AuthorityCase = {
       ...ordinaryScenario,
       indexed: true,
@@ -3309,6 +3328,7 @@ describe(`Ordered source request authority`, () => {
   it.each(authorityCampaigns)(
     `holds, retires, and recovers requests under generated settlement orders (%s campaign)`,
     async (campaign) => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       let supersededFailures = 0
       let staleSettlementsAfterRepair = 0
       let supersededFailuresAfterRepair = 0
@@ -3581,6 +3601,7 @@ describe(`Ordered source request authority`, () => {
   it.each(unprovenReportCampaigns)(
     `answers each loaded-subset report as its coverage requires (%s campaign)`,
     async (campaign) => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       // Declared reach: histories where each report law judged a report.
       const reportStates = [
         `repairedReportsOnOwnPage`,

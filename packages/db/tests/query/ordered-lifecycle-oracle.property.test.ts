@@ -15,6 +15,7 @@ import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
   oracleRandomParameters,
+  oracleRoute,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -956,6 +957,7 @@ describe(`synchronous initial settlement refinement`, () => {
   declareOracle({ grammar: [cells] })
 
   it(`enumerates every initial path and settlement cell exactly once`, () => {
+    oracleRoute(`case`)
     expect(cells).toHaveLength(4)
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(4)
   })
@@ -963,6 +965,7 @@ describe(`synchronous initial settlement refinement`, () => {
   it.each(cells)(
     `publishes the complete initial window at the $settlement checkpoint with $autoIndex indexing`,
     async ({ settlement, autoIndex }) => {
+      oracleRoute(`case`)
       const observed = await observeInitialSettlement(settlement, autoIndex)
       assertInitialSettlementObservation(observed.immediate, settlement)
       expect(observed.settled).toEqual({
@@ -981,6 +984,7 @@ describe(`synchronous initial settlement refinement`, () => {
   )
 
   it(`rejects the old Promise-wrapped observation at the synchronous checkpoint`, () => {
+    oracleRoute(`calibration`)
     expect(() =>
       assertInitialSettlementObservation(
         expectedInitialSettlementObservation(`promise`),
@@ -1014,17 +1018,20 @@ describe(`ordered lifecycle product`, () => {
   declareOracle({ grammar: [cells] })
 
   it(`keeps all 192 declared histories distinct`, () => {
+    oracleRoute(`case`)
     expect(cells).toHaveLength(192)
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(192)
   })
   it.each(cells)(
     `$acquisitionPath / $delivery / $window / $outcome / $syncRun / $barrier`,
     async (scenario) => {
+      oracleRoute(`case`)
       const result = await assertHistory(scenario)
       observed.add(JSON.stringify(result.coordinates))
     },
   )
   it(`reaches all 192 histories through physical work and terminal cleanup`, () => {
+    oracleRoute(`case`)
     expect(observed.size).toBe(cells.length)
   })
   const arbitrary = fc.record({
@@ -1048,6 +1055,7 @@ describe(`ordered lifecycle product`, () => {
   fcTest.prop([arbitrary], { numRuns: 20 * multiplier, seed: 93471 })(
     `matches the ordered lifecycle for a fixed seed`,
     async (scenario) => {
+      oracleRoute(`fixed seed`)
       await assertHistory(scenario)
     },
     Math.max(10000, multiplier * 1500),
@@ -1058,6 +1066,7 @@ describe(`ordered lifecycle product`, () => {
   )(
     `matches the ordered lifecycle for a random or replayed seed`,
     async (scenario) => {
+      oracleRoute(`random seed`)
       await assertHistory(scenario)
     },
     Math.max(10000, multiplier * 1500),
@@ -1275,6 +1284,7 @@ describe(`initial locale-string fallback oracle`, () => {
   declareOracle({ grammar: [cells] })
 
   it(`enumerates every index, settlement, and row-order cell exactly once`, () => {
+    oracleRoute(`case`)
     expect(cells).toHaveLength(8)
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(8)
   })
@@ -1282,6 +1292,7 @@ describe(`initial locale-string fallback oracle`, () => {
   it.each(cells)(
     `publishes the $autoIndex $order locale-string singleton at the $settlement checkpoint`,
     async ({ autoIndex, settlement, order }) => {
+      oracleRoute(`case`)
       const observed = await observeInitialFallback(
         autoIndex,
         settlement,
@@ -1313,6 +1324,7 @@ describe(`initial locale-string fallback oracle`, () => {
   it.each(cells)(
     `emits one completed $autoIndex $order initial window change with $settlement fallback`,
     async ({ autoIndex, order, settlement }) => {
+      oracleRoute(`case`)
       const observed = await observeInitialFallback(
         autoIndex,
         settlement,
@@ -2178,6 +2190,7 @@ describe(`post-publication null fallback oracle`, () => {
   it.each(cases)(
     `keeps the public window and change events coherent after $mutation with $response and $childDemand child demand`,
     async ({ mutation, response, childDemand }) => {
+      oracleRoute(`case`)
       await observeLaterFallback(mutation, response, childDemand, (observed) =>
         assertLaterFallbackObservation(mutation, observed),
       )
@@ -2185,6 +2198,7 @@ describe(`post-publication null fallback oracle`, () => {
   )
 
   it(`rejects a stale window event after an overlapping held provider result`, async () => {
+    oracleRoute(`calibration`)
     await observeLaterFallback(
       `delete-marker`,
       `held-promise`,
@@ -2229,6 +2243,7 @@ describe(`post-publication null fallback oracle`, () => {
   it.each([`delete-marker`, `retarget-marker`] as const)(
     `reports the first lease's cleanup failure after the %s fallback publishes its replacement`,
     async (mutation) => {
+      oracleRoute(`case`)
       // The subscription reports the throwing release uncaught, once: it is
       // an adapter bug, not a load result.
       const uncaught = captureMicrotaskErrors()
@@ -2253,6 +2268,7 @@ describe(`post-publication null fallback oracle`, () => {
 
 describe(`nullable multi-term lifecycle product`, () => {
   it(`anchors the nullable reference and controlled provider to an independent order palette`, () => {
+    oracleRoute(`case`)
     for (const primaryNulls of [`first`, `last`] as const)
       for (const primaryDirection of [`asc`, `desc`] as const)
         for (const secondaryNulls of [`first`, `last`] as const)
@@ -2314,6 +2330,7 @@ describe(`nullable multi-term lifecycle product`, () => {
   declareOracle({ grammar: [cells, directionCells] })
 
   it(`enumerates every nullable lifecycle and direction-overlay cell exactly once`, () => {
+    oracleRoute(`case`)
     expect(cells).toHaveLength(22)
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(22)
     expect(
@@ -2332,6 +2349,7 @@ describe(`nullable multi-term lifecycle product`, () => {
   it.each(cells)(
     `observes nullable tie and lifecycle coordinates: %j`,
     async (scenario) => {
+      oracleRoute(`case`)
       const result = await assertHistory(scenario)
       expect(result.orderedRequests).toBeGreaterThan(0)
       expect(
@@ -2345,6 +2363,7 @@ describe(`nullable multi-term lifecycle product`, () => {
   it.each(directionCells)(
     `keeps primary $primaryDirection and secondary $secondaryDirection direction independent`,
     async ({ primaryDirection, secondaryDirection }) => {
+      oracleRoute(`case`)
       const representative = cells[0]!
       await assertHistory({
         ...representative,
@@ -2364,6 +2383,7 @@ describe(`nullable multi-term lifecycle product`, () => {
   it.each([`secondary-order`, `null-placement`] as const)(
     `rejects a wrong %s through live loader output`,
     async (fault) => {
+      oracleRoute(`calibration`)
       const scenario = cells[0]!
       await assertHistory(scenario)
       await expect(assertHistory(scenario, fault)).rejects.toMatchObject({
@@ -2405,6 +2425,7 @@ describe(`nullable multi-term lifecycle product`, () => {
   declareOracle({ grammar: [arbitrary] })
 
   it(`generates the nullable value and lifecycle dimensions`, () => {
+    oracleRoute(`fixed seed`)
     const sample = fc.sample(arbitrary, { seed: 93472, numRuns: 100 })
     expect(new Set(sample.map((scenario) => scenario.acquisitionPath))).toEqual(
       new Set([`prefix`, `boundary`, `full-source`]),
@@ -2447,7 +2468,10 @@ describe(`nullable multi-term lifecycle product`, () => {
   const nullableTimeout = Math.max(10000, multiplier * 1500)
   fcTest.prop([arbitrary], { numRuns: nullableRunBudget, seed: 93472 })(
     `matches nullable multi-term lifecycle histories for a fixed seed`,
-    assertNullableHistory,
+    async (scenario) => {
+      oracleRoute(`fixed seed`)
+      await assertNullableHistory(scenario)
+    },
     nullableTimeout,
   )
   fcTest.prop(
@@ -2459,7 +2483,10 @@ describe(`nullable multi-term lifecycle product`, () => {
     ),
   )(
     `matches nullable multi-term lifecycle histories for a random or replayed seed`,
-    assertNullableHistory,
+    async (scenario) => {
+      oracleRoute(`random seed`)
+      await assertNullableHistory(scenario)
+    },
     nullableTimeout,
   )
 })
@@ -2475,6 +2502,7 @@ describe(`synchronous initial full-source settlement refinement`, () => {
   declareOracle({ grammar: [cells] })
 
   it(`enumerates every full-source feature and settlement cell exactly once`, () => {
+    oracleRoute(`case`)
     expect(cells).toHaveLength(8)
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(8)
   })
@@ -2482,6 +2510,7 @@ describe(`synchronous initial full-source settlement refinement`, () => {
   it.each(cells)(
     `publishes the complete initial $feature window at the $settlement checkpoint`,
     async ({ feature, settlement }) => {
+      oracleRoute(`case`)
       const observed = await observeFullSourceSettlement(feature, settlement)
       assertFullSourceRequest(observed.requests[0])
       assertInitialSettlementObservation(observed.immediate, settlement)
@@ -2492,6 +2521,7 @@ describe(`synchronous initial full-source settlement refinement`, () => {
   it.each(fullSourceFeatures)(
     `publishes the complete initial %s window over an eager source at the synchronous checkpoint`,
     async (feature) => {
+      oracleRoute(`case`)
       // An eager source answers every local snapshot synchronously.
       assertInitialSettlementObservation(
         await observeEagerFullSourceSettlement(feature),
@@ -2506,6 +2536,16 @@ describe(`synchronous initial full-source settlement refinement`, () => {
 // the driver. compareNullable is the nullable-order model; the palette table is
 // its authority, and expectNullableOrderMatchesPalette anchors the model to it.
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/deferred.ts#createDeferred',
+    'src/indexes/btree-index.ts',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/functions.ts#isUndefined',
+    'src/query/builder/functions.ts#not',
+    'src/query/builder/include-functions.ts#toArray',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [
     observeHistory,
     assertInitialSettlementObservation,

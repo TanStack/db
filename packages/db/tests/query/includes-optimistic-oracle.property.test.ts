@@ -14,7 +14,11 @@ import {
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
-import { oraclePropertyOptions, oracleReplayTest } from '../oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRoute,
+} from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import {
   assertCanStartOptimisticChange,
@@ -629,6 +633,17 @@ function expectedHeldRepairRows(
 }
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/deferred.ts#createDeferred',
+    'src/indexes/basic-index.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/include-functions.ts#materialize',
+    'src/query/builder/include-functions.ts#toArray',
+    'src/query/ir.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [expectHistoryMatches],
   model: [recompute, expectedHeldRepairRows],
 })
@@ -655,10 +670,16 @@ function optimisticProperty(
   oracleReplayTest(fcTest).prop([routeValuesArbitrary], {
     ...options,
     seed: 1_658_013,
-  })(`${name} (fixed seed)`, run)
+  })(`${name} (fixed seed)`, (...args: Parameters<typeof run>) => {
+    oracleRoute(`fixed seed`)
+    return run(...args)
+  })
   oracleReplayTest(fcTest, property).prop([routeValuesArbitrary], options)(
     `${name} (random seed)`,
-    run,
+    (...args: Parameters<typeof run>) => {
+      oracleRoute(`random seed`)
+      return run(...args)
+    },
   )
 }
 
@@ -666,6 +687,7 @@ describe(`optimistic relationship-transition oracle`, () => {
   fcTest(
     `keeps a same-root optimistic snapshot private until ordered repair publishes`,
     async () => {
+      oracleRoute(`fixed history`)
       type OrderedRoot = { id: number; rank: number; value: string }
       type Child = { id: number; parentId: number }
       type PublishedRoot = {
@@ -913,6 +935,7 @@ describe(`optimistic relationship-transition oracle`, () => {
     fcTest(
       `observes queued sibling delivery with pending=${pending}`,
       async () => {
+        oracleRoute(`case`)
         const routes: RouteValues = {
           rootA: 10,
           rootB: 100,
@@ -1088,6 +1111,7 @@ describe(`optimistic relationship-transition oracle`, () => {
       fcTest(
         `cleans failed optimistic work (compound=${compound}, cleanup failure=${cleanupFails})`,
         async () => {
+          oracleRoute(`case`)
           const routes: RouteValues = {
             rootA: 10,
             rootB: 100,
@@ -1194,6 +1218,7 @@ describe(`optimistic relationship-transition oracle`, () => {
   fcTest(
     `checks the optimistic overlay before yielding from apply`,
     async () => {
+      oracleRoute(`fixed history`)
       const routes: RouteValues = {
         rootA: 10,
         rootB: 100,
@@ -1236,6 +1261,7 @@ describe(`optimistic relationship-transition oracle`, () => {
   fcTest(
     `rejects a stale route at the immediate optimistic checkpoint`,
     async () => {
+      oracleRoute(`calibration`)
       const routes: RouteValues = {
         rootA: 10,
         rootB: 100,

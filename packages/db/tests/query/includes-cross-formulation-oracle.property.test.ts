@@ -19,6 +19,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
@@ -707,6 +708,19 @@ const windowedExamples: Array<
 // each partition with a direct relation over source rows. The grouped check
 // compares a nested route's counts with the standalone grouped query.
 declareOracle({
+  owns: [
+    'src/collection/change-events.ts#createFilterFunctionFromExpression',
+    'src/collection/index.ts#createCollection',
+    'src/query/builder/functions.ts#and',
+    'src/query/builder/functions.ts#count',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/functions.ts#isNull',
+    'src/query/builder/functions.ts#lt',
+    'src/query/builder/functions.ts#not',
+    'src/query/builder/include-functions.ts#toArray',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/query-once.ts#queryOnce',
+  ],
   check: [
     expectFormulationsEquivalent,
     expectWindowedIncludeMatches,
@@ -731,6 +745,7 @@ describe(`includes cross-formulation oracle`, () => {
   })
 
   test(`bounded grammar axes distinguish routes, order, partitions, and windows`, () => {
+    oracleRoute(`fixed history`)
     const parents = new Map(
       partitionAndRouteScenario.parents.map((row) => [row.id, row]),
     )
@@ -821,6 +836,7 @@ describe(`includes cross-formulation oracle`, () => {
   })
 
   test(`TLP checker rejects a wrong branch even when the union is complete`, () => {
+    oracleRoute(`calibration`)
     const rows: Array<ChildRow> = [
       { id: 10, parentGroup: 0, score: null, position: 0 },
       { id: 11, parentGroup: 0, score: -1, position: 1 },
@@ -854,6 +870,7 @@ describe(`includes cross-formulation oracle`, () => {
   })(
     `parent-context routing preserves reference-sensitive predicate values across transitions for a fixed seed`,
     async (code) => {
+      oracleRoute(`fixed seed`)
       await checkReferenceContextRouting(code)
     },
   )
@@ -863,7 +880,10 @@ describe(`includes cross-formulation oracle`, () => {
     oraclePropertyOptions(4, `includes-cross-formulation.reference-context`),
   )(
     `parent-context routing preserves reference-sensitive predicate values across transitions for a random or replayed seed`,
-    checkReferenceContextRouting,
+    (...args: Parameters<typeof checkReferenceContextRouting>) => {
+      oracleRoute(`random seed`)
+      return checkReferenceContextRouting(...args)
+    },
   )
 
   async function checkReferenceContextRouting(code: number): Promise<void> {
@@ -1032,6 +1052,7 @@ describe(`includes cross-formulation oracle`, () => {
   ])(
     `grouped includes use query equality for %s routes`,
     async (_name, createValues) => {
+      oracleRoute(`case`)
       const [parentGroup, equivalentChildGroup, unequalChildGroup] =
         createValues()
       const parents = createControlledCollection(`equality-route-parents`, [
@@ -1106,7 +1127,10 @@ describe(`includes cross-formulation oracle`, () => {
     seed: 1_658_002,
   })(
     `lazy materialization matches fully loaded materialization for reference-sensitive correlation keys for a fixed seed`,
-    checkReferenceKeyRouting,
+    (...args: Parameters<typeof checkReferenceKeyRouting>) => {
+      oracleRoute(`fixed seed`)
+      return checkReferenceKeyRouting(...args)
+    },
   )
 
   oracleReplayTest(fcTest, `includes-cross-formulation.reference-key`).prop(
@@ -1114,7 +1138,10 @@ describe(`includes cross-formulation oracle`, () => {
     oraclePropertyOptions(4, `includes-cross-formulation.reference-key`),
   )(
     `lazy materialization matches fully loaded materialization for reference-sensitive correlation keys for a random or replayed seed`,
-    checkReferenceKeyRouting,
+    (...args: Parameters<typeof checkReferenceKeyRouting>) => {
+      oracleRoute(`random seed`)
+      return checkReferenceKeyRouting(...args)
+    },
   )
 
   async function checkReferenceKeyRouting(code: number): Promise<void> {
@@ -1267,7 +1294,10 @@ describe(`includes cross-formulation oracle`, () => {
     seed: 1_658_003,
   })(
     `grouped includes agree with standalone groups for symbol routes for a fixed seed`,
-    checkSymbolGroupRouting,
+    (...args: Parameters<typeof checkSymbolGroupRouting>) => {
+      oracleRoute(`fixed seed`)
+      return checkSymbolGroupRouting(...args)
+    },
   )
 
   oracleReplayTest(
@@ -1278,7 +1308,10 @@ describe(`includes cross-formulation oracle`, () => {
     oraclePropertyOptions(4, `includes-cross-formulation.symbol-group-route`),
   )(
     `grouped includes agree with standalone groups for symbol routes for a random or replayed seed`,
-    checkSymbolGroupRouting,
+    (...args: Parameters<typeof checkSymbolGroupRouting>) => {
+      oracleRoute(`random seed`)
+      return checkSymbolGroupRouting(...args)
+    },
   )
 
   async function checkSymbolGroupRouting(code: number): Promise<void> {
@@ -1359,12 +1392,14 @@ describe(`includes cross-formulation oracle`, () => {
     }
   }
 
-  fcTest(`shared-route child deletion agrees across formulations`, () =>
-    expectFormulationsEquivalent(sharedRouteDeletionScenario),
-  )
+  fcTest(`shared-route child deletion agrees across formulations`, () => {
+    oracleRoute(`fixed history`)
+    return expectFormulationsEquivalent(sharedRouteDeletionScenario)
+  })
 
-  test(`split, merge and reactivated routes preserve all predicate partitions`, () =>
-    expectFormulationsEquivalent({
+  test(`split, merge and reactivated routes preserve all predicate partitions`, () => {
+    oracleRoute(`fixed history`)
+    return expectFormulationsEquivalent({
       parents: [
         { id: 0, group: 0, position: 1 },
         { id: 1, group: 0, position: 0 },
@@ -1391,7 +1426,8 @@ describe(`includes cross-formulation oracle`, () => {
           row: { id: 12, parentGroup: 1, score: 1, position: 0 },
         },
       ],
-    }))
+    })
+  })
 
   test.each([
     { name: `zero limit`, offset: 0, limit: 0 },
@@ -1403,8 +1439,9 @@ describe(`includes cross-formulation oracle`, () => {
     { name: `empty tail`, offset: 3, limit: 2 },
   ])(
     `preserves ordered window $name through root and child moves`,
-    ({ offset, limit }) =>
-      expectWindowedIncludeMatches(
+    ({ offset, limit }) => {
+      oracleRoute(`case`)
+      return expectWindowedIncludeMatches(
         {
           parents: [
             { id: 0, group: 0, position: 1 },
@@ -1435,7 +1472,8 @@ describe(`includes cross-formulation oracle`, () => {
         },
         offset,
         limit,
-      ),
+      )
+    },
   )
 
   // Checked direct replay witness:
@@ -1454,6 +1492,7 @@ describe(`includes cross-formulation oracle`, () => {
   )(
     `generated equivalence rejects a missing production parent and replays its checkpoint`,
     async () => {
+      oracleRoute(`calibration`)
       // The hostile observation is injected after the real nested query is
       // captured. The same generated driver and refinement comparison execute
       // during shrinking and direct seed/path replay.
@@ -1517,6 +1556,7 @@ describe(`includes cross-formulation oracle`, () => {
   )(
     `generated window rejects an extra production child and replays its checkpoint`,
     async () => {
+      oracleRoute(`calibration`)
       const property = fc.asyncProperty(
         windowedScenarioArbitrary,
         async (sample) => {
@@ -1588,7 +1628,10 @@ describe(`includes cross-formulation oracle`, () => {
     examples: scenarioExamples,
   })(
     `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a fixed seed`,
-    checkEquivalenceScenario,
+    (...args: Parameters<typeof checkEquivalenceScenario>) => {
+      oracleRoute(`fixed seed`)
+      return checkEquivalenceScenario(...args)
+    },
   )
 
   oracleReplayTest(fcTest, `includes-cross-formulation.equivalence`).prop(
@@ -1599,7 +1642,10 @@ describe(`includes cross-formulation oracle`, () => {
     },
   )(
     `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a random or replayed seed`,
-    checkEquivalenceScenario,
+    (...args: Parameters<typeof checkEquivalenceScenario>) => {
+      oracleRoute(`random seed`)
+      return checkEquivalenceScenario(...args)
+    },
   )
 
   const checkWindowedScenario = ({
@@ -1636,7 +1682,10 @@ describe(`includes cross-formulation oracle`, () => {
     examples: windowedExamples,
   })(
     `matches recomputation for ordered offset and limit child windows for a fixed seed`,
-    checkWindowedScenario,
+    (...args: Parameters<typeof checkWindowedScenario>) => {
+      oracleRoute(`fixed seed`)
+      return checkWindowedScenario(...args)
+    },
   )
 
   oracleReplayTest(fcTest, `includes-cross-formulation.ordered-window`).prop(
@@ -1647,6 +1696,9 @@ describe(`includes cross-formulation oracle`, () => {
     },
   )(
     `matches recomputation for ordered offset and limit child windows for a random or replayed seed`,
-    checkWindowedScenario,
+    (...args: Parameters<typeof checkWindowedScenario>) => {
+      oracleRoute(`random seed`)
+      return checkWindowedScenario(...args)
+    },
   )
 })

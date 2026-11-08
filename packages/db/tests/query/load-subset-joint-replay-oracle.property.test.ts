@@ -33,13 +33,24 @@ import { createDeferred } from '../../src/deferred.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { runOracleCampaign } from '../oracle-campaign.js'
-import { oracleRuns } from '../oracle-config'
+import { oracleRoute, oracleRuns } from '../oracle-config'
 import { flushPromises, withOracleCleanup } from '../utils.js'
+import { declareOracle } from '../oracle-declaration'
 import type {
   LoadSubsetOptions,
   SyncAppliedReceipt,
   SyncConfig,
 } from '../../src/types.js'
+
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/deferred.ts#createDeferred',
+    'src/query/builder/functions.ts#eq',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/transactions.ts#createTransaction',
+  ],
+})
 
 type Row = { id: string; version: number; value: number; kind: `data` | `hold` }
 type PublicRow = Pick<Row, `id` | `version` | `value`>
@@ -444,6 +455,7 @@ async function runHistory(h: Scenario) {
 }
 
 it(`composes overlapping replay receipts, failure, surviving ownership and restart`, async () => {
+  oracleRoute(`random seed`)
   await runOracleCampaign(
     `JOINT_REPLAY_ORACLE`,
     [

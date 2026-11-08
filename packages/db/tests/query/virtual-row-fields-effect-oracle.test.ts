@@ -57,6 +57,7 @@ import { createTransaction } from '../../src/transactions.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { createOracleReach } from '../oracle-reach.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
+import { oracleRoute } from '../oracle-config.js'
 import { expectedSourceMetadata } from './virtual-row-fields-source-oracle.js'
 import {
   checkWithCleanup,
@@ -305,6 +306,7 @@ afterAll(() => {
 test.each(callbackHistories)(
   `delivers current values across callback profiles: %j`,
   async (history) => {
+    oracleRoute(`case`)
     ranDelivery = true
     await runCallbackHistory(
       history,
@@ -416,6 +418,14 @@ afterAll(() => {
     )
 })
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/builder/functions.ts#coalesce',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/index.ts',
+    'src/query/effect.ts#createEffect',
+    'src/transactions.ts#createTransaction',
+  ],
   model: [visibleSource, expectedEffectRows, expectedEffectDelta],
   check: [checkEffectDelta],
   grammar: [effectMetadataHistories],
@@ -568,6 +578,7 @@ function startEffect(
 test.each(effectMetadataHistories)(
   `delivers explicitly selected source metadata through Effects: %j`,
   async (history) => {
+    oracleRoute(`case`)
     enteredEffectHistories++
     effectMetadataReach.beginHistory()
     const path = pathOf(history)
@@ -822,6 +833,7 @@ declareOracle({ grammar: [effectFaults] })
 test.each(effectFaults)(
   `rejects a hostile Effect metadata ledger: %s`,
   (fault) => {
+    oracleRoute(`calibration`)
     const row = (id: Key, pending: boolean): ProjectedRow => ({
       id,
       side: `left`,
@@ -925,6 +937,7 @@ function calibrationLedger(
   }
 }
 test(`permits reordered delivery and fresh opaque keys after an exit`, () => {
+  oracleRoute(`fixed history`)
   const before = calibrationRows(false)
   const after = calibrationRows(true)
   const active: KeyIntervals = new Map()
@@ -947,6 +960,7 @@ test(`permits reordered delivery and fresh opaque keys after an exit`, () => {
   checkEffectDelta(calibrationLedger(survivor, oldKey), survivor, active)
 })
 test(`permits empty callback partitions while preserving exact delta events`, () => {
+  oracleRoute(`fixed history`)
   const before = calibrationRows(false)
   const after = calibrationRows(true)
   const active: KeyIntervals = new Map()
@@ -963,6 +977,7 @@ test(`permits empty callback partitions while preserving exact delta events`, ()
   }
 })
 test(`records scalar callback values before later object mutation`, () => {
+  oracleRoute(`fixed history`)
   const before = calibrationRows(false)
   const after = calibrationRows(true)
   const keyFor = (row: ProjectedRow) => occurrence(row)
@@ -987,6 +1002,7 @@ test(`records scalar callback values before later object mutation`, () => {
   checkEffectDelta(ledger, expected, active)
 })
 test(`preserves later interval judgments after an invalid unknown update`, () => {
+  oracleRoute(`fixed history`)
   const before = calibrationRows(false)
   const after = calibrationRows(true)
   const keyFor = (row: ProjectedRow) => occurrence(row)
@@ -1106,6 +1122,7 @@ declareOracle({ model: [boundaryModelRows], grammar: [boundaryHistories] })
 test.each(boundaryHistories)(
   `classifies callback-visible membership across coalesced source histories: %j`,
   async (history) => {
+    oracleRoute(`case`)
     enteredBoundary = true
     boundaryReach.beginHistory()
     const main: SourceRow = {

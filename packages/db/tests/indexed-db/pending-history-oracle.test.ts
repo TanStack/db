@@ -24,8 +24,10 @@ import { createLiveQueryCollection } from '../../src'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../oracle-config'
+import { declareOracle } from '../oracle-declaration'
 import {
   Channel,
   deferred,
@@ -45,6 +47,15 @@ import { recordCollection } from './recorder'
 import { runCampaign } from './campaign'
 import type { Change, OracleRow } from './cross-tab-oracle'
 import type { Operation } from './harness'
+
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+})
 
 // Campaigns. The fixed campaign and the fresh campaign run the same generator
 // and checker. A path replay of `indexeddb.pending-history` runs its recorded
@@ -392,6 +403,7 @@ async function run(
 }
 
 it('reconstructs held multi-row CRUD crossed with every peer action and decision', async () => {
+  oracleRoute(`case`)
   const reach = new Set<string>()
   for (const local of ['insert', 'update', 'delete'] as const)
     for (const kind of ['write', 'delete', 'clear', 'import'] as const)
@@ -409,6 +421,7 @@ it('reconstructs held multi-row CRUD crossed with every peer action and decision
     expect(reach.has(`peer ${operation}`), operation).toBe(true)
 }, 60_000)
 it('attributes the queued confirmation after an earlier replacement', async () => {
+  oracleRoute(`fixed history`)
   const history: History = {
     local: 'insert',
     accept: true,
@@ -429,6 +442,7 @@ it('attributes the queued confirmation after an earlier replacement', async () =
 })
 
 it('a peer no-op cannot spend another source acknowledgement', async () => {
+  oracleRoute(`fixed history`)
   await run({
     local: 'insert',
     accept: false,
@@ -443,6 +457,7 @@ it('a peer no-op cannot spend another source acknowledgement', async () => {
 const runs =
   process.env.TANSTACK_INDEXEDDB_ORACLE_PROFILE === 'stress' ? 300 : 30
 it(`refines held mutations through fixed peer histories`, async () => {
+  oracleRoute(`fixed history`)
   await runCampaign(
     'pending',
     histories,
@@ -453,6 +468,7 @@ it(`refines held mutations through fixed peer histories`, async () => {
 oracleReplayTest(vitestIt, PENDING_HISTORY)(
   `refines held mutations through fresh peer histories`,
   async () => {
+    oracleRoute(`random seed`)
     const { numRuns, seed, path } = oraclePropertyOptions(runs, PENDING_HISTORY)
     await runCampaign(
       'pending',

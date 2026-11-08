@@ -10,6 +10,7 @@ import {
 } from '../../src/query/index.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { flushPromises } from '../utils.js'
+import { oracleRoute } from '../oracle-config.js'
 import { finishCleanup } from './load-subset-source-readiness-support.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -47,7 +48,18 @@ function expectedRows(
   ]
 }
 
-declareOracle({ model: [expectedRows] })
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/deferred.ts#createDeferred',
+    'src/indexes/btree-index.ts',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/include-functions.ts#toArray',
+    'src/query/expression-helpers.ts#extractSimpleComparisons',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  model: [expectedRows],
+})
 
 it.each([
   { oldOutcome: `resolve`, settlementOrder: `old-first` },
@@ -57,6 +69,7 @@ it.each([
 ] as const)(
   `fences a retired source-demand attempt across $settlementOrder $oldOutcome settlement`,
   async ({ oldOutcome, settlementOrder }) => {
+    oracleRoute(`case`)
     type Parent = { id: string; group: string }
     type Child = { id: string; group: string }
     type PendingRequest = {

@@ -1,7 +1,11 @@
 import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { stripVirtualProps } from '../utils.js'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRuns,
+} from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import {
   BUCKETS,
@@ -780,12 +784,17 @@ const history = fc.array(step, { minLength: 1, maxLength: 8 })
 // predicts the rows that each flush owes, which events it may name, and which
 // layout revision it owes.
 declareOracle({
+  owns: [
+    'src/query/live/bucket-facade-adapter.ts',
+    'src/transactions.ts#createTransaction',
+  ],
   check: [runHistory, checkEvents],
   model: [applyOps, layoutExpectation, shownLayoutExpectation, touchedIds],
 })
 
 describe(`bucket facade rollback`, () => {
   it(`restores written facades and reads no others (fixed campaign)`, async () => {
+    oracleRoute(`fixed seed`)
     // A repeatable baseline. Seed 2081 is arbitrary.
     await fc.assert(fc.asyncProperty(history, runHistory), {
       numRuns: oracleRuns(150),
@@ -794,6 +803,7 @@ describe(`bucket facade rollback`, () => {
   })
 
   it(`restores written facades and reads no others (random or replayed)`, async () => {
+    oracleRoute(`random seed`)
     await fc.assert(
       fc.asyncProperty(history, runHistory),
       oraclePropertyOptions(150, PROPERTY),
@@ -804,6 +814,7 @@ describe(`bucket facade rollback`, () => {
   // still publish the layout change, so the failed flush must not leave its
   // new order behind as the facade's current order.
   it(`publishes a reorder on retry after a failed reordering flush`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       {
         choices: [
@@ -831,6 +842,7 @@ describe(`bucket facade rollback`, () => {
   // rollback must restore the facade's current order, or the second flush
   // sees no order change and owes a layout revision it does not publish.
   it(`publishes a reorder sent again after a rolled-back reorder`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       {
         choices: [
@@ -858,6 +870,7 @@ describe(`bucket facade rollback`, () => {
   // other buckets, as a parent-only write would. The retry must still publish
   // the facade change that was pending when the root commit failed.
   it(`publishes a pending facade change after a failed root commit`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       {
         choices: [
@@ -884,6 +897,7 @@ describe(`bucket facade rollback`, () => {
   // row from a pending user transaction, or a held sync commit behind a
   // persisting one. Retiring the bucket must not fail the flush.
   it(`retires a bucket whose facade shows an optimistic row`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       {
         choices: [
@@ -905,6 +919,7 @@ describe(`bucket facade rollback`, () => {
   // Fixed history: a failed flush that writes two existing buckets and retires a
   // third restores all three, then the retried flush applies everything.
   it(`restores two written buckets and a retired bucket, then retries`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       {
         choices: [
@@ -938,6 +953,7 @@ describe(`bucket facade rollback`, () => {
   // Fixed regression of a generated failure: an update to a row that an earlier
   // flush wrote behind a still-persisting transaction keeps the row.
   it(`updates a row that a persisting transaction still holds`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       {
         choices: [{ kind: 0, bucket: 0, id: 0, v: 0, rank: 0 }],
@@ -963,6 +979,7 @@ describe(`bucket facade rollback`, () => {
   // flush wrote behind a still-persisting transaction. The restore must write
   // it as an update, because the held insert lands first.
   it(`restores a held row after a rolled-back update`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       {
         choices: [{ kind: 0, bucket: 3, id: 0, v: 0, rank: 0 }],
@@ -991,6 +1008,7 @@ describe(`bucket facade rollback`, () => {
   // id, is rolled back, and then a flush fails while writing the facade. The
   // failed flush publishes nothing.
   it(`publishes nothing from a failed flush after a shared optimistic row leaves`, async () => {
+    oracleRoute(`fixed history`)
     const plain = {
       throwPick: 0,
       local: 0,
