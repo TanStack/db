@@ -26,6 +26,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, test } from 'vitest'
+import { oracleRoute } from '../packages/db/tests/oracle-config.js'
 import { declareOracle } from '../packages/db/tests/oracle-declaration.js'
 
 // The grammar authors structured releases before serializing Markdown. Removing
@@ -773,6 +774,9 @@ if (args[0] === 'api' && args[1] === 'graphql') {
   if (failures.length === 1) throw failures[0]
 }
 
+// Owns nothing: comment-on-release.ts is a repository script outside any
+// package, and the driver runs it in a child process, where the gap report
+// cannot place mutants.
 declareOracle({
   model: [expectedNotifications],
   check: [checkNotifications],
@@ -788,8 +792,10 @@ if (
   )
 for (const [index, input] of histories.entries()) {
   if (replay !== undefined && Number(replay) !== index) continue
-  test(`release-comments case ${index}: ${input.version}, reverse ${input.reverse}, issues ${Object.keys(input.edges).length}, packages ${input.packages.length}`, () =>
-    exercise(input))
+  test(`release-comments case ${index}: ${input.version}, reverse ${input.reverse}, issues ${Object.keys(input.edges).length}, packages ${input.packages.length}`, () => {
+    oracleRoute(`case`)
+    return exercise(input)
+  })
 }
 afterAll(() => {
   process.stdout.write(
