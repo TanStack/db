@@ -51,9 +51,9 @@
     "fast-check": "^3.23.0"
   },
   "devDependencies": {
-    "@fast-check/vitest": "^0.4.1",
+    "@fast-check/vitest": "^0.5.0",
     "@neon/realtime": "0.1.2",
     "@standard-schema/spec": "^1.1.0",
-    "@vitest/coverage-istanbul": "^4.1.12"
+    "@vitest/coverage-istanbul": "5.0.5"
   }
 }
