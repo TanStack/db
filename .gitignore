@@ -52,14 +52,12 @@ tsconfig.vitest-temp.json
 # The part-reach oracle lints scratch programs inside the repository; an
 # interrupted run can leave them behind.
 /part-reach-scratch-*/
-# The gap-report oracle writes scratch packages beside the CLI it tests.
-/scripts/oracle-gaps/.scratch-*/
-# A temporary copy of the CLI that hostile-mutant runs edit.
-/scripts/oracle-gaps-mutant*/
 
 # Other checkouts and scratch copies. A plain directory here is not part of
 # this checkout's branch, so the oracle lint hooks must not see its files.
 /.worktrees/
 
-# The gap report CLI: evidence store and workspace bundles
+# The gap report CLI: evidence store and workspace bundles, and the harness
+# files that a run which died leaves beside the package
 .oracle-gaps/
+.oracle-gaps-*

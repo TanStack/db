@@ -4008,83 +4008,11 @@ keys and the fixed seed 271828 as removed, although both campaigns still run in
 the oracle file. Owner: `scripts.run-budget`. Needed witness: a campaign whose
 budget a helper computes and passes in as parameters.
 
-`scripts/oracle-gaps/gap-report-oracle.property.test.mjs` owns the gap report
-(`scripts.gap-report`), the CLI in `scripts/oracle-gaps/` that lists the gaps an
-oracle's author must answer. It generates a source file of functions and
-classes that imports from a second source file of the same package, two
-oracle files that declare `owns` entries, an ordinary test file,
-authored mutants, declaration faults, and source edits. A small interpreter of
-that grammar predicts every report fact, and the driver runs the real CLI on a
-scratch package. Its laws are the operator enumeration; probe-only code in the decided form
-`process.env.NODE_ENV !== 'production' && globalThis.__oracleProbe?.(name,
-condition)`, with every other probe shape judged as production; owner
-discovery, static reference trees within the package as the type checker
-resolves them (calls, direct and aliased imports, `this` and typed fields,
-`.bind`, values passed as arguments, and classes passed as values, which bring
-all their methods; `new C()` brings only the constructor), stopping at the
-package boundary, and refusal of an owns entry that names nothing, a
-non-literal owns list, or a failing owner; classification by the tests of every owner on
-their registered routes, where only a law verdict on a reproducible route kills
-(a crash, an agreement-only kill, a random-only kill, a kill on an unregistered
-route, a framework-only failure, a nondeterministic test, and an ordinary test
-never do), an `expect` assertion failure counts as a verdict under an unnamed
-law (transitional, for older oracles), and a test that runs several campaigns
-has each failure attributed to the route active when it fired, including a
-soft assertion (`expect.soft`) that lets the test go on to another campaign;
-authored mutants; anchored keys; report completeness; key
-stability under an unrelated function, an inserted probe guard, and a
-reformat; and incremental equals cold: through the daemon (`--daemon`), whose
-evidence store is a TanStack DB collection persisted to SQLite, a check at
-every state of a sequence of edits (a test, a source statement, line shifts,
-an owns list, the authored mutant, a helper module one oracle file imports,
-the seed, a new oracle file, a daemon restart, and a revert) reports what a
-cold run of that state reports. Its reach requires reuse, a mix of reuse and
-recomputation, reuse from disk after a restart, and a changed cold result for
-each content edit. Its authority is the maintainer's gap-check decisions of 2026-11-04
-and 2026-11-05, which are not yet in a decision register. Limits: two source
-files of one package, with no re-exports, namespace imports, or calls into
-another package; no loops, timeouts, multi-line conditions, arrow or nested
-functions, member calls other than `this.m()`, or `--only`, `--sample`, and
-`--diff-base`; no probe-bound states, so reach
-agreement's killing of probe mutants is unchecked; no gap answers or gate;
-the incremental law's edits leave out files a test reads through `fs`,
-environment variables other than the seed, a new file that changes how an
-unchanged import resolves, Vite config and installed-package changes, edits to
-the CLI's own files, and concurrent checks. A test that is only sometimes
-nondeterministic can make an incremental check differ from a cold one, because
-the daemon replays its stored unmutated runs. Its required states are reached by constructed histories,
-and generated histories add little reach of their own. The static states
-(probe structure and ownership through the reference tree) are counted here
-and required by `scripts.gap-report-static`. The three gap-report oracles run
-in about two and a half minutes (`pnpm test:oracle-gaps`). Owner:
-`scripts/oracle-gaps`.
-
-`scripts/oracle-gaps/gap-report-static-oracle.property.test.mjs`
-(`scripts.gap-report-static`) owns the gap report's static half in-process:
-operator enumeration, probe-only code, refusal of an owns entry that names
-nothing, a missing file, or a non-literal list, ownership through the
-reference tree, keys, and key stability. It writes the end-to-end oracle's
-generated fixtures (`gap-report-model-oracle.mjs`) to a scratch package and
-calls `analyze` (analysis.mjs) and `assignKeys` directly, without Vitest, so
-a campaign takes about a second and every static state is reached in every
-campaign. Limits: the end-to-end grammar's; outcomes that need test runs and
-the failing-owner refusal belong to `scripts.gap-report`. Owner:
-`scripts/oracle-gaps`.
-
-`scripts/oracle-gaps/gap-report-classify-oracle.property.test.mjs`
-(`scripts.gap-report-classify`) owns the gap report's classification and
-summary over run records: it generates the records a test run writes
-(states, error texts, timeouts, setup and unhandled errors, capture rows
-with reach, `if` outcomes, asserted and observed hashes, routes, and
-verdicts with the route active when they fired), runs the CLI's pure
-`classify.mjs` and `renderReport`, and compares each mutant's outcome, class,
-laws, and ordinary-tier outcome, and the summary's gaps, warnings, and
-counts, with a model of the law over records. 300 histories run in well
-under a second. Limits: no authored mutants; that real runs write these
-records is `scripts.gap-report`'s. Owner: `scripts/oracle-gaps`.
-
-`pnpm test:oracle-gaps:fast` runs these two in a few seconds; the
-end-to-end oracle runs with `pnpm test:oracle-gaps`.
+The gap report (`pnpm gap-report`) is the `oracle-gaps` CLI of
+`@tanstack/oracles`. Its own oracles (`oracle-gaps.report`, and the static and
+classify oracles) and their limits live in the TanStack/oracles repository,
+under `packages/oracles/oracle-gaps/`. TanStack DB passes its prefix with
+`--env-prefix TANSTACK_DB_ORACLE`.
 
 `scripts/lint-scope-oracle.property.test.js` owns lint selection after an
 edit (`scripts.lint-scope`): the changed scope, the named (pre-commit) scope,
