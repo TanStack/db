@@ -1,6 +1,9 @@
 import { D2, MultiSet } from '@tanstack/db-ivm'
 import { describe, expect, it } from 'vitest'
-import { BucketFacadeAdapter } from '../../src/query/live/bucket-facade-adapter.js'
+import {
+  BucketFacadeAdapter,
+  resolvePublicValue,
+} from '../../src/query/live/bucket-facade-adapter.js'
 import { createTransaction } from '../../src/transactions.js'
 import { stripVirtualProps } from '../utils.js'
 import { BUCKET_FACADE_REF } from '../../src/query/live/materialized-pipeline.js'
@@ -87,6 +90,7 @@ describe(`bucket facade rollback`, () => {
         },
       ],
       () => {},
+      resolvePublicValue,
     )
     graph.finalize()
     const entries = (

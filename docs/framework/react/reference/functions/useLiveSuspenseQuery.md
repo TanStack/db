@@ -9,7 +9,7 @@ title: useLiveSuspenseQuery
 function useLiveSuspenseQuery<TContext>(queryFn): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:154](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L154)
+Defined in: [useLiveSuspenseQuery.ts:317](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L317)
 
 Create a live query with React Suspense support
 
@@ -165,7 +165,7 @@ function Profile({ userId }: { userId: string }) {
 function useLiveSuspenseQuery<TContext>(config): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:164](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L164)
+Defined in: [useLiveSuspenseQuery.ts:327](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L327)
 
 Create a live query with React Suspense support
 
@@ -319,7 +319,7 @@ function Profile({ userId }: { userId: string }) {
 function useLiveSuspenseQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:174](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L174)
+Defined in: [useLiveSuspenseQuery.ts:337](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L337)
 
 Create a live query with React Suspense support
 
@@ -480,7 +480,7 @@ function Profile({ userId }: { userId: string }) {
 function useLiveSuspenseQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:188](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L188)
+Defined in: [useLiveSuspenseQuery.ts:351](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L351)
 
 Create a live query with React Suspense support
 

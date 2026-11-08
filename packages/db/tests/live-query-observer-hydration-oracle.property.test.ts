@@ -1,9 +1,22 @@
+import { expect, it } from 'vitest'
 import fc from 'fast-check'
 import { DbClient } from '../src/client.js'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
+import {
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRoute,
+  oracleRuns,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import { oracleProperty, pass, violation } from './oracle-property.js'
+import { createOracleReach } from './oracle-reach.js'
+import { ScenarioLifetime } from './conformance/scenario-lifetime.js'
+import {
+  atOracleCheckpoint,
+  createOracleFailureFidelity,
+} from './oracle-failure-fidelity.js'
 import type {
   ChangeMessage,
   CollectionStatus,
@@ -68,7 +81,8 @@ import type {
 | failure ends the seed | the same, with cleanup after the failure | notify/attach -> seed handoff | `cleaned-up` and live rows after cleanup | this generated oracle |
 | cleanup keeps the seed | cleanup and restart while the seed is active | notify early return under the seed | `ready` and seed rows | this generated oracle; recorded decision, not a law-16 claim |
 | announced changes | every step while attached | emit -> flushPublications | last-read snapshot and granular rebuilt rows equal the current snapshot | this generated oracle |
-| handoff timing, on-demand subsets, streamed errors, consumption | | | | focused `live-query-observer.test.ts` hydration tests |
+| already-ready subset handoff | held subset at attach, then settlement without row/status change; both modes | seeded observer -> subset settlement | seed while held, live snapshot and announced granular/wholesale rows after settlement | generated ready-subset lane below; Svelte page receiver |
+| other handoff timing, streamed errors, consumption | | | | focused `live-query-observer.test.ts` hydration tests |
 
  * Keys are `a`..`c`, versions 0..3, histories of 1..10 steps, both modes.
  * Constructed histories start a generated history with the steps that enter each declared
@@ -726,4 +740,185 @@ oracleProperty({
   reached: (_history, _trace, expected) => expected.reached,
   driver: driveHistory,
   check: checkHistory,
+})
+
+/**
+ * Readiness also includes the end of pending subset work on an already ready
+ * Collection. A retained page can stay ready throughout that work (#2345).
+ * The existing terminal-status grammar cannot generate this boundary. The
+ * hydration handoff law above and the SSR guide require the seed until local
+ * work settles, then live rows, with an announcement for both consumer modes.
+ *
+ * This lane uses a plain on-demand Collection as the observer's input. An
+ * external subscription establishes held subset work before observer attach.
+ * Resolving its controlled load changes no row or Collection status. The
+ * shared expectedView model predicts seed -> live from that explicit event;
+ * production's subset/status classifiers never choose the expected phase.
+ * The real Svelte transported-page receiver supplies this same premise through
+ * retained live-query Collections and native rune scheduling.
+ */
+const subsetHandoffArbitrary = fc.record({
+  count: fc.integer({ min: 1, max: 3 }),
+  liveCount: fc.integer({ min: 0, max: 3 }),
+  version: fc.integer({ min: 0, max: 3 }),
+})
+type SubsetHandoff = { count: number; liveCount: number; version: number }
+async function checkSubsetHandoff(
+  input: SubsetHandoff,
+  mode: Mode,
+  reach: ReturnType<typeof createOracleReach<string>>,
+) {
+  const lifetime = new ScenarioLifetime()
+  const client = new DbClient()
+  let observer:
+    ReturnType<typeof createLiveQueryObserver<Row, string>> | undefined
+  let unsubscribe: (() => void) | undefined
+  lifetime.defer(() => {
+    observer?.dispose()
+    unsubscribe?.()
+  })
+  lifetime.defer(() => client.cleanup())
+  await lifetime.run(async () => {
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const local = Array.from({ length: input.liveCount }, (_, i) => ({
+      id: String(i),
+      version: input.version + 1,
+    }))
+    const source = createCollection<Row, string>({
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (const value of local) write({ type: `insert`, value })
+          commit()
+          markReady()
+          return { loadSubset: () => pending }
+        },
+      },
+    })
+    lifetime.defer(() => source.cleanup())
+    const demand = source.subscribeChanges(() => {}, {
+      includeInitialState: true,
+    })
+    unsubscribe = () => demand.unsubscribe()
+    expect(source.status, `local status is already ready`).toBe(`ready`)
+    expect(source.isLoadingSubset, `external demand is held`).toBe(true)
+    const model: Model = {
+      seed: Array.from({ length: input.count }, (_, i) => [
+        String(i),
+        input.version,
+      ]),
+      ended: false,
+      endedByFailure: false,
+      attached: true,
+    }
+    const queryHash = `held-ready-subset`
+    client.hydrate({
+      collections: [],
+      liveQueries: [
+        {
+          queryHash,
+          dehydratedAt: 1,
+          snapshot: {
+            rows: model.seed.map(([rowKey, rowVersion]) => ({
+              key: rowKey,
+              value: { id: rowKey, version: rowVersion },
+            })),
+          },
+        },
+      ],
+    })
+    observer = createLiveQueryObserver(source, { client, queryHash, mode })
+    const read = (): View => {
+      const snapshot = observer!.getSnapshot()
+      return { status: snapshot.status, rows: sortedRows(snapshot.state ?? []) }
+    }
+    const rebuilt = new Map<string, Row>()
+    let lastRead: View | undefined
+    observer.subscribe((changes) => {
+      if (!changes) {
+        rebuilt.clear()
+        for (const [rowKey, row] of observer!.getSnapshot().state ?? [])
+          rebuilt.set(rowKey, row)
+      }
+      for (const change of changes ?? []) {
+        if (change.type === `delete`) rebuilt.delete(change.key)
+        else rebuilt.set(change.key, change.value)
+      }
+      lastRead = read()
+    })
+    lastRead = read() // the host's post-subscription consistency read
+    const compare = (cut: string) =>
+      atOracleCheckpoint(`seeded subset handoff`, cut, () => {
+        const expected = expectedView(
+          model,
+          `ready`,
+          local.map((row) => [row.id, row.version]),
+        )
+        expect(read()).toEqual(expected)
+        expect(lastRead, `handoff is announced`).toEqual(expected)
+        if (mode === `granular`)
+          expect(sortedRows(rebuilt), `granular rows follow handoff`).toEqual(
+            expected.rows,
+          )
+      })
+    await settle() // the initial scheduled handoff must leave held work alone
+    compare(`ready Collection with held subset`)
+    reach.reach(`ready while subset held`)
+    release()
+    await settle()
+    expect(source.isLoadingSubset, `the held work settled`).toBe(false)
+    expect(source.status, `settlement changes no Collection status`).toBe(
+      `ready`,
+    )
+    model.ended = true
+    compare(`subset settled without rows or status changing`)
+    reach.reach(`subset-only handoff`)
+  })
+}
+for (const mode of [`granular`, `wholesale`] as const)
+  for (const campaign of [`fixed`, `fresh`] as const) {
+    const property = `live-query-observer.hydration-subset-handoff`
+    const test =
+      campaign === `fixed`
+        ? oracleReplayTest(it)
+        : oracleReplayTest(it, property)
+    test(`${mode} seeded ready-subset handoff (${campaign})`, async () => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
+      const reach = createOracleReach<string>(
+        `${property}/${mode}/${campaign}`,
+        [`ready while subset held`, `subset-only handoff`],
+      )
+      const fidelity = createOracleFailureFidelity<SubsetHandoff>()
+      try {
+        await fidelity.assert(() =>
+          fc.assert(
+            fc.asyncProperty(subsetHandoffArbitrary, async (input) => {
+              reach.beginHistory()
+              await fidelity.run(input, () =>
+                checkSubsetHandoff(input, mode, reach),
+              )
+            }),
+            campaign === `fixed`
+              ? { numRuns: oracleRuns(8), seed: 2345 }
+              : oraclePropertyOptions(8, property),
+          ),
+        )
+        reach.assertReached()
+      } finally {
+        console.info(
+          `subset handoff reach ${mode}/${campaign}`,
+          Object.fromEntries(reach.counts()),
+        )
+      }
+    })
+  }
+declareOracle({
+  owns: [`src/live-query-observer.ts`, `src/client.ts#DbClient.hydrate`],
+  grammar: [subsetHandoffArbitrary],
+  check: [checkSubsetHandoff],
 })

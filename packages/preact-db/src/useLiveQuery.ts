@@ -253,7 +253,7 @@ export function useLiveQuery(
   const bindingRef = useRef<LiveQueryBinding | null>(null)
   let binding = bindingRef.current
   let commitWindow: (() => void) | undefined
-  if (binding?.identity !== identity) {
+  if (!binding?.collection || binding.identity !== identity) {
     const collection = resolveLiveQueryValue(preparedValue, {
       gcTime: DEFAULT_GC_TIME_MS,
       previousCollection: binding?.collection ?? null,

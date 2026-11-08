@@ -111,9 +111,9 @@ describe(`typed-array methods behave like native typed arrays`, () => {
     for (const write of [false, true]) expectTypedCall([3, 1, 2], m, 1, write)
   })
 
-  // A mutator counts as a change without a revert check, even when the
-  // result equals the original under draft equality (-0 equals 0).
-  it(`reversing [-0, 0] is a change although the result is draft-equal`, () => {
+  // Reversal swaps distinct signed-zero values. The native comparison checks
+  // their final positions, including the detached change-set value.
+  it(`reversing signed zeros preserves their native positions`, () => {
     oracleRoute(`case`)
     expectTypedCall([-0, 0], `reverse`, 0, false)
   })

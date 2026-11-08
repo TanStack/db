@@ -7,7 +7,7 @@ title: WithVirtualProps
 type WithVirtualProps<T, TKey> = T & VirtualRowProps<TKey>;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L132)
+Defined in: [packages/db/src/virtual-props.ts:133](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L133)
 
 Adds virtual properties to a row type.
 

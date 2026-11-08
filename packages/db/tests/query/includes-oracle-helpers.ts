@@ -31,9 +31,10 @@ export type ControlledCollection<T extends { id: number }> = {
   rejectSync: (error: Error) => void
 }
 
-type ControlledCollectionOptions = {
+type ControlledCollectionOptions<T> = {
   autoIndex?: `off` | `eager`
   rowUpdateMode?: `partial` | `full`
+  getKey?: (row: T) => string | number
 }
 
 let nextControlledCollectionId = 0
@@ -41,11 +42,11 @@ let nextControlledCollectionId = 0
 export function createControlledCollection<T extends { id: number }>(
   name: string,
   initialData: ReadonlyArray<T> = [],
-  options: ControlledCollectionOptions = {},
+  options: ControlledCollectionOptions<T> = {},
 ): ControlledCollection<T> {
   const collectionOptions = mockSyncCollectionOptions<T>({
     id: `${name}-${nextControlledCollectionId++}`,
-    getKey: (row) => row.id,
+    getKey: options.getKey ?? ((row) => row.id),
     initialData: initialData.map((row) => ({ ...row })),
     ...(options.autoIndex ? { autoIndex: options.autoIndex } : {}),
   })

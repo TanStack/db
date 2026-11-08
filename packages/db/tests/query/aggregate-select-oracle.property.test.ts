@@ -171,10 +171,12 @@ import { declareOracle } from '../oracle-declaration.js'
  * differ. Each campaign first runs twelve complete structural histories through
  * this same model, driver, and comparison. They guarantee the 21 initial
  * premises, including string ordering, independently of the seed, with no
- * mutations, shadowed alias, or union. A separate reach requires the 160
+ * mutations, shadowed alias, or union. A separate reach requires the
  * generated histories themselves to enter those states and the mutation and
- * route checkpoints below. Their coverage is sampled: a miss fails with the
- * selected campaign seed and counts, rather than borrowing structural reach.
+ * route checkpoints below. A generated prefix constructs one history for each
+ * structural family, varying literals, order direction and legal mutations.
+ * The remaining 160 histories explore the broad grammar. Neither generated
+ * reach nor structural reach can borrow the other's observations.
  *
  * Limits: one parent field (`x`) and one source field (`v`); groups by one,
  * two, or three keys; numbers and string keys only. A boolean, Date, `NaN`,
@@ -1682,6 +1684,50 @@ const structuralHistories = [
 const examples = structuralHistories.map((entry) => [entry] as [History])
 const structuralInputs = new Set(structuralHistories)
 
+/**
+ * Required premises are constructive, rather than a lottery at campaign end.
+ * Each family varies its authored literal, ordering direction and source/parent
+ * writes. The final family also crosses union and shadowed-alias boundaries.
+ * These generated examples use the campaign seed and the ordinary comparison;
+ * they add to the broad run budget and remain available to seed/path replay.
+ */
+const requiredHistories = fc.tuple(
+  ...structuralHistories.map((template) =>
+    fc
+      .record({
+        value: literal,
+        direction: fc.constantFrom(`asc` as const, `desc` as const),
+        route: fc.constantFrom(`b`, `A`),
+        shadow: fc.boolean(),
+        union: fc.boolean(),
+        tail: fc.array(step, { maxLength: 2 }),
+      })
+      .map(({ value, direction, route, shadow, union, tail }): History => {
+        const vary = (s: Shape): Shape => ({
+          ...s,
+          fields: { ...s.fields, generated: { k: `lit`, n: value } },
+          orderBy: s.orderBy?.map((term) => ({ ...term, dir: direction })),
+        })
+        return {
+          ...template,
+          top: vary(template.top),
+          nested: vary(template.nested),
+          shadow: template.grouping === `triple` || shadow,
+          union:
+            template.grouping === `triple` ||
+            (template.top.include === undefined && union),
+          steps: [
+            { t: `parent`, id: 1, x: value },
+            { t: `insert`, k: route, v: value },
+            { t: `update`, pick: 0, k: route, v: value },
+            { t: `delete`, pick: 0 },
+            ...tail,
+          ],
+        }
+      }),
+  ),
+)
+
 /** The states the operator laws need; each campaign must reach all of them. */
 const reachStates = [
   `bare include: field`,
@@ -1737,6 +1783,9 @@ async function runCampaign(
     [...reachStates, ...generatedCheckpoints],
   )
   try {
+    const generatedExamples = fc
+      .sample(requiredHistories, { seed: parameters.seed, numRuns: 1 })[0]!
+      .map((entry) => [entry] as [History])
     await fc.assert(
       fc.asyncProperty(history, async (entry) => {
         const fixed = structuralInputs.has(entry)
@@ -1744,7 +1793,14 @@ async function runCampaign(
         reach.beginHistory({ fixed })
         await runHistory(entry)
       }),
-      parameters,
+      {
+        ...parameters,
+        examples: [...parameters.examples, ...generatedExamples],
+        numRuns:
+          parameters.path === undefined
+            ? parameters.numRuns + generatedExamples.length
+            : parameters.numRuns,
+      },
     )
     structuralReach.assertReached()
     generatedReach.assertReached()
@@ -1794,7 +1850,7 @@ declareOracle({
   ],
   check: [runHistory],
   model: [modelGroup, modelError],
-  grammar: [history],
+  grammar: [history, requiredHistories],
 })
 
 describe(`aggregate select shapes`, () => {

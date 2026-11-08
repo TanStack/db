@@ -181,6 +181,9 @@ export type OptimisticStep =
       optimistic: boolean
       pending?: boolean
       inHandler?: HandlerBatch | undefined
+      // Replace `fields` with the visible row's zero fields, signs flipped.
+      // A missing row, or one with no zero, keeps `fields`.
+      flipZeros?: boolean
     }
   | {
       type: `delete`
@@ -323,11 +326,13 @@ class HistoryModel {
   ): number | undefined {
     const row = this.visible().get(step.key)
     if (step.type === `delete` && !row) return
+    // An edit that writes only the values the row holds is no transaction.
+    // -0 and 0 are distinct row values (maintainer decision, 2026-10-29).
     if (
       step.type === `edit` &&
       row &&
-      Object.entries(step.fields).every(
-        ([key, value]) => row[key as keyof Fields] === value,
+      Object.entries(step.fields).every(([key, value]) =>
+        Object.is(row[key as keyof Fields], value),
       )
     )
       return
@@ -659,12 +664,36 @@ export async function withHistoryCleanup<T>(
   return result as T
 }
 
-// The history grammar shared by every production path.
+// The history grammar shared by every production path. Field values include
+// -0, a distinct row value from 0 (maintainer decision, 2026-10-29), so a
+// write can change a field only by the sign of a zero.
+const fieldValue = fc.oneof(fc.integer({ min: -2, max: 2 }), fc.constant(-0))
+const fieldNames = [`a`, `b`, `c`] as const
+
+/**
+ * Resolves a `flipZeros` edit against the model's visible rows: it writes
+ * each zero field of the edited row with the other sign. Other steps, and an
+ * edit of a row without a zero, are unchanged.
+ */
+function withFlippedZeros(
+  step: OptimisticStep,
+  visible: ReadonlyMap<number, HistoryRow>,
+): OptimisticStep {
+  if (step.type !== `edit` || !step.flipZeros) return step
+  const row = visible.get(step.key)
+  if (row === undefined) return step
+  const fields = Object.fromEntries(
+    fieldNames
+      .filter((field) => row[field] === 0)
+      .map((field) => [field, Object.is(row[field], -0) ? 0 : -0]),
+  )
+  return Object.keys(fields).length === 0 ? step : { ...step, fields }
+}
 export const historyRow = fc.record({
   id: fc.integer({ min: 1, max: 3 }),
-  a: fc.integer({ min: -2, max: 2 }),
-  b: fc.integer({ min: -2, max: 2 }),
-  c: fc.integer({ min: -2, max: 2 }),
+  a: fieldValue,
+  b: fieldValue,
+  c: fieldValue,
 })
 const noDeletes = fc.constant(0).map(
   (): Array<number> => [],
@@ -734,16 +763,28 @@ export const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
       key: fc.integer({ min: 1, max: 3 }),
       fields: fc
         .record(
-          {
-            a: fc.integer({ min: -2, max: 2 }),
-            b: fc.integer({ min: -2, max: 2 }),
-            c: fc.integer({ min: -2, max: 2 }),
-          },
+          { a: fieldValue, b: fieldValue, c: fieldValue },
           { requiredKeys: [] },
         )
         .filter((fields) => Object.keys(fields).length > 0),
       optimistic: fc.boolean(),
       inHandler: handlerSourceBatch,
+    }),
+  },
+  {
+    // An edit that changes only the sign of the row's zeros (-0 and 0 are
+    // distinct row values). Random fields rarely do it by chance. It
+    // matters over a write still in flight, so it needs a second flip edit on
+    // the same key before the first settles; the fixed campaigns reach it.
+    weight: 2,
+    arbitrary: fc.record({
+      type: fc.constant(`edit` as const),
+      key: fc.integer({ min: 1, max: 3 }),
+      // With no zero to flip, the edit writes zeros, so a later one can.
+      fields: fc.constant({ a: 0, b: 0, c: 0 }),
+      optimistic: fc.boolean(),
+      inHandler: fc.constant(undefined),
+      flipZeros: fc.constant(true),
     }),
   },
   {
@@ -1077,6 +1118,10 @@ export async function runOptimisticHistory(
     // Partial updates whose omitted `c` differs from the source's held row,
     // so only a merge keeps the held value.
     distinguishingPartialUpdates: 0,
+    // Edits over a row that already had an optimistic write in flight whose
+    // visible row changed only by the sign of a zero: no pending-writes flag
+    // changes, so only value equality can publish the change.
+    zeroSignEditsOverPending: 0,
     // Drains that kept a settled row held for a deferred transaction.
     deferredHolds: 0,
     abortedDeferred: 0,
@@ -1463,16 +1508,34 @@ export async function runOptimisticHistory(
       const initialFrame = publications.at(-1)
       check(`initial`)
       initialPublication = false
-      for (const [position, step] of steps.entries()) {
+      for (const [position, authored] of steps.entries()) {
+        const step = withFlippedZeros(authored, model.visible())
         settling = step.type === `settle`
         const before = sorted(model.visible().values())
         const deliveredBefore = deliveries
         if (step.type === `edit` || step.type === `delete`) {
           if (step.type === `edit` && step.pending && step.inHandler)
             throw new Error(`A pending edit cannot write from its handler yet`)
+          const inFlight = model.transactions.some(
+            (transaction) =>
+              transaction.key === step.key &&
+              (transaction.state === `pending` ||
+                transaction.state === `persisting`),
+          )
           const index = model.author(step)
           if (index === undefined) continue
           const intent = model.transactions[index]!
+          const was = before.find((row) => row.id === step.key)
+          const now = model.visible().get(step.key)
+          if (
+            inFlight &&
+            was !== undefined &&
+            now !== undefined &&
+            fieldNames.every((field) => was[field] === now[field]) &&
+            fieldNames.some((field) => !Object.is(was[field], now[field]))
+          ) {
+            counts.zeroSignEditsOverPending++
+          }
           cuts = [sorted(model.visible().values())]
           if (step.inHandler && !open) {
             const batch: HandlerBatch = resolveSourceBatch(step.inHandler)
@@ -1554,12 +1617,18 @@ export async function runOptimisticHistory(
                         b: intent.row.b,
                       }
                     : plain(intent.row)
-                  : Object.fromEntries(
+                  : // An authored field is a change unless it is the same
+                    // value; -0 and 0 are distinct row values (maintainer
+                    // decision, 2026-10-29).
+                    Object.fromEntries(
                       Object.entries(step.fields).filter(
                         ([key, value]) =>
-                          before.find((row) => row.id === intent.key)?.[
-                            key as keyof Fields
-                          ] !== value,
+                          !Object.is(
+                            before.find((row) => row.id === intent.key)?.[
+                              key as keyof Fields
+                            ],
+                            value,
+                          ),
                       ),
                     ),
           }
@@ -1723,10 +1792,10 @@ export async function runOptimisticHistory(
         check(`${position}: ${JSON.stringify(step)}`)
         // Count events as well as final values; value-only oracles miss redundant
         // publications when a mutation moves into completed retention.
+        // Strict equality, so a row whose zero changed sign counts as changed.
         if (
           step.type === `settle` &&
-          JSON.stringify(before) ===
-            JSON.stringify(sorted(model.visible().values()))
+          isDeepStrictEqual(before, sorted(model.visible().values()))
         ) {
           expect(deliveries, `unchanged settlement ${position}`).toBe(
             deliveredBefore,

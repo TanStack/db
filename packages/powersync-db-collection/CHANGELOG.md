@@ -1,5 +1,28 @@
 # @tanstack/powersync-db-collection
 
+## 1.0.0-rc.1.4
+
+### Patch Changes
+
+- Updated dependencies [[`bfb660a`](https://github.com/TanStack/db/commit/bfb660a1e8074064cd1fd93a645273c17aaec98c)]:
+  - @tanstack/db@1.0.0-rc.1.4
+
+## 1.0.0-rc.1.3
+
+### Patch Changes
+
+- Updated dependencies [[`8a31870`](https://github.com/TanStack/db/commit/8a318707b2debe080195ae422a63982d118cf72f), [`70a744b`](https://github.com/TanStack/db/commit/70a744b3a4022b6df41b9717108f3e44b999af46)]:
+  - @tanstack/db@1.0.0-rc.1.3
+
+## 1.0.0-rc.1.2
+
+### Patch Changes
+
+- Release the change watcher and any diff trigger when an eager Collection's first load fails, instead of keeping them until cleanup. ([#2336](https://github.com/TanStack/db/pull/2336))
+
+- Updated dependencies [[`30e8546`](https://github.com/TanStack/db/commit/30e85464ed2b9b12c5f10981a062427a1fc8daaa), [`a3c4d06`](https://github.com/TanStack/db/commit/a3c4d0676621cc7df4d242bdfe31815509add734), [`035a526`](https://github.com/TanStack/db/commit/035a5260ef994ce3aabed77a3f09b35c71482a9a), [`baabf57`](https://github.com/TanStack/db/commit/baabf57a0f110d57ad9bb7b81148466b18fbe0d1), [`9be51e0`](https://github.com/TanStack/db/commit/9be51e037f6c092bc9625f9b5b4b7e23eb4fa5fe), [`a3c4d06`](https://github.com/TanStack/db/commit/a3c4d0676621cc7df4d242bdfe31815509add734), [`85392bd`](https://github.com/TanStack/db/commit/85392bd1d349aa3bb77c9c11ffba671f0b2d2a84), [`9be3c4e`](https://github.com/TanStack/db/commit/9be3c4ed2c8d9762d3837e38d8869483d50b07f6)]:
+  - @tanstack/db@1.0.0-rc.1.2
+
 ## 1.0.0-rc.1.1
 
 ### Patch Changes

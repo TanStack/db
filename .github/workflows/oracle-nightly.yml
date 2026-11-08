@@ -27,6 +27,8 @@ jobs:
           persist-credentials: false
       - name: Setup Tools
         uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
+      - name: Build dependencies
+        run: node scripts/ci-tests.mjs build sqlite-core
       - name: Run the generated campaign with a larger budget
         env:
           TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: '10'

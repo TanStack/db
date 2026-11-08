@@ -104,7 +104,25 @@ type SourceMutation = {
   key: RowKey
   action: `upsert` | `delete`
   value: number
+  // Upsert the visible row's zero with the other sign; a key whose visible
+  // value is not a zero upserts `value`.
+  flip?: boolean
 }
+
+/** Resolves a `flip` mutation against the model's visible rows. */
+function withFlippedZero(
+  command: PublicationCommand,
+  publication: PublicationModel,
+): PublicationCommand {
+  if (command.type !== `source` || !command.flip) return command
+  const visible = publication.visible.get(command.key)?.value
+  return visible === 0
+    ? { ...command, value: Object.is(visible, -0) ? 0 : -0 }
+    : command
+}
+
+// Reach: source writes that change a public row only by the sign of a zero.
+let zeroSignWrites = 0
 
 type PublicationCommand =
   | Exclude<LifecycleCommand, { type: `truncate` | `settle` }>
@@ -199,9 +217,14 @@ function recordSourceWrite(publication: PublicationModel, row: Row): void {
   // Retained public rows take precedence when reconciling a stale snapshot.
   const previous =
     publication.visible.get(row.id) ?? publication.source.get(row.id)
+  if (previous?.value === row.value && !Object.is(previous.value, row.value)) {
+    zeroSignWrites++
+  }
   publication.source.set(row.id, cloneRow(row))
   publication.retainedKeys.delete(row.id)
-  if (previous?.value === row.value) return
+  // The same value publishes nothing; -0 and 0 are distinct row values
+  // (maintainer decision, 2026-10-29).
+  if (previous !== undefined && Object.is(previous.value, row.value)) return
   publication.visible.set(row.id, cloneRow(row))
   publication.sentKeys.add(row.id)
   publication.batches.push([
@@ -221,7 +244,9 @@ const mapsEqual = (
   right: ReadonlyMap<RowKey, Row>,
 ): boolean =>
   left.size === right.size &&
-  [...left].every(([id, row]) => right.get(id)?.value === row.value)
+  [...left].every(
+    ([id, row]) => right.has(id) && Object.is(right.get(id)!.value, row.value),
+  )
 
 function publicationPhase(
   publication: PublicationModel,
@@ -252,7 +277,7 @@ function publicationDiff(
     const value = next.get(key)
     if (!value) {
       changes.push({ type: `delete`, key, value: cloneRow(previousValue) })
-    } else if (value.value !== previousValue.value) {
+    } else if (!Object.is(value.value, previousValue.value)) {
       changes.push({
         type: `update`,
         key,
@@ -520,12 +545,28 @@ function projectPublication(
   }
 }
 
-const sourceMutationArbitrary: fc.Arbitrary<SourceMutation> = fc.record({
-  type: fc.constant(`source` as const),
-  key: fc.constantFrom(`a` as const, `b` as const, `c` as const, `d` as const),
-  action: fc.constantFrom(`upsert` as const, `delete` as const),
-  value: fc.integer({ min: 0, max: 5 }),
-})
+const sourceMutationArbitrary: fc.Arbitrary<SourceMutation> = fc.oneof(
+  fc.record({
+    type: fc.constant(`source` as const),
+    key: fc.constantFrom(
+      `a` as const,
+      `b` as const,
+      `c` as const,
+      `d` as const,
+    ),
+    action: fc.constantFrom(`upsert` as const, `delete` as const),
+    // -0 is a distinct row value from 0, so a write can change only a sign.
+    value: fc.oneof(fc.integer({ min: 0, max: 5 }), fc.constant(-0)),
+  }),
+  // Writes 0 over a non-zero row, and flips the sign of a zero one.
+  fc.record({
+    type: fc.constant(`source` as const),
+    key: fc.constantFrom(`a` as const, `b` as const),
+    action: fc.constant(`upsert` as const),
+    value: fc.constant(0),
+    flip: fc.constant(true),
+  }),
+)
 
 // Generated publication histories contain 1–20 lifecycle commands from the
 // shared grammar plus 1–5 atomic source mutations inserted at any boundary,
@@ -1128,7 +1169,8 @@ async function runPublicationHistory(
 
   const failures: Array<unknown> = []
   try {
-    for (const [index, command] of history.entries()) {
+    for (const [index, authored] of history.entries()) {
+      const command = withFlippedZero(authored, publication)
       const priorPublicationCount = lifecycle.publications
       const phaseBefore = publicationPhase(publication, lifecycle)
       const pendingAttemptsBefore = [...attempts.values()].filter(
@@ -2554,6 +2596,39 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { continueAfterMismatch: true },
     )
   })
+  // The history above with zeros: the failed replay retains b as -0, and the
+  // later source write of 0 must reconcile as an update, since -0 and 0 are
+  // distinct row values (maintainer decision, 2026-10-29).
+  it(`reconciles a retained -0 row with a later source write of 0`, async () => {
+    await runPublicationHistory(
+      [
+        { type: `source`, key: `b`, action: `upsert`, value: -0 },
+        { type: `request`, demand: `a` },
+        {
+          type: `settle`,
+          demand: `a`,
+          scope: `current`,
+          age: `oldest`,
+          outcome: `resolve`,
+        },
+        { type: `truncate` },
+        { type: `source`, key: `b`, action: `upsert`, value: 51 },
+        {
+          type: `settle`,
+          demand: `a`,
+          scope: `current`,
+          age: `oldest`,
+          outcome: `reject`,
+        },
+        { type: `release`, demand: `a` },
+        { type: `source`, key: `b`, action: `upsert`, value: 0 },
+        { type: `cleanup` },
+        { type: `restart` },
+        { type: `unsubscribe` },
+      ],
+      { continueAfterMismatch: true },
+    )
+  })
   it(`does not delete an independent public row when releasing a restarted demand`, async () => {
     oracleRoute(`fixed history`)
     await runPublicationHistory(
@@ -2941,6 +3016,26 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     }
   }
   const runs = 60 * multiplier
+  // Generated histories never write over a retained row (a failed replay's
+  // carried row): the random grammar inserts source writes into green
+  // lifecycle histories. The pinned zero-sign history below covers that path.
+  it(`reaches a zero-sign source write in the fixed campaign`, async () => {
+    const reach = createOracleReach(
+      `lifecycle-publication.zero-sign`,
+      [`zero-sign-write`],
+      { minimum: 5 },
+    )
+    for (const history of fc.sample(publicationCommandHistoryArbitrary, {
+      seed: 1_657_005,
+      numRuns: runs,
+    })) {
+      reach.beginHistory()
+      const before = zeroSignWrites
+      await runPublicationHistory(history)
+      if (zeroSignWrites > before) reach.reach(`zero-sign-write`)
+    }
+    reach.assertReached()
+  }, 120_000)
   fcTest.prop([publicationCommandHistoryArbitrary], {
     numRuns: runs,
     seed: 1_657_005,

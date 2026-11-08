@@ -1,5 +1,5 @@
 /**
- * # Reserved fields must be correct before user JavaScript consumes them.
+ * # Intermediate values keep authored fields until Collection publication.
  *
  * The shared input oracle states the maintainer's source/projection/inline law.
  * This finite receiver exhausts 1,155 root histories, 1,155 wrapped child
@@ -18,7 +18,7 @@
  *
  * Reconstruction retains every single-field collision and both populated union
  * branches with numeric/string keys. Removing path, shape, collision, boolean
- * or checkpoint loses a distinct sanitizer shortcut; the calibrated attacks
+ * or checkpoint loses a distinct authored-value or boundary shortcut; the calibrated attacks
  * below exhibit those consequences. Legal direct source returns cannot carry
  * authored overrides. Compiled Collection-valued inputs are the nearby rejected
  * form. Recursion is bounded at two QueryRefs, one LEFT join and flat child
@@ -286,11 +286,12 @@ const sourceFact: MetadataSourceFact = {
 test.each([
   `source-spoof`,
   `source-stripped`,
-  `projection-leak`,
+  `projection-stripped`,
   `inline-stripped`,
   `own-undefined-lost`,
   `mixed-before-after`,
   `late-capture-rewrite`,
+  `compiler-symbol`,
 ] as const)(`rejects a hostile callback-input observation: %s`, (fault) => {
   oracleRoute(`case`)
   const description = {
@@ -299,15 +300,26 @@ test.each([
     authoredPending: true,
   } as const
   const projected = { ...description, shape: `functional-spread` } as const
-  const use = fault === `projection-leak` ? projected : description
-  const inline = fault === `inline-stripped`
-  const expected = expectedMetadataInput(sourceFact, use, inline)
+  const direct = {
+    ...description,
+    shape: `functional-direct`,
+    collision: `none`,
+  } as const
+  const use =
+    fault === `projection-stripped`
+      ? projected
+      : fault.startsWith(`source-`) || fault === `mixed-before-after`
+        ? direct
+        : description
+  const expected = expectedMetadataInput(sourceFact, use)
   const hostile = structuredClone(expected)
+  if (fault === `compiler-symbol`)
+    hostile.symbols.push(Symbol(`compiler-state`))
   if (fault === `source-spoof`) hostile.fields.$collectionId!.value = `spoof`
   if (fault === `source-stripped` || fault === `inline-stripped`)
     hostile.fields.$key = { present: false, own: false, value: undefined }
-  if (fault === `projection-leak`)
-    hostile.fields.$key = { present: true, own: true, value: `spoof` }
+  if (fault === `projection-stripped`)
+    hostile.fields.$key = { present: false, own: false, value: undefined }
   if (fault === `own-undefined-lost`) delete hostile.ordinary.optional
   const next = expectedMetadataInput(
     {
@@ -316,7 +328,6 @@ test.each([
       pending: true,
     },
     use,
-    inline,
   )
   if (fault === `mixed-before-after`) hostile.fields = next.fields
   if (fault === `late-capture-rewrite`) hostile.ordinary.label = `later`
@@ -329,7 +340,7 @@ test.each([
   `omitted-peer`,
   `duplicate-peer`,
   `wrong-key-kind`,
-  `publication-only-sanitizer`,
+  `intermediate-sanitizer`,
   `missing-derived-field`,
 ] as const)(`rejects a hostile derived ordinary output: %s`, (fault) => {
   oracleRoute(`calibration`)
@@ -349,11 +360,11 @@ test.each([
   if (fault === `omitted-peer`) hostile.pop()
   if (fault === `duplicate-peer`) hostile.push(structuredClone(hostile[1]!))
   if (fault === `wrong-key-kind`) hostile[1]!.id = 1
-  if (fault === `publication-only-sanitizer`)
+  if (fault === `intermediate-sanitizer`)
     hostile[0]!.observed.fields.$collectionId = {
-      present: true,
-      own: true,
-      value: `spoof`,
+      present: false,
+      own: false,
+      value: undefined,
     }
   if (fault === `missing-derived-field`)
     Reflect.deleteProperty(hostile[0]!, `observed`)
@@ -425,7 +436,7 @@ test.each([`selected-virtual`, `own-undefined`] as const)(
       collision: `$collectionId`,
       authoredPending: false,
     } as const
-    const selected = expectedMetadataInput(sourceFact, description, true)
+    const selected = expectedMetadataInput(sourceFact, description)
     const child: Record<string, unknown> = {
       ...selected.ordinary,
       ...Object.fromEntries(
@@ -465,15 +476,11 @@ test.each([`unexpected`, `$collectionId`] as const)(
   `rejects an extra own field on an inline array: %s`,
   (field) => {
     oracleRoute(`calibration`)
-    const child = expectedMetadataInput(
-      sourceFact,
-      {
-        shape: `functional-projection`,
-        collision: `none`,
-        authoredPending: false,
-      },
-      true,
-    ).ordinary
+    const child = expectedMetadataInput(sourceFact, {
+      shape: `functional-projection`,
+      collision: `none`,
+      authoredPending: false,
+    }).ordinary
     const authored = { id: `parent`, children: [child] }
     const expected = expectedMetadataRecord(authored)
     const value = structuredClone(authored)

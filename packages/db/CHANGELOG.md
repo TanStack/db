@@ -1,5 +1,52 @@
 # @tanstack/db
 
+## 1.0.0-rc.1.4
+
+### Patch Changes
+
+- Restore nested-row query performance by keeping source payloads opaque during metadata cleanup and resolving includes along compiled paths. Intermediate projections, functional callback inputs, inline results and Effect outputs retain authored fields, while published Collection rows receive genuine computed metadata. ([#2356](https://github.com/TanStack/db/pull/2356))
+
+  Preserve child identities through outer joins and fan-out, and retain aggregate result types through expression wrappers.
+
+## 1.0.0-rc.1.3
+
+### Patch Changes
+
+- Keep live-query Collections across finite page changes under a DbClient, including React Suspense and Svelte, while preserving page-specific preload and hydration snapshots. Give independent React Suspense queries separate successful Collections so one query cannot move another query's page. Surface a private Suspense output's failed first load while it is showing copied ready rows, and keep its health independent of a peer's page-request failures. Fix initially disabled keyed query admission in Preact and Svelte, and finish hydration seed handoff when subset work settles without a row or status change. ([#2348](https://github.com/TanStack/db/pull/2348))
+
+- Preserve live-query observer data arrays and lazy state Maps across status-only and health-only snapshot updates. Keep value and ordering changes visible while retaining point-in-time snapshots. ([#2346](https://github.com/TanStack/db/pull/2346))
+
+  Keep snapshot invalidation fresh across discarded Collection publications. Publish nested record prototype changes, while preserving equal writes with the same shape.
+
+  Keep common equal object-valued Set comparisons linear, with polynomial matching for ambiguous unordered members. Preserve the exported deepEquals record policy while distinguishing prototype changes in Collection rows. Reject observer inputs without valid Collection revision clocks. Keep pooled live-query observers working when layout changes use their ordinary change stream.
+
+  Compare every array position so replacing a hole with a defined value publishes the change and refreshes observers.
+
+## 1.0.0-rc.1.2
+
+### Patch Changes
+
+- Keep adapter-owned live queries and their source subscriptions when only the ordered query's finite `.limit()` or `.offset()` changes. Preserve exact requested bounds and select only installed ranks when page windows include negative offsets. Keep Angular's list/findOne result shape consistent with the current query during reactive changes, and avoid React 18 layout-effect warnings during server rendering. ([#2316](https://github.com/TanStack/db/pull/2316))
+
+- Fix reserved metadata before `fn.select()`, `fn.where()`, and `fn.having()` callbacks in live queries, Effects, and correlated includes. Preserve genuine source metadata, authored inline values, and selected output when compiled queries share a cache. Preserve every ordered window and joined-source publication dependency when one source feeds multiple compiled views or nested queries. ([#2312](https://github.com/TanStack/db/pull/2312))
+
+- Accept `autoIndex` and `defaultIndexType` on live-query Collection and hook configs so downstream queries can index intermediate results. Keep independent React Suspense bindings' Collection options separate when they differ. Validate eager indexing declarations on every DbClient preload, including cached reuse. ([#2314](https://github.com/TanStack/db/pull/2314))
+
+- Preserve ordering invalidations raised while an ordered repair retires its previous acquisitions, including an adapter delete of a row in the repaired prefix. Revalidate the affected source prefix before publishing the repaired window. ([#2302](https://github.com/TanStack/db/pull/2302))
+
+- Reject negative `.limit()` values and negative limits passed to `setWindow()` before they can change a query or its active window. Keep zero limits and negative offsets working. ([#2333](https://github.com/TanStack/db/pull/2333))
+
+- Keep the last complete live-query result while a new include demand loads under a sibling subscription's truncate replay. The demand now joins the publication barrier when it starts, so a sibling that settles first cannot publish an incomplete replacement. A failed held demand keeps that result until its own coverage recovers or its demand retires. ([#2312](https://github.com/TanStack/db/pull/2312))
+
+- Preserve Collection rows and mutation originals while Solid `useLiveQuery` updates, including nested values, live getters, callable fields, and explicit undefined fields. Keep unchanged nested elements stable and avoid repeated expansion of shared acyclic values. ([#2307](https://github.com/TanStack/db/pull/2307))
+
+  Preserve enumerable own source fields through Core query selection, including user symbols and inherited-name shadows. Build nested projections without changing borrowed source data or retaining fields the authored object replaces.
+
+- Treat `-0` and `0` as distinct row values. A synced update, a replay that replaces a subscription's rows, and an optimistic update that change a field only from `-0` to `0` (or back) now publish a change; before, the Collection could store the new value while subscribers kept the old one. A draft write of `0` over `-0` is now recorded as a change instead of being dropped. A transaction that deletes a row and reinserts it with only a zero's sign changed now sends that update instead of dropping it, and an ordered live query or Effect (`orderBy`, with or without `limit`) now delivers an update that changes only a zero's sign; before, it kept the old value. Join, distinct, and grouping keys still treat `-0` and `0` as equal. A sync insert of a held key whose row differs only by a zero's sign is now a duplicate key, not an equal re-insert. The same holds inside typed arrays. An ordered Effect also delivers an update whose value is a class instance, which can change in private state its enumerable fields do not show. ([#2336](https://github.com/TanStack/db/pull/2336))
+
+- Updated dependencies [[`30e8546`](https://github.com/TanStack/db/commit/30e85464ed2b9b12c5f10981a062427a1fc8daaa), [`9be3c4e`](https://github.com/TanStack/db/commit/9be3c4ed2c8d9762d3837e38d8869483d50b07f6)]:
+  - @tanstack/db-ivm@1.0.0-rc.1.2
+
 ## 1.0.0-rc.1.1
 
 ### Patch Changes

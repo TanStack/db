@@ -175,7 +175,7 @@ describe(`virtual row field type boundary`, () => {
             .where(({ child }) => eq(child.id, row.id))
             .select(({ child }) => {
               expectTypeOf(child).toEqualTypeOf<
-                Ref<PublishedValueFor<Row, `row-root`>, false, true>
+                Ref<PublishedValueFor<Row, `row-root`>, false, false>
               >()
               return child
             }),

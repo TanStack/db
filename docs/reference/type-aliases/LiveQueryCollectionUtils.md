@@ -7,7 +7,7 @@ title: LiveQueryCollectionUtils
 type LiveQueryCollectionUtils = UtilsRecord & object;
 ```
 
-Defined in: [packages/db/src/query/live/collection-config-builder.ts:65](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/collection-config-builder.ts#L65)
+Defined in: [packages/db/src/query/live/collection-config-builder.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/collection-config-builder.ts#L69)
 
 ## Type Declaration
 
@@ -60,6 +60,8 @@ or 0 for `.limit(0).findOne()`); an ordered `findOne` has a movable window,
 and an unordered one is a fixed one-row result that accepts only its
 compiled limit at offset 0.
 
+Existing query-shape and reentrancy guards run before limit validation.
+
 #### Parameters
 
 ##### options
@@ -80,3 +82,11 @@ nor a `findOne`, or an unordered `findOne` would move its offset.
 #### Throws
 
 `SetWindowFindOneLimitError` if a `findOne` would change its limit.
+
+#### Throws
+
+`SetWindowReentrancyError` during synchronous graph or source work.
+
+#### Throws
+
+RangeError if the supplied limit is negative and those guards pass.

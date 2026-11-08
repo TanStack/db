@@ -33,7 +33,10 @@ const valueRelations: Array<{
     name: `different plain values`,
     pair: (n) => [{ a: n }, { a: n + 1 }, false],
   },
-  { name: `signed zero`, pair: () => [-0, 0, true] },
+  // -0 and 0 are distinct row values, so a version that changes only a
+  // zero's sign replaces the old one (maintainer decision 2026-11-02).
+  { name: `signed zero`, pair: () => [-0, 0, false] },
+  { name: `nested signed zero`, pair: () => [{ a: -0 }, { a: 0 }, false] },
   { name: `NaN`, pair: () => [NaN, Number.NaN, true] },
   { name: `typed scalars`, pair: (n) => [n, String(n), false] },
   { name: `dates`, pair: (n) => [new Date(n), new Date(n), true] },
@@ -110,6 +113,28 @@ const valueRelations: Array<{
       const left = /same/g
       const right = /same/g
       right.lastIndex = n + 1
+      return [left, right, false]
+    },
+  },
+  {
+    // Headers compare with ===, as in D2 value identity. Core's row equality
+    // ignores a RegExp's lastIndex, so a version that changes only it never
+    // reaches top-K.
+    name: `regexp position signed zero`,
+    pair: () => {
+      const left = /same/g
+      const right = /same/g
+      left.lastIndex = -0
+      right.lastIndex = 0
+      return [left, right, true]
+    },
+  },
+  {
+    name: `regexp position NaN`,
+    pair: () => {
+      const left = /same/g
+      const right = /same/g
+      left.lastIndex = right.lastIndex = NaN
       return [left, right, false]
     },
   },

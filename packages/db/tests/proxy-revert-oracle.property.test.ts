@@ -8,6 +8,7 @@ import {
   oracleRuns,
 } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
+import { createOracleReach } from './oracle-reach'
 
 /**
  * # Which draft writes count as changes, and which count as reverts?
@@ -24,7 +25,7 @@ import { declareOracle } from './oracle-declaration'
  *
  * "Equal" here is draft equality, which is stricter than `deepEquals`:
  *
- * 1. Primitives compare by value. `-0` equals `0`, and `NaN` equals `NaN`.
+ * 1. Primitives compare by SameValue: `-0` differs from `0`, and `NaN` equals `NaN`.
  * 2. Dates compare by timestamp. Invalid dates are equal.
  * 3. Regular expressions compare by source, flags, and `lastIndex`.
  * 4. Maps and Sets compare by entries or values in insertion order.
@@ -56,6 +57,9 @@ import { declareOracle } from './oracle-declaration'
  * `docs/contributing/oracle-reviews/code-weight-draft-proxy.md`. The
  * false-positive permission is a maintainer decision (2026-10-09), recorded in
  * `docs/contributing/oracle-reviews/proxy-revert-replaced-object.md`.
+ * The maintainer's FID-1 decision (2026-10-29), recorded in the coverage map,
+ * also requires user writes to preserve signed zero, including nested and
+ * floating typed-array values. This supersedes rule 1's earlier zero equivalence.
  *
  * Limits:
  * - The main histories write by assignment, delete, nested property write,
@@ -150,8 +154,13 @@ type Root = Partial<Record<Field, Spec>>
 function encode(spec: Spec | undefined): string {
   return JSON.stringify(canon(spec))
 }
+// SameValue preserves the sign that String(number) and JSON numbers erase.
+// This token is independent of the production draft comparator.
+function numberToken(value: number): string {
+  return Object.is(value, -0) ? `-0` : String(value)
+}
 function prim(v: Primitive | undefined): unknown {
-  return typeof v === `number` ? [`num`, String(v)] : [typeof v, v ?? null]
+  return typeof v === `number` ? [`num`, numberToken(v)] : [typeof v, v ?? null]
 }
 function canon(spec: Spec | undefined): unknown {
   if (spec === undefined) return [`absent`]
@@ -182,9 +191,9 @@ function canon(spec: Spec | undefined): unknown {
     case `rows`:
       return [`rows`, spec.rows.map((row) => prim(row.a))]
     case `typed`:
-      // Elements follow rule 1: -0 equals 0 and NaN equals NaN. The class is
+      // Elements follow rule 1: -0 differs from 0 and NaN equals NaN. The class is
       // part of the value.
-      return [`typed`, spec.ctor, spec.values.map(String)]
+      return [`typed`, spec.ctor, spec.values.map(numberToken)]
     case `url`:
       return [`url`, spec.path]
     case `point`:
@@ -510,6 +519,47 @@ const nestedRoundTripArb: fc.Arbitrary<History> = fc
     return { original: { f, g }, ops: [first, ...between, last] }
   })
 
+// A sign-only write must survive each assignment path. Random fields, nested
+// keys and typed-array positions vary the access path without another value
+// change masking a lost zero sign. Both signs are legal; Uint8Array is excluded
+// because native integer conversion cannot retain -0. Removing a path loses
+// its draft boundary; removing the sign distinction admits the old comparator.
+const signedZeroPaths = [`root`, `nested`, `float64`] as const
+const signedZeroArb = fc.record({
+  path: fc.constantFrom(...signedZeroPaths),
+  field: fc.constantFrom(...FIELDS),
+  negative: fc.boolean(),
+  key: fc.constantFrom(`a` as const, `b` as const, `sym` as const),
+  width: fc.integer({ min: 1, max: 3 }),
+  index: fc.nat(2),
+})
+type SignedZeroInput =
+  typeof signedZeroArb extends fc.Arbitrary<infer T> ? T : never
+function signedZeroHistory(input: SignedZeroInput): History {
+  const before = input.negative ? -0 : 0
+  const after = input.negative ? 0 : -0
+  let original: Spec
+  let op: Op
+  if (input.path === `root`) {
+    original = { k: `prim`, v: before }
+    op = { op: `set`, field: input.field, value: { k: `prim`, v: after } }
+  } else if (input.path === `nested`) {
+    original = { k: `obj`, [input.key]: before }
+    op = { op: `nested`, field: input.field, key: input.key, value: after }
+  } else {
+    const index = input.index % input.width
+    original = {
+      k: `typed`,
+      ctor: `f64`,
+      values: Array.from({ length: input.width }, (_, at) =>
+        at === index ? before : 1,
+      ),
+    }
+    op = { op: `index`, field: input.field, index, value: after }
+  }
+  return { original: { [input.field]: original }, ops: [op] }
+}
+
 // ---------------------------------------------------------------------------
 // Model: apply each op to the spec state. An op whose target has the wrong
 // shape does nothing, and the driver skips it the same way.
@@ -798,6 +848,7 @@ const NESTED_ROUND_TRIPS = `proxy.revert-nested-round-trips`
 const CLASS_WRITES = `proxy.revert-class-writes`
 const PARTIAL_REVERTS = `proxy.revert-partial-reverts`
 const NATIVE_HISTORIES = `proxy.revert-native-histories`
+const SIGNED_ZERO = `proxy.revert-signed-zero`
 
 const it = oracleReplayTest(vitestIt)
 
@@ -810,6 +861,43 @@ const randomPredicate =
   }
 
 describe(`draft revert oracle`, () => {
+  // These six fixed histories reconstruct the scalar false-green witness and
+  // its nested/Float64 neighbors in both directions. They use the generated
+  // campaign's model, draft driver and final getChanges/draft/isolation check.
+  const zeroExamples: Array<[SignedZeroInput]> = signedZeroPaths.flatMap(
+    (path) =>
+      [false, true].map((negative): [SignedZeroInput] => [
+        { path, negative, field: `f`, key: `a`, width: 1, index: 0 },
+      ]),
+  )
+  for (const campaign of [`fixed`, `random`] as const)
+    oracleReplayTest(vitestIt, ...(campaign === `fixed` ? [] : [SIGNED_ZERO]))(
+      `preserves sign-only writes through each draft path (${campaign})`,
+      () => {
+        const reach = createOracleReach(SIGNED_ZERO, signedZeroPaths, {
+          fixedHistories: zeroExamples.length,
+        })
+        let histories = 0
+        fc.assert(
+          fc.property(signedZeroArb, (input) => {
+            reach.beginHistory({ fixed: histories++ < zeroExamples.length })
+            expectHistory(signedZeroHistory(input))
+            reach.reach(input.path)
+          }),
+          {
+            ...oraclePropertyOptions(100, SIGNED_ZERO, {
+              examples: zeroExamples,
+            }),
+            ...(campaign === `fixed` ? { seed: FIXED_SEED } : {}),
+          },
+        )
+        reach.assertReached()
+        process.stdout.write(
+          `draft signed-zero ${campaign}: ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+        )
+      },
+    )
+
   it(`matches the model across generated write histories (${FIXED_SEED})`, () => {
     oracleRoute(`fixed seed`)
     fc.assert(fc.property(historyArb, expectHistory), {
@@ -1219,7 +1307,7 @@ describe(`draft revert oracle`, () => {
       },
     ],
     [
-      `-0 and NaN rewrites are not changes`,
+      `a zero-sign rewrite changes while NaN remains equal`,
       {
         original: { f: { k: `prim`, v: 0 }, g: { k: `prim`, v: NaN } },
         ops: [
@@ -1442,8 +1530,8 @@ function expectNativeHistory(history: NativeHistory): void {
 declareOracle({
   owns: [`src/proxy.ts`],
   check: [expectHistory, expectNativeResult],
-  model: [step, expectedChanges, nativeModel],
-  grammar: [nativeHistoryArb],
+  model: [numberToken, step, expectedChanges, nativeModel],
+  grammar: [signedZeroArb, signedZeroHistory, nativeHistoryArb],
 })
 
 describe(`draft revert oracle: native mutators mixed with assignments`, () => {

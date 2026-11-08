@@ -1133,3 +1133,17 @@ decreases by 59 gzip bytes and 38 Brotli bytes. Its typical app decreases by
 75 gzip bytes and increases by 26 Brotli bytes. Earlier source fingerprints and
 size figures remain historical. No oracle law, comparison, grammar or budget
 changes. Fresh CI must check this pushed head before merge.
+
+
+## Boundary-only policy revision, 2026-11-05
+
+The maintainer chose to preserve authored values in intermediate callbacks,
+inline results and Effect outputs. Published Collection row roots retain their
+computed metadata and existing source-attribution rules. This supersedes the
+October 28/30 callback-normalization policy described above; the historical
+findings and experiments remain intact. The
+[policy exploration](2026-11-05-metadata-policy-exploration.md) distinguishes
+the choices and source history. The
+[implementation evidence](2026-11-05-boundary-only-metadata.md) records the
+revised law, original-production RED, GREEN, mutants and limits. Independent
+ordered-loading, replay and framework repairs in #2312 remain in force.

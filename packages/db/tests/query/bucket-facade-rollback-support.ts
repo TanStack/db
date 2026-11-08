@@ -1,6 +1,9 @@
 import { D2, MultiSet } from '@tanstack/db-ivm'
 import { expect } from 'vitest'
-import { BucketFacadeAdapter } from '../../src/query/live/bucket-facade-adapter.js'
+import {
+  BucketFacadeAdapter,
+  resolvePublicValue,
+} from '../../src/query/live/bucket-facade-adapter.js'
 import { createTransaction } from '../../src/transactions.js'
 import { stripVirtualProps } from '../utils.js'
 import type { Collection } from '../../src/collection/index.js'
@@ -146,6 +149,7 @@ export class Driver {
         },
       ],
       () => {},
+      resolvePublicValue,
     )
     this.graph.finalize()
   }

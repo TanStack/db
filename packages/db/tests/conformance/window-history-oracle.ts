@@ -4,7 +4,11 @@
  * 2026-10-30, issue #2291). This extends the recompilation law in contract.ts.
  * Query identity still includes the page for cache/hydration lookup.
  *
- * This owner checks adapter-owned ordered list queries without a DbClient.
+ * This owner checks adapter-owned ordered list queries across framework drivers,
+ * including DbClient and Suspense modes (maintainer decision, 2026-11-03).
+ * The React and Svelte client receivers check JSON page seeds before local readiness,
+ * handoff to local rows and independent peers. React also checks client switches.
+ * Independent Suspense bindings own their Collections; neither may move a peer.
  * An explicit key still owns invalidation: an unchanged key keeps its query.
  * A changed key can reuse a window only when both plans have stable structured
  * identities and differ solely in the outer window. Opaque callbacks retain
@@ -31,6 +35,7 @@ import {
 } from '../oracle-config'
 import { expectOrderedRows, expectUnorderedRows } from './result-laws'
 import { ScenarioLifetime } from './scenario-lifetime'
+import { expectDisabledResult } from './disabled-laws'
 import type {
   ControllableHandle,
   LiveQueryDriver,
@@ -107,15 +112,17 @@ export function checkWindowObservation(
   if (expected.previousCollection !== undefined) {
     if (expected.retain)
       atOracleCheckpoint(`outer window retains Collection`, checkpoint, () =>
-        expect(actual.collection, `outer window retains Collection`).toBe(
-          expected.previousCollection,
-        ),
+        expect(
+          actual.collection === expected.previousCollection,
+          `outer window retains Collection`,
+        ).toBe(true),
       )
     else
       atOracleCheckpoint(`changed plan replaces Collection`, checkpoint, () =>
-        expect(actual.collection, `changed plan replaces Collection`).not.toBe(
-          expected.previousCollection,
-        ),
+        expect(
+          actual.collection === expected.previousCollection,
+          `changed plan replaces Collection`,
+        ).toBe(false),
       )
   }
 }
@@ -616,6 +623,14 @@ export function registerWindowHistoryOracle(driver: LiveQueryDriver) {
         )
       },
     )
+    registerPeerWindowOracle(driver)
+    if (driver.mountKeyedControllable) registerImmutableKeyOracle(driver)
+    // Disabled input is legal only for ordinary bindings that accept keys.
+    for (const receiver of driver.mountKeyedControllable &&
+    !driver.features?.suspendsUntilReady
+      ? [driver]
+      : [])
+      registerKeyedAdmissionOracle(receiver)
     registerPendingWindowOracle(driver)
     registerPublicationWindowOracle(driver)
     for (const nested of [false, true]) {
@@ -794,11 +809,18 @@ async function checkPendingWindowHistory(
         false,
       )
     await handle.flush()
-    const collection = handle.collection()
+    let collection = handle.collection()
     const failures: Array<unknown> = []
+    // Suspense publishes a fallback before its first successful return. It has
+    // no public Collection then; after readiness the same retention law applies.
+    const suspends = driver.features?.suspendsUntilReady === true
     const readiness = (ready: boolean, checkpoint: string) =>
       atOracleCheckpoint(`initial-query readiness`, checkpoint, () =>
-        expect(handle.current().isReady).toBe(ready),
+        suspends
+          ? expect(handle.isSuspended!(), `public Suspense fallback`).toBe(
+              !ready,
+            )
+          : expect(handle.current().isReady).toBe(ready),
       )
     const acquisitionPending = (pending: boolean, checkpoint: string) =>
       atOracleCheckpoint(`acquisition pending premise`, checkpoint, () =>
@@ -809,6 +831,22 @@ async function checkPendingWindowHistory(
     // last settled offset and recompute that page independently.
     const compare = (offset: number | undefined, checkpoint: string) => {
       try {
+        if (suspends && offset === undefined) {
+          expect(handle.isSuspended!(), `initial fallback is visible`).toBe(
+            true,
+          )
+          expect(
+            handle.collection(),
+            `no successful hook result yet`,
+          ).toBeNull()
+          return
+        }
+        // The previous complete page remains public during a later move. A
+        // stale renderHook result behind a fallback is not that observation.
+        if (suspends)
+          expect(handle.isSuspended!(), `settled page stays visible`).toBe(
+            false,
+          )
         const expectedRows = offset === undefined ? [] : expected(offset)
         checkWindowObservation(
           { rows: handle.current().data, collection: handle.collection() },
@@ -850,6 +888,7 @@ async function checkPendingWindowHistory(
       acquisitionPending(false, `initial ready`)
       readiness(true, `initial ready`)
       reach.reach(`initial ready`)
+      if (suspends) collection = handle.collection()
       compare(history.jump, `initial ready`)
 
       const firstMove = history.jump + history.width + 1
@@ -1195,4 +1234,572 @@ function registerPublicationWindowOracle(driver: LiveQueryDriver) {
 declareOracle({
   grammar: [publicationWindowArbitrary],
   check: [checkPublicationWindowHistory],
+})
+
+/** Independent bindings may read the same source, but their mutable pages are
+ * local. The shared sort/slice model judges both outputs after declarative and
+ * imperative moves, source writes, and retirement of the other binding. A
+ * supplied Collection is not generated: sharing one is explicit caller intent.
+ */
+async function checkPeerWindowHistory(
+  driver: LiveQueryDriver,
+  history: { width: number; jump: number },
+  reach: ReturnType<typeof createOracleReach<string>>,
+) {
+  const lifetime = new ScenarioLifetime()
+  let first: ControllableHandle<number> | undefined
+  let peer: ControllableHandle<number> | undefined
+  lifetime.defer(() => first?.unmount())
+  lifetime.defer(() => peer?.unmount())
+  await lifetime.run(async () => {
+    const rows = Array.from({ length: 12 }, (_, rank) => ({
+      id: String(rank),
+      rank,
+    }))
+    const source = driver.makeSource(rows)
+    lifetime.defer(() => source.collection.cleanup({ dependents: true }))
+    const build = (q: Parameters<QueryBuild>[0], offset: number) =>
+      q
+        .from({ row: source.collection })
+        .orderBy(({ row }: { row: WindowRow }) => row.rank)
+        .limit(history.width)
+        .offset(offset)
+        .select(({ row }: { row: WindowRow }) => ({ ...row }))
+    const mount = () =>
+      driver.mountKeyedControllable
+        ? driver.mountKeyedControllable<number>(
+            build,
+            (offset) => [`peer-window`, offset],
+            0,
+          )
+        : driver.mountControllable<number>(build, 0)
+    first = mount()
+    peer = mount()
+    await first.flush()
+    await peer.flush()
+    const firstCollection = first.collection()
+    const peerCollection = peer.collection()
+    const compare = (
+      handle: ControllableHandle<number>,
+      offset: number,
+      checkpoint: string,
+      previousCollection: unknown,
+    ) => {
+      const expected = windowRows(
+        rows,
+        {
+          offset,
+          limit: history.width,
+          minimum: -1,
+          descending: false,
+          nestedLimit: rows.length,
+        },
+        false,
+      )
+      checkWindowObservation(
+        { rows: handle.current().data, collection: handle.collection() },
+        { rows: expected, previousCollection, retain: true },
+        checkpoint,
+      )
+      checkWindowState(handle.current().state, expected, checkpoint)
+    }
+    checkWindowObservation(
+      { rows: peer.current().data, collection: peerCollection },
+      {
+        rows: windowRows(
+          rows,
+          {
+            offset: 0,
+            limit: history.width,
+            minimum: -1,
+            descending: false,
+            nestedLimit: rows.length,
+          },
+          false,
+        ),
+        previousCollection: firstCollection,
+        retain: false,
+      },
+      `independent equal-query outputs`,
+    )
+    reach.reach(`independent outputs`)
+    await first.setParam(history.jump)
+    compare(first, history.jump, `first hook page`, firstCollection)
+    compare(peer, 0, `peer after declarative move`, peerCollection)
+    reach.reach(`declarative isolation`)
+    // A public imperative move must obey the same ownership law. It does not
+    // change the authored input, so the first hook later returns declaratively.
+    await first.apply(() => {
+      void firstCollection!.utils.setWindow({
+        offset: history.jump + 1,
+        limit: history.width,
+      })
+    })
+    compare(first, history.jump + 1, `imperative page`, firstCollection)
+    compare(peer, 0, `peer after imperative move`, peerCollection)
+    reach.reach(`imperative isolation`)
+    const changed = { ...rows[0]!, rank: 20 }
+    rows[0] = changed
+    await peer.apply(() => source.update({ ...changed }))
+    compare(peer, 0, `peer source update`, peerCollection)
+    compare(first, history.jump + 1, `first source update`, firstCollection)
+    reach.reach(`source write isolation`)
+    first.unmount()
+    first = undefined
+    await peer.setParam(history.jump)
+    compare(peer, history.jump, `peer after other unmount`, peerCollection)
+    reach.reach(`peer survives retirement`)
+  })
+}
+function registerPeerWindowOracle(driver: LiveQueryDriver) {
+  for (const campaign of [`fixed`, `fresh`] as const) {
+    const property = windowHistoryProperty(driver, `peer-window-history`)
+    const test =
+      campaign === `fixed`
+        ? oracleReplayTest(it)
+        : oracleReplayTest(it, property)
+    test(`peer page histories (${campaign})`, async () => {
+      const reach = createOracleReach(
+        `${driver.name}/peer/${campaign}`,
+        [
+          `independent outputs`,
+          `declarative isolation`,
+          `imperative isolation`,
+          `source write isolation`,
+          `peer survives retirement`,
+        ],
+        { fixedHistories: pendingExamples.length },
+      )
+      let index = 0
+      const fidelity = createOracleFailureFidelity<{
+        width: number
+        jump: number
+      }>()
+      try {
+        await fidelity.assert(() =>
+          fc.assert(
+            fc.asyncProperty(pendingWindowArbitrary, async (history) => {
+              reach.beginHistory({ fixed: index++ < pendingExamples.length })
+              await fidelity.run(history, () =>
+                checkPeerWindowHistory(driver, history, reach),
+              )
+            }),
+            campaign === `fixed`
+              ? {
+                  numRuns: oracleRuns(6) + pendingExamples.length,
+                  seed: 2345,
+                  examples: pendingExamples,
+                }
+              : oraclePropertyOptions(6, property, {
+                  examples: pendingExamples,
+                }),
+          ),
+        )
+      } finally {
+        console.info(
+          `peer reach ${driver.name}/${campaign}`,
+          Object.fromEntries(reach.counts()),
+        )
+      }
+      reach.assertReached()
+    })
+  }
+}
+declareOracle({
+  grammar: [pendingWindowArbitrary],
+  check: [checkPeerWindowHistory],
+})
+
+// A disabled input admits no authored plan. The enablement contract therefore
+// precedes stable-key retention: first admit the enabled plan, then keep it
+// until its key changes. These histories cross the two formerly separate lanes.
+const keyedAdmissionArbitrary = fc.record({
+  count: fc.integer({ min: 2, max: 10 }),
+  offset: fc.integer({ min: 0, max: 1 }),
+})
+async function checkKeyedAdmission(
+  driver: LiveQueryDriver,
+  history: { count: number; offset: number },
+  reach: ReturnType<typeof createOracleReach<string>>,
+) {
+  const lifetime = new ScenarioLifetime()
+  let mounted:
+    | ControllableHandle<{
+        enabled: boolean
+        minimum: number
+        key: number
+      }>
+    | undefined
+  lifetime.defer(() => mounted?.unmount())
+  await lifetime.run(async () => {
+    const rows = Array.from({ length: history.count }, (_, rank) => ({
+      id: String(rank),
+      rank,
+    }))
+    const source = driver.makeSource(rows)
+    lifetime.defer(() => source.collection.cleanup({ dependents: true }))
+    const page = {
+      offset: history.offset,
+      limit: history.count,
+      minimum: -1,
+      descending: false,
+      nestedLimit: history.count,
+    }
+    const first = { enabled: false, minimum: -1, key: 0 }
+    mounted = driver.mountKeyedControllable!(
+      (q, input: typeof first) =>
+        input.enabled
+          ? q
+              .from({ row: source.collection })
+              .where(({ row }: { row: WindowRow }) =>
+                driver.ops.gt(row.rank, input.minimum),
+              )
+              .orderBy(({ row }: { row: WindowRow }) => row.rank)
+              .limit(page.limit)
+              .offset(page.offset)
+              .select(({ row }: { row: WindowRow }) => ({
+                id: row.id,
+                rank: row.rank,
+              }))
+          : null,
+      (input) => [`admission`, input.key],
+      first,
+    )
+    await mounted.flush()
+    expectDisabledResult(mounted.current(), driver.disabledRepresentation)
+    expect(
+      mounted.collection(),
+      `disabled input has no authored Collection`,
+    ).toBeNull()
+    reach.reach(`initial disabled`)
+    await mounted.setParam({ ...first, enabled: true })
+    checkWindowObservation(
+      { rows: mounted.current().data, collection: mounted.collection() },
+      { rows: windowRows(rows, page, false), retain: true },
+      `stable key first admits enabled plan`,
+    )
+    reach.reach(`enabled under same key`)
+    const collection = mounted.collection()
+    await mounted.setParam({ enabled: true, minimum: history.count, key: 0 })
+    checkWindowObservation(
+      { rows: mounted.current().data, collection: mounted.collection() },
+      {
+        rows: windowRows(rows, page, false),
+        previousCollection: collection,
+        retain: true,
+      },
+      `stable key retains admitted plan`,
+    )
+    reach.reach(`stable admitted plan`)
+    await mounted.setParam({ enabled: true, minimum: history.count, key: 1 })
+    checkWindowObservation(
+      { rows: mounted.current().data, collection: mounted.collection() },
+      {
+        rows: windowRows(rows, { ...page, minimum: history.count }, false),
+        previousCollection: collection,
+        retain: false,
+      },
+      `changed key admits changed plan`,
+    )
+    reach.reach(`changed key`)
+  })
+}
+function registerKeyedAdmissionOracle(driver: LiveQueryDriver) {
+  // Disabled inputs are not a Suspense overload. Its pending fallback law has
+  // separate receiving histories; ordinary identity-comparing bindings run here.
+  for (const campaign of [`fixed`, `fresh`] as const) {
+    const property = windowHistoryProperty(driver, `keyed-admission`)
+    const test =
+      campaign === `fixed`
+        ? oracleReplayTest(it)
+        : oracleReplayTest(it, property)
+    test(`initial disabled keyed admission (${campaign})`, async () => {
+      const reach = createOracleReach<string>(`${property}/${campaign}`, [
+        `initial disabled`,
+        `enabled under same key`,
+        `stable admitted plan`,
+        `changed key`,
+      ])
+      const fidelity = createOracleFailureFidelity<{
+        count: number
+        offset: number
+      }>()
+      try {
+        await fidelity.assert(() =>
+          fc.assert(
+            fc.asyncProperty(keyedAdmissionArbitrary, async (history) => {
+              reach.beginHistory()
+              await fidelity.run(history, () =>
+                checkKeyedAdmission(driver, history, reach),
+              )
+            }),
+            campaign === `fixed`
+              ? { numRuns: oracleRuns(6), seed: 2345 }
+              : oraclePropertyOptions(6, property),
+          ),
+        )
+        reach.assertReached()
+      } finally {
+        console.info(
+          `keyed admission reach ${driver.name}/${campaign}`,
+          Object.fromEntries(reach.counts()),
+        )
+      }
+    })
+  }
+}
+declareOracle({
+  grammar: [keyedAdmissionArbitrary],
+  check: [checkKeyedAdmission],
+})
+
+// Immutable explicit keys obey contract.ts (maintainer decision, 2026-11-03).
+// Equal values keep the authored query even when a new callback proposes a
+// different predicate. Changed nested values admit that predicate. Mutation is
+// outside the legal grammar; frozen key trees catch accidental fixture writes.
+// This lane covers plain records/arrays and JSON scalar leaves, not rich keys,
+// disabled admission, pending work, transport seeds or speculative host cuts.
+const immutableKeyArbitrary = fc.record({
+  count: fc.integer({ min: 3, max: 10 }),
+  label: fc.string({ maxLength: 8 }),
+  values: fc.array(
+    fc.oneof(fc.integer(), fc.string(), fc.boolean(), fc.constant(null)),
+    {
+      maxLength: 4,
+    },
+  ),
+  tail: fc.array(
+    fc.record({
+      object: fc.integer({ min: 0, max: 2 }),
+      array: fc.integer({ min: 0, max: 2 }),
+      minimum: fc.integer({ min: -1, max: 10 }),
+      reordered: fc.boolean(),
+    }),
+    { maxLength: 5 },
+  ),
+})
+type ImmutableKeyHistory =
+  typeof immutableKeyArbitrary extends fc.Arbitrary<infer T> ? T : never
+
+function immutableKey(
+  history: ImmutableKeyHistory,
+  object: number,
+  array: number,
+  reordered = false,
+): ReadonlyArray<unknown> {
+  const filter = Object.freeze({ minimum: object })
+  const clauses = Object.freeze([Object.freeze({ minimum: array })])
+  const values = Object.freeze([...history.values])
+  return Object.freeze([
+    `immutable-key`,
+    Object.freeze(
+      reordered
+        ? { values, clauses, filter, label: history.label }
+        : { label: history.label, filter, clauses, values },
+    ),
+  ])
+}
+
+// The two integers are model-only key equivalence classes. One names a value
+// under a record, the other under an array. Equality needs no production deep
+// comparator or hash. The authored minimum is separate: equal keys may propose
+// different queries, so the next render distinguishes it from the candidate.
+async function checkImmutableKeyHistory(
+  driver: LiveQueryDriver,
+  history: ImmutableKeyHistory,
+  reach: ReturnType<typeof createOracleReach<string>>,
+) {
+  const lifetime = new ScenarioLifetime()
+  let mounted:
+    | ControllableHandle<{
+        key: ReadonlyArray<unknown>
+        minimum: number
+      }>
+    | undefined
+  lifetime.defer(() => mounted?.unmount())
+  await lifetime.run(async () => {
+    const rows = Array.from({ length: history.count }, (_, rank) => ({
+      id: String(rank),
+      rank,
+    }))
+    const source = driver.makeSource(rows)
+    lifetime.defer(() => source.collection.cleanup({ dependents: true }))
+    const page = {
+      offset: 0,
+      limit: history.count,
+      minimum: -1,
+      descending: false,
+      nestedLimit: history.count,
+    }
+    const firstKey = immutableKey(history, 0, 0)
+    mounted = driver.mountKeyedControllable!(
+      (q, input: { key: ReadonlyArray<unknown>; minimum: number }) =>
+        q
+          .from({ row: source.collection })
+          .where(({ row }: { row: WindowRow }) =>
+            driver.ops.gt(row.rank, input.minimum),
+          )
+          .orderBy(({ row }: { row: WindowRow }) => row.rank)
+          .limit(page.limit)
+          .select(({ row }: { row: WindowRow }) => ({
+            id: row.id,
+            rank: row.rank,
+          })),
+      (input) => input.key,
+      { key: firstKey, minimum: -1 },
+    )
+    await mounted.flush()
+    let previous = { object: 0, array: 0 }
+    let minimum = -1
+    const compare = (
+      checkpoint: string,
+      previousCollection?: unknown,
+      retain = true,
+    ) => {
+      const expected = windowRows(rows, { ...page, minimum }, false)
+      checkWindowObservation(
+        { rows: mounted!.current().data, collection: mounted!.collection() },
+        {
+          rows: expected,
+          previousCollection,
+          retain,
+        },
+        checkpoint,
+      )
+      checkWindowState(mounted!.current().state, expected, checkpoint)
+    }
+    compare(`initial immutable key`)
+    // Each history reconstructs equal reference/deep-value proposals, then
+    // changes each nested path independently and restores the original key.
+    // Tail actions vary repetitions, returns, predicates and property order.
+    const steps = [
+      {
+        object: 0,
+        array: 0,
+        minimum: history.count,
+        key: firstKey,
+        cut: `same key object`,
+      },
+      {
+        object: 0,
+        array: 0,
+        minimum: history.count,
+        key: Object.freeze([...firstKey]),
+        cut: `fresh outer array`,
+      },
+      {
+        object: 0,
+        array: 0,
+        minimum: history.count,
+        key: immutableKey(history, 0, 0),
+        cut: `fresh equal nested values`,
+      },
+      {
+        object: 0,
+        array: 0,
+        minimum: history.count,
+        key: immutableKey(history, 0, 0, true),
+        cut: `reordered record properties`,
+      },
+      {
+        object: 1,
+        array: 0,
+        minimum: history.count,
+        key: immutableKey(history, 1, 0),
+        cut: `changed nested record value`,
+      },
+      {
+        object: 1,
+        array: 0,
+        minimum: -1,
+        key: immutableKey(history, 1, 0),
+        cut: `equal key after replacement`,
+      },
+      {
+        object: 1,
+        array: 1,
+        minimum: -1,
+        key: immutableKey(history, 1, 1),
+        cut: `changed nested array value`,
+      },
+      {
+        object: 0,
+        array: 0,
+        minimum: 0,
+        key: firstKey,
+        cut: `return to earlier key`,
+      },
+      ...history.tail.map((step) => ({
+        ...step,
+        key: immutableKey(history, step.object, step.array, step.reordered),
+        cut: `generated key proposal`,
+      })),
+    ]
+    for (const step of steps) {
+      const retain =
+        previous.object === step.object && previous.array === step.array
+      const collection = mounted.collection()
+      const changedPlan = minimum !== step.minimum
+      if (!retain) minimum = step.minimum
+      await mounted.setParam({ key: step.key, minimum: step.minimum })
+      // The driver's native settled cut supplies the real host witness. Check
+      // data, keyed state and Collection identity without normalizing output.
+      // An invalidated key with an identical plan leaves Collection reuse free.
+      compare(step.cut, retain || changedPlan ? collection : undefined, retain)
+      if (step.cut !== `generated key proposal`) reach.reach(step.cut)
+      previous = step
+    }
+  })
+}
+
+function registerImmutableKeyOracle(driver: LiveQueryDriver) {
+  for (const campaign of [`fixed`, `fresh`] as const) {
+    const property = windowHistoryProperty(driver, `immutable-key-history`)
+    const test =
+      campaign === `fixed`
+        ? oracleReplayTest(it)
+        : oracleReplayTest(it, property)
+    test(`immutable query key histories (${campaign})`, async () => {
+      const reach = createOracleReach<string>(
+        `${property}/${campaign}`,
+        [
+          `same key object`,
+          `fresh outer array`,
+          `fresh equal nested values`,
+          `reordered record properties`,
+          `changed nested record value`,
+          `equal key after replacement`,
+          `changed nested array value`,
+          `return to earlier key`,
+        ],
+        { minimum: oracleRuns(6) },
+      )
+      const fidelity = createOracleFailureFidelity<ImmutableKeyHistory>()
+      try {
+        await fidelity.assert(() =>
+          fc.assert(
+            fc.asyncProperty(immutableKeyArbitrary, async (history) => {
+              reach.beginHistory()
+              await fidelity.run(history, () =>
+                checkImmutableKeyHistory(driver, history, reach),
+              )
+            }),
+            campaign === `fixed`
+              ? { numRuns: oracleRuns(6), seed: 2345 }
+              : oraclePropertyOptions(6, property),
+          ),
+        )
+        reach.assertReached()
+      } finally {
+        console.info(
+          `immutable key reach ${driver.name}/${campaign}`,
+          Object.fromEntries(reach.counts()),
+        )
+      }
+    })
+  }
+}
+declareOracle({
+  grammar: [immutableKeyArbitrary],
+  check: [checkImmutableKeyHistory],
 })

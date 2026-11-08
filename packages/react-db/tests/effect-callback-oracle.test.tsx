@@ -42,7 +42,7 @@ test.each(callbackHistories)(
     await runCallbackHistory(
       history,
       {
-        mount: async ({ skipInitial, project, handlers }) => {
+        mount: async ({ skipInitial, ordered, project, handlers }) => {
           const source = createCollection(
             mockSyncCollectionOptions<CallbackRow>({
               id: `callback-react`,
@@ -51,9 +51,10 @@ test.each(callbackHistories)(
             }),
           )
           await source.preload()
-          const query = new Query()
-            .from({ row: source })
-            .fn.select(({ row }) => project(row))
+          const rows = new Query().from({ row: source })
+          const query = (
+            ordered ? rows.orderBy(({ row }) => row.id).limit(10) : rows
+          ).fn.select(({ row }) => project(row))
           const mounted = renderHook(
             ({ config }: { config: EffectConfig<CallbackOutput> }) =>
               useLiveQueryEffect(config),

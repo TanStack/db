@@ -656,7 +656,13 @@ function createPowerSyncCollectionConfig<
             message: `Could not start syncing process for ${viewName} into ${trackedTableName}`,
             error,
           })
-          if (!ready) fail(error)
+          if (!ready) {
+            fail(error)
+            // A failed first load ends this sync run, so its change watcher
+            // and any diff trigger it set up are released now, not at cleanup.
+            abortController.abort()
+            void disposeTrackingAfterAbort()
+          }
         })
 
         const invokeOnUnload = (): void | Promise<void> => {

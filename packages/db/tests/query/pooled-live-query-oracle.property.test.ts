@@ -114,6 +114,9 @@ const property = `pooled-live-query.publication`
 // A detached reader distinguishes a view that empties at cleanup from one
 // whose rows stay readable only if it held rows when the cleanup started.
 const reachStates = [
+  `wholesale-reader-compared`,
+  `granular-reader-compared`,
+  `detached-reader-compared`,
   `detached-reader-holds-rows-at-cleanup`,
   // The reader's peer was unmounted, so no listener watches its group.
   `unwatched-reader-holds-rows-at-cleanup`,
@@ -796,6 +799,7 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
         `${label} rows`,
       ).toEqual(reference.toArray.map((row) => describeRow(row)))
       expect(snapshot.status, `${label} status`).toBe(reference.status)
+      reach?.reach(`wholesale-reader-compared`)
       // The view itself, which the observer reads only when notified.
       expect(
         [...view.entries()].map(([, row]) => describeRow(row)),
@@ -804,6 +808,7 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
       expect(view.status, `${label} view status`).toBe(reference.status)
       // A reader that never subscribed sees the same rows and status.
       expectDetached(label, entry.detached, reference)
+      reach?.reach(`detached-reader-compared`)
       const model = entry.frozen ?? expectedRows(rows, peer)
       expect(
         [...snapshot.state!.values()].map(describeFields).sort(),
@@ -819,6 +824,7 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
       expect(entry.pooledChanges.sort(), `${label} granular changes`).toEqual(
         entry.referenceChanges.sort(),
       )
+      reach?.reach(`granular-reader-compared`)
       entry.pooledChanges.length = 0
       entry.referenceChanges.length = 0
       // A change in the ordered keys always advances the layout revision.
@@ -1132,7 +1138,12 @@ describe(`pooled live query oracle`, () => {
       return runGenerated(history)
     })
     afterAll(() => {
-      if (generatedRan) reach.assertReached()
+      if (generatedRan) {
+        process.stdout.write(
+          `pooled observer reach ${JSON.stringify(Object.fromEntries(reach.counts()))}\n`,
+        )
+        reach.assertReached()
+      }
     })
   }
 

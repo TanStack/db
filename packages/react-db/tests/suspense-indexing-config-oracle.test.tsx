@@ -3,8 +3,8 @@
  * settings, even when a peer already reads the same source and query. The
  * shared handoff owner's explicit-output law applies to each binding; cache
  * reuse cannot replace one binding's declaration with its peer's declaration.
- * Compatible declarations under the same query identity retain existing
- * Collection sharing. Mounted bindings retain their first options until query identity changes, as
+ * Equal declarations still produce independent output Collections
+ * (maintainer decision, 2026-11-03). Mounted bindings retain their first options until query identity changes, as
  * required by the approved first-options rule.
  *
  * The shared grammar exhausts both configurations and three identity relations:
@@ -40,11 +40,10 @@ import { afterAll, expect, test, vi } from 'vitest'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { DbProvider } from '../src/DbProvider'
 import {
+  expectIndependentIndexingOutputs,
   expectIndexingAdmission,
   expectIndexingConfiguration,
-  expectIndexingReuse,
   expectedIndexing,
-  expectedIndexingReuse,
   indexConfigurationPairs,
   indexConfigurations,
   indexOptionAbsencePairs,
@@ -65,11 +64,11 @@ declareOracle({
     `src/DbProvider.tsx#DbProvider`,
   ],
   grammar: [indexConfigurationPairs, indexOptionAbsencePairs],
-  model: [expectedIndexing, expectedIndexingReuse],
+  model: [expectedIndexing],
   check: [
     expectIndexingAdmission,
     expectIndexingConfiguration,
-    expectIndexingReuse,
+    expectIndependentIndexingOutputs,
   ],
 })
 
@@ -133,8 +132,8 @@ const pendingReaches = Object.fromEntries(
     scope,
     createOracleReach(`Suspense indexing pending/${scope}`, [
       `both-suspended`,
-      `shared-output`,
-      `separate-outputs`,
+      `equal-options`,
+      `different-options`,
       `mode-change`,
       `constructor-change`,
     ]),
@@ -310,11 +309,12 @@ test.each(histories)(
       const firstOutput = readyFirst ?? (await readFirst?.())
       const secondOutput = await readSecond?.()
       if (firstOutput) expectIndexingConfiguration(firstOutput, first)
-      expectIndexingReuse(firstOutput, secondOutput, first, second, identity)
+      expectIndependentIndexingOutputs(firstOutput, secondOutput, first, second)
       pendingReach?.reach(
-        expectedIndexingReuse(first, second, identity)
-          ? `shared-output`
-          : `separate-outputs`,
+        first.autoIndex === second.autoIndex &&
+          first.defaultIndexType === second.defaultIndexType
+          ? `equal-options`
+          : `different-options`,
       )
       reach.reach(`retained-first`)
       if (firstOutput) {

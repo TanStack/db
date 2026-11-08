@@ -1135,6 +1135,9 @@ const PROPERTY = `persisted-demand-coverage.history`
 const REQUIRED_PROPERTY = `persisted-demand-coverage.required`
 const RUNS = 40
 const REQUIRED_RUNS = 2
+// Nightly scales both history budgets; allow the same time per history while
+// keeping ordinary PR and replay runs bounded by the existing three minutes.
+const campaignTimeoutMs = oracleRuns(180_000)
 const REACH_STATES: ReadonlyArray<CoverageReach> = [
   `covered offline`,
   `uncovered offline`,
@@ -1452,7 +1455,7 @@ describe(`persisted demand coverage over generated histories`, () => {
       quietConsole()
       await campaign({ seed: 2102, numRuns: oracleRuns(RUNS) })
     },
-    180_000,
+    campaignTimeoutMs,
   )
 
   it.skipIf(oracleReplaySkips(PROPERTY, REQUIRED_PROPERTY))(
@@ -1462,6 +1465,6 @@ describe(`persisted demand coverage over generated histories`, () => {
       quietConsole()
       await campaign(oraclePropertyOptions(RUNS, PROPERTY))
     },
-    180_000,
+    campaignTimeoutMs,
   )
 })

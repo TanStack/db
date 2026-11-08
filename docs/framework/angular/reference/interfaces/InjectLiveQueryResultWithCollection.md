@@ -3,7 +3,7 @@ id: InjectLiveQueryResultWithCollection
 title: InjectLiveQueryResultWithCollection
 ---
 
-Defined in: [angular-db/src/index.ts:80](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L80)
+Defined in: [angular-db/src/index.ts:77](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L77)
 
 The status and flag signals every `injectLiveQuery` result has.
 
@@ -36,7 +36,7 @@ collection: Signal<
 | null>;
 ```
 
-Defined in: [angular-db/src/index.ts:87](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L87)
+Defined in: [angular-db/src/index.ts:84](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L84)
 
 ***
 
@@ -46,7 +46,7 @@ Defined in: [angular-db/src/index.ts:87](https://github.com/TanStack/db/blob/mai
 data: Signal<TResult[]>;
 ```
 
-Defined in: [angular-db/src/index.ts:86](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L86)
+Defined in: [angular-db/src/index.ts:83](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L83)
 
 ***
 
@@ -56,7 +56,7 @@ Defined in: [angular-db/src/index.ts:86](https://github.com/TanStack/db/blob/mai
 state: Signal<Map<TKey, TResult>>;
 ```
 
-Defined in: [angular-db/src/index.ts:85](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L85)
+Defined in: [angular-db/src/index.ts:82](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L82)
 
 ***
 
@@ -66,7 +66,7 @@ Defined in: [angular-db/src/index.ts:85](https://github.com/TanStack/db/blob/mai
 status: Signal<CollectionStatus | "disabled">;
 ```
 
-Defined in: [angular-db/src/index.ts:48](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L48)
+Defined in: [angular-db/src/index.ts:45](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L45)
 
 A signal containing the current status of the collection
 

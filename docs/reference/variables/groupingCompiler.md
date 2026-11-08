@@ -17,7 +17,7 @@ query IR, so apps that never group or aggregate do not bundle it.
 ### processGroupBy()
 
 ```ts
-processGroupBy: (pipeline, groupByClause, valueIdentity, isSourceRef, havingClauses?, selectClause?, fnHavingClauses?, aggregateCollectionId?, mainSource?, sanitizeCallbackRows) => NamespacedAndKeyedStream;
+processGroupBy: (pipeline, groupByClause, valueIdentity, isSourceRef, havingClauses?, selectClause?, fnHavingClauses?, mainSource?, sanitizeCallbackRows) => NamespacedAndKeyedStream;
 ```
 
 Processes the GROUP BY clause with optional HAVING and SELECT
@@ -54,10 +54,6 @@ Whether a ref reads a field of the query's own rows.
 ##### fnHavingClauses?
 
 (`row`) => `any`[]
-
-##### aggregateCollectionId?
-
-`string`
 
 ##### mainSource?
 

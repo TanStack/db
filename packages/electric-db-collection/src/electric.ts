@@ -1,4 +1,5 @@
 import {
+  FetchError,
   ShapeStream,
   isChangeMessage,
   isControlMessage,
@@ -118,6 +119,21 @@ type ElectricLifecycleEvidence = {
   seenTxids: Set<Txid>
   seenSnapshots: Array<PostgresSnapshot>
   hydratedResumeState?: ElectricResumeState
+}
+
+function hasEvidence(evidence: ElectricLifecycleEvidence, txId: Txid): boolean {
+  return (
+    evidence.seenTxids.has(txId) ||
+    evidence.seenSnapshots.some((snapshot) =>
+      isVisibleInSnapshot(txId, snapshot),
+    )
+  )
+}
+
+function clearEvidence(evidence: ElectricLifecycleEvidence): void {
+  evidence.seenTxids.clear()
+  evidence.seenSnapshots.length = 0
+  evidence.hydratedResumeState = undefined
 }
 
 type ElectricPendingMatch<T extends Row<unknown>> = {
@@ -916,6 +932,15 @@ class ElectricLifecycle<T extends Row<unknown>> {
   private nextWaiterId = 0
   private epoch = 0
   private active = false
+  // Evidence of retired runs. It counts once the current run is ready,
+  // because that run's rows are read after it (EVID-2).
+  private readonly retired: ElectricLifecycleEvidence = {
+    seenTxids: new Set(),
+    seenSnapshots: [],
+  }
+  private runReady = false
+  // The current run's failure: no evidence can arrive after it (EVID-2).
+  private failure: { error: unknown } | undefined
 
   constructor(private readonly collectionId?: string) {}
 
@@ -927,6 +952,8 @@ class ElectricLifecycle<T extends Row<unknown>> {
   start(): number {
     if (this.active) this.retire()
     this.active = true
+    this.runReady = false
+    this.failure = undefined
     this.epoch++
     this.matchBuffer = { committedMessages: [], pendingMessages: [] }
     return this.epoch
@@ -939,31 +966,61 @@ class ElectricLifecycle<T extends Row<unknown>> {
   retire(epoch?: number): void {
     if (epoch !== undefined && !this.isActive(epoch)) return
     this.active = false
-    this.epoch++
+    this.rejectWaits(new StreamAbortedError(this.collectionId))
+    this.matchBuffer = { committedMessages: [], pendingMessages: [] }
+    for (const txid of this.evidence.seenTxids) this.retired.seenTxids.add(txid)
+    this.retired.seenSnapshots.push(...this.evidence.seenSnapshots)
+    clearEvidence(this.evidence)
+  }
 
-    for (const match of this.pendingMatches.values()) {
-      clearTimeout(match.timeoutId)
-      match.reject(new StreamAbortedError(this.collectionId))
+  /** The run's first ready: retired evidence now counts (EVID-2). */
+  markReady(epoch: number): void {
+    if (!this.isActive(epoch)) return
+    this.runReady = true
+    this.resolveTxidWaiters()
+  }
+
+  /**
+   * The run failed: its pending waits reject, as later unmet ones do. An
+   * abort that stops the run can retire it first; the failure still counts
+   * until the next run starts.
+   */
+  fail(epoch: number, error: unknown): void {
+    if (epoch !== this.epoch) return
+    this.failure ??= { error }
+    this.rejectWaits(error)
+  }
+
+  private rejectWaits(error: unknown): void {
+    for (const waiter of [
+      ...this.pendingMatches.values(),
+      ...this.pendingTxidWaits.values(),
+    ]) {
+      clearTimeout(waiter.timeoutId)
+      waiter.reject(error as Error)
     }
     this.pendingMatches.clear()
-
-    for (const waiter of this.pendingTxidWaits.values()) {
-      clearTimeout(waiter.timeoutId)
-      waiter.reject(new StreamAbortedError(this.collectionId))
-    }
     this.pendingTxidWaits.clear()
-    this.matchBuffer = { committedMessages: [], pendingMessages: [] }
-    this.evidence.hydratedResumeState = undefined
   }
 
-  forgetEvidenceAfterScopedRecovery(): void {
-    this.evidence.seenTxids.clear()
-    this.evidence.seenSnapshots.length = 0
-    this.evidence.hydratedResumeState = undefined
+  forgetEvidence(): void {
+    clearEvidence(this.evidence)
+    clearEvidence(this.retired)
   }
 
+  /** Exported txids are those `awaitTxId` accepts now (EVID-2). */
   exportMeta(): ElectricSyncMeta {
-    return exportElectricSyncMeta(this.evidence)
+    return exportElectricSyncMeta(
+      this.runReady
+        ? {
+            ...this.evidence,
+            seenTxids: new Set([
+              ...this.retired.seenTxids,
+              ...this.evidence.seenTxids,
+            ]),
+          }
+        : this.evidence,
+    )
   }
 
   importMeta(meta: unknown): void {
@@ -990,10 +1047,8 @@ class ElectricLifecycle<T extends Row<unknown>> {
 
   private hasTxid(txId: Txid): boolean {
     return (
-      this.evidence.seenTxids.has(txId) ||
-      this.evidence.seenSnapshots.some((snapshot) =>
-        isVisibleInSnapshot(txId, snapshot),
-      )
+      hasEvidence(this.evidence, txId) ||
+      (this.runReady && hasEvidence(this.retired, txId))
     )
   }
 
@@ -1018,6 +1073,7 @@ class ElectricLifecycle<T extends Row<unknown>> {
       throw new ExpectedNumberInAwaitTxIdError(typeof txId, this.collectionId)
     }
     if (this.hasTxid(txId)) return true
+    if (this.failure) throw this.failure.error
 
     return new Promise((resolve, reject) => {
       const waitId = this.nextWaiterId++
@@ -1046,6 +1102,7 @@ class ElectricLifecycle<T extends Row<unknown>> {
       if (!matchFn(message)) continue
       return true
     }
+    if (this.failure) throw this.failure.error
     for (const message of this.matchBuffer.pendingMessages) {
       if (matchFn(message)) return this.registerMatch(matchFn, timeout, true)
     }
@@ -1628,7 +1685,7 @@ function createElectricSync<T extends Row<unknown>>(
     } = tagState
     if (freshScopedGeneration) clearTagTrackingState()
     const lifecycle = getLifecycle(params.collection)
-    if (freshScopedGeneration) lifecycle.forgetEvidenceAfterScopedRecovery()
+    if (freshScopedGeneration) lifecycle.forgetEvidence()
     const lifecycleEpoch = lifecycle.start()
     const isActiveLifecycle = () => lifecycle.isActive(lifecycleEpoch)
     Object.assign(params.collection.utils, lifecycle.utils)
@@ -1637,7 +1694,6 @@ function createElectricSync<T extends Row<unknown>>(
       begin,
       write,
       commit: commitSyncTransaction,
-      fail,
       truncate,
       collection,
       metadata,
@@ -1646,9 +1702,49 @@ function createElectricSync<T extends Row<unknown>>(
     // Collection still shows the previous run's status, so status cannot say
     // whether this run has reached its first ready.
     let ready = false
+    // READY-9: a give-up while the first snapshot's acceptance is pending
+    // fails the run once that acceptance makes it ready.
+    let gaveUpBeforeReady: { cause: unknown } | undefined
     const markReady = () => {
       ready = true
+      lifecycle.markReady(lifecycleEpoch)
       params.markReady()
+      if (gaveUpBeforeReady) giveUp(gaveUpBeforeReady.cause)
+    }
+    // A failure ends the run's waits (EVID-2).
+    const fail = (error: unknown) => {
+      lifecycle.fail(lifecycleEpoch, error)
+      params.fail(error)
+    }
+    // After the first ready, a retried outage shows only once five
+    // shape-log attempts in a row failed, so health does not flap on a blip
+    // (maintainer decision). The attempt that crossed the threshold reports
+    // it once; later attempts keep its failure. A response the client
+    // accepts ends the run of failures, and an applied up-to-date ends the
+    // outage, clearing its failure (HEALTH-1, HEALTH-2, RETRY-1). A give-up
+    // after ready ends health reports; the other failures abort the run.
+    let failedAttempts = 0
+    let outageFailure: unknown
+    let gaveUp = false
+    // A give-up after ready fails the run and ends its health reports.
+    const giveUp = (cause: unknown) => {
+      gaveUp = true
+      fail(cause)
+    }
+    const reportsHealth = () => ready && !gaveUp && isActiveLifecycle()
+    const reportRetry = (cause: unknown) => {
+      if (!reportsHealth() || abortController.signal.aborted) return
+      if (++failedAttempts === 5) params.reportError((outageFailure ??= cause))
+    }
+    const endOutage = () => {
+      const recovered = outageFailure
+      failedAttempts = 0
+      outageFailure = undefined
+      return () => {
+        if (recovered !== undefined && reportsHealth()) {
+          params.reportHealthy(recovered)
+        }
+      }
     }
     // The stream can give up (fail()) from several places; the first one
     // stops this sync run. Core ignores a later fail() in the same run, so
@@ -1759,7 +1855,7 @@ function createElectricSync<T extends Row<unknown>>(
       hasIncompatibleSourceProgress || hasPersistedReset
         ? {}
         : { offset: shapeOptions.offset, handle: shapeOptions.handle }
-    if (scopedRecovery) lifecycle.forgetEvidenceAfterScopedRecovery()
+    if (scopedRecovery) lifecycle.forgetEvidence()
     const usesChangesOnlyLog =
       syncMode === `on-demand` &&
       (!requiresFreshSourceEvidence || scopedRecovery)
@@ -1871,7 +1967,15 @@ function createElectricSync<T extends Row<unknown>>(
     // claim on readiness; a replacement session decides it.
     let sessionCleanedUp = false
     const failInitialSync = (cause: unknown) => {
-      if (firstSnapshotCommitted) return
+      if (firstSnapshotCommitted) {
+        // The Collection is already ready: a truncate commit made it so, or
+        // a reload's run started on a ready Collection. The give-up is then
+        // a post-ready failure; READY-9 defers only a first load's
+        // (maintainer decision).
+        if (collection.status === `ready`) giveUp(cause)
+        else gaveUpBeforeReady ??= { cause }
+        return
+      }
       initialSyncFailedFinally = true
       fail(cause)
     }
@@ -1885,11 +1989,22 @@ function createElectricSync<T extends Row<unknown>>(
       } else markReady()
     }
     // An external abort stops the source for good. Before the first ready,
-    // that is the final initial failure; cleanup aborts internally instead.
+    // that is the final initial failure; after it, deliberate or not, the
+    // source no longer syncs, so it is the source's error (maintainer
+    // decision). Cleanup aborts internally instead.
     const forwardExternalAbort = () => {
-      const fails = isActiveLifecycle() && !ready
+      const active = isActiveLifecycle()
       abortController.abort()
-      if (fails) failInitialSync(new StreamAbortedError(collectionId))
+      if (active) {
+        const error = new StreamAbortedError(collectionId)
+        if (ready) giveUp(error)
+        else {
+          // The waits end with the stream, also while READY-9 defers the
+          // Collection's failure.
+          lifecycle.fail(lifecycleEpoch, error)
+          failInitialSync(error)
+        }
+      }
       // A source that stops must end its reserved transaction. The initial
       // failure decides first: abandoning commits.
       abandonOpenTransaction()
@@ -1925,6 +2040,46 @@ function createElectricSync<T extends Row<unknown>>(
         requestedPosition.handle ??
         (canUsePersistedResume ? persistedResumeState.handle : undefined),
       signal: abortController.signal,
+      // The client retries a failed network attempt, 429, or 5xx itself, and
+      // onError decides another 4xx; each is a failed attempt. A subset
+      // snapshot request carries no abort signal: its attempts belong to its
+      // demand, not to the source (glossary, request error). The client's
+      // catch-up prefetches carry one, and count (maintainer decision
+      // 2026-11-02).
+      fetchClient: async (input, init) => {
+        const attempt = init?.signal
+        try {
+          // A fetch that throws before it returns is a failed attempt too.
+          const response = await (shapeOptions.fetchClient ?? fetch)(
+            input,
+            init,
+          )
+          if (!attempt) return response
+          if (response.ok || response.status === 409) failedAttempts = 0
+          else {
+            // Not `Object.fromEntries`: a DOM lib without iterable Headers
+            // also type-checks this source.
+            const headers: Record<string, string> = {}
+            response.headers.forEach((value, name) => (headers[name] = value))
+            // The client still reads the body, so the message names no text.
+            const url = String(input)
+            reportRetry(
+              new FetchError(
+                response.status,
+                undefined,
+                undefined,
+                headers,
+                url,
+                `HTTP Error ${response.status} at ${url}`,
+              ),
+            )
+          }
+          return response
+        } catch (error) {
+          if (attempt && !attempt.aborted) reportRetry(error)
+          throw error
+        }
+      },
       onError: async (errorParams) => {
         if (!isActiveLifecycle() || abortController.signal.aborted) return
         streamErrorVersion++
@@ -1948,8 +2103,12 @@ function createElectricSync<T extends Row<unknown>>(
           try {
             retry = await shapeOptions.onError(errorParams)
           } catch (error) {
+            // A throwing handler gives up with its error. Rethrown, it would
+            // reject the client's own start unobserved, so the run fails
+            // here and returning nothing stops the stream.
             failWaits(error)
-            throw error
+            if (ready) giveUp(error)
+            return
           }
           if (!retry || typeof retry !== `object`) failWaits(errorParams)
           return retry
@@ -2588,9 +2747,13 @@ function createElectricSync<T extends Row<unknown>>(
             () => undefined,
           )
         }
-        if (applied !== true) {
+        // Only the shape log's up-to-date shows the source recovered; a
+        // subset's end belongs to its demand.
+        const recover = commitPoint === `up-to-date` ? endOutage() : undefined
+        if (applied === true) recover?.()
+        else {
           void applied.then(
-            () => undefined,
+            () => recover?.(),
             (error: unknown) => {
               if (!isActiveLifecycle() || abortController.signal.aborted) {
                 return
@@ -2657,7 +2820,7 @@ function createElectricSync<T extends Row<unknown>>(
         rejectFullSnapshot(error)
         if (isActiveLifecycle() && !abortController.signal.aborted) {
           if (!ready) failInitialSync(error)
-          else fail(error)
+          else giveUp(error)
         }
         // A source that stops must end its reserved transaction. The initial
         // failure decides first: abandoning commits.

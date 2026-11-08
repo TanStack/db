@@ -8,6 +8,7 @@ import {
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import { createOracleReach } from './oracle-reach.js'
 import {
   historyRow,
   optimisticHistory,
@@ -36,6 +37,12 @@ import type { Collection } from '../src/collection/index.js'
  * restart, and while a reentrant restart's new transaction is still open, the
  * old run writes and commits a row. Cleanup ended that run, so the row never
  * appears and the commit returns `true`.
+ *
+ * A source insert of a held key is an equal re-insert only when its row value
+ * equals the held one; otherwise it throws `DuplicateKeySyncError`. Row values
+ * tell -0 from 0 (maintainer decision 2026-10-29), so values include -0, and
+ * an insert that differs from the held row only by a zero's sign is a
+ * duplicate (reach `sign-only-reinsert`).
  */
 
 type RetentionAction =
@@ -57,8 +64,19 @@ type RetentionHarness = {
 
 const retainedRowArbitrary = fc.record({
   id: fc.integer({ min: 0, max: 3 }),
-  value: fc.integer({ min: -2, max: 2 }),
+  // Zeros of both signs are common, so an insert often differs from the
+  // held row only by a zero's sign.
+  value: fc.oneof(
+    { weight: 3, arbitrary: fc.integer({ min: -2, max: 2 }) },
+    { weight: 1, arbitrary: fc.constant(0) },
+    { weight: 1, arbitrary: fc.constant(-0) },
+  ),
 })
+
+// Each generated campaign declares its own reach and checks it when it
+// ends; pinned replays record none.
+let retentionReach:
+  ReturnType<typeof createOracleReach<`sign-only-reinsert`>> | undefined
 
 function snapshotRetainedRow(row: RetainedRow): RetainedRow {
   return { id: row.id, value: row.value }
@@ -141,7 +159,17 @@ function applyAction(
   switch (action.type) {
     case `insert`: {
       const previous = model.get(action.row.id)
-      if (previous !== undefined && previous.value !== action.row.value) {
+      if (
+        previous !== undefined &&
+        previous.value === action.row.value &&
+        !Object.is(previous.value, action.row.value)
+      ) {
+        retentionReach?.reach(`sign-only-reinsert`)
+      }
+      if (
+        previous !== undefined &&
+        !Object.is(previous.value, action.row.value)
+      ) {
         expect(() =>
           sync.write({
             type: `insert`,
@@ -222,6 +250,7 @@ declareOracle({
 async function runRetentionHistory(
   actions: ReadonlyArray<RetentionAction>,
 ): Promise<void> {
+  retentionReach?.beginHistory()
   const harness = createRetentionHarness()
   const { collection } = harness
   const model = new Map<number, RetainedRow>()
@@ -448,28 +477,55 @@ it(`releases retained keys after long unique-key churn`, async () => {
   await runRetentionHistory(actions)
 })
 
-const retentionHistory = fc.array(retentionActionArbitrary, {
-  minLength: 1,
-  maxLength: 20,
-})
+// One element in ten writes a zero to a key, then inserts the other zero:
+// random actions rarely put the two next to each other.
+const signFlipArbitrary = fc
+  .record({ id: fc.integer({ min: 0, max: 3 }), zero: fc.constantFrom(0, -0) })
+  .map(({ id, zero }): Array<RetentionAction> => [
+    { type: `update`, row: { id, value: zero } },
+    { type: `insert`, row: { id, value: Object.is(zero, -0) ? 0 : -0 } },
+  ])
+const retentionHistory = fc
+  .array(
+    fc.oneof(
+      { weight: 9, arbitrary: retentionActionArbitrary.map((a) => [a]) },
+      { weight: 1, arbitrary: signFlipArbitrary },
+    ),
+    { minLength: 1, maxLength: 20 },
+  )
+  .map((elements) => elements.flat())
 
-fcTest.prop([retentionHistory], { numRuns: oracleRuns(100), seed: 1_902 })(
-  `matches retained authoritative state with a fixed seed`,
-  async (actions) => {
-    oracleRoute(`fixed seed`)
-    await runRetentionHistory(actions)
-  },
-)
-fcTest.prop(
-  [retentionHistory],
-  oraclePropertyOptions(100, `collection-state.retention`),
-)(
-  `matches retained authoritative state with a random or replayed seed`,
-  async (actions) => {
-    oracleRoute(`random seed`)
-    await runRetentionHistory(actions)
-  },
-)
+async function retentionCampaign(
+  campaign: string,
+  options: Parameters<typeof fc.assert>[1],
+): Promise<void> {
+  retentionReach = createOracleReach(
+    `collection-state.retention (${campaign})`,
+    [`sign-only-reinsert`],
+    { minimum: 5 },
+  )
+  try {
+    await fc.assert(
+      fc.asyncProperty(retentionHistory, runRetentionHistory),
+      options,
+    )
+    retentionReach.assertReached()
+  } finally {
+    retentionReach = undefined
+  }
+}
+
+it(`matches retained authoritative state with a fixed seed`, () => {
+  oracleRoute(`fixed seed`)
+  return retentionCampaign(`fixed`, { numRuns: oracleRuns(100), seed: 1_902 })
+})
+it(`matches retained authoritative state with a random or replayed seed`, () => {
+  oracleRoute(`random seed`)
+  return retentionCampaign(
+    `random`,
+    oraclePropertyOptions(100, `collection-state.retention`),
+  )
+})
 
 // The partial-update production path reuses those histories and marks source batches
 // partial from a separate stream, so the full-mode campaigns keep their
@@ -764,6 +820,20 @@ it(`writes distinguishing partial updates in the fixed partial campaign`, async 
     distinguishing += counts.distinguishingPartialUpdates
   }
   expect(distinguishing).toBeGreaterThan(0)
+})
+
+// Reach: an edit over an in-flight optimistic write that changes the
+// visible row only by a zero's sign. Neither the pending-writes flag nor
+// deep equality without signed zeros sees that change.
+it(`writes zero-sign edits over in-flight writes in the fixed campaign`, async () => {
+  oracleRoute(`fixed seed`)
+  const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 40 })
+  let zeroSignEdits = 0
+  for (const { initial, steps } of histories) {
+    const counts = await runOptimisticHistory(initial, steps)
+    zeroSignEdits += counts.zeroSignEditsOverPending
+  }
+  expect(zeroSignEdits).toBeGreaterThan(0)
 })
 
 // Fixed histories for a source delete of a key the source never held. The

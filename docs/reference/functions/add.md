@@ -4,10 +4,10 @@ title: add
 ---
 
 ```ts
-function add<T1, T2>(left, right): BinaryNumericReturnType;
+function add<T1, T2>(left, right): WithAggregate<BinaryNumericReturnType, [T1, T2]>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:617](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L617)
+Defined in: [packages/db/src/query/builder/functions.ts:528](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L528)
 
 ## Type Parameters
 
@@ -31,4 +31,4 @@ Defined in: [packages/db/src/query/builder/functions.ts:617](https://github.com/
 
 ## Returns
 
-`BinaryNumericReturnType`
+`WithAggregate`\<`BinaryNumericReturnType`, \[`T1`, `T2`\]\>

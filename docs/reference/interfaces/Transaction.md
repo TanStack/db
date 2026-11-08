@@ -3,7 +3,7 @@ id: Transaction
 title: Transaction
 ---
 
-Defined in: [packages/db/src/transactions.ts:350](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L350)
+Defined in: [packages/db/src/transactions.ts:351](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L351)
 
 ## Type Parameters
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/transactions.ts:350](https://github.com/TanStack/db
 autoCommit: boolean;
 ```
 
-Defined in: [packages/db/src/transactions.ts:362](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L362)
+Defined in: [packages/db/src/transactions.ts:363](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L363)
 
 ***
 
@@ -29,7 +29,7 @@ Defined in: [packages/db/src/transactions.ts:362](https://github.com/TanStack/db
 readonly collections: Set<Collection<any, any, any, any, any>>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:359](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L359)
+Defined in: [packages/db/src/transactions.ts:360](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L360)
 
 Every Collection that has tracked this transaction. Settlement recomputes
 each of them, including one whose mutations merged away.
@@ -42,7 +42,7 @@ each of them, including one whose mutations merged away.
 createdAt: Date;
 ```
 
-Defined in: [packages/db/src/transactions.ts:363](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L363)
+Defined in: [packages/db/src/transactions.ts:364](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L364)
 
 ***
 
@@ -52,7 +52,7 @@ Defined in: [packages/db/src/transactions.ts:363](https://github.com/TanStack/db
 optional error: object;
 ```
 
-Defined in: [packages/db/src/transactions.ts:366](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L366)
+Defined in: [packages/db/src/transactions.ts:367](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L367)
 
 #### error
 
@@ -74,7 +74,7 @@ message: string;
 id: string;
 ```
 
-Defined in: [packages/db/src/transactions.ts:351](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L351)
+Defined in: [packages/db/src/transactions.ts:352](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L352)
 
 ***
 
@@ -84,7 +84,7 @@ Defined in: [packages/db/src/transactions.ts:351](https://github.com/TanStack/db
 metadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:365](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L365)
+Defined in: [packages/db/src/transactions.ts:366](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L366)
 
 ***
 
@@ -94,7 +94,7 @@ Defined in: [packages/db/src/transactions.ts:365](https://github.com/TanStack/db
 mutationFn: MutationFn<T>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:353](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L353)
+Defined in: [packages/db/src/transactions.ts:354](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L354)
 
 ***
 
@@ -104,7 +104,7 @@ Defined in: [packages/db/src/transactions.ts:353](https://github.com/TanStack/db
 mutations: PendingMutation<T, OperationType, Collection<T, any, any, any, any>>[];
 ```
 
-Defined in: [packages/db/src/transactions.ts:354](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L354)
+Defined in: [packages/db/src/transactions.ts:355](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L355)
 
 ***
 
@@ -114,7 +114,7 @@ Defined in: [packages/db/src/transactions.ts:354](https://github.com/TanStack/db
 sequenceNumber: number;
 ```
 
-Defined in: [packages/db/src/transactions.ts:364](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L364)
+Defined in: [packages/db/src/transactions.ts:365](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L365)
 
 ***
 
@@ -124,7 +124,7 @@ Defined in: [packages/db/src/transactions.ts:364](https://github.com/TanStack/db
 state: TransactionState;
 ```
 
-Defined in: [packages/db/src/transactions.ts:352](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L352)
+Defined in: [packages/db/src/transactions.ts:353](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L353)
 
 ## Methods
 
@@ -134,7 +134,7 @@ Defined in: [packages/db/src/transactions.ts:352](https://github.com/TanStack/db
 applyMutations(mutations): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:566](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L566)
+Defined in: [packages/db/src/transactions.ts:567](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L567)
 
 Apply new mutations to this transaction, intelligently merging with existing mutations
 
@@ -171,7 +171,7 @@ Array of new mutations to apply
 commit(): Promise<Transaction<T>>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:745](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L745)
+Defined in: [packages/db/src/transactions.ts:746](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L746)
 
 Commit the transaction and execute the mutation function
 
@@ -230,7 +230,7 @@ console.log(tx.state) // "completed" or "failed"
 compareCreatedAt(other): number;
 ```
 
-Defined in: [packages/db/src/transactions.ts:817](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L817)
+Defined in: [packages/db/src/transactions.ts:818](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L818)
 
 Compare two transactions by their createdAt time and sequence number in order
 to sort them in the order they were created.
@@ -257,7 +257,7 @@ The other transaction to compare to
 completeWithoutCommit(): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:411](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L411)
+Defined in: [packages/db/src/transactions.ts:412](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L412)
 
 **`Internal`**
 
@@ -275,7 +275,7 @@ Complete a transaction whose work was already applied outside commit().
 mutate(callback): Transaction<T>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:475](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L475)
+Defined in: [packages/db/src/transactions.ts:476](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L476)
 
 Execute collection operations within this transaction
 
@@ -352,7 +352,7 @@ await tx.commit()
 rollback(config?): Transaction<T>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:638](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L638)
+Defined in: [packages/db/src/transactions.ts:639](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L639)
 
 Rollback the transaction and any conflicting transactions
 
@@ -423,7 +423,7 @@ try {
 setState(newState): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:417](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L417)
+Defined in: [packages/db/src/transactions.ts:418](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L418)
 
 #### Parameters
 
@@ -443,7 +443,7 @@ Defined in: [packages/db/src/transactions.ts:417](https://github.com/TanStack/db
 touchCollection(releasedHold): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:684](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L684)
+Defined in: [packages/db/src/transactions.ts:685](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L685)
 
 Tell every Collection that tracked this transaction that it changed. A
 failure in one Collection must not leave the others showing this
@@ -469,7 +469,7 @@ tracking Collections. Its mutations still name their Collection.
 when(_state): Promise<Transaction<T>>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:406](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L406)
+Defined in: [packages/db/src/transactions.ts:407](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L407)
 
 Wait for this transaction to complete successfully or fail.
 
