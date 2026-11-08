@@ -7,7 +7,11 @@ import { BaseQueryBuilder, Query } from '../../src/query/builder/index.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { CollectionHasSubscribersError } from '../../src/errors.js'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRuns,
+} from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
 import { declareOracle } from '../oracle-declaration.js'
 import {
@@ -79,6 +83,16 @@ async function expectPooledReleaseMatchesCollection(
 }
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/deferred.ts#createDeferred',
+    'src/errors.ts',
+    'src/live-query-observer.ts#createLiveQueryObserver',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/pooled-live-query.ts#createPooledLiveQuery',
+  ],
   check: [
     expectPooledReleaseMatchesCollection,
     checkCallbackHistory,
@@ -317,6 +331,7 @@ describe(`pooled live query gcTime`, () => {
     for (const path of [`ordinary`, `pooled`] as const) {
       for (const campaign of [`fixed`, `random`] as const) {
         it(`${title}: ${path} (${campaign})`, async () => {
+          oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
           const states = [
             path,
             `return`,
@@ -365,6 +380,7 @@ describe(`pooled live query gcTime`, () => {
    */
   for (const campaign of [`fixed`, `random`] as const) {
     it(`releases late cleanup registration channels (${campaign})`, async () => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(`pooled-late-cleanup`, [
         `return`,
         `throw`,
@@ -479,6 +495,7 @@ describe(`pooled live query gcTime`, () => {
   for (const gcTime of [1, 100, 0, Number.POSITIVE_INFINITY]) {
     for (const subscribe of [true, false]) {
       it(`matches a live-query Collection for gcTime ${gcTime}${subscribe ? `` : ` without a subscriber`}`, async () => {
+        oracleRoute(`case`)
         await expectPooledReleaseMatchesCollection(gcTime, subscribe)
       })
     }
@@ -768,11 +785,13 @@ describe(`pooled live query cleanup admission`, () => {
     ],
   }
   it(`keeps a view whose cleanup rejected in its partition`, async () => {
+    oracleRoute(`fixed history`)
     await expectPooledCleanupMatchesOrdinary(fixedHistory)
   })
 
   for (const campaign of [`fixed`, `random`] as const) {
     it(`matches a live-query Collection's cleanup admission (${campaign})`, async () => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(property, cleanupReachStates)
       await fc.assert(
         fc.asyncProperty(cleanupHistory, async (history) => {

@@ -4,6 +4,7 @@ import { Func, Value } from '../../../src/query/ir.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../oracle-config.js'
 import { declareOracle } from '../../oracle-declaration.js'
@@ -164,6 +165,10 @@ function findLikeMismatch(
 }
 
 declareOracle({
+  owns: [
+    'src/query/compiler/evaluators.ts#compileExpression',
+    'src/query/ir.ts',
+  ],
   check: [findLikeMismatch],
   model: [referenceLike],
   grammar: [seededLikeCases],
@@ -174,6 +179,7 @@ describe(`evaluators`, () => {
     describe(`function compilation`, () => {
       describe(`like/ilike functions`, () => {
         it(`rejects the literal-before-wildcard wrong result`, () => {
+          oracleRoute(`calibration`)
           const witness: LikeCase = {
             value: `100% done`,
             pattern: `100%done`,

@@ -33,6 +33,7 @@ import { PropRef } from '../../src/query/ir.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
+import { oracleRoute } from '../oracle-config.js'
 import type { Collection } from '../../src/collection/index.js'
 import type {
   LoadSubsetOptions,
@@ -252,13 +253,24 @@ async function expectIndexedPublicOrder(
   ])
 }
 
-declareOracle({ check: [expectIndexedPublicOrder] })
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/basic-index.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/ir.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  check: [expectIndexedPublicOrder],
+})
 
 for (const scenario of histories) {
   for (const IndexType of [BasicIndex, BTreeIndex]) {
     for (const direction of [`asc`, `desc`] as const) {
-      it(`${IndexType.name} preserves ${scenario.name} ${direction} public order across kind changes`, () =>
-        expectIndexedPublicOrder(scenario, IndexType, direction))
+      it(`${IndexType.name} preserves ${scenario.name} ${direction} public order across kind changes`, () => {
+        oracleRoute(`case`)
+        return expectIndexedPublicOrder(scenario, IndexType, direction)
+      })
     }
   }
 }
@@ -320,6 +332,7 @@ function evaluateNumericRequest(
 }
 
 it(`preserves a retained on-demand window after its index domain becomes mixed`, async () => {
+  oracleRoute(`fixed history`)
   const initial: Array<NumericRow> = [
     { id: `three`, value: 3 },
     { id: `five`, value: 5 },

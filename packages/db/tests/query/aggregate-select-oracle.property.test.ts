@@ -40,6 +40,7 @@ import {
   oraclePropertyOptions,
   oracleRandomParameters,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
@@ -1769,6 +1770,28 @@ async function runCampaign(
 // `modelGroup` and `modelError`. Generated histories, structural examples, and
 // existing model replays use this same check.
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/errors.ts',
+    'src/query/builder/functions.ts#add',
+    'src/query/builder/functions.ts#caseWhen',
+    'src/query/builder/functions.ts#coalesce',
+    'src/query/builder/functions.ts#count',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/functions.ts#gt',
+    'src/query/builder/functions.ts#inArray',
+    'src/query/builder/functions.ts#max',
+    'src/query/builder/functions.ts#sum',
+    'src/query/builder/functions.ts#upper',
+    'src/query/builder/group-keys.ts#groupKeys',
+    'src/query/builder/include-functions.ts#include',
+    'src/query/builder/include-functions.ts#materialize',
+    'src/query/builder/include-functions.ts#toArray',
+    'src/query/builder/index.ts',
+    'src/query/builder/query-ir.ts#getQueryIR',
+    'src/query/ir.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [runHistory],
   model: [modelGroup, modelError],
   grammar: [history],
@@ -1778,6 +1801,7 @@ describe(`aggregate select shapes`, () => {
   oracleReplayTest(it)(
     `match the model across generated shapes (fixed campaign)`,
     async () => {
+      oracleRoute(`fixed seed`)
       // Keep the literal budget/seed binding visible to the run-budget audit.
       const options = { numRuns: oracleRuns(160), seed: 2094 }
       await runCampaign(
@@ -1795,6 +1819,7 @@ describe(`aggregate select shapes`, () => {
   oracleReplayTest(it, PROPERTY)(
     `match the model across generated shapes (random or replayed)`,
     async () => {
+      oracleRoute(`random seed`)
       await runCampaign(
         `random`,
         oraclePropertyOptions(160, PROPERTY, { examples }),
@@ -1805,6 +1830,7 @@ describe(`aggregate select shapes`, () => {
   // Fixed regression of a review counterexample: a grouped select value that
   // holds the group key inside a function must read the group's key.
   oracleReplayTest(it)(`reads the group key inside a function`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory({
       top: {
         fields: { f0: { k: `add`, a: { k: `lit`, n: 0 }, b: { k: `key` } } },
@@ -1817,6 +1843,7 @@ describe(`aggregate select shapes`, () => {
   // Fixed regression: a published row keeps the select's field order, also
   // when a group key comes before a plain aggregate.
   oracleReplayTest(it)(`keeps the select's field order`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory({
       top: {
         fields: {
@@ -1834,6 +1861,7 @@ describe(`aggregate select shapes`, () => {
   oracleReplayTest(it)(
     `accepts HAVING beside a wrapped aggregate without groupBy`,
     async () => {
+      oracleRoute(`fixed history`)
       await runHistory({
         top: {
           fields: {
@@ -1861,6 +1889,7 @@ describe(`aggregate select shapes`, () => {
   oracleReplayTest(it)(
     `reads a parent field under a shadowing child alias`,
     async () => {
+      oracleRoute(`fixed history`)
       await runHistory({
         top: { fields: { f0: { k: `agg`, fn: `count` } } },
         nested: {

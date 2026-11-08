@@ -23,19 +23,28 @@ import { createOracleReach } from '../oracle-reach.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../oracle-config.js'
 import type { DistinctValue } from '../../../db-ivm/tests/distinct-incrementalization-oracle.js'
 
 const PROPERTY = `query.distinct-collisions`
 const values = distinctCollisionValues(hash)
-declareOracle({ check: [checkDistinctSnapshot], grammar: [distinctHistory] })
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  check: [checkDistinctSnapshot],
+  grammar: [distinctHistory],
+})
 
 for (const ordered of [false, true])
   for (const campaign of [`fixed`, `random`] as const)
     oracleReplayTest(it, ...(campaign === `random` ? [PROPERTY] : []))(
       `preserves public distinct collision rows, ordered=${ordered} (${campaign})`,
       async () => {
+        oracleRoute(campaign === `random` ? `random seed` : `fixed seed`)
         const reach = createOracleReach(PROPERTY, DISTINCT_REACH_STATES)
         await fc.assert(
           fc.asyncProperty(distinctHistory, async (worlds) => {

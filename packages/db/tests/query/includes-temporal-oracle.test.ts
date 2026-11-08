@@ -17,6 +17,7 @@ import { runTrace } from '../trace-runner.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -1294,6 +1295,20 @@ function temporalCampaigns(property: string, fixedSeed: number) {
 }
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/deferred.ts#createDeferred',
+    'src/errors.ts',
+    'src/indexes/basic-index.ts',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/include-functions.ts#materialize',
+    'src/query/builder/include-functions.ts#toArray',
+    'src/query/effect.ts#createEffect',
+    'src/query/expression-helpers.ts#extractSimpleComparisons',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/live/subset-demand-controller.ts',
+    'src/query/query-once.ts#queryOnce',
+  ],
   check: [
     expectReadinessMatches,
     expectScheduledDemandObservation,
@@ -1309,10 +1324,13 @@ declareOracle({
 })
 
 describe(`includes temporal oracle`, () => {
-  it(`an empty outer does not wait for an undemanded child`, () =>
-    expectReadinessMatches([]))
+  it(`an empty outer does not wait for an undemanded child`, () => {
+    oracleRoute(`fixed history`)
+    return expectReadinessMatches([])
+  })
 
   it(`loads a demanded child before becoming ready`, async () => {
+    oracleRoute(`fixed history`)
     await expectReadinessMatches([
       { id: 1, authorId: `selected`, title: `one` },
       { id: 2, authorId: `selected`, title: `two` },
@@ -1333,17 +1351,33 @@ describe(`includes temporal oracle`, () => {
   )) {
     campaign.test.prop([demandScheduler], campaign.options)(
       `acquisition settlements preserve current demand with ${campaign.label}`,
-      expectScheduledAcquisitionsRespectCurrentDemand,
+      (
+        ...args: Parameters<
+          typeof expectScheduledAcquisitionsRespectCurrentDemand
+        >
+      ) => {
+        oracleRoute(
+          campaign.label.startsWith(`fixed seed`)
+            ? `fixed seed`
+            : `random seed`,
+        )
+        return expectScheduledAcquisitionsRespectCurrentDemand(...args)
+      },
     )
   }
 
   it.each([{ order: [1, 2] }, { order: [2, 1] }])(
     `observes every completion in fixed scheduler order $order`,
-    ({ order }) =>
-      expectScheduledAcquisitionsRespectCurrentDemand(fc.schedulerFor(order)),
+    ({ order }) => {
+      oracleRoute(`case`)
+      return expectScheduledAcquisitionsRespectCurrentDemand(
+        fc.schedulerFor(order),
+      )
+    },
   )
 
   it(`rejects an obsolete child row at the first scheduled checkpoint`, () => {
+    oracleRoute(`calibration`)
     expect(() =>
       expectScheduledDemandObservation(
         {
@@ -1356,10 +1390,13 @@ describe(`includes temporal oracle`, () => {
     ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
   })
 
-  it(`reactivated demand retries after its prior release fails`, () =>
-    expectDemandReactivationRetriesAfterReleaseFailure([1]))
+  it(`reactivated demand retries after its prior release fails`, () => {
+    oracleRoute(`fixed history`)
+    return expectDemandReactivationRetriesAfterReleaseFailure([1])
+  })
 
   it(`rejects a failed release that suppresses reacquisition`, () => {
+    oracleRoute(`calibration`)
     expect(() =>
       expectReleaseReentryObservation(
         {
@@ -1392,7 +1429,18 @@ describe(`includes temporal oracle`, () => {
   )) {
     campaign.test.prop([releaseKeys], campaign.options)(
       `failed release never suppresses a later demand incarnation with ${campaign.label}`,
-      expectDemandReactivationRetriesAfterReleaseFailure,
+      (
+        ...args: Parameters<
+          typeof expectDemandReactivationRetriesAfterReleaseFailure
+        >
+      ) => {
+        oracleRoute(
+          campaign.label.startsWith(`fixed seed`)
+            ? `fixed seed`
+            : `random seed`,
+        )
+        return expectDemandReactivationRetriesAfterReleaseFailure(...args)
+      },
     )
   }
 
@@ -1425,8 +1473,12 @@ describe(`includes temporal oracle`, () => {
         })),
       ),
     )
-    it.each(cells)(`$consumer $shape: $history`, ({ consumer, shape, steps }) =>
-      expectLaggingSourceTraceMatches(consumer, shape, steps),
+    it.each(cells)(
+      `$consumer $shape: $history`,
+      ({ consumer, shape, steps }) => {
+        oracleRoute(`case`)
+        return expectLaggingSourceTraceMatches(consumer, shape, steps)
+      },
     )
   })
 
@@ -1450,6 +1502,11 @@ describe(`includes temporal oracle`, () => {
     campaign.test.prop([partialBodies], campaign.options)(
       `publishes each partial child prefix before the acquisition promise fulfills with ${campaign.label}`,
       async (bodies) => {
+        oracleRoute(
+          campaign.label.startsWith(`fixed seed`)
+            ? `fixed seed`
+            : `random seed`,
+        )
         for (const form of [`array`, `materialized`] as const) {
           const parents = createMutablePosts([
             { id: 1, authorId: `selected`, title: `Receiving children` },

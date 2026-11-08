@@ -92,6 +92,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -796,6 +797,16 @@ async function runHistory(history: History): Promise<void> {
 // properties reach them; the witness tests in where-predicate-publication.test.ts
 // do not.
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/basic-index.ts',
+    'src/query/builder/functions.ts#and',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/functions.ts#not',
+    'src/query/builder/functions.ts#or',
+    'src/query/ir.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [runHistory],
   model: [expectedTruth, expectedVisible],
 })
@@ -835,6 +846,7 @@ describe(`WHERE predicate publication oracle`, () => {
   // property selects.
   if (!oracleReplayRequested()) {
     it(`fixed snapshot histories distinguish Kleene logic from two-valued logic`, () => {
+      oracleRoute(`fixed history`)
       // A checker that folds UNKNOWN into FALSE before NOT must disagree with
       // the model on each fixed snapshot, or the history does not calibrate.
       const twoValued = (predicate: Predicate, row: ModelRow): boolean => {
@@ -879,18 +891,26 @@ describe(`WHERE predicate publication oracle`, () => {
       fixedPrefilteredSnapshot,
       ...fixedChangeHistories,
     ]) {
-      it(`publishes TRUE rows for ${history.kind} history ${describePredicate(history.predicate)}`, () =>
-        runHistory(history))
+      it(`publishes TRUE rows for ${history.kind} history ${describePredicate(history.predicate)}`, () => {
+        oracleRoute(`case`)
+        return runHistory(history)
+      })
     }
 
     fcTest.prop([historyArbitrary], {
       seed: 44_500_301,
       numRuns: oracleRuns(80),
-    })(`publishes exactly the TRUE rows (fixed)`, runHistory)
+    })(`publishes exactly the TRUE rows (fixed)`, (history) => {
+      oracleRoute(`fixed seed`)
+      return runHistory(history)
+    })
   }
 
   oracleReplayTest(fcTest, property).prop(
     [historyArbitrary],
     oraclePropertyOptions(80, property),
-  )(`publishes exactly the TRUE rows (random)`, runHistory)
+  )(`publishes exactly the TRUE rows (random)`, (history) => {
+    oracleRoute(`random seed`)
+    return runHistory(history)
+  })
 })

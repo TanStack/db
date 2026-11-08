@@ -48,7 +48,11 @@ import fc from 'fast-check'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { count } from '../../src/query/builder/functions.js'
 import { createCollection } from '../../src/collection/index.js'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRuns,
+} from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
@@ -258,17 +262,28 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
   }, [() => live.cleanup(), () => source.cleanup()])
 }
 
-declareOracle({ check: [runHistory], model: [expectedGroups] })
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/builder/functions.ts#count',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  check: [runHistory],
+  model: [expectedGroups],
+})
 
 describe(`grouped result key oracle`, () => {
   for (const [index, history] of fixedHistories.entries()) {
-    it(`keeps lookalike group values apart (fixed history ${index})`, () =>
-      runHistory(history))
+    it(`keeps lookalike group values apart (fixed history ${index})`, () => {
+      oracleRoute(`fixed history`)
+      return runHistory(history)
+    })
   }
 
   it.each([92_604_118, undefined])(
     `publishes one key of the key type per group (seed %s)`,
     async (seed) => {
+      oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
       const reach = createOracleReach(
         property,
         [

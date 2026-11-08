@@ -3,7 +3,11 @@ import fc from 'fast-check'
 import { Temporal } from 'temporal-polyfill'
 import { compileExpression } from '../../../src/query/compiler/evaluators.js'
 import { Func, PropRef, Value } from '../../../src/query/ir.js'
-import { oraclePropertyOptions, oracleRuns } from '../../oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRuns,
+} from '../../oracle-config.js'
 import { declareOracle } from '../../oracle-declaration.js'
 
 /**
@@ -223,7 +227,14 @@ function describeCase(testCase: InCase): string {
   return `value=${show(testCase.value)} list=[${testCase.list.map(show).join(`, `)}] listFromRow=${testCase.listFromRow}`
 }
 
-declareOracle({ check: [check], model: [referenceIn] })
+declareOracle({
+  owns: [
+    'src/query/compiler/evaluators.ts#compileExpression',
+    'src/query/ir.ts',
+  ],
+  check: [check],
+  model: [referenceIn],
+})
 
 describe(`in evaluator`, () => {
   const property = fc.property(inCase, (testCase) =>
@@ -231,10 +242,12 @@ describe(`in evaluator`, () => {
   )
 
   it(`agrees with the reference over a fixed campaign`, () => {
+    oracleRoute(`fixed seed`)
     fc.assert(property, { numRuns: oracleRuns(2000), seed: 0x2029 })
   })
 
   it(`agrees with the reference over a random or replayed campaign`, () => {
+    oracleRoute(`random seed`)
     fc.assert(property, oraclePropertyOptions(2000, PROPERTY))
   })
 
@@ -260,12 +273,14 @@ describe(`in evaluator`, () => {
     ],
     [`an empty list`, `a`, [], false],
   ] as const)(`fixed history %s`, (_name, value, list, expected) => {
+    oracleRoute(`case`)
     const testCase = { value, list: [...list], listFromRow: false }
     expect(referenceIn(value, testCase.list)).toBe(expected)
     check(evaluateWithProduction, testCase)
   })
 
   it(`rejects an evaluator that compares raw values`, () => {
+    oracleRoute(`calibration`)
     // Calibration: without normalization a Date never equals its timestamp
     // and equal byte arrays are different objects.
     const raw: Evaluate = ({ value, list }) =>
@@ -281,6 +296,7 @@ describe(`in evaluator`, () => {
   })
 
   it(`rejects display-text equality for equivalent Duration forms`, () => {
+    oracleRoute(`case`)
     const seconds = Temporal.Duration.from({ seconds: 1 })
     const milliseconds = Temporal.Duration.from({ milliseconds: 1000 })
     const textual: Evaluate = ({ value, list }) =>

@@ -21,6 +21,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createTransaction } from '../../src'
 import { declareOracle } from '../oracle-declaration'
+import { oracleRoute } from '../oracle-config'
 import {
   assertRows,
   deferred,
@@ -56,7 +57,16 @@ function apply(rows: Array<Row>, kind: Kind, owner: number): Array<Row> {
   return [...rows.filter((value) => value.id !== row.id), row]
 }
 
-declareOracle({ model: [apply] })
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db-wrapper.ts#deleteDatabase',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+    'src/transactions.ts#createTransaction',
+  ],
+  model: [apply],
+})
 
 const pairCells = kinds.flatMap((first) =>
   kinds.flatMap((second) =>
@@ -67,6 +77,7 @@ const pairCells = kinds.flatMap((first) =>
 )
 describe('admitted native writes retain their actual outcome after closure', () => {
   it.each(pairCells)('%j', async ({ first, second, reason, reverse }) => {
+    oracleRoute(`case`)
     // Both queued aborts and FIFO commits are reachable, including abort of the
     // later transaction before the earlier transaction finishes.
     for (const outcomes of [
@@ -202,6 +213,7 @@ describe('admitted native writes retain their actual outcome after closure', () 
 for (const reason of reasons) {
   for (const kind of ['insert', 'update', 'delete'] as const) {
     it(`publishes accepted ${kind} before caller settlement after ${reason}`, async () => {
+      oracleRoute(`case`)
       await withHarness(async (h) => {
         await seed(h.db, 'items', initial)
         const c = await h.open()
@@ -258,6 +270,7 @@ for (const reason of reasons) {
 
 for (const kind of kinds) {
   it(`confirms native-committed ${kind} if explicit close precedes its continuation`, async () => {
+    oracleRoute(`case`)
     await withHarness(async (h) => {
       await seed(h.db, 'items', initial)
       const c = await h.open()
@@ -318,6 +331,7 @@ const mixedCells = prefixes.flatMap((a) =>
 it.each(mixedCells)(
   'retains independent operation prefixes at closure: %j',
   async ({ a, b, reason, abort }) => {
+    oracleRoute(`case`)
     await withHarness(async (h) => {
       await seed(h.db, 'items', initial)
       const operations = [a, b]

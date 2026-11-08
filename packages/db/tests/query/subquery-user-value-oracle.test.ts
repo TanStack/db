@@ -10,6 +10,7 @@ import { buildQuery } from '../../src/query/builder/index.js'
 import { compileQuery } from '../../src/query/compiler/index.js'
 import { collectCollectionSources } from '../../src/query/ir.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
+import { oracleRoute } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { stripVirtualProps } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
@@ -124,6 +125,16 @@ function expectedFindOneCandidates(
 }
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/builder/functions.ts#count',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/include-functions.ts#materialize',
+    'src/query/builder/index.ts#buildQuery',
+    'src/query/compiler/index.ts#compileQuery',
+    'src/query/ir.ts#collectCollectionSources',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [expectPublicSnapshotFollowsModel],
   model: [
     expectedDistinctRows,
@@ -134,6 +145,7 @@ declareOracle({
 
 describe('subquery boundaries preserve operators and user rows', () => {
   it('joins the distinct subquery result before applying the outer WHERE', async () => {
+    oracleRoute(`fixed history`)
     const persons = createControlledCollection<Person>(
       'distinct-outer-persons',
       people,
@@ -224,6 +236,7 @@ describe('subquery boundaries preserve operators and user rows', () => {
   })
 
   it('recomputes a joined DISTINCT result after source writes', async () => {
+    oracleRoute(`fixed history`)
     const persons = createControlledCollection<Person>(
       'distinct-history-persons',
       people,
@@ -295,6 +308,7 @@ describe('subquery boundaries preserve operators and user rows', () => {
   })
 
   it('recomputes a joined aggregate QueryRef after source writes', async () => {
+    oracleRoute(`fixed history`)
     const initialItems = [{ id: 1 }, { id: 2 }]
     const initialPeople = [{ id: 2 }]
     const source = createControlledCollection(
@@ -371,6 +385,7 @@ describe('subquery boundaries preserve operators and user rows', () => {
   // count as the nested aggregate above. Check the exact public row when
   // source counts and matching people change.
   it('publishes a flat aggregate QueryRef join through source writes', async () => {
+    oracleRoute(`fixed history`)
     const source = createControlledCollection('flat-aggregate-items', [
       { id: 1 },
       { id: 2 },
@@ -434,6 +449,7 @@ describe('subquery boundaries preserve operators and user rows', () => {
   // The public builder documents findOne() as returning the first result.
   // The nested QueryRef must reduce the candidates before the outer join.
   it('publishes one ordered joined findOne QueryRef row through source writes', async () => {
+    oracleRoute(`fixed history`)
     const initialPeople = [
       { id: 1, groupId: 1 },
       { id: 2, groupId: 2 },
@@ -539,6 +555,7 @@ describe('subquery boundaries preserve operators and user rows', () => {
   })
 
   it('materializes one joined findOne value after source writes', async () => {
+    oracleRoute(`fixed history`)
     const initialPeople = [
       { id: 1, groupId: 1, scope: 1 },
       { id: 2, groupId: 2, scope: 1 },

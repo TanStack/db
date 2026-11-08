@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { declareOracle } from '../oracle-declaration.js'
+import { oracleRoute } from '../oracle-config.js'
 import { countEntries, withSpaceFixture } from './includes-space-helpers.js'
 import type { AdapterState } from './includes-space-helpers.js'
 
@@ -34,12 +35,24 @@ function expectedFacadeCount(rootCount: number): number {
   return rootCount + rootCount * 2 + rootCount * 2 * 5
 }
 
-declareOracle({ model: [expectedFacadeCount] })
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/local-only.ts#localOnlyCollectionOptions',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/include-functions.ts#include',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/live/bucket-facade-adapter.ts',
+  ],
+  model: [expectedFacadeCount],
+})
 
 describe(`nested Collection materialization space oracle`, () => {
   it.each([0, 1, 20])(
     `constructs exactly one facade per reachable bucket for %i roots`,
     async (rootCount) => {
+      oracleRoute(`case`)
       await withSpaceFixture(rootCount, async (fixture, entries) => {
         await fixture.live.preload()
 

@@ -95,6 +95,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -1053,6 +1054,17 @@ function expectSnapshotMatchesReference(
 }
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/live-query-observer.ts#createLiveQueryObserver',
+    'src/query/builder/functions.ts#and',
+    'src/query/builder/functions.ts#eq',
+    'src/query/builder/functions.ts#not',
+    'src/query/builder/index.ts',
+    'src/query/ir.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/pooled-live-query.ts#createPooledLiveQuery',
+  ],
   check: [runHistory, expectSnapshotMatchesReference],
   model: [expectedKeys, expectedRows],
 })
@@ -1072,6 +1084,7 @@ describe(`pooled live query oracle`, () => {
     // Generated fields are plain values; this covers a field whose getter
     // throws, which both paths treat as a row that does not match.
     it(`matches the live-query Collection when an eq path getter throws`, async () => {
+      oracleRoute(`fixed history`)
       const source = createCollection(
         mockSyncCollectionOptions<any>({
           id: `pooled-${serial++}`,
@@ -1106,13 +1119,18 @@ describe(`pooled live query oracle`, () => {
     })
 
     for (const { name, history } of fixedHistories) {
-      it(`matches the live-query Collection when ${name}`, () =>
-        runHistory(history))
+      it(`matches the live-query Collection when ${name}`, () => {
+        oracleRoute(`case`)
+        return runHistory(history)
+      })
     }
     fcTest.prop([historyArbitrary], {
       seed: 44_502_001,
       numRuns: oracleRuns(80),
-    })(`matches the live-query Collection (fixed)`, runGenerated)
+    })(`matches the live-query Collection (fixed)`, (history) => {
+      oracleRoute(`fixed seed`)
+      return runGenerated(history)
+    })
     afterAll(() => {
       if (generatedRan) reach.assertReached()
     })
@@ -1121,5 +1139,8 @@ describe(`pooled live query oracle`, () => {
   oracleReplayTest(fcTest, property).prop(
     [historyArbitrary],
     oraclePropertyOptions(80, property),
-  )(`matches the live-query Collection (random)`, runGenerated)
+  )(`matches the live-query Collection (random)`, (history) => {
+    oracleRoute(`random seed`)
+    return runGenerated(history)
+  })
 })

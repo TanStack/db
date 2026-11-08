@@ -48,6 +48,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -272,17 +273,26 @@ describe(`joined result key oracle`, () => {
         .map((row) =>
           typeof row.id === `number` ? String(row.id) : JSON.stringify(row.id),
         )
-        .join(` `)}`, () => runHistory(history))
+        .join(` `)}`, () => {
+        oracleRoute(`case`)
+        return runHistory(history)
+      })
     }
 
     fcTest.prop([historyArbitrary], {
       seed: 44_501_962,
       numRuns: oracleRuns(80),
-    })(`publishes one row per joined pair (fixed)`, runHistory)
+    })(`publishes one row per joined pair (fixed)`, (history) => {
+      oracleRoute(`fixed seed`)
+      return runHistory(history)
+    })
   }
 
   oracleReplayTest(fcTest, property).prop(
     [historyArbitrary],
     oraclePropertyOptions(80, property),
-  )(`publishes one row per joined pair (random)`, runHistory)
+  )(`publishes one row per joined pair (random)`, (history) => {
+    oracleRoute(`random seed`)
+    return runHistory(history)
+  })
 })
