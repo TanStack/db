@@ -1990,7 +1990,10 @@ function fixtureFiles(plan, state = initialState(plan)) {
     'tests/strict.ts': `export const strict = ${state.strict}\n`,
     // A workspace dependency with module state, linked through node_modules.
     'deps/state-dep/package.json': `{ "name": "state-dep", "private": true, "type": "module", "exports": "./index.js" }\n`,
-    'deps/state-dep/index.js': `const log = []\nexport function note(entry) {\n  log.push(entry)\n}\nexport function seen() {\n  return [...log]\n}\n`,
+    // It also refuses a second load into one realm through a global marker,
+    // as @tanstack/db's duplicate-instance check does in a browser window:
+    // each copy must load it as a fresh worker would.
+    'deps/state-dep/index.js': `const marker = Symbol.for('state-dep/loaded')\nif (globalThis[marker]) throw new Error('state-dep loaded twice in one realm')\nglobalThis[marker] = true\nconst log = []\nexport function note(entry) {\n  log.push(entry)\n}\nexport function seen() {\n  return [...log]\n}\n`,
     'tests/c.test.ts': ordinaryTestFile(plan),
     // A copy that a check which died left behind (the runner names its
     // copies `.oracle-gaps-<pid>-<n>-<file>`). It is no test file: a check

@@ -88,7 +88,18 @@ if (globalThis.__oracleGapsKilled?.capture !== run.capture)
   globalThis.__oracleGapsKilled = { capture: run.capture, mutants: new Set() }
 const killed = globalThis.__oracleGapsKilled.mutants
 const skippedCopy = unit !== undefined && killed.has(unit.mutant)
-if (run.units && !skippedCopy) vi.resetModules()
+// The global names the worker had before its first copy loaded. Resetting
+// modules gives a copy fresh module state, but a module may also mark
+// `globalThis` (a duplicate-instance check does), and that mark would
+// outlive the reset. Each copy starts from the worker's first globals, as in
+// a fresh worker; Vitest's names and this runner's stay.
+const firstGlobals = (globalThis.__oracleGapsGlobals ??= new Set(Reflect.ownKeys(globalThis)))
+const ownName = (key) => /^(__vitest|__VITEST|__oracle|vitest)/i.test(typeof key === `symbol` ? (key.description ?? ``) : key)
+if (run.units && !skippedCopy) {
+  for (const key of Reflect.ownKeys(globalThis))
+    if (!firstGlobals.has(key) && !ownName(key)) delete globalThis[key]
+  vi.resetModules()
+}
 const state = unit ? { ...run, ...unit } : run
 // The seed travels with each run's state, so a worker that a warm context
 // started under an earlier check's seed runs under this run's seed.
