@@ -643,6 +643,8 @@ async function driver(plan, observe) {
     }
     // A batch that a hang cut off reran its other items in a new context.
     if (cli.evidence?.rerun > 0) states.add(`a batch cut off by a hang reran the rest`)
+    // A loop that never ends was cut off by its call budget.
+    if (cli.evidence?.spin > 0) states.add(`a spin cut off by its call budget`)
     // A hang that waited on nothing was cut off for idleness.
     if (cli.evidence?.idle > 0) states.add(`a hang cut off for idleness`)
     // A mutant that changed no value was judged from the unmutated runs.
@@ -1082,6 +1084,7 @@ const required = [
   `a dropped field killed`,
   `an arithmetic swap killed`,
   `a hang cut off for idleness`,
+  `a spin cut off by its call budget`,
   `a copy waiting on I/O killed, not cut for idleness`,
   `a kill whose test's cleanup then threw`,
   `a test.prop kill whose last run passed`,
@@ -1110,7 +1113,7 @@ oracleProperty({
   law: {
     statement: `The gap report enumerates the promised operator mutants, leaves out exactly the probe-only code, discovers every oracle that owns a function's call tree and refuses broken ownership, judges each mutant only by its owners' tests on their registered routes and counts only law verdicts on reproducible routes as kills, which outrank a run that never ends, anchors each mutant by its function and normalized statement, lists every gap and unowned mutant once with consistent counts, keeps keys stable under unrelated edits, and reports through its daemon what a cold run reports at every state of a sequence of edits.`,
     authority: `The maintainer's decisions in design runs v11, v14, and v19 (2026-11-04 and 2026-11-05), not yet in the repository's decision register, including that a kill by reach agreement alone is a gap and that an incremental run through the daemon equals a cold one (v19.3); AGENTS.md on quiet exclusions; oracle-rubric ORC-006 outcome kinds; the CLI's documented operator list in schemata.mjs.`,
-    limits: `Hangs only as an owner test that awaits a promise that never settles, under a 1 s first budget and a 6 s full limit, and a slow run only as one witness that waits 3 s before it judges; no busy loops, slow runs past the full limit that would end, hangs in ordinary or nondeterministic tests, setup errors, loops, multi-line conditions, arrow or nested functions, two functions on one line, getters and setters, or await, new, and void statements; two source files of one package, with no re-exports, namespace imports, or calls into another package; no --only, --sample, or --diff-base; no probe-bound states, so reach agreement's killing of probe mutants is not checked; no gap answers or gate; law 9's edits leave out files read through fs, other environment variables, new files that change how an unchanged import resolves, Vite config and installed-package changes, and concurrent checks.`,
+    limits: `Hangs only as an owner test that awaits a promise that never settles, under a 1 s first budget and a 6 s full limit, and a slow run only as one witness that waits 3 s before it judges; busy loops only on instrumented code (cut by the call budget), no slow runs past the full limit that would end, hangs in ordinary or nondeterministic tests, setup errors, loops, multi-line conditions, arrow or nested functions, two functions on one line, getters and setters, or await, new, and void statements; two source files of one package, with no re-exports, namespace imports, or calls into another package; no --only, --sample, or --diff-base; no probe-bound states, so reach agreement's killing of probe mutants is not checked; no gap answers or gate; law 9's edits leave out files read through fs, other environment variables, new files that change how an unchanged import resolves, Vite config and installed-package changes, and concurrent checks.`,
     owner: `scripts/oracle-gaps`,
   },
   histories: {

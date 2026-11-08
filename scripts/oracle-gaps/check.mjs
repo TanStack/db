@@ -54,6 +54,10 @@ const sha1 = (text) => createHash(`sha1`).update(text).digest(`hex`)
 // a hang (capture-setup.mjs). The longest idle stretch measured in correct
 // tests was 51 ms (79,180 test runs, 2026-11-07), so this is ten times that.
 const IDLE_MS = 500
+// The least call budget a copy gets (capture-setup.mjs): mutation-helper calls
+// in one test before it counts as a loop that never ends. A file's budget is
+// a hundred times the most calls any of its unmutated tests made, if more.
+const CALL_FLOOR = 100_000
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // This CLI's own code and the framework it reads. They are part of the run
@@ -556,6 +560,7 @@ export default mergeConfig(base, {
           stopOnKill: items[i].stopOnKill ?? false,
           ignore: inCopy(copy, items[i].file, items[i].ignore ?? []),
           idleMs: items[i].idleMs ?? null,
+          callBudget: items[i].callBudget ?? null,
           idleHorizonMs: items[i].idleHorizonMs ?? null,
         },
       ]),
@@ -572,14 +577,25 @@ export default mergeConfig(base, {
     // The watchdog: each copy writes a closing row when it finishes, so the
     // copy that is running is the first without one. A copy that passes its
     // file's time limit is cut off.
-    // A copy that reported itself idle is cut off at once (capture-setup.mjs).
+    // A copy that reported itself idle, or past its call budget, is cut off
+    // at once (capture-setup.mjs).
     const idle = new Set()
+    const spun = new Set()
+    // When each copy's spin row was first seen. The budget's throw usually
+    // ends the loop and the copy finishes on its own; a copy still running
+    // IDLE_MS after it spun swallowed the throw and is cut off.
+    const spunAt = new Map()
     const finished = () => {
       if (!existsSync(capture)) return 0
       const done = new Set()
       for (const line of readFileSync(capture, `utf8`).split(`\n`)) {
         if (line.includes(`"closed":true`)) done.add(JSON.parse(line).file)
         if (line.includes(`"idle":true`)) idle.add(JSON.parse(line).file)
+        if (line.includes(`"spin":true`)) {
+          const file = JSON.parse(line).file
+          spun.add(file)
+          if (!spunAt.has(file)) spunAt.set(file, Date.now())
+        }
       }
       return copies.findIndex((copy) => !done.has(copy))
     }
@@ -594,7 +610,11 @@ export default mergeConfig(base, {
           current = at
           copyStarted = Date.now()
         }
-        if (idle.has(copies[current]) || Date.now() - copyStarted > items[current].limitMs)
+        if (
+          idle.has(copies[current]) ||
+          Date.now() - (spunAt.get(copies[current]) ?? Infinity) > IDLE_MS ||
+          Date.now() - copyStarted > items[current].limitMs
+        )
           return resolve(undefined)
         timer = setTimeout(poll, 50)
       }
@@ -613,11 +633,16 @@ export default mergeConfig(base, {
           const row = JSON.parse(line)
           const copy = copies.find((c) => row.key?.startsWith(`${c} > `) || row.file === c)
           if (copy && row.skipped) skipped.add(copy)
-          if (copy && !row.closed && !row.idle) rows.get(copy).push(row)
+          if (copy && row.spin) spun.add(copy)
+          if (copy && !row.closed && !row.idle && !row.spin) rows.get(copy).push(row)
         }
       return rows
     }
     const skippedUnit = (item) => ({ file: item.file, skipped: true })
+    // A copy that ran past its call budget, even one whose throw ended the
+    // loop and let it finish, is a timeout as it stands (a count, not a
+    // clock: no confirming run).
+    const spunUnit = (item) => ({ file: item.file, timedOut: true, spin: true, seconds })
     try {
       if (result === undefined) {
         // Cancelled without waiting; the caller replaces the context (see
@@ -631,6 +656,7 @@ export default mergeConfig(base, {
         return {
           units: items.slice(0, current).map((item, i) => {
             if (skipped.has(copies[i])) return skippedUnit(item)
+            if (spun.has(copies[i])) return spunUnit(item)
             const map = keyFor(copies[i], item.file)
             const own = rows.get(copies[i]).map((row) => ({ ...row, key: map(row.key) }))
             return {
@@ -652,6 +678,7 @@ export default mergeConfig(base, {
           }),
           timedOutAt: current,
           idle: idle.has(copies[current]),
+          spin: spun.has(copies[current]),
         }
       }
       // Errors outside any test cannot be attributed to one copy, so the
@@ -663,6 +690,7 @@ export default mergeConfig(base, {
         units: items.map((item, i) => {
           const copy = copies[i]
           if (skipped.has(copy)) return skippedUnit(item)
+          if (spun.has(copy)) return spunUnit(item)
           const map = keyFor(copy, item.file)
           const modules = result.testModules.filter((m) => m.moduleId === copy)
           return {
@@ -787,7 +815,7 @@ export default mergeConfig(base, {
     // at their time limit or for idleness (of them, `idle`), items rerun
     // after a cut-off batch, and mutants that changed no value and so needed
     // no run.
-    const evidence = { reused: 0, computed: 0, cut: 0, idle: 0, rerun: 0, unchanged: 0 }
+    const evidence = { reused: 0, computed: 0, cut: 0, idle: 0, spin: 0, rerun: 0, unchanged: 0 }
     // Each file's imports in its unmutated run. A run that timed out reports
     // none, so it is stored under these: a mutant changes no import.
     const fileInputs = new Map()
@@ -886,6 +914,7 @@ export default mergeConfig(base, {
         }
         batch.units.forEach((u, k) => {
           if (u.skipped) return
+          if (u.spin) evidence.spin += 1
           got[rest[k].i] = u
           remember(rest[k].id, rest[k].file, u, index)
           evidence.computed += 1
@@ -898,11 +927,12 @@ export default mergeConfig(base, {
         const full = limitFor(hung.file)
         evidence.cut += 1
         if (batch.idle) evidence.idle += 1
+        if (batch.spin) evidence.spin += 1
         await replace(slot)
         // A copy that already had the full limit, or that sat idle, is
         // final; any other is confirmed on the next free slot, so a mutant
         // that hangs in several files confirms them in parallel.
-        if (hung.limitMs >= full || batch.idle)
+        if (hung.limitMs >= full || batch.idle || batch.spin)
           settle(hung, { file: hung.file, timedOut: true, seconds: full / 1000 }, index)
         else
           confirming.push(
@@ -1175,6 +1205,15 @@ export default mergeConfig(base, {
     const ioFiles = new Set()
     for (const rows of [first.rows, second.rows])
       for (const [key, row] of rows) if (row.io) ioFiles.add(fileOf(key))
+    // Each file's call budget: a hundred times the most mutation-helper calls
+    // any of its unmutated tests made, and at least CALL_FLOOR. A copy past it
+    // is spinning (capture-setup.mjs) and is a timeout as it stands.
+    const mostCalls = new Map()
+    for (const rows of [first.rows, second.rows])
+      for (const [key, row] of rows)
+        if (!row.background)
+          mostCalls.set(fileOf(key), Math.max(mostCalls.get(fileOf(key)) ?? 0, row.calls ?? 0))
+    const callBudgetFor = (file) => Math.max(CALL_FLOOR, 100 * (mostCalls.get(file) ?? 0))
     const changesNothing = (mutant, targets) =>
       targets.oracleTargets.every(
         (file) => unmutatedUnits.has(file) && !valueChanges.get(file)?.has(mutant.number),
@@ -1240,6 +1279,8 @@ export default mergeConfig(base, {
             limitMs: firstLimitFor(file),
             // Idle detection only where no unmutated test of the file did I/O.
             idleMs: ioFiles.has(file) ? null : IDLE_MS,
+            // A loop that spins on instrumented code is cut by count.
+            callBudget: callBudgetFor(file),
             // Timers due after the full limit do not keep a copy busy.
             idleHorizonMs: limitFor(file),
             stopOnKill: true,

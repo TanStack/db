@@ -63,8 +63,14 @@ const statement = fc.oneof(
   ),
   // A boolean literal in production code, written out as text.
   fc.record({ kind: fc.constant(`flag`), value: fc.boolean() }),
-  // A loop that pushes twice.
-  fc.record({ kind: fc.constant(`loop`), quote }),
+  // A loop that pushes twice, or now and then one that pushes until the
+  // output has three entries: without its push that one spins forever on
+  // instrumented code, and each spin costs a cut, so it shares the loop's
+  // share of histories.
+  fc.oneof(
+    { arbitrary: fc.record({ kind: fc.constant(`loop`), quote }), weight: 3 },
+    { arbitrary: fc.record({ kind: fc.constant(`until`), quote }), weight: 1 },
+  ),
   fc.record({
     kind: fc.constant(`if`),
     op: comparison,
@@ -504,6 +510,14 @@ const witness = [
     body: [{ kind: `loop`, quote: `'` }],
     tests: [judging(`a`, `fixed seed`, 1)],
   },
+  // A loop that a judging test reaches: with its push deleted it spins
+  // forever on instrumented code, which its call budget cuts off.
+  {
+    id: `w_spin`,
+    owners: [`a`],
+    body: [{ kind: `until`, quote: `'` }],
+    tests: [judging(`a`, `fixed seed`, 1)],
+  },
   // A record that a judging test sees: each field drop and the arithmetic
   // swap change its JSON.
   {
@@ -589,6 +603,7 @@ const captureWitness = new Set([
   `w_cleanup`,
   `w_fcprop`,
   `w_record`,
+  `w_spin`,
 ])
 
 // ## Rendering and layout
@@ -678,6 +693,8 @@ function renderStatement(stmt, callText) {
       return [`out.push(String(${stmt.value}));`]
     case `loop`:
       return [`for (let i = 0; i < 2; i += 1) ${pushText(stmt)}`]
+    case `until`:
+      return [`while (out.length < 3) ${pushText(stmt)}`]
     case `record`:
       return [`out.push(JSON.stringify({ n: x + 1, s: 's${stmt.label}' }));`]
     case `depNote`:
@@ -1180,7 +1197,7 @@ function sitesOf(plan) {
         at(`arithmetic-swap`, `arith`, stmt.line, whole)
         at(`field-drop`, `dropS`, stmt.line, whole)
       }
-      if (stmt.kind === `loop`) {
+      if (stmt.kind === `loop` || stmt.kind === `until`) {
         at(`loop-false`, `loop`, stmt.line, whole)
         at(`binary-swap`, `swap`, stmt.line, whole)
         at(`delete-call`, `push`, stmt.line, pushText(stmt))
@@ -1386,6 +1403,24 @@ function interpret(plan, fnId, x, sites, active) {
           if (!(isActive(swapSite) ? i <= 2 : i < 2)) break
           write(stmt)
         }
+      // Pushes while the output is short of three entries; `<=` pushes to
+      // four. With its push deleted, a short output never grows: the loop
+      // never ends.
+      if (stmt.kind === `until`) {
+        const loopSite = siteOf(stmt, `loop`)
+        for (;;) {
+          reached.add(loopSite.id)
+          if (isActive(loopSite)) break
+          const swapSite = siteOf(stmt, `swap`)
+          reached.add(swapSite.id)
+          if (!(isActive(swapSite) ? trace.length <= 3 : trace.length < 3)) break
+          if (isActive(siteOf(stmt, `push`))) {
+            reached.add(siteOf(stmt, `push`).id)
+            throw new Spin()
+          }
+          write(stmt)
+        }
+      }
       // The workspace dependency's log, as a freshly loaded module has it.
       if (stmt.kind === `depNote`) {
         const call = siteOf(stmt, `note`)
@@ -1524,13 +1559,18 @@ function interpret(plan, fnId, x, sites, active) {
     }
   }
   let threw = false
+  let spun = false
   try {
     run(fnId)
-  } catch {
-    threw = true
+  } catch (error) {
+    if (error instanceof Spin) spun = true
+    else threw = true
   }
-  return { trace, threw, reached, outcomes }
+  return { trace, threw, spun, reached, outcomes }
 }
+
+/** A loop that never ends, as the interpreter sees one. */
+class Spin extends Error {}
 
 function judge(plan, tests, sites, active) {
   // A test runs its campaigns in order. Each failing judgment is a verdict
@@ -1546,10 +1586,12 @@ function judge(plan, tests, sites, active) {
       for (const part of partsOf(t)) {
         const base = interpret(plan, t.fn, part.input, sites)
         const mutated = interpret(plan, t.fn, part.input, sites, active)
+        const route = routeOf(t, part)
+        // A loop that never ends cuts the file's run off, as a hang does.
+        if (mutated.spun) return { t, route, hang: true, verdicts: found, changed: true }
         const changed =
           !mutated.threw && mutated.trace.join() !== base.trace.join()
         changedAny ||= changed
-        const route = routeOf(t, part)
         if (mutated.threw)
           return { t, route, crash: true, verdicts: found, changed: changedAny }
         // A test that hangs where another would judge never ends.

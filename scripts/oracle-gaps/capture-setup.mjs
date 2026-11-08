@@ -183,9 +183,27 @@ let inTest = false
 let currentFile
 const background = new Set()
 const active = state.mutant
+// Calls to the mutation helpers in the running test. A mutant that makes a
+// loop spin forever on instrumented code calls them without end, and a
+// worker stuck in such a loop never reaches a timer or a cancel. Past the
+// copy's budget (`callBudget`, from check.mjs: a hundred times the most calls
+// any unmutated test of the file made, and at least 100,000), the copy throws
+// from every helper call and writes a spin row, and the batch reports it as a
+// timeout. A count, unlike a clock, does not depend on load.
+let calls = 0
+let spun = false
 const hit = (id) => {
   ;(inTest ? hits : background).add(id)
   historyHits?.add(id)
+  if (inTest) calls += 1
+  if (spun || (state.callBudget && calls > state.callBudget)) spin()
+}
+function spin() {
+  if (!spun) {
+    spun = true
+    appendFileSync(state.capture, `${JSON.stringify({ file: thisFile, spin: true })}\n`)
+  }
+  throw new Error(`oracle-gaps: the copy's call budget ran out (a loop that never ends)`)
 }
 // The sites whose mutant would have changed a value here, in the running
 // test or, outside any test, in the file's background. A mutant that
@@ -557,6 +575,7 @@ beforeEach((context) => {
   installRandom(testKey(context.task))
   digest = createHash(`sha1`)
   count = 0
+  calls = 0
   uuids = new Map()
   identities = new Map()
   hits = new Set()
@@ -599,6 +618,7 @@ function finishTest(context) {
       count,
       observed: observations > 0 ? observed.digest(`hex`) : undefined,
       hits: [...hits],
+      calls,
       infected: [...infected],
       ...(sawIo ? { io: true } : {}),
       outcomes: [...outcomes],
