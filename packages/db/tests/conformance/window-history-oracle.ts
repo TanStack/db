@@ -26,6 +26,7 @@ import {
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../oracle-config'
 import { expectOrderedRows, expectUnorderedRows } from './result-laws'
@@ -634,6 +635,7 @@ export function registerWindowHistoryOracle(driver: LiveQueryDriver) {
             test(
               `${form} window histories (${campaign})`,
               async () => {
+                oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
                 // Registration's replay selector is the same one the ordinary suite uses.
                 const reach = createOracleReach(
                   `${driver.name}/${form}/${campaign}`,
@@ -713,6 +715,9 @@ export function registerWindowHistoryOracle(driver: LiveQueryDriver) {
   })
 }
 
+// Owns no production entry in packages/db: this module checks the public
+// observations that each framework driver passes it, so the framework packages
+// that run it own the entries it judges.
 declareOracle({
   model: [sameWindowPlan, windowRows],
   grammar: [windowHistoryArbitrary],
@@ -892,6 +897,9 @@ async function checkPendingWindowHistory(
   })
 }
 
+// Owns no production entry in packages/db: this module checks the public
+// observations that each framework driver passes it, so the framework packages
+// that run it own the entries it judges.
 declareOracle({
   grammar: [pendingWindowArbitrary],
   check: [checkPendingWindowHistory],
@@ -907,6 +915,7 @@ function registerPendingWindowOracle(driver: LiveQueryDriver) {
     test(
       `pending window histories (${campaign})`,
       async () => {
+        oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
         const reach = createOracleReach(
           `${driver.name}/${property}/${campaign}`,
           pendingStates,
@@ -1128,6 +1137,7 @@ function registerPublicationWindowOracle(driver: LiveQueryDriver) {
     test(
       `publication callback window histories (${campaign})`,
       async () => {
+        oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
         const reach = createOracleReach(
           `${driver.name}/${property}/${campaign}`,
           publicationWindowStates,
@@ -1179,6 +1189,9 @@ function registerPublicationWindowOracle(driver: LiveQueryDriver) {
   }
 }
 
+// Owns no production entry in packages/db: this module checks the public
+// observations that each framework driver passes it, so the framework packages
+// that run it own the entries it judges.
 declareOracle({
   grammar: [publicationWindowArbitrary],
   check: [checkPublicationWindowHistory],

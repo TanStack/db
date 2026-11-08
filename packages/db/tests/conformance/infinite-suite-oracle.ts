@@ -22,6 +22,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import { createOracleReach } from '../oracle-reach'
+import { oracleRoute } from '../oracle-config'
 import { declareOracle } from '../oracle-declaration.js'
 import {
   captureError,
@@ -174,6 +175,9 @@ function expectNoPagesAfterRejection(handle: InfiniteQueryHandle): void {
  * overlapping-window model predicts the committed prefix, its continuation, and
  * the retained error after overlapping window outcomes.
  */
+// Owns no production entry in packages/db: this module checks the public
+// observations that each framework driver passes it, so the framework packages
+// that run it own the entries it judges.
 declareOracle({
   check: [expectReadyObservationsMatchSource],
   model: [expectedOverlappingWindow],
@@ -198,7 +202,14 @@ export function runInfiniteQuerySuite(
   ) => {
     registry.register(key)
     const label = `[${key}] ${name}`
-    it(label, () => runScenario(state, fn), timeoutMs)
+    it(
+      label,
+      () => {
+        oracleRoute(`case`)
+        return runScenario(state, fn)
+      },
+      timeoutMs,
+    )
   }
 
   describe(`infinite-query conformance :: ${driver.name}`, () => {

@@ -944,7 +944,7 @@ describe(`SSR snapshot admission`, () => {
     }
     for (const history of ssrSnapshotExamples) {
       it(`replays ${hook} SSR ${history.preparation}/${history.sourceState}/${history.rows.length}`, async () => {
-        oracleRoute(`fixed history`)
+        oracleRoute(`case`)
         await checkHistory(history, makeReach())
       })
     }
@@ -1397,7 +1397,7 @@ describe(`stream render snapshot cut`, () => {
     { count: 1, writes: 0 },
   ])
     it(`replays count=${history.count} later-writes=${history.writes}`, () => {
-      oracleRoute(`fixed history`)
+      oracleRoute(`case`)
       return checkStreamCut(history, createStreamReach())
     })
   for (const campaign of [`fixed`, `random`] as const)
