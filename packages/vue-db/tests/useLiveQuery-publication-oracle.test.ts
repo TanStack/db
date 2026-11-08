@@ -31,6 +31,7 @@ import { createCollection } from '@tanstack/db'
 import { effectScope, watch } from 'vue'
 import { expect, it, vi } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 
@@ -100,6 +101,7 @@ function expectCoherentPublication(
 it.each(cases)(
   `publishes one coherent Vue data snapshot for a source $name through $input`,
   async ({ name, initial, change, input }) => {
+    oracleRoute(`case`)
     const source = createCollection(
       mockSyncCollectionOptions<Row>({
         id: `vue-publication-${name}-${input}`,
@@ -197,4 +199,7 @@ it.each(cases)(
   },
 )
 
-declareOracle({ check: [expectCoherentPublication] })
+declareOracle({
+  owns: [`src/useLiveQuery.ts#useLiveQuery`],
+  check: [expectCoherentPublication],
+})
