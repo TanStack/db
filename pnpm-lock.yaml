@@ -1153,9 +1153,12 @@ importers:
       react-dom:
         specifier: ^19.2.4
         version: 19.2.4(react@19.2.4)
+      vite-7:
+        specifier: npm:vite@^7.3.7
+        version: vite@7.3.7(@types/node@25.2.2)(jiti@2.7.0)(lightningcss@1.33.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)
       webpack:
         specifier: ^5.102.0
-        version: 5.112.0(esbuild@0.28.1)
+        version: 5.112.0(esbuild@0.28.1)(lightningcss@1.33.0)
 
   packages/capacitor-db-sqlite-persistence:
     dependencies:
@@ -13178,6 +13181,46 @@ packages:
       yaml:
         optional: true
 
+  vite@7.3.7:
+    resolution: {integrity: sha512-AHEzTORMbi7/7aXp7w7KZ5+DCUdSeLsJz0grY8xHpc9DHdYb0vQu6DqJfm2tOw3gDExNgPgnJTXxM6syYFHaCA==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    hasBin: true
+    peerDependencies:
+      '@types/node': ^20.19.0 || >=22.12.0
+      jiti: '>=1.21.0'
+      less: ^4.0.0
+      lightningcss: ^1.21.0
+      sass: ^1.70.0
+      sass-embedded: ^1.70.0
+      stylus: '>=0.54.8'
+      sugarss: ^5.0.0
+      terser: ^5.16.0
+      tsx: ^4.8.1
+      yaml: ^2.4.2
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
+      jiti:
+        optional: true
+      less:
+        optional: true
+      lightningcss:
+        optional: true
+      sass:
+        optional: true
+      sass-embedded:
+        optional: true
+      stylus:
+        optional: true
+      sugarss:
+        optional: true
+      terser:
+        optional: true
+      tsx:
+        optional: true
+      yaml:
+        optional: true
+
   vite@8.3.5:
     resolution: {integrity: sha512-z1YpjieJ9g0ebTmQpLBv/oq9E3F9EIlOe+7LahW8SrE3LTiG3udBRUXQOlYXP9b+IC2q2phHeVxj9xGlw34OEQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -24869,6 +24912,17 @@ snapshots:
       esbuild: 0.25.11
     optional: true
 
+  minimizer-webpack-plugin@5.13.1(esbuild@0.28.1)(lightningcss@1.33.0)(webpack@5.112.0(esbuild@0.28.1)(lightningcss@1.33.0)):
+    dependencies:
+      '@jridgewell/trace-mapping': 0.3.31
+      jest-worker: 27.5.1
+      schema-utils: 4.8.1(webpack@5.112.0(esbuild@0.28.1)(lightningcss@1.33.0))
+      terser: 5.51.2
+      webpack: 5.112.0(esbuild@0.28.1)(lightningcss@1.33.0)
+    optionalDependencies:
+      esbuild: 0.28.1
+      lightningcss: 1.33.0
+
   minimizer-webpack-plugin@5.13.1(esbuild@0.28.1)(webpack@5.112.0(esbuild@0.28.1)):
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
@@ -24878,6 +24932,7 @@ snapshots:
       webpack: 5.112.0(esbuild@0.28.1)
     optionalDependencies:
       esbuild: 0.28.1
+    optional: true
 
   minipass-collect@2.0.1:
     dependencies:
@@ -26525,6 +26580,15 @@ snapshots:
       webpack: 5.112.0(esbuild@0.25.11)
     optional: true
 
+  schema-utils@4.8.1(webpack@5.112.0(esbuild@0.28.1)(lightningcss@1.33.0)):
+    dependencies:
+      '@types/json-schema': 7.0.15
+      ajv: 8.20.0
+      ajv-formats: 3.0.1(ajv@8.20.0)
+      ajv-keywords: 5.1.0(ajv@8.20.0)
+    optionalDependencies:
+      webpack: 5.112.0(esbuild@0.28.1)(lightningcss@1.33.0)
+
   schema-utils@4.8.1(webpack@5.112.0(esbuild@0.28.1)):
     dependencies:
       '@types/json-schema': 7.0.15
@@ -26533,6 +26597,7 @@ snapshots:
       ajv-keywords: 5.1.0(ajv@8.20.0)
     optionalDependencies:
       webpack: 5.112.0(esbuild@0.28.1)
+    optional: true
 
   semver@6.3.1: {}
 
@@ -27785,6 +27850,24 @@ snapshots:
       tsx: 4.21.0
       yaml: 2.8.1
 
+  vite@7.3.7(@types/node@25.2.2)(jiti@2.7.0)(lightningcss@1.33.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1):
+    dependencies:
+      esbuild: 0.28.1
+      fdir: 6.5.0(picomatch@4.0.7)
+      picomatch: 4.0.7
+      postcss: 8.5.31
+      rollup: 4.64.12
+      tinyglobby: 0.2.17
+    optionalDependencies:
+      '@types/node': 25.2.2
+      fsevents: 2.3.3
+      jiti: 2.7.0
+      lightningcss: 1.33.0
+      sass: 1.90.0
+      terser: 5.51.2
+      tsx: 4.21.0
+      yaml: 2.8.1
+
   vite@8.3.5(@types/node@25.2.2)(esbuild@0.25.11)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1):
     dependencies:
       lightningcss: 1.33.0
@@ -28016,6 +28099,44 @@ snapshots:
       mime-db: 1.54.0
       minimizer-webpack-plugin: 5.13.1(esbuild@0.28.1)(webpack@5.112.0(esbuild@0.28.1))
       schema-utils: 4.8.1(webpack@5.112.0(esbuild@0.28.1))
+      tapable: 2.3.3
+      watchpack: 2.6.3
+      webpack-sources: 3.6.0
+    transitivePeerDependencies:
+      - '@minify-html/node'
+      - '@napi-rs/image'
+      - '@swc/core'
+      - '@swc/css'
+      - '@swc/html'
+      - clean-css
+      - cssnano
+      - csso
+      - esbuild
+      - html-minifier-terser
+      - imagemin
+      - lightningcss
+      - postcss
+      - sharp
+      - svgo
+      - uglify-js
+    optional: true
+
+  webpack@5.112.0(esbuild@0.28.1)(lightningcss@1.33.0):
+    dependencies:
+      '@types/estree': 1.0.9
+      '@types/json-schema': 7.0.15
+      '@webassemblyjs/ast': 1.14.1
+      '@webassemblyjs/wasm-edit': 1.14.1
+      '@webassemblyjs/wasm-parser': 1.14.1
+      browserslist: 4.28.1
+      chrome-trace-event: 1.0.4
+      enhanced-resolve: 5.26.0
+      es-module-lexer: 2.3.2
+      events: 3.3.0
+      graceful-fs: 4.2.11
+      mime-db: 1.54.0
+      minimizer-webpack-plugin: 5.13.1(esbuild@0.28.1)(lightningcss@1.33.0)(webpack@5.112.0(esbuild@0.28.1)(lightningcss@1.33.0))
+      schema-utils: 4.8.1(webpack@5.112.0(esbuild@0.28.1)(lightningcss@1.33.0))
       tapable: 2.3.3
       watchpack: 2.6.3
       webpack-sources: 3.6.0

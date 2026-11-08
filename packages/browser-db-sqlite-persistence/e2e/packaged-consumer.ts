@@ -27,11 +27,14 @@ export const packageDirectory = fileURLToPath(new URL(`../`, import.meta.url))
  * unset, which Vite treats as production; Vitest sets it to `test`, which
  * would keep development-only code in the bundle.
  */
-export async function buildForProduction(config: InlineConfig): Promise<void> {
+export async function buildForProduction(
+  config: InlineConfig,
+  viteBuild: typeof build = build,
+): Promise<void> {
   const nodeEnv = process.env.NODE_ENV
   process.env.NODE_ENV = `production`
   try {
-    await build(config)
+    await viteBuild(config)
   } finally {
     process.env.NODE_ENV = nodeEnv
   }

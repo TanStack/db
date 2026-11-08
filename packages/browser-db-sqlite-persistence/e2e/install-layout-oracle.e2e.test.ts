@@ -47,7 +47,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import { createServer, preview } from 'vite'
+import * as vite8 from 'vite'
+import * as vite7 from 'vite-7'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { buildForProduction } from './packaged-consumer'
 import type { Browser } from '@playwright/test'
@@ -68,11 +69,15 @@ type Layout =
 type Cache = `default` | `custom` | `dist`
 type Exclusion = `none` | `import name` | `package name`
 type Server = `development` | `production`
+// The major of the consumer's Vite: the dev server and the build that the
+// consumer runs.
+type ConsumerVite = 7 | 8
 type LayoutCase = {
   layout: Layout
   cache: Cache
   exclusion: Exclusion
   server: Server
+  vite: ConsumerVite
 }
 type LayoutOutcome =
   | { opens: false; workers: 0 | 1 }
@@ -106,6 +111,13 @@ function expectedOutcome(
   install: InstallFacts,
 ): LayoutOutcome {
   if (layoutCase.server === `production`) return { opens: true, workers: 1 }
+  // Authority: maintainer decision on TanStack/db#2371 (2026-11-08). Under Vite
+  // 8 the dependency optimizer keeps a moved copy's worker and WASM beside it,
+  // so the copy loads its own assets and never asks the dev server for the
+  // package by name. Every layout therefore opens with the imported copy.
+  if (layoutCase.vite === 8) {
+    return { opens: true, workers: 1, worker: `imported copy` }
+  }
   const excludedName =
     layoutCase.exclusion === `import name`
       ? install.importSpecifier
@@ -141,7 +153,7 @@ const layouts: Array<Layout> = [
   `two copies`,
   `two versions`,
 ]
-const layoutCases: Array<LayoutCase> = [
+const layoutCasesForOneVite: Array<Omit<LayoutCase, `vite`>> = [
   ...layouts.flatMap((layout) =>
     ([`default`, `custom`, `dist`] as const).map((cache) => ({
       layout,
@@ -169,6 +181,10 @@ const layoutCases: Array<LayoutCase> = [
     server: `production` as const,
   })),
 ]
+// Every history runs against a consumer on each Vite major.
+const layoutCases: Array<LayoutCase> = ([7, 8] as const).flatMap((vite) =>
+  layoutCasesForOneVite.map((layoutCase) => ({ ...layoutCase, vite })),
+)
 
 declareOracle({
   check: [expectLayoutOutcome],
@@ -197,7 +213,7 @@ afterAll(async () => {
 })
 
 it.each(layoutCases)(
-  `$server $layout install (cache $cache, excluded by $exclusion) matches the layout model`,
+  `vite $vite $server $layout install (cache $cache, excluded by $exclusion) matches the layout model`,
   async (layoutCase) => {
     const temporaryDirectory = realpathSync(
       mkdtempSync(join(realpathSync(tmpdir()), `db-wasm-layout-`)),
@@ -406,19 +422,24 @@ async function openInLayout(
             ],
           },
   }
-  let developmentServer: Awaited<ReturnType<typeof createServer>> | undefined
-  let productionServer: Awaited<ReturnType<typeof preview>> | undefined
+  // The consumer runs the Vite major that the case names.
+  const vite = (layoutCase.vite === 7 ? vite7 : vite8) as typeof vite8
+  let developmentServer: Awaited<ReturnType<typeof vite.createServer>> | undefined
+  let productionServer: Awaited<ReturnType<typeof vite.preview>> | undefined
   if (layoutCase.server === `production`) {
-    await buildForProduction({
-      ...config,
-      build: { outDir: join(appDirectory, `dist`) },
-    })
-    productionServer = await preview({
+    await buildForProduction(
+      {
+        ...config,
+        build: { outDir: join(appDirectory, `dist`) },
+      },
+      vite.build,
+    )
+    productionServer = await vite.preview({
       ...config,
       preview: { host: `127.0.0.1`, port: 0 },
     })
   } else {
-    developmentServer = await createServer({
+    developmentServer = await vite.createServer({
       ...config,
       // Files are written just before the server starts. A late watcher event
       // would reload the page during the open, so these servers do not watch.
