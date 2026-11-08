@@ -781,7 +781,16 @@ export const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
       type: fc.constant(`edit` as const),
       key: fc.integer({ min: 1, max: 3 }),
       // With no zero to flip, the edit writes zeros, so a later one can.
-      fields: fc.constant({ a: 0, b: 0, c: 0 }),
+      // A mapped constant, not an object constant: fast-check compares a
+      // constant by identity, so a fixed flip edit would not be a member of
+      // the language.
+      fields: fc.constant(0).map(
+        () => ({ a: 0, b: 0, c: 0 }),
+        (value) => {
+          if (isDeepStrictEqual(value, { a: 0, b: 0, c: 0 })) return 0
+          throw new Error(`not the zeros of a flip edit`)
+        },
+      ),
       optimistic: fc.boolean(),
       inHandler: fc.constant(undefined),
       flipZeros: fc.constant(true),

@@ -180,6 +180,48 @@ const cases: Array<{
     initial: [],
     steps: [edit({ a: 1 }), settle(0), sync([], true), sync([])],
   },
+  // The seed-1 random campaign's shrunk counterexample, found when the
+  // model compared visible rows through JSON, which erases a zero's sign.
+  // The rolled-back flipZeros edit turns the row's zeros back from 0 to -0,
+  // a visible change (-0 and 0 are distinct row values, maintainer
+  // decision 2026-10-29), so the settlement is not quiet.
+  {
+    name: `a rollback that only flips a zero's sign publishes`,
+    initial: [],
+    steps: [
+      {
+        type: `edit`,
+        key: 3,
+        fields: { c: -0 },
+        optimistic: true,
+        inHandler: {
+          type: `sync`,
+          rows: [],
+          deletes: [],
+          truncate: false,
+          copies: 1,
+          awaitReceipt: false,
+        },
+      },
+      {
+        type: `edit`,
+        key: 3,
+        fields: { a: 0, b: 0, c: 0 },
+        optimistic: true,
+        inHandler: undefined,
+        flipZeros: true,
+      },
+      settle(1, false),
+      {
+        type: `edit`,
+        key: 1,
+        fields: { c: -0 },
+        optimistic: false,
+        inHandler: undefined,
+      },
+      settle(0, false),
+    ],
+  },
 ]
 
 // What this oracle owns: the gap report judges every function in
