@@ -31,7 +31,8 @@ const METHOD_NAMES = [`run`, `step`, `tick`]
 // CLI is run. The source holds one to three generated functions over `x`,
 // each a free function or a method of class `C0` or `C1`; methods take
 // names in order from `run`, `step`, `tick`, so the two classes share names.
-// A statement pushes a label (quoted with `'` or a backtick), branches on
+// A statement pushes a label (quoted with `'` or a backtick), pushes a
+// record of an arithmetic field and a label field as JSON, branches on
 // one comparison against a constant, throws on a value no input reaches,
 // fires a probe through a guard, a helper, a probe-only `if` or block, or
 // calls a later function (by name, or through `this` within a class).
@@ -54,7 +55,12 @@ const comparison = fc.constantFrom(`<`, `<=`, `>`, `>=`, `===`, `!==`)
 const quote = fc.constantFrom(`'`, `\``)
 const constant = fc.integer({ min: 0, max: 9 })
 const statement = fc.oneof(
-  fc.record({ kind: fc.constant(`push`), quote }),
+  // A push, or now and then a record: a record has five mutants, each a run
+  // of the real CLI, so it shares the push's share of histories.
+  fc.oneof(
+    { arbitrary: fc.record({ kind: fc.constant(`push`), quote }), weight: 3 },
+    { arbitrary: fc.record({ kind: fc.constant(`record`) }), weight: 1 },
+  ),
   // A boolean literal in production code, written out as text.
   fc.record({ kind: fc.constant(`flag`), value: fc.boolean() }),
   // A loop that pushes twice.
@@ -498,6 +504,14 @@ const witness = [
     body: [{ kind: `loop`, quote: `'` }],
     tests: [judging(`a`, `fixed seed`, 1)],
   },
+  // A record that a judging test sees: each field drop and the arithmetic
+  // swap change its JSON.
+  {
+    id: `w_record`,
+    owners: [`a`],
+    body: [{ kind: `record` }],
+    tests: [judging(`a`, `fixed seed`, 1)],
+  },
   // A test that waits on a child process where the output differs: an I/O
   // handle is open, so its copy is busy, never cut for idleness, and the
   // confirming run kills it.
@@ -574,6 +588,7 @@ const captureWitness = new Set([
   `w_iowait`,
   `w_cleanup`,
   `w_fcprop`,
+  `w_record`,
 ])
 
 // ## Rendering and layout
@@ -663,6 +678,8 @@ function renderStatement(stmt, callText) {
       return [`out.push(String(${stmt.value}));`]
     case `loop`:
       return [`for (let i = 0; i < 2; i += 1) ${pushText(stmt)}`]
+    case `record`:
+      return [`out.push(JSON.stringify({ n: x + 1, s: 's${stmt.label}' }));`]
     case `depNote`:
       return [`note('d');`]
     case `depSeen`:
@@ -1155,6 +1172,14 @@ function sitesOf(plan) {
         at(`value-undefined`, `string`, stmt.line, whole)
         at(`bool-flip`, `flag`, stmt.line, whole)
       }
+      // The push, its JSON, the `n` field, the `+ 1` in it, and the `s` field.
+      if (stmt.kind === `record`) {
+        at(`delete-call`, `push`, stmt.line, whole)
+        at(`value-undefined`, `string`, stmt.line, whole)
+        at(`field-drop`, `dropN`, stmt.line, whole)
+        at(`arithmetic-swap`, `arith`, stmt.line, whole)
+        at(`field-drop`, `dropS`, stmt.line, whole)
+      }
       if (stmt.kind === `loop`) {
         at(`loop-false`, `loop`, stmt.line, whole)
         at(`binary-swap`, `swap`, stmt.line, whole)
@@ -1376,6 +1401,30 @@ function interpret(plan, fnId, x, sites, active) {
           // Spreading undefined throws.
           if (isActive(seenSite)) throw new TypeError(`seen() is undefined`)
           trace.push(...depLog)
+        }
+      }
+      if (stmt.kind === `record`) {
+        // A deleted push builds nothing; a dropped field never evaluates.
+        const call = siteOf(stmt, `push`)
+        reached.add(call.id)
+        if (!isActive(call)) {
+          const string = siteOf(stmt, `string`)
+          reached.add(string.id)
+          if (isActive(string)) trace.push(undefined)
+          else {
+            const record = {}
+            const dropN = siteOf(stmt, `dropN`)
+            reached.add(dropN.id)
+            if (!isActive(dropN)) {
+              const arith = siteOf(stmt, `arith`)
+              reached.add(arith.id)
+              record.n = isActive(arith) ? x - 1 : x + 1
+            }
+            const dropS = siteOf(stmt, `dropS`)
+            reached.add(dropS.id)
+            if (!isActive(dropS)) record.s = `s${stmt.label}`
+            trace.push(JSON.stringify(record))
+          }
         }
       }
       if (stmt.kind === `flag`) {
@@ -1803,14 +1852,14 @@ function oracleTestFile(plan, file) {
         // where the output differs; it then judges as usual.
         ...(t.slow
           ? [
-              `    if (${when} && JSON.stringify(${out}) !== '${expected}') await new Promise((r) => setTimeout(r, ${SLOW_MS}))`,
+              `    if (${when} && JSON.stringify(${out}) !== ${JSON.stringify(expected)}) await new Promise((r) => setTimeout(r, ${SLOW_MS}))`,
             ]
           : []),
         // A test that waits on I/O (a child process, about 3 s) where the
         // output differs, then judges as usual.
         ...(t.ioWait
           ? [
-              `    if (${when} && JSON.stringify(${out}) !== '${expected}') await new Promise((r) => spawn(process.execPath, ['-e', 'setTimeout(() => {}, ${SLOW_MS})']).on('exit', r))`,
+              `    if (${when} && JSON.stringify(${out}) !== ${JSON.stringify(expected)}) await new Promise((r) => spawn(process.execPath, ['-e', 'setTimeout(() => {}, ${SLOW_MS})']).on('exit', r))`,
             ]
           : []),
         // An injected failure shrinks to its smallest counterexample.
@@ -1823,7 +1872,7 @@ function oracleTestFile(plan, file) {
         // A flaky test never hangs: the model leaves flaky tests out.
         ...(t.hangs && !t.flaky
           ? [
-              `    if (${when} && JSON.stringify(${out}) !== '${expected}') await new Promise(() => {})`,
+              `    if (${when} && JSON.stringify(${out}) !== ${JSON.stringify(expected)}) await new Promise(() => {})`,
             ]
           : []),
         ...(!t.judges
@@ -1833,7 +1882,7 @@ function oracleTestFile(plan, file) {
                 `    if (${when}) expect${t.judgeBy === `soft` ? `.soft` : ``}(${out}).toEqual(${expected})`,
               ]
             : [
-                `    if (${when} && JSON.stringify(${out}) !== '${expected}') {`,
+                `    if (${when} && JSON.stringify(${out}) !== ${JSON.stringify(expected)}) {`,
                 `      g.__oracleVerdict?.({ property: 'fixture-${file}', law: '${t.law}', checkpoint: 'trace' })`,
                 `      throw new Error('violation')`,
                 `    }`,

@@ -583,6 +583,10 @@ async function driver(plan, observe) {
         states.add(`a value-position call killed`)
       if (m.operator === `loop-false` && m.outcome === `killed`)
         states.add(`a loop that never runs killed`)
+      if (m.operator === `field-drop` && m.outcome === `killed`)
+        states.add(`a dropped field killed`)
+      if (m.operator === `arithmetic-swap` && m.outcome === `killed`)
+        states.add(`an arithmetic swap killed`)
       if (m.function === `w_leaf` && m.outcome !== `unowned`)
         states.add(`owned through a call chain`)
       if (m.function === `W0.step` && m.outcome !== `unowned`)
@@ -1075,6 +1079,8 @@ const required = [
   `a boolean flip killed`,
   `a value-position call killed`,
   `a loop that never runs killed`,
+  `a dropped field killed`,
+  `an arithmetic swap killed`,
   `a hang cut off for idleness`,
   `a copy waiting on I/O killed, not cut for idleness`,
   `a kill whose test's cleanup then threw`,

@@ -10,6 +10,11 @@
 // - `binary-swap`: `===`↔`!==`, `<`↔`<=`, `>`↔`>=`, `&&`↔`||`, `??`→`&&`.
 // - `drop-not`: `!x` → `x`.
 // - `bool-flip`: a boolean literal `true` ↔ `false` (not a literal type).
+// - `arithmetic-swap`: `+` ↔ `-` where one operand is a numeric literal
+//   (so `count + 1`, not string concatenation of two values).
+// - `field-drop`: a property of an object literal is left out, and its value
+//   is not evaluated. Not a spread, method, or accessor, not `__proto__`,
+//   and not a destructuring pattern.
 // - `value-undefined`: a call whose value is used → `undefined`, and the
 //   call does not run. Not a call statement (`delete-call`), and not a
 //   callee or the object of a property or element access, where
@@ -78,6 +83,30 @@ function anchorOf(ts, file, node) {
 export function instrument(ts, path, text, source, offset = 0) {
   const file = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true)
   const lineOf = (pos) => file.getLineAndCharacterOfPosition(pos).line + 1
+  const arithmetic = new Set([ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken])
+  // Whether an object literal is (part of) a destructuring pattern: the left
+  // of an `=`, or a `for...of` or `for...in` target, possibly nested.
+  const inPattern = (literal) => {
+    let node = literal
+    while (
+      ts.isObjectLiteralExpression(node.parent) ||
+      ts.isArrayLiteralExpression(node.parent) ||
+      ts.isPropertyAssignment(node.parent) ||
+      ts.isShorthandPropertyAssignment(node.parent) ||
+      ts.isSpreadAssignment(node.parent) ||
+      ts.isSpreadElement(node.parent) ||
+      ts.isParenthesizedExpression(node.parent)
+    )
+      node = node.parent
+    const parent = node.parent
+    return (
+      (ts.isBinaryExpression(parent) &&
+        parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        parent.left === node) ||
+      ((ts.isForOfStatement(parent) || ts.isForInStatement(parent)) &&
+        parent.initializer === node)
+    )
+  }
   const mutants = []
   // `at` is the node whose line the mutant reports: the operator token for a
   // swap and the condition for an `if`, as the earlier runner reported them.
@@ -211,10 +240,25 @@ export function instrument(ts, path, text, source, offset = 0) {
         ids.binary = add(node.operatorToken, `binary-swap`, op, swap)
     }
     if (
+      ts.isBinaryExpression(node) &&
+      arithmetic.has(node.operatorToken.kind) &&
+      (ts.isNumericLiteral(node.left) || ts.isNumericLiteral(node.right))
+    ) {
+      const op = node.operatorToken.getText(file)
+      ids.arith = add(node.operatorToken, `arithmetic-swap`, op, op === `+` ? `-` : `+`)
+    }
+    if (
       ts.isPrefixUnaryExpression(node) &&
       node.operator === ts.SyntaxKind.ExclamationToken
     )
       ids.not = add(node, `drop-not`, `!`, ``)
+    if (
+      (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) &&
+      ts.isObjectLiteralExpression(node.parent) &&
+      !inPattern(node.parent) &&
+      node.name.getText(file).replace(/^['"`]|['"`]$/g, ``) !== `__proto__`
+    )
+      ids.drop = add(node, `field-drop`, node.getText(file), ``)
     if (
       (node.kind === ts.SyntaxKind.TrueKeyword ||
         node.kind === ts.SyntaxKind.FalseKeyword) &&
@@ -281,8 +325,16 @@ export function instrument(ts, path, text, source, offset = 0) {
         return `${G}.cmp(${ids.binary}, ${left}, ${right}, '${op}')`
       return `${G}.v(${G}.m(${ids.binary}) ? (${left} ${logical.get(op)} ${right}) : (${left} ${op} ${right}))`
     }
+    if (ids.arith !== undefined) {
+      const op = node.operatorToken.getText(file)
+      const left = emitted.get(node.left).text
+      const right = emitted.get(node.right).text
+      return `${G}.v(${G}.m(${ids.arith}) ? (${left} ${op === `+` ? `-` : `+`} ${right}) : (${left} ${op} ${right}))`
+    }
     if (ids.not !== undefined)
       return `${G}.not(${ids.not}, ${emitted.get(node.operand).text})`
+    // The property stays in place as a spread of either nothing or itself.
+    if (ids.drop !== undefined) return `...(${G}.m(${ids.drop}) ? {} : { ${out} })`
     if (ids.bool !== undefined) return `${G}.b(${ids.bool}, ${node.getText(file)})`
     if (ids.value !== undefined) return `${G}.v(${G}.m(${ids.value}) ? void 0 : ${out})`
     if (ids.loop !== undefined) {
