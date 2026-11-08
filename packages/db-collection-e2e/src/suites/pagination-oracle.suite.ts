@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createLiveQueryCollection, eq } from '@tanstack/db'
 import { declareOracle } from '../../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../../db/tests/oracle-config.js'
 import {
   assertAllItemsMatch,
   assertCollectionSize,
@@ -202,6 +203,7 @@ export function createPaginationTestSuite(
   describe(`Pagination Suite`, () => {
     describe(`OrderBy`, () => {
       it(`should sort ascending by single field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -230,6 +232,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should sort descending by single field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -258,6 +261,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should sort by string field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -288,6 +292,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should sort by date field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -316,6 +321,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should sort by multiple fields`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const postsCollection = config.collections.onDemand.posts
 
@@ -355,6 +361,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should sort by multiple fields with chained orderBy`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -404,6 +411,7 @@ export function createPaginationTestSuite(
 
     describe(`Multi-Column OrderBy with Incremental Loading`, () => {
       it(`should correctly paginate with multi-column orderBy and limit`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -450,6 +458,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should load subsequent pages correctly with multi-column orderBy`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -519,6 +528,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should load distinct windows across multiple live queries with multi-column orderBy`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -587,6 +597,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should allow paging a second live query without affecting the first`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -652,6 +663,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should handle multi-column orderBy with duplicate values in first column`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -720,6 +732,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should handle multi-column orderBy with mixed directions`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const postsCollection = config.collections.onDemand.posts
 
@@ -770,6 +783,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should handle three-column orderBy`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -822,6 +836,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should use setWindow to page through multi-column orderBy results`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -903,6 +918,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should use setWindow to move backwards with multi-column orderBy`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -966,6 +982,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should use setWindow with mixed direction multi-column orderBy`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const postsCollection = config.collections.onDemand.posts
 
@@ -1029,6 +1046,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should handle setWindow across duplicate first-column values`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -1113,6 +1131,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should expose successive windows when paging with multi-column orderBy`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -1189,6 +1208,7 @@ export function createPaginationTestSuite(
 
     describe(`Limit`, () => {
       it(`should limit to specific number of records`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -1217,6 +1237,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should handle limit=0`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -1244,6 +1265,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should handle limit larger than dataset`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -1272,6 +1294,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should combine limit with orderBy`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -1303,6 +1326,7 @@ export function createPaginationTestSuite(
 
     describe(`Offset`, () => {
       it(`should skip records with offset`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -1332,6 +1356,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should combine offset with limit (pagination)`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -1361,6 +1386,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should handle offset beyond dataset`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -1391,6 +1417,7 @@ export function createPaginationTestSuite(
 
     describe(`Complex Pagination Scenarios`, () => {
       it(`should paginate with predicates`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -1422,6 +1449,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should handle pagination edge cases - last page with fewer records`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -1453,6 +1481,7 @@ export function createPaginationTestSuite(
       })
 
       it(`should handle single record pages`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -1484,6 +1513,7 @@ export function createPaginationTestSuite(
 
     describe(`Requested Window Verification`, () => {
       it(`should return only the requested page`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
@@ -1518,4 +1548,7 @@ export function createPaginationTestSuite(
   })
 }
 
+// Owns no production entry in this package: the suite judges the collection
+// adapter that the consuming package runs it against, and that package owns
+// those entries. This package has no production code of its own to own.
 declareOracle({ check: [withPaginationHistory], model: [createWindowOracle] })

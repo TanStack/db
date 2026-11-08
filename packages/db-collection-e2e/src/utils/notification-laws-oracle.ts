@@ -54,6 +54,9 @@ export function expectNotificationsStopped<Row>(
   expect(callbacks).toStrictEqual(archived)
 }
 
+// Owns no production entry in this package: the suite judges the collection
+// adapter that the consuming package runs it against, and that package owns
+// those entries. This package has no production code of its own to own.
 declareOracle({
   check: [expectNotificationHistory, expectNotificationsStopped],
 })

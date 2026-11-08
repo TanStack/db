@@ -7,6 +7,7 @@ import {
   expectNotificationsStopped,
 } from '../utils/notification-laws-oracle'
 import { declareOracle } from '../../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../../db/tests/oracle-config.js'
 import {
   captureUserRows,
   userFixture,
@@ -21,6 +22,7 @@ export function createLiveUpdatesTestSuite(
   describe('Live Updates Suite', () => {
     describe('Subscription Lifecycle', () => {
       it('should receive updates when subscribed', async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         await withOwnedUsers(config, async (owned) => {
           const query = owned.track(
@@ -128,6 +130,9 @@ export function createLiveUpdatesTestSuite(
   })
 }
 
+// Owns no production entry in this package: the suite judges the collection
+// adapter that the consuming package runs it against, and that package owns
+// those entries. This package has no production code of its own to own.
 declareOracle({
   check: [expectNotificationHistory, expectNotificationsStopped],
 })

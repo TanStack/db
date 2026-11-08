@@ -23,6 +23,7 @@ import {
   or,
 } from '@tanstack/db'
 import { declareOracle } from '../../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../../db/tests/oracle-config.js'
 import { assertAllItemsMatch, assertCollectionSize } from '../utils/assertions'
 import { waitForQueryData } from '../utils/helpers'
 import type { E2ETestConfig, Post, User } from '../types'
@@ -172,6 +173,7 @@ export function createPredicatesTestSuite(
   describe(`Predicates Suite`, () => {
     describe(`Equality Operators`, () => {
       it(`should filter with eq() on string field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.name === `Alice 0`)
@@ -193,6 +195,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with eq() on number field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.age === 25)
@@ -211,6 +214,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with eq() on boolean field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.isActive === true)
@@ -232,6 +236,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with eq() on UUID field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter(
@@ -257,6 +262,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with isNull() for null values`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.email === null)
@@ -280,6 +286,7 @@ export function createPredicatesTestSuite(
 
     describe(`Inequality Operators`, () => {
       it(`should filter with not(eq()) on string field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.name !== `Alice 0`)
@@ -301,6 +308,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with not(isNull()) for non-null values`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.email !== null)
@@ -324,6 +332,7 @@ export function createPredicatesTestSuite(
 
     describe(`Comparison Operators`, () => {
       it(`should filter with gt() on number field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.age > 50)
@@ -342,6 +351,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with gte() on number field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.age >= 50)
@@ -360,6 +370,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with lt() on number field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.age < 30)
@@ -378,6 +389,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with lte() on number field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.age <= 30)
@@ -396,6 +408,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with gt() on viewCount field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.posts.filter((p) => p.viewCount > 100)
@@ -414,6 +427,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with eq() on BIGINT field using JavaScript BigInt`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.posts.filter(
@@ -445,6 +459,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with gt() on BIGINT field using JavaScript BigInt`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.posts.filter(
@@ -481,6 +496,7 @@ export function createPredicatesTestSuite(
 
     describe(`String Pattern Matching Operators`, () => {
       it(`should filter with like() operator (case-sensitive)`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.name.startsWith(`Alice`))
@@ -503,6 +519,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with ilike() operator (case-insensitive)`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) =>
@@ -529,6 +546,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with like() with wildcard pattern (% at end)`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter(
@@ -556,6 +574,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with like() with wildcard pattern (% in middle)`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter(
@@ -583,6 +602,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with like() with wildcard pattern matching newline`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) =>
@@ -607,6 +627,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with like() with lower() function`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) =>
@@ -633,6 +654,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with ilike() with lower() function`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) =>
@@ -659,6 +681,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with or() combining multiple like() conditions (search pattern)`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.posts.filter(
@@ -700,6 +723,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with like() and orderBy`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = orderedAliceRows(fixture.users)
@@ -734,6 +758,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with like() and limit`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = orderedAliceRows(fixture.users).slice(0, 5)
@@ -765,6 +790,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should handle like() with pattern matching no records`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) =>
@@ -787,6 +813,7 @@ export function createPredicatesTestSuite(
 
     describe(`In Operator`, () => {
       it(`should filter with inArray() on string array`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) =>
@@ -810,6 +837,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with inArray() on number array`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) =>
@@ -831,6 +859,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with inArray() on UUID array`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) =>
@@ -862,6 +891,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should handle empty inArray()`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expectedIds = new Set<string>()
@@ -881,6 +911,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with inArray() on BIGINT array using JavaScript BigInt`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.posts.filter((p) =>
@@ -922,6 +953,7 @@ export function createPredicatesTestSuite(
 
     describe(`Null Operators`, () => {
       it(`should filter with isNull() on nullable field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.email === null)
@@ -943,6 +975,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with not(isNull()) on nullable field`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.email !== null)
@@ -964,6 +997,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should filter with isNull() on deletedAt (soft delete pattern)`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.deletedAt === null)
@@ -987,6 +1021,7 @@ export function createPredicatesTestSuite(
 
     describe(`Boolean Logic`, () => {
       it(`should combine predicates with and()`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter(
@@ -1009,6 +1044,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should combine predicates with or()`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter(
@@ -1029,6 +1065,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should handle complex nested logic`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter(
@@ -1057,6 +1094,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should handle NOT operator`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.isActive !== true)
@@ -1077,6 +1115,7 @@ export function createPredicatesTestSuite(
 
     describe(`Predicate Result Verification`, () => {
       it(`should return only data matching the predicate`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.age === 25)
@@ -1099,6 +1138,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should exclude deleted records from filtered results`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.deletedAt === null)
@@ -1122,6 +1162,7 @@ export function createPredicatesTestSuite(
 
     describe(`Multiple where() Calls`, () => {
       it(`should AND multiple where() calls together`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter(
@@ -1145,6 +1186,7 @@ export function createPredicatesTestSuite(
 
     describe(`Edge Cases`, () => {
       it(`should handle query with no where clause on on-demand collection`, async () => {
+        oracleRoute(`fixed history`)
         // NOTE: Electric has a bug where empty subset requests don't load data
         // We work around this by injecting "true = true" when there's no where clause
         // This is always true so doesn't filter data, just tricks Electric into loading
@@ -1170,6 +1212,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should handle predicate matching no records`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) => u.age === 999)
@@ -1188,6 +1231,7 @@ export function createPredicatesTestSuite(
       })
 
       it(`should handle complex AND with no matches`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const fixture = config.fixture()
         const expected = fixture.users.filter((u) =>
@@ -1213,4 +1257,7 @@ export function createPredicatesTestSuite(
   })
 }
 
+// Owns no production entry in this package: the suite judges the collection
+// adapter that the consuming package runs it against, and that package owns
+// those entries. This package has no production code of its own to own.
 declareOracle({ check: [assertPredicateRows], model: [orderedAliceRows] })
