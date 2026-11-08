@@ -14,6 +14,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplaySkips,
+  oracleRoute,
   oracleRuns,
   recordOracleReplay,
 } from './oracle-config.js'
@@ -171,12 +172,14 @@ function comparisonProperty<
     }
 
     it.skipIf(oracleReplayRequested())(`${label} fixed`, () => {
+      oracleRoute(`fixed seed`)
       assertComparisonProperty(label, arbitrary, checkValues, {
         seed: fixedSeed,
         numRuns: oracleRuns(campaignRuns),
       })
     })
     it.skipIf(oracleReplaySkips(property))(`${label} random`, () => {
+      oracleRoute(`random seed`)
       assertComparisonProperty(
         label,
         arbitrary,
@@ -413,7 +416,10 @@ function assertTransitive(ab: number, bc: number, ac: number): void {
   if (ab <= 0 && bc <= 0) expect(ac).toBeLessThanOrEqual(0)
 }
 
+// What this oracle owns: the gap report judges every function in
+// utils/comparison.ts by this file's comparison laws.
 declareOracle({
+  owns: [`src/utils/comparison.ts`],
   check: [
     assertComparisonProperty,
     checkAntisymmetry,
@@ -430,6 +436,7 @@ describe(`comparison law controls`, () => {
   fcTest(
     `shrinking retains the first violated law and replays its checkpoint`,
     () => {
+      oracleRoute(`calibration`)
       let reachedOtherLaw = false
       const arbitrary = fc.integer({ min: 0, max: 10 })
       const check = (value: number) => {
@@ -494,6 +501,7 @@ describe(`comparison law controls`, () => {
   )
 
   fcTest(`rejects invalid results and accepts signed infinity`, () => {
+    oracleRoute(`case`)
     for (const invalid of [NaN, `invalid`, undefined]) {
       expect(() => checkAntisymmetry(invalid, 0)).toThrow(
         `comparator result must be a number other than NaN`,
@@ -510,6 +518,7 @@ describe(`comparison law controls`, () => {
   fcTest(
     `rejects and replays a comparator returning NaN only for unequal pairs`,
     () => {
+      oracleRoute(`calibration`)
       const mutant = (a: number, b: number): number => (a === b ? 0 : NaN)
       const property = fc.property(fc.integer({ min: -100, max: 100 }), (a) => {
         expect(mutant(a, a)).toBe(0)
@@ -541,6 +550,7 @@ describe(`comparison law controls`, () => {
   fcTest(
     `changed-byte law rejects length-only equality and accepts indexed equality`,
     () => {
+      oracleRoute(`calibration`)
       const sample = {
         bytes: new Uint8Array([255]),
         changed: new Uint8Array([0]),
@@ -558,6 +568,7 @@ describe(`comparison law controls`, () => {
   )
 
   fcTest(`fixed campaign reaches a changed byte in every case`, () => {
+    oracleRoute(`fixed seed`)
     const result = fc.check(
       fc.property(arbitraryChangedBytes, (sample) => {
         assertChangedBytes(sample, areValuesEqual)
@@ -568,6 +579,7 @@ describe(`comparison law controls`, () => {
   })
 
   it(`transitivity reaches a strict chain and rejects a cyclic order`, () => {
+    oracleRoute(`calibration`)
     const [a, b, c] = [0, 1, 2]
     const ab = ascComparator(a, b, defaultOpts)
     const bc = ascComparator(b, c, defaultOpts)
@@ -784,6 +796,7 @@ describe(`ascComparator property-based tests`, () => {
 
 describe(`NaN and invalid Date default-order refinement`, () => {
   it(`reconstructs the finite, duplicate NaN, null, and invalid Date witnesses`, () => {
+    oracleRoute(`case`)
     assertNonFiniteOrder({
       family: `number`,
       finiteDays: [3, 1, 5],
@@ -810,6 +823,7 @@ describe(`NaN and invalid Date default-order refinement`, () => {
   )
 
   it(`rejects a wrong comparison that ties non-finite and finite values`, () => {
+    oracleRoute(`calibration`)
     for (const family of [`number`, `date`] as const) {
       let reachedFault = false
       const faultyComparator = (
@@ -848,6 +862,7 @@ describe(`NaN and invalid Date default-order refinement`, () => {
   })
 
   it(`rejects a default sort that ties NaN to finite values`, () => {
+    oracleRoute(`calibration`)
     let reachedFault = false
     const faultySort = (a: number | Date | null, b: number | Date | null) => {
       if (typeof a === `number` && Number.isNaN(a)) {
@@ -930,6 +945,7 @@ describe(`makeComparator property-based tests`, () => {
   )
 
   it(`preserves signed infinity from a valid custom string comparator`, () => {
+    oracleRoute(`case`)
     const comparator = makeComparator({
       ...defaultOpts,
       stringSort: `custom`,
@@ -1183,6 +1199,7 @@ const arbitraryZonedDateTimeOrderInput: fc.Arbitrary<ZonedDateTimeOrderInput> =
 
 describe(`Temporal default-order refinement`, () => {
   it(`reconstructs the three PlainDate and one ZonedDateTime assertions`, () => {
+    oracleRoute(`case`)
     const jan = { year: 2024, month: 1, day: 1 }
     const june = { year: 2024, month: 6, day: 1 }
     assertPlainDateOrder({
@@ -1220,6 +1237,7 @@ describe(`Temporal default-order refinement`, () => {
   )
 
   it(`rejects text order for one instant shown in two zones`, () => {
+    oracleRoute(`calibration`)
     const sample: ZonedDateTimeOrderInput = {
       leftNanoOffset: 0,
       rightNanoOffset: 0,
@@ -1232,6 +1250,7 @@ describe(`Temporal default-order refinement`, () => {
   })
 
   it(`rejects millisecond truncation across adjacent instants`, () => {
+    oracleRoute(`calibration`)
     const sample: ZonedDateTimeOrderInput = {
       leftNanoOffset: 0,
       rightNanoOffset: 1,

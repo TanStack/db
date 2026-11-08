@@ -2,6 +2,7 @@ import fc from 'fast-check'
 import { DbClient } from '../src/client.js'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
+import { declareOracle } from './oracle-declaration.js'
 import { oracleProperty, pass, violation } from './oracle-property.js'
 import type {
   ChangeMessage,
@@ -582,6 +583,14 @@ const replays: ReadonlyArray<[string, Array<Event[`type`]>]> = [
     [`crash`, `attach`, `cleanup`],
   ],
 ]
+
+// What this oracle owns: the gap report judges every function in
+// src/live-query-observer.ts and DbClient.hydrate by this file's generated
+// hydration-terminal histories, which end a seed's sync run in every way.
+
+declareOracle({
+  owns: [`src/live-query-observer.ts`, `src/client.ts#DbClient.hydrate`],
+})
 
 oracleProperty({
   id: `live-query-observer.hydration-terminal`,

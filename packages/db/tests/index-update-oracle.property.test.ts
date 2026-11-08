@@ -8,7 +8,7 @@ import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { eq } from '../src/query/builder/functions.js'
 import { PropRef } from '../src/query/ir.js'
 import { mockSyncCollectionOptions } from './utils'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { oraclePropertyOptions, oracleRoute, oracleRuns } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
 import { indexTypes, withCollectionCleanup } from './index-update-support'
 import type { BaseIndex } from '../src/indexes/base-index.js'
@@ -226,6 +226,7 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
   test.each([20260930, undefined])(
     `matches a reference model across valid operation sequences (seed %s)`,
     async (seed) => {
+      oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
       await fc.assert(
         fc.asyncProperty(
           fc.array(arbitraryAction, { minLength: 1, maxLength: 100 }),
@@ -307,6 +308,7 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
     [`duplicate key`, `takeFromStart`, [`a`, `a`]],
     [`wrong reverse order`, `takeReversedFromEnd`, [`a`, `b`]],
   ] as const)(`full traversal rejects a %s`, (_name, method, wrongKeys) => {
+    oracleRoute(`calibration`)
     const index = new IndexType(1, new PropRef([`value`]))
     index.add(`a`, { value: 1 })
     index.add(`b`, { value: 2 })
@@ -327,6 +329,7 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
     }
   })
   test(`inclusive lower bound rejects an exclusive-boundary result`, () => {
+    oracleRoute(`calibration`)
     const index = new IndexType(1, new PropRef([`value`]))
     index.add(`boundary`, { value: -2 })
     const rangeQuery = index.rangeQuery.bind(index)
@@ -344,6 +347,7 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
     }
   })
   test(`upper-only range rejects a dropped minimum when the lower flag is exclusive`, () => {
+    oracleRoute(`calibration`)
     const index = new IndexType(1, new PropRef([`value`]))
     index.add(`minimum`, { value: -2 })
     const rangeQuery = index.rangeQuery.bind(index)
@@ -365,6 +369,7 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
     }
   })
   test(`explicit exclusive lower bound rejects an included boundary value`, () => {
+    oracleRoute(`calibration`)
     const index = new IndexType(1, new PropRef([`value`]))
     index.add(`boundary`, { value: -2 })
     index.add(`later`, { value: 0 })
@@ -686,7 +691,10 @@ function applyNullishAction(
   expectNullishMembership(index, rows)
 }
 
+// What this oracle owns: the gap report judges every function in basic-index.ts and
+// btree-index.ts by this file's tests.
 declareOracle({
+  owns: [`src/indexes/basic-index.ts`, `src/indexes/btree-index.ts`],
   check: [
     expectIndexMatchesModel,
     expectCustomGroups,
@@ -713,6 +721,7 @@ describe.each(indexTypes)(
       [`undefined to defined`, undefined, 1],
       [`undefined to undefined`, undefined, undefined],
     ] as const)(`keeps membership after %s`, (_label, before, after) => {
+      oracleRoute(`case`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       applyNullishAction(index, rows, { type: `put`, key: `a`, value: before })
@@ -720,6 +729,7 @@ describe.each(indexTypes)(
     })
 
     test(`keeps coexisting null and undefined buckets distinct`, () => {
+      oracleRoute(`fixed history`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       for (const [key, value] of [
@@ -732,6 +742,7 @@ describe.each(indexTypes)(
     })
 
     test(`finds every undefined owner beside distinct string values`, () => {
+      oracleRoute(`fixed history`)
       const index = new IndexType(1, new PropRef([`status`]))
       const rows = new Map<string, string | undefined>()
       const exactProbes = [undefined, `active`, `inactive`]
@@ -749,6 +760,7 @@ describe.each(indexTypes)(
     })
 
     test(`returns no undefined key from a nonempty all-defined index`, () => {
+      oracleRoute(`fixed history`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       applyNullishAction(index, rows, { type: `put`, key: `a`, value: 1 })
@@ -756,6 +768,7 @@ describe.each(indexTypes)(
     })
 
     test(`unites undefined and defined IN members without distractors`, () => {
+      oracleRoute(`fixed history`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       for (const [key, value] of [
@@ -769,6 +782,7 @@ describe.each(indexTypes)(
     })
 
     test(`returns every undefined owner from a singleton IN list`, () => {
+      oracleRoute(`fixed history`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       for (const [key, value] of [
@@ -781,6 +795,7 @@ describe.each(indexTypes)(
     })
 
     test(`distinguishes endpoint reads from explicit undefined cursors`, () => {
+      oracleRoute(`fixed history`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       for (const [key, value] of [
@@ -793,6 +808,7 @@ describe.each(indexTypes)(
     })
 
     test(`traverses every undefined owner before continuing to numbers`, () => {
+      oracleRoute(`fixed history`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       for (const [key, value] of [
@@ -807,6 +823,7 @@ describe.each(indexTypes)(
     })
 
     test(`retains the second undefined owner after removing the first`, () => {
+      oracleRoute(`fixed history`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       applyNullishAction(index, rows, {
@@ -823,6 +840,7 @@ describe.each(indexTypes)(
     })
 
     test(`distinguishes explicit and omitted undefined lower bounds`, () => {
+      oracleRoute(`fixed history`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       for (const [key, value] of [
@@ -836,6 +854,7 @@ describe.each(indexTypes)(
     })
 
     test(`includes both undefined owners within double undefined bounds`, () => {
+      oracleRoute(`fixed history`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       for (const [key, value] of [
@@ -848,6 +867,7 @@ describe.each(indexTypes)(
     })
 
     test(`build preserves nulls-first ordered reads and ranges`, () => {
+      oracleRoute(`fixed history`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       applyNullishAction(index, rows, {
@@ -885,6 +905,7 @@ describe.each(indexTypes)(
     test.each([20261012, undefined])(
       `refines nullish membership histories (seed %s)`,
       async (seed) => {
+        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
         await fc.assert(
           fc.asyncProperty(
             fc.array(arbitraryNullishAction, { minLength: 1, maxLength: 40 }),
@@ -905,6 +926,7 @@ describe.each(indexTypes)(
     )
 
     test(`rejects a skipped undefined-to-null update`, () => {
+      oracleRoute(`calibration`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       applyNullishAction(index, rows, {
@@ -928,6 +950,7 @@ describe.each(indexTypes)(
     })
 
     test(`rejects lookup dispatch that unites nullish buckets`, () => {
+      oracleRoute(`calibration`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       applyNullishAction(index, rows, {
@@ -959,6 +982,7 @@ describe.each(indexTypes)(
     })
 
     test(`rejects an exact lookup that loses one undefined owner`, () => {
+      oracleRoute(`calibration`)
       const index = new IndexType(1, new PropRef([`status`]))
       const rows = new Map<string, string | undefined>([
         [`a`, `active`],
@@ -984,6 +1008,7 @@ describe.each(indexTypes)(
     })
 
     test(`rejects an IN lookup that drops an undefined operand`, () => {
+      oracleRoute(`calibration`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       applyNullishAction(index, rows, {
@@ -1011,6 +1036,7 @@ describe.each(indexTypes)(
     })
 
     test(`rejects an IN lookup that loses a same-value owner`, () => {
+      oracleRoute(`calibration`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       applyNullishAction(index, rows, {
@@ -1042,6 +1068,7 @@ describe.each(indexTypes)(
     })
 
     test(`rejects IN dispatch that returns only its first value group`, () => {
+      oracleRoute(`calibration`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>()
       applyNullishAction(index, rows, {
@@ -1073,6 +1100,7 @@ describe.each(indexTypes)(
     })
 
     test(`rejects an endpoint read that drops the undefined owner`, () => {
+      oracleRoute(`calibration`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>([
         [`a`, undefined],
@@ -1094,6 +1122,7 @@ describe.each(indexTypes)(
     })
 
     test(`rejects a cursor that repeats the last undefined owner`, () => {
+      oracleRoute(`calibration`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>([
         [`undef1`, undefined],
@@ -1122,6 +1151,7 @@ describe.each(indexTypes)(
     })
 
     test(`rejects a forward range that drops an explicit undefined lower bound`, () => {
+      oracleRoute(`calibration`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>([
         [`undef`, undefined],
@@ -1157,6 +1187,7 @@ describe.each(indexTypes)(
     })
 
     test(`rejects a double undefined range that loses one owner`, () => {
+      oracleRoute(`calibration`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>([
         [`a`, undefined],
@@ -1191,6 +1222,7 @@ describe.each(indexTypes)(
     })
 
     test(`rejects a null bound that drops its undefined peer`, () => {
+      oracleRoute(`calibration`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, NullishIndexValue>([
         [`a`, undefined],
@@ -1330,6 +1362,7 @@ describe.each(indexTypes)(
           test.each([0, 1, 4, 5, 32, 33, 65])(
             `throws exactly when it receives an invalid result after %s rows`,
             (size) => {
+              oracleRoute(`case`)
               const { index, step } = createRecordedIndex(compare)
               const rows = new Map<string, IndexValue>()
               for (let value = 0; value < size; value++) {
@@ -1344,11 +1377,13 @@ describe.each(indexTypes)(
       },
     )
     test(`crashes at the second write of the reported string rows`, () => {
+      oracleRoute(`fixed history`)
       const { index, step } = createRecordedIndex((left, right) => left - right)
       expect(step(() => index.add(`1`, { value: `ann` }))).toBe(false)
       expect(step(() => index.add(`2`, { value: `bob` }))).toBe(true)
     })
     test(`a rejected remove leaves its row indexed`, () => {
+      oracleRoute(`fixed history`)
       const { index, step } = createRecordedIndex((left, right) => left - right)
       expect(step(() => index.add(`x`, { value: `x` }))).toBe(false)
       expect(step(() => index.remove(`x`, { value: `x` }))).toBe(true)
@@ -1356,6 +1391,7 @@ describe.each(indexTypes)(
       expect(index.lookup(`eq`, `x`)).toEqual(new Set([`x`]))
     })
     test(`a rejected remove preserves other exact values`, () => {
+      oracleRoute(`fixed history`)
       const { index, step } = createRecordedIndex((left, right) =>
         left === `x` && right === `x`
           ? NaN
@@ -1460,6 +1496,7 @@ describe.each([
     test.each(writePaths)(
       `$name crashes the collection instead of publishing partial success`,
       async ({ write }) => {
+        oracleRoute(`case`)
         const { collection, sync } = createNamedCollection()
         await withCollectionCleanup(collection, () => {
           const published = new Set<number>()
@@ -1517,6 +1554,7 @@ function expectStringMembershipMatches<Value extends string>(
 
 describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
   test(`rejects stale retired identity outputs without rejecting live reuse`, () => {
+    oracleRoute(`calibration`)
     const symbol = Symbol(`same group`)
     const retired = { key: `old`, groupId: 0, value: [symbol] }
     const live = { key: `live`, groupId: 0, value: [symbol] }
@@ -1547,6 +1585,7 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
   })
 
   test(`rejects append-only replacement state and accepts replacement continuation`, () => {
+    oracleRoute(`calibration`)
     const index = new IndexType(1, new PropRef([`value`]))
     index.add(`old`, { value: -1 })
     index.add(`new`, { value: 1 })
@@ -1562,6 +1601,7 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
   })
 
   test(`custom facts reject mutated payload groups and insertion-order ties`, () => {
+    oracleRoute(`calibration`)
     const rows = [1, 1, 2].map((groupId, position) =>
       Object.freeze({
         key: String(position),
@@ -1607,6 +1647,7 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
   })
 
   test(`moves exact string membership across a comparator-equal update`, () => {
+    oracleRoute(`fixed history`)
     // The input facts put A/a in one order group and B/b in another. The
     // comparator implements that order, but the expected exact memberships
     // come from the source Map's unchanged strings, not from the comparator.
@@ -1701,6 +1742,7 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
   test.each([20260930, undefined])(
     `preserves exact equality while ordered traversal retains every row (seed %s)`,
     async (seed) => {
+      oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
       await fc.assert(
         fc.asyncProperty(
           fc.array(fc.integer({ min: 0, max: 4 }), {
@@ -1836,6 +1878,7 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
   test.each([20260930, undefined])(
     `matches an independent custom-comparator model (seed %s)`,
     async (seed) => {
+      oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
       await fc.assert(
         fc.asyncProperty(
           fc.array(fc.integer({ min: 0, max: 4 }), {
@@ -1961,6 +2004,7 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
 })
 
 test(`retired-identity calibration shrinks and replays the same semantic failure`, () => {
+  oracleRoute(`calibration`)
   const property = fc.property(
     fc.array(fc.integer({ min: 0, max: 20 }), { minLength: 1, maxLength: 8 }),
     (keys) => {
@@ -2035,6 +2079,7 @@ describe.each(indexTypes)(
     test.each(mixedRows)(
       `keeps every surviving key once after deleting $id`,
       (removed) => {
+        oracleRoute(`case`)
         const index = new IndexType(1, new PropRef([`value`]))
         const rows = new Map<string, number | string>()
         for (const row of mixedRows) {
@@ -2049,6 +2094,7 @@ describe.each(indexTypes)(
     )
 
     test(`keeps one copy of each key after a mixed-value delete, update, and add`, () => {
+      oracleRoute(`fixed history`)
       const index = new IndexType(1, new PropRef([`value`]))
       const rows = new Map<string, number | string>()
       const add = (id: string, value: number | string) => {
@@ -2087,6 +2133,7 @@ describe.each(indexTypes)(
     ])(
       `keeps $name and ordinary-string owners after deletion`,
       ({ first, second, text }) => {
+        oracleRoute(`case`)
         const index = new IndexType(1, new PropRef([`value`]))
         const rows = new Map<string, unknown>()
         for (const [id, value] of [
@@ -2111,6 +2158,7 @@ describe.each([
   [`BTreeIndex`, BTreeIndex],
 ] as const)(`%s mixed-value public snapshot`, (_indexName, IndexType) => {
   test(`returns each surviving key once after a source deletion`, async () => {
+    oracleRoute(`fixed history`)
     const options = mockSyncCollectionOptions<{
       id: string
       value: number | string
@@ -2195,6 +2243,7 @@ function expectBinaryValueMembership(
 
 describe.each(indexTypes)(`%s binary-value ownership`, (_name, IndexType) => {
   test(`does not retain an ordered entry after equal-content removal`, () => {
+    oracleRoute(`fixed history`)
     const index = new IndexType(1, new PropRef([`value`]))
     const rows = new Map<string, Uint8Array>()
     const bytes = (value = 1) => new Uint8Array([value])
@@ -2254,6 +2303,7 @@ describe.each(indexTypes)(
   `%s unordered Temporal equality`,
   (_name, IndexType) => {
     test(`accepts distinct PlainMonthDay values for exact lookup`, async () => {
+      oracleRoute(`fixed history`)
       const rows = [
         { id: `jan`, value: Temporal.PlainMonthDay.from(`--01-01`) },
         { id: `feb`, value: Temporal.PlainMonthDay.from(`--02-01`) },

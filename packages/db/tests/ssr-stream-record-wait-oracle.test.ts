@@ -19,8 +19,13 @@ import { createDeferred } from '../src/deferred.js'
 import { getLiveQueryHash } from '../src/live-query-options.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { expectedSsrStreamRecordOutcome } from './ssr-stream-view-oracle.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRuns,
+} from './oracle-config.js'
 import { createOracleReach } from './oracle-reach.js'
+import { declareOracle } from './oracle-declaration.js'
 import { withOracleCleanup } from './utils.js'
 import type { DehydratedLiveQueryResult } from '../src/client.js'
 import type { SsrStreamRecordHistory } from './ssr-stream-view-oracle.js'
@@ -219,6 +224,7 @@ async function checkRecordHistory(history: SsrStreamRecordHistory) {
 describe(`SSR stream record lifetime`, () => {
   for (const campaign of [`fixed`, `random`] as const) {
     it(`settles each record demand at its transport checkpoint (${campaign})`, async () => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(`ssr-stream-record`, [
         `missing`,
         `pending`,
@@ -254,4 +260,13 @@ describe(`SSR stream record lifetime`, () => {
       )
     })
   }
+})
+
+// What this oracle owns: the gap report judges the DbClient's SSR query waits
+// and stream failure handling in client.ts by this file's tests. The record
+// model is checkRecordHistory's expectation over the stream-view oracle.
+declareOracle({
+  owns: [`src/client.ts`],
+  check: [checkRecordHistory],
+  grammar: [grammar],
 })

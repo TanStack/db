@@ -5,6 +5,7 @@ import { deepEquals } from '../src/utils'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from './oracle-config.js'
 import {
@@ -15,6 +16,11 @@ import {
   expectEqualityPair,
   expectRingLaw,
 } from './deep-equals-support'
+import { declareOracle } from './oracle-declaration.js'
+
+// What this oracle owns: the gap report judges the deepEquals relation in
+// utils.ts by this file's tests.
+declareOracle({ owns: [`src/utils.ts`] })
 
 /**
  * The `deepEquals` API contract in `../src/utils.ts`, reinforced by the
@@ -63,11 +69,17 @@ function utilsProperty<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
     oracleReplayTest(fcTest).prop([argumentsArbitrary], {
       seed: fixedSeed,
       numRuns: oracleRuns(campaignRuns),
-    })(`${label} fixed`, (values) => check(...values))
+    })(`${label} fixed`, (values) => {
+      oracleRoute(`fixed seed`)
+      check(...values)
+    })
     oracleReplayTest(fcTest, property).prop(
       [argumentsArbitrary],
       oraclePropertyOptions(campaignRuns, property),
-    )(`${label} random`, (values) => check(...values))
+    )(`${label} random`, (values) => {
+      oracleRoute(`random seed`)
+      check(...values)
+    })
   }
 }
 
@@ -267,6 +279,7 @@ describe(`deepEquals property-based tests`, () => {
       (cells) => expectRingLaw(cells),
     )
     it(`runs a fixed mixed-ring campaign without skipped antecedents`, () => {
+      oracleRoute(`fixed seed`)
       const result = fc.check(
         fc.property(ringArbitrary, (cells) => expectRingLaw(cells)),
         { seed: 101301, numRuns: 100 },
@@ -333,6 +346,7 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
     it(`shrinks and replays a payload-blind graph comparator`, () => {
+      oracleRoute(`calibration`)
       const property = fc.property(ringArbitrary, (cells) =>
         expectRingLaw(cells, () => true),
       )
@@ -483,6 +497,7 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
     it(`fixed campaign reaches an extra property in every case`, () => {
+      oracleRoute(`fixed seed`)
       const result = fc.check(
         fc.property(arbitraryExtraProperty, (sample) => {
           assertExtraProperty(sample, deepEquals)

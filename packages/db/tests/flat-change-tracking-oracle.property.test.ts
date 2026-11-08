@@ -81,6 +81,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -580,22 +581,41 @@ function runHistory(history: History): void {
   expect(normalize(proxy), `proxy vs model`).toStrictEqual(normalize(model))
 }
 
-declareOracle({ check: [runHistory], model: [expectedChanges] })
+// What this oracle owns: the gap report judges the flat and proxy change trackers
+// (withFlatChangeTracking, withChangeTracking, withArrayChangeTracking) by this file's tests.
+declareOracle({
+  owns: [
+    `src/proxy.ts#withFlatChangeTracking`,
+    `src/proxy.ts#withChangeTracking`,
+    `src/proxy.ts#withArrayChangeTracking`,
+  ],
+  check: [runHistory],
+  model: [expectedChanges],
+})
 
 describe(`flat change tracking oracle`, () => {
   if (!oracleReplayRequested()) {
     for (const { name, history } of pinnedHistories) {
-      it(`matches the draft proxy when ${name}`, () => runHistory(history))
+      it(`matches the draft proxy when ${name}`, () => {
+        oracleRoute(`fixed history`)
+        return runHistory(history)
+      })
     }
 
     fcTest.prop([historyArbitrary], {
       seed: 44_502_101,
       numRuns: oracleRuns(200),
-    })(`matches the draft proxy (fixed)`, runHistory)
+    })(`matches the draft proxy (fixed)`, (...args) => {
+      oracleRoute(`fixed seed`)
+      return runHistory(...args)
+    })
   }
   // A path replay of this property runs its one recorded history here.
   oracleReplayTest(fcTest, property).prop(
     [historyArbitrary],
     oraclePropertyOptions(200, property),
-  )(`matches the draft proxy (random)`, runHistory)
+  )(`matches the draft proxy (random)`, (...args) => {
+    oracleRoute(`random seed`)
+    return runHistory(...args)
+  })
 })

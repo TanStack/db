@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { oracleRoute } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
 import {
   confirmEverything,
@@ -79,7 +80,16 @@ function expectDirectMatchesConfirmed(
   expect(direct.remaining).toBe(0)
 }
 
-declareOracle({ check: [expectDirectMatchesConfirmed] })
+// What this oracle owns: the gap report judges the local-only direct-write
+// guard in CollectionMutationsManager.commitLocalOnlyDirect and the local-only
+// Collection options by this file's fixed direct-write histories.
+declareOracle({
+  owns: [
+    `src/local-only.ts`,
+    `src/collection/mutations.ts#CollectionMutationsManager.commitLocalOnlyDirect`,
+  ],
+  check: [expectDirectMatchesConfirmed],
+})
 
 describe(`local-only direct writes match the confirmed optimistic path`, () => {
   const histories: Record<string, Array<Write>> = {
@@ -136,6 +146,7 @@ describe(`local-only direct writes match the confirmed optimistic path`, () => {
 
   for (const [name, writes] of Object.entries(histories)) {
     it(`for ${name}`, async () => {
+      oracleRoute(`fixed history`)
       const direct = await observe({}, writes)
       const reference = await observe(confirmEverything, writes)
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DbClient, collectionOptions } from '../src/client.js'
+import { oracleRoute } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import type { SyncConfig } from '../src/types.js'
 
@@ -363,7 +364,11 @@ function compareObservedMetadata(
     )
 }
 
+// What this oracle owns: the gap report judges how a sync transaction's row
+// metadata writes are applied and read, in sync.ts and state.ts, by this
+// file's tests, across the immediate, held, and rebuilt production paths.
 declareOracle({
+  owns: [`src/collection/sync.ts`, `src/collection/state.ts`],
   check: [compareObservedMetadata],
   model: [
     expectedMetadata,
@@ -747,6 +752,7 @@ async function observeNested(
 
 describe(`row metadata composition oracle`, () => {
   it(`enumerates every legal one-key history of up to three writes`, () => {
+    oracleRoute(`case`)
     expect(histories).toHaveLength(1457)
     const labels = new Set(
       histories.map(
@@ -772,6 +778,7 @@ describe(`row metadata composition oracle`, () => {
   })
 
   it(`rejects named wrong answers in the model`, () => {
+    oracleRoute(`calibration`)
     // A delete that carried metadata keeps none.
     expect(
       expectedMetadata(`present-with-metadata`, [
@@ -800,6 +807,7 @@ describe(`row metadata composition oracle`, () => {
   })
 
   it(`enumerates rebuilt histories against every earlier write`, () => {
+    oracleRoute(`case`)
     // 1457 after a key-2 update, plus 310 after a key-1 write.
     expect(rebuiltHistories).toHaveLength(1767)
     expect(
@@ -813,6 +821,7 @@ describe(`row metadata composition oracle`, () => {
   })
 
   it(`enumerates nested histories for every nested write`, () => {
+    oracleRoute(`case`)
     const labels = new Set(nestedHistories.map(describeNested))
     // 275 sequences for each of the seven nested variants.
     expect(nestedHistories).toHaveLength(1925)
@@ -873,6 +882,7 @@ describe(`row metadata composition oracle`, () => {
     `matches last-write-wins metadata after a nested write (%s)`,
     { timeout: 120_000 },
     async (path) => {
+      oracleRoute(`case`)
       const mismatches: Array<string> = []
       for (const [index, history] of nestedHistories.entries()) {
         const label = describeNested(history)
@@ -899,6 +909,7 @@ describe(`row metadata composition oracle`, () => {
   )
 
   it(`rejects named wrong answers in the held-window model`, () => {
+    oracleRoute(`calibration`)
     // Truncate keeps collection metadata, and an earlier set survives T2.
     expect(
       expectedHeldReads(
@@ -924,6 +935,7 @@ describe(`row metadata composition oracle`, () => {
     `reads accepted metadata during a hold, then in an open transaction that is %s`,
     { timeout: 120_000 },
     async (open) => {
+      oracleRoute(`case`)
       const mismatches: Array<string> = []
       for (const [index, { start, sequence }] of histories.entries()) {
         const label = `${start}: ${sequence.map(describeWrite).join(`, `)}`
@@ -959,6 +971,7 @@ describe(`row metadata composition oracle`, () => {
     `matches last-write-wins metadata on the %s path`,
     { timeout: 120_000 },
     async (productionPath) => {
+      oracleRoute(`case`)
       const cases =
         productionPath === `rebuilt`
           ? rebuiltHistories

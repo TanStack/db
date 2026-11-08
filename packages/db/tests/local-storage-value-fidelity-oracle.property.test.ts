@@ -36,6 +36,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -374,7 +375,11 @@ async function runHistory({ entry, handler, payload }: History) {
   )
 }
 
+// What this oracle owns: the gap report judges every function in
+// src/local-storage.ts by this file's JSON-fidelity histories and fixed
+// payload cases.
 declareOracle({
+  owns: [`src/local-storage.ts`],
   check: [runHistory],
   model: [restoredArray, restoredObject],
 })
@@ -424,14 +429,17 @@ describe(`LocalStorage value fidelity oracle`, () => {
       for (const handler of [true, false]) {
         for (const payload of fixedPayloads) {
           if (!isLegal({ entry, handler, payload })) continue
-          it(`${entry} ${handler ? `with` : `without`} a handler of ${payload.label} ${payload.restored === LOST ? `rejects` : `persists its JSON form`}`, () =>
-            runHistory({ entry, handler, payload }))
+          it(`${entry} ${handler ? `with` : `without`} a handler of ${payload.label} ${payload.restored === LOST ? `rejects` : `persists its JSON form`}`, () => {
+            oracleRoute(`fixed history`)
+            return runHistory({ entry, handler, payload })
+          })
         }
       }
       // Storage must hold the JSON the check accepted. This `toJSON` returns
       // the full value once and then a function, which JSON would drop, so a
       // second serialization before the write would store a different row.
       it(`${entry} stores the JSON that its check accepted`, () => {
+        oracleRoute(`fixed history`)
         let calls = 0
         const payload = {
           toJSON: () => (calls++ === 0 ? `checked` : () => `later`),
@@ -447,11 +455,17 @@ describe(`LocalStorage value fidelity oracle`, () => {
     fcTest.prop([historyArbitrary], {
       seed: 20_261_021,
       numRuns: oracleRuns(300),
-    })(`matches the JSON value model (fixed)`, runHistory)
+    })(`matches the JSON value model (fixed)`, (history) => {
+      oracleRoute(`fixed seed`)
+      return runHistory(history)
+    })
   }
   // A path replay of this property runs its one recorded history here.
   oracleReplayTest(fcTest, property).prop(
     [historyArbitrary],
     oraclePropertyOptions(300, property),
-  )(`matches the JSON value model (random)`, runHistory)
+  )(`matches the JSON value model (random)`, (history) => {
+    oracleRoute(`random seed`)
+    return runHistory(history)
+  })
 })

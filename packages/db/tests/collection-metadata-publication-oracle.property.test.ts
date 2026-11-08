@@ -9,6 +9,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -576,6 +577,7 @@ const mutateDriverMetadata: MetadataDriver = (value) => {
 }
 
 it(`detects driver mutation of committed metadata without rewriting its authority`, async () => {
+  oracleRoute(`calibration`)
   const rounds: Array<PublicationRound> = [
     {
       key: 1,
@@ -597,6 +599,7 @@ it(`detects driver mutation of committed metadata without rewriting its authorit
 })
 
 it(`rejects a torn callback-time metadata cut even when settled metadata is correct`, async () => {
+  oracleRoute(`calibration`)
   const rounds: Array<PublicationRound> = [
     {
       key: 1,
@@ -620,6 +623,7 @@ it.each(
 )(
   `detects $placement metadata mutation with canceledFirst=$canceledFirst`,
   async ({ placement, canceledFirst }) => {
+    oracleRoute(`calibration`)
     const initial: Array<MetadataEntryState> =
       placement === `initial`
         ? [
@@ -652,6 +656,7 @@ it.each(
 )
 
 it(`shrinks and replays a driver-only metadata corruption`, async () => {
+  oracleRoute(`calibration`)
   const roundsFor = (nested: number): Array<PublicationRound> => [
     {
       key: 1,
@@ -681,6 +686,7 @@ it(`shrinks and replays a driver-only metadata corruption`, async () => {
 })
 
 it(`publishes one event per key when metadata-only sync retires optimistic work`, async () => {
+  oracleRoute(`fixed history`)
   await runPublicationHistory([
     {
       key: 1,
@@ -698,6 +704,7 @@ it(`publishes one event per key when metadata-only sync retires optimistic work`
 })
 
 it(`applies the last committed metadata write and discards aborted writes`, async () => {
+  oracleRoute(`fixed history`)
   await runPublicationHistory([
     {
       key: 1,
@@ -722,6 +729,7 @@ it(`applies the last committed metadata write and discards aborted writes`, asyn
 })
 
 it(`releases only canceled metadata keys while another sync remains pending`, async () => {
+  oracleRoute(`fixed history`)
   await expectMetadataCancellationOwnership(
     [0, 1],
     [1, 2],
@@ -737,6 +745,7 @@ it(`releases only canceled metadata keys while another sync remains pending`, as
 })
 
 it(`does not apply canceled metadata to an absent base key`, async () => {
+  oracleRoute(`fixed history`)
   await expectMetadataCancellationOwnership(
     [0, 1],
     [1, 2],
@@ -748,6 +757,7 @@ it(`does not apply canceled metadata to an absent base key`, async () => {
 })
 
 it(`settles an older metadata owner after canceling the newer owner`, async () => {
+  oracleRoute(`fixed history`)
   await expectMetadataCancellationOwnership(
     [0, 1],
     [1, 2],
@@ -789,7 +799,13 @@ const runCancellationHistory = ({
     initialMetadata,
   )
 
-declareOracle({ check: [applyRound, expectMetadataCancellationOwnership] })
+// What this oracle owns: the gap report judges the metadata-only sync
+// transaction and its metadata writes in sync.ts, and the publication of
+// row and metadata changes to subscribers in state.ts, by this file's tests.
+declareOracle({
+  owns: [`src/collection/sync.ts`, `src/collection/state.ts`],
+  check: [applyRound, expectMetadataCancellationOwnership],
+})
 
 describe(`generated metadata publication histories`, () => {
   if (!oracleReplayRequested()) {
@@ -798,7 +814,10 @@ describe(`generated metadata publication histories`, () => {
       seed: 1_805_001,
     })(
       `keeps metadata-only optimistic settlement a valid keyed diff (fixed)`,
-      runPublicationHistory,
+      async (rounds) => {
+        oracleRoute(`fixed seed`)
+        await runPublicationHistory(rounds)
+      },
     )
 
     fcTest.prop([metadataCancellationArbitrary], {
@@ -806,7 +825,10 @@ describe(`generated metadata publication histories`, () => {
       seed: 1_805_002,
     })(
       `keeps metadata suppression owned by pending transactions (fixed)`,
-      runCancellationHistory,
+      async (history) => {
+        oracleRoute(`fixed seed`)
+        await runCancellationHistory(history)
+      },
     )
   }
   // A path replay of one property runs its one recorded history through that
@@ -816,13 +838,19 @@ describe(`generated metadata publication histories`, () => {
     oraclePropertyOptions(50, metadataOnlyProperty),
   )(
     `keeps metadata-only optimistic settlement a valid keyed diff (random)`,
-    runPublicationHistory,
+    async (rounds) => {
+      oracleRoute(`random seed`)
+      await runPublicationHistory(rounds)
+    },
   )
   oracleReplayTest(fcTest, metadataCancellationProperty).prop(
     [metadataCancellationArbitrary],
     oraclePropertyOptions(50, metadataCancellationProperty),
   )(
     `keeps metadata suppression owned by pending transactions (random)`,
-    runCancellationHistory,
+    async (history) => {
+      oracleRoute(`random seed`)
+      await runCancellationHistory(history)
+    },
   )
 })

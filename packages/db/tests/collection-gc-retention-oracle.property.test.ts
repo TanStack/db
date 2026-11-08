@@ -6,8 +6,10 @@ import { createTransaction } from '../src/transactions.js'
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
+  oracleRoute,
   readOracleRunConfig,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { createOracleReach } from './oracle-reach.js'
 import { resetCleanupQueue, withOracleCleanup } from './utils.js'
 import {
@@ -851,11 +853,21 @@ const boundaryHistoryArbitrary: fc.Arbitrary<BoundaryHistory> = fc.oneof(
   { arbitrary: automaticCleanupHistoryArbitrary, weight: 1 },
 )
 
+// What this oracle owns: the gap report judges the garbage-collection
+// retention of Collections, in lifecycle.ts, by this file's tests. The
+// companion retention module declares the shared check and model that these
+// histories are compared with.
+declareOracle({
+  owns: [`src/collection/lifecycle.ts`],
+  grammar: [boundaryHistoryArbitrary],
+})
+
 it.each(
   runConfig.campaignSeed === undefined ? [20261026, undefined] : [undefined],
 )(
   `preserves retention across transaction phases and idle delivery (seed %s)`,
   async (seed) => {
+    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
     boundaryReach = createOracleReach(boundaryPropertyName, boundaryStates)
     await fc.assert(
       fc.asyncProperty(boundaryHistoryArbitrary, runBoundaryHistory),
@@ -996,5 +1008,8 @@ const boundaryExamples: Array<{ name: string; history: BoundaryHistory }> = [
 ]
 it.skipIf(oracleReplayRequested()).each(boundaryExamples)(
   `reconstructs $name`,
-  async ({ history }) => runBoundaryHistory(history),
+  async ({ history }) => {
+    oracleRoute(`fixed history`)
+    await runBoundaryHistory(history)
+  },
 )

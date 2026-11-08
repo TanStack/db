@@ -9,6 +9,7 @@ import {
 import { createDeferred } from '../src/deferred'
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
+import { oracleRoute } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import { createOracleReach } from './oracle-reach.js'
 import { flushPromises } from './utils'
@@ -291,7 +292,17 @@ function expectedDependentCleanup(
 }
 
 // Declared after the dependents grammar, whose cells are a const.
+// What this oracle owns: the gap report judges public Collection cleanup and
+// the lifecycle manager behind it, the terminal error of a pooled live query
+// that depends on a cleaning Collection, and the disposal of an Effect at
+// cleanup start, by this file's tests.
 declareOracle({
+  owns: [
+    `src/collection/index.ts#CollectionImpl.cleanup`,
+    `src/collection/lifecycle.ts`,
+    `src/query/pooled-live-query.ts`,
+    `src/query/effect.ts#createEffect`,
+  ],
   model: [expectedCleanupBoundary, expectedDependentCleanup],
   grammar: [
     reentryScenarios,
@@ -315,6 +326,7 @@ describe(`Collection cleanup with failing dependents oracle`, () => {
   afterAll(() => reach.assertReached())
 
   it(`declares each cell of the dependents product once`, () => {
+    oracleRoute(`case`)
     const ids = dependentCleanupCells.map(({ id }) => id)
     expect(new Set(ids).size).toBe(ids.length)
     // 6 x 6 pairs x 3 adapters, plus a second release order for the 20 pairs
@@ -325,6 +337,7 @@ describe(`Collection cleanup with failing dependents oracle`, () => {
   it.each(dependentCleanupCells)(
     `settles after every dependent and the source's own cleanup: $id`,
     async (cell) => {
+      oracleRoute(`case`)
       reach.beginHistory()
       const expected = expectedDependentCleanup(cell)
       const gates = new Map<Gate, ReturnType<typeof createDeferred<void>>>()
@@ -574,6 +587,7 @@ describe(`Collection cleanup admission oracle`, () => {
   it.each(subscriberAdmissionCases)(
     `closes $admission admission during $priorStatus $syncMode cleanup`,
     async ({ priorStatus, syncMode, admission }) => {
+      oracleRoute(`case`)
       const cleanupGate = createDeferred<void>()
       let starts = 0
       let acquisitions = 0
@@ -680,6 +694,7 @@ describe(`Collection cleanup admission oracle`, () => {
   )
 
   it(`calibrates every declared bounded-product cell exactly once`, () => {
+    oracleRoute(`case`)
     expectExactCaseIds(reentryScenarios, [
       `abort:plain:1`,
       `abort:plain:2`,
@@ -699,6 +714,7 @@ describe(`Collection cleanup admission oracle`, () => {
   })
 
   it(`waits for source cleanup before publishing the restart boundary`, async () => {
+    oracleRoute(`fixed history`)
     const cleanupGate = createDeferred<void>()
     let starts = 0
     let cleanups = 0
@@ -802,6 +818,7 @@ describe(`Collection cleanup admission oracle`, () => {
   })
 
   it(`retains loading status at cleanup start, then admits restart`, async () => {
+    oracleRoute(`fixed history`)
     const cleanupGate = createDeferred<void>()
     const statuses: Array<string> = []
     let starts = 0
@@ -863,6 +880,7 @@ describe(`Collection cleanup admission oracle`, () => {
   })
 
   it(`rejects dependent preload when cleanup starts before terminal settlement`, async () => {
+    oracleRoute(`fixed history`)
     const cleanupGate = createDeferred<void>()
     const loadGate = createDeferred<void>()
     const loadEntered = createDeferred<void>()
@@ -928,6 +946,7 @@ describe(`Collection cleanup admission oracle`, () => {
   })
 
   it(`disposes a dependent Effect when cleanup starts before terminal settlement`, async () => {
+    oracleRoute(`fixed history`)
     const cleanupGate = createDeferred<void>()
     const handlerGate = createDeferred<void>()
     const handlerEntered = createDeferred<void>()
@@ -1037,6 +1056,7 @@ describe(`Collection cleanup admission oracle`, () => {
   it.each(lateEffectCases)(
     `releases a late Effect during $priorStatus $syncMode cleanup of its $cleaningPosition source`,
     async ({ priorStatus, syncMode, cleaningPosition }) => {
+      oracleRoute(`case`)
       const cleanupGate = createDeferred<void>()
       let starts = 0
       const source = createCollection<Row, number>({

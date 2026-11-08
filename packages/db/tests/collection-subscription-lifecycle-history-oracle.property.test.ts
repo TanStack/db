@@ -30,8 +30,10 @@ import {
   oracleRandomParameters,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   readOracleRunConfig,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
 import type {
   DemandName,
@@ -47,6 +49,14 @@ const { multiplier, ...replay } = readOracleRunConfig()
 const it = oracleReplayTest(vitestIt)
 const fixedCampaign = oracleReplayTest(fcTest)
 const randomCampaign = (property: string) => oracleReplayTest(fcTest, property)
+
+// What this oracle owns: the gap report judges the subscription's logical
+// demand and physical acquisition bookkeeping in subscription.ts, as the
+// histories below drive it, by this file's tests. The lifecycle model lives in
+// the grammar companion, which declares it.
+declareOracle({
+  owns: [`src/collection/subscription.ts`],
+})
 
 /**
  * # What settles a demand created while a Collection is cleaned up?
@@ -72,6 +82,7 @@ describe(`demand created while its Collection is cleaned up`, () => {
   it.each(cleanedRestartDemandCases)(
     `$syncMode source with $loader loader, $replacement replacement, and $interruption`,
     async (history) => {
+      oracleRoute(`case`)
       const expected = expectedCleanedRestartDemand(history)
       let syncRuns = 0
       let physicalAcquisitions = 0
@@ -219,6 +230,7 @@ describe(`demand created while its Collection is cleaned up`, () => {
  */
 describe(`demand parked behind a failed first load across a reload`, () => {
   it.each(parkedReloadDemandCases)(`new run: $newRun`, async (history) => {
+    oracleRoute(`case`)
     const expected = expectedParkedReloadDemand(history)
     let syncRuns = 0
     let loads = 0
@@ -1061,6 +1073,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   it.each([`resolve`, `reject`] as const)(
     `retains an earlier peer failure after aborting it while another peer will %s`,
     async (outcome) => {
+      oracleRoute(`case`)
       await runHistory(
         [
           { type: `cleanup` },
@@ -1077,6 +1090,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )
 
   it(`shares one normalized replay rejection among surviving detached callers`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory(
       [
         { type: `cleanup` },
@@ -1102,6 +1116,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   ] as const)(
     `holds detached callers for their peer until %s`,
     async (finish) => {
+      oracleRoute(`case`)
       const history: Array<LifecycleCommand> = [
         { type: `cleanup` },
         { type: `request`, demand: `a` },
@@ -1131,6 +1146,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )
 
   it(`does not revive a discarded caller when its logical demand restarts`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       { type: `cleanup` },
       { type: `request`, demand: `a` },
@@ -1151,6 +1167,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       ),
     ),
   )(`checks corrupted caller outcomes: %j`, async ({ origin, fault }) => {
+    oracleRoute(`calibration`)
     const history: Array<LifecycleCommand> = [
       ...(origin === `detached` ? [{ type: `cleanup` } as const] : []),
       { type: `request`, demand: `a` },
@@ -1168,6 +1185,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   })
 
   it(`retains the caller mismatch and a separate cleanup failure`, async () => {
+    oracleRoute(`calibration`)
     const cleanupFailure = new Error(`cleanup sentinel`)
     let reported: unknown
     try {
@@ -1195,6 +1213,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
 
   for (const outcome of [`resolve`, `reject`] as const) {
     it(`keeps terminal observations unchanged when a retired acquisition attempt ${outcome}s`, async () => {
+      oracleRoute(`fixed history`)
       const reach = await runHistory(
         [{ type: `request`, demand: `a` }, { type: `unsubscribe` }],
         { retiredDelivery: outcome },
@@ -1205,6 +1224,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
 
   for (const firstOutcome of [`resolve`, `reject`] as const) {
     it(`settles only the corresponding returned result when the first acquisition ${firstOutcome}s`, async () => {
+      oracleRoute(`fixed history`)
       const secondOutcome = firstOutcome === `resolve` ? `reject` : `resolve`
       const history: Array<LifecycleCommand> = [
         { type: `request`, demand: `a` },
@@ -1258,6 +1278,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   }
 
   it(`covers every required command and cross-phase transition`, async () => {
+    oracleRoute(`case`)
     const reach = new Set<string>()
     for (const history of [
       ...greenLifecycleHistories,
@@ -1308,6 +1329,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   })
 
   it(`names the overlapping replay transition in the model`, () => {
+    oracleRoute(`case`)
     const model = createLifecycleModel()
     for (const command of pendingSupersessionHistory) {
       reduceLifecycle(model, command)
@@ -1337,11 +1359,13 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   ])(
     `does not wait for an aborted load to settle for $name`,
     async ({ history }) => {
+      oracleRoute(`case`)
       await runHistory(history)
     },
   )
 
   it(`releases exact ownership while older replay work is pending`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory(
       [
         ...pendingSupersessionHistory,
@@ -1367,6 +1391,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )(
     `tracks $cancellation cancellation across $replays replay(s) ending in $outcome`,
     async ({ cancellation, replays, outcome }) => {
+      oracleRoute(`case`)
       await runHistory(
         [
           { type: `request`, demand: `a` },
@@ -1403,11 +1428,13 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   ])(
     `queues replay without reacquiring an aborted demand on $name`,
     async ({ history }) => {
+      oracleRoute(`case`)
       await runHistory(history)
     },
   )
 
   it(`does not release an unacquired replacement after an aborted demand replays`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory(
       [
         ...abortReplayHistory,
@@ -1420,6 +1447,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   })
 
   it(`replays a live peer without reacquiring an aborted demand`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       { type: `request`, demand: `a` },
       { type: `request`, demand: `b` },
@@ -1445,6 +1473,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   })
 
   it(`restarts a live peer without reacquiring an aborted demand and completes teardown`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory(mixedAbortedRestartHistory, {
       continueAfterMismatch: true,
     })
@@ -1472,11 +1501,13 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   it.each(syncReplayScenarios)(
     `settles queued synchronous $transition with $ownerCount owner(s), abort=$abortFirst`,
     async ({ history }) => {
+      oracleRoute(`case`)
       await runHistory(history, { acquisitionMode: `sync-success` })
     },
   )
 
   it(`preserves acquisition lease ownership across queued synchronous replay`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory(syncLifecycleHistory, {
       acquisitionMode: `sync-success`,
       continueAfterMismatch: true,
@@ -1537,6 +1568,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   }>)(
     `continues through the full synchronous replay suffix for $name`,
     async ({ history }) => {
+      oracleRoute(`case`)
       await runHistory(history, {
         acquisitionMode: `sync-success`,
         continueAfterMismatch: true,
@@ -1545,6 +1577,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )
 
   it(`publishes a new snapshot while canceled initial work still holds readiness`, async () => {
+    oracleRoute(`fixed history`)
     // Seed 1413322355, path 757:13:15:15:9:9:9. This checks an empty snapshot
     // notification: initial readiness is not a replacement publication gate.
     await runHistory(
@@ -1582,6 +1615,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   })
 
   it(`keeps a new snapshot private after failed restart`, async () => {
+    oracleRoute(`fixed history`)
     // Minimized from seed 317005625 at 100×. The mismatch is an empty
     // notification, not lost rows: failed replacement must keep reads private.
     await runHistory(
@@ -1643,6 +1677,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   }
 
   it(`judges a replay once after a change that retires a replacement and a pending owner`, async () => {
+    oracleRoute(`fixed history`)
     const reached = await runHistory(changeRetiresReplacementHistory)
     expect(reached).toContain(`change:between-releases-would-publish`)
   })
@@ -1650,6 +1685,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   // Prompt cancellation of the replaced owner's replay load is a settlement:
   // the held replacement covers it, so the replay publishes.
   it(`publishes a replay when a covered owner's replay load is canceled`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory(
       [
         { type: `request`, demand: `c` },
@@ -1704,6 +1740,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   ] satisfies Array<{ name: string; history: Array<LifecycleCommand> }>)(
     `keeps a replay failed when $name`,
     async ({ history }) => {
+      oracleRoute(`case`)
       await runDemandChangeHistory(history)
     },
   )
@@ -1720,6 +1757,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   })(
     `matches the pure lifecycle model for a fixed seed`,
     async (history, cancellation) => {
+      oracleRoute(`fixed seed`)
       await runHistory(history, { cancellation })
     },
     120_000,
@@ -1734,6 +1772,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )(
     `matches the pure lifecycle model for a random or replayed seed`,
     async (history, cancellation) => {
+      oracleRoute(`random seed`)
       await runHistory(history, { cancellation })
     },
     120_000,
@@ -1744,6 +1783,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )(
     `judges a replay once per demand change for a fixed seed`,
     async (history, cancellation) => {
+      oracleRoute(`fixed seed`)
       demandChangeHistoriesRan = true
       await runDemandChangeHistory(history, cancellation)
     },
@@ -1760,6 +1800,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )(
     `judges a replay once per demand change for a random or replayed seed`,
     async (history, cancellation) => {
+      oracleRoute(`random seed`)
       demandChangeHistoriesRan = true
       await runDemandChangeHistory(history, cancellation)
     },
@@ -1772,6 +1813,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   })(
     `matches synchronous success histories for a fixed seed`,
     async (history) => {
+      oracleRoute(`fixed seed`)
       await runHistory(history, { acquisitionMode: `sync-success` })
     },
     120_000,
@@ -1782,6 +1824,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )(
     `matches synchronous success histories for a random or replayed seed`,
     async (history) => {
+      oracleRoute(`random seed`)
       await runHistory(history, { acquisitionMode: `sync-success` })
     },
     120_000,

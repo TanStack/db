@@ -530,6 +530,9 @@ const handlerCalibrations = [
   },
 ]
 
+// No owns: the handler types this property judges belong to the Query and
+// Electric adapter packages, outside packages/db. The property's own parts
+// (the compiler driver and the admission model) are declared by oracleProperty.
 oracleProperty({
   id: `adapter.handler-types`,
   law: {

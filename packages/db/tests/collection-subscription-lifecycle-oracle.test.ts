@@ -14,6 +14,7 @@ import {
   oraclePropertyOptions,
   oracleRandomParameters,
   oracleReplayTest,
+  oracleRoute,
   readOracleRunConfig,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -753,7 +754,11 @@ function expectedThreeGenerationSettlement(
   }
 }
 
+// What this oracle owns: the gap report judges the demand lifecycle of a
+// subscription in subscription.ts, its startup, cleanup, restart, and
+// release, by this file's tests.
 declareOracle({
+  owns: [`src/collection/subscription.ts`],
   check: [runAsyncRestartScenario],
   model: [
     modelSubscriberResumeRetirement,
@@ -785,6 +790,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   const { multiplier, ...replay } = readOracleRunConfig()
 
   it(`executes every required async restart regime`, async () => {
+    oracleRoute(`case`)
     const reach = new Set<string>()
     for (const scenario of asyncRestartCoverageScenarios) {
       for (const label of await runAsyncRestartScenario(scenario)) {
@@ -810,6 +816,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   })
 
   it(`covers every finite start, failure-delivery, and release cell`, () => {
+    oracleRoute(`case`)
     expect(
       new Set(
         startScenarios.map(({ outcome, reentry }) => `${outcome}:${reentry}`),
@@ -833,6 +840,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   })
 
   it(`accounts for every acquisition phase and entry pair`, () => {
+    oracleRoute(`case`)
     const allCells = new Set<AcquisitionCell>(
       acquisitionPhases.flatMap((phase) =>
         acquisitionEntries.map((entry) => `${phase}:${entry}` as const),
@@ -844,6 +852,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   })
 
   it(`accounts for every acquisition lifecycle state and interaction cause`, () => {
+    oracleRoute(`case`)
     const allCells = new Set<AcquisitionInteractionCell>(
       acquisitionLifecycleStates.flatMap((state) =>
         acquisitionInteractionCauses.map(
@@ -865,6 +874,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )(
     `retires startup at $entry with nested restart=$restart`,
     async ({ entry, restart }) => {
+      oracleRoute(`case`)
       const failure = new Error(`obsolete startup failed`)
       const cleanups: Array<number> = []
       const loads: Array<number> = []
@@ -1001,6 +1011,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )(
     `observes unavailable demand synchronously: $entry / $unavailable / $outcome / $phase`,
     async ({ outcome, phase, entry }) => {
+      oracleRoute(`case`)
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
       const transport = createDeferred<void>()
       const failure = new Error(`recovery acquisition failed`)
@@ -1162,6 +1173,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )(
     `cancels queued acquisition during $phase via $action`,
     async ({ phase, action }) => {
+      oracleRoute(`case`)
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
@@ -1225,6 +1237,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )(
     `retires only the acquired lease for aborted replay with unload=$outcome, releaseSelf=$releaseSelf`,
     async ({ outcome, releaseSelf }) => {
+      oracleRoute(`case`)
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
       const controller = new AbortController()
       const failure = new Error(`release failed`)
@@ -1308,6 +1321,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )(
     `attempts release once across $reentry reentry with $failures configured failures`,
     async ({ reentry, failures }) => {
+      oracleRoute(`case`)
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
       const failure = new Error(`physical release failed`)
       const loads: Array<LoadSubsetOptions> = []
@@ -1390,6 +1404,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   it.each(threeGenerationScenarios)(
     `fences three sync-run generations for $obsoleteOutcome/$currentOutcome settled $settlementOrder`,
     async ({ obsoleteOutcome, currentOutcome, settlementOrder }) => {
+      oracleRoute(`case`)
       type Row = { id: string; version: number }
       const obsolete = createDeferred<void>()
       const current = createDeferred<void>()
@@ -1517,6 +1532,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   })(
     `fences async demand settlements across sync-run generations for a fixed seed`,
     async (scenario) => {
+      oracleRoute(`fixed seed`)
       await runAsyncRestartScenario(scenario)
     },
     120_000,
@@ -1532,6 +1548,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )(
     `fences async demand settlements across sync-run generations for a random or replayed seed`,
     async (scenario) => {
+      oracleRoute(`random seed`)
       await runAsyncRestartScenario(scenario)
     },
     120_000,
@@ -1556,6 +1573,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 describe(`resumption notification error and surviving demand`, () => {
   for (const campaign of [`fixed`, `random`] as const) {
     it(`acquires retained demand after replacement readiness (${campaign})`, async () => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(`resume-notification-error`, [
         `throwing-notification`,
         `retained-owner`,
@@ -1682,6 +1700,7 @@ describe(`resumption notification error and surviving demand`, () => {
   )(
     `ordinary admission preserves $cleanupAt cleanup (pending=$cleanupPending, $gate start, $syncMode)`,
     async (history) => {
+      oracleRoute(`case`)
       const expected = modelSubscriberStartCleanup(history)
       const pendingCleanup = createDeferred<void>()
       let starts = 0
@@ -1781,6 +1800,7 @@ describe(`resumption notification error and surviving demand`, () => {
   )(
     `balances resume at $retireAt (cleanup=$cleanup, $syncMode, gate=$renderGate)`,
     async (history) => {
+      oracleRoute(`case`)
       const expected = modelSubscriberResumeRetirement(history)
       let starts = 0
       let loads = 0

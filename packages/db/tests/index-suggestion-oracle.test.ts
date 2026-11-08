@@ -22,6 +22,7 @@ import {
 import { eq } from '../src/query/builder/functions.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from './utils.js'
+import { oracleRoute } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import type { IndexSuggestion } from '../src/indexes/index-registry.js'
 
@@ -67,7 +68,13 @@ function expectedIndexCount(
   return mode === `eager` || index !== `none` ? 1 : 0
 }
 
+// What this oracle owns: the collection-size suggestion and the ordered-index
+// fallback warning, by this file's scenarios.
 declareOracle({
+  owns: [
+    `src/indexes/index-registry.ts#checkCollectionSizeForIndex`,
+    `src/query/compiler/order-by.ts#warnOrderIndexFallback`,
+  ],
   check: [expectSizeSuggestionOutcome, expectOrderedIndexMessages],
   model: [
     expectedSuggestions,
@@ -89,6 +96,7 @@ describe(`collection-size index suggestions`, () => {
     { mode: `off`, size: 1101, index: `none`, enabled: false },
   ] as const) {
     test(`${scenario.mode}, ${scenario.size} rows, index=${scenario.index}, advice=${scenario.enabled}`, async () => {
+      oracleRoute(`case`)
       const suggestions: Array<IndexSuggestion> = []
       configureIndexDevMode({
         enabled: scenario.enabled,
@@ -314,6 +322,7 @@ describe(`bounded orderBy index diagnostics`, () => {
   ]
   for (const scenario of scenarios) {
     test(scenario.name, async () => {
+      oracleRoute(`case`)
       const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const source = createCollection(
         mockSyncCollectionOptions<{ id: number; name: string }>({

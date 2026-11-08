@@ -45,6 +45,7 @@ import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
 import { createHost } from './local-storage-peer-fixtures'
 import { withHistoryCleanup } from './optimistic-history-oracle'
+import { declareOracle } from './oracle-declaration'
 import { oracleProperty, pass, violation } from './oracle-property'
 
 // -- Histories ------------------------------------------------------------------
@@ -506,6 +507,14 @@ const describeAction = (action: Action) => {
   if (action.kind === `deliver`) return `deliver${action.tab}`
   return action.kind
 }
+
+// What this oracle owns: the gap report judges every function in
+// src/local-storage.ts by this file's generated same-tab and cross-tab peer
+// histories.
+
+declareOracle({
+  owns: [`src/local-storage.ts`],
+})
 
 oracleProperty({
   id: `local-storage.peers`,

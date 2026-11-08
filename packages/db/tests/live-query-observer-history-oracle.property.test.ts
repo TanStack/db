@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { DbClient } from '../src/client.js'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRuns,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import { finishHistory } from './observer-history-cleanup.js'
 import { withOracleCleanup } from './utils.js'
@@ -43,6 +47,7 @@ describe(`observer hydration error timing`, () => {
   })
   for (const campaign of [`fixed`, `random`] as const) {
     it(`publishes errors at their ownership checkpoint (${campaign})`, async () => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(`observer-hydration-error`, [
         `granular`,
         `wholesale`,
@@ -162,6 +167,7 @@ describe(`observer hydration error timing`, () => {
 describe(`observer release failure ownership`, () => {
   for (const campaign of [`fixed`, `random`] as const) {
     it(`reattaches after reporting a release failure (${campaign})`, async () => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(`observer-release`, [
         `granular`,
         `wholesale`,
@@ -293,6 +299,7 @@ describe(`observer release failure ownership`, () => {
 describe(`observer partial attachment`, () => {
   for (const campaign of [`fixed`, `random`] as const) {
     it(`releases every acquired channel before retry (${campaign})`, async () => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(`observer-partial-attach`, [
         `early-failure`,
         `sync-failure`,
@@ -1027,7 +1034,11 @@ function reactionHistory(reaction: Reaction): Array<Command> {
   ]
 }
 
+// What this oracle owns: the gap report judges every function in
+// src/live-query-observer.ts by this file's generated and fixed histories of
+// subscribe, publish, markError, and dispose.
 declareOracle({
+  owns: [`src/live-query-observer.ts`],
   check: [runHistory, assertHistory],
   model: [subscribeModel, unsubscribeModel, publishModel, disposeModel],
   grammar: [command, listener],
@@ -1038,6 +1049,7 @@ describe(`LiveQueryObserver generated histories`, () => {
     it.each([1813, -1359260562])(
       `${mode} listeners follow the eligibility ledger with fixed seed=%s`,
       async (seed) => {
+        oracleRoute(`fixed seed`)
         await fc.assert(
           fc.asyncProperty(
             fc.array(command, { minLength: 1, maxLength: 30 }),
@@ -1050,6 +1062,7 @@ describe(`LiveQueryObserver generated histories`, () => {
       },
     )
     it(`${mode} listeners follow the eligibility ledger with a random or replayed seed`, async () => {
+      oracleRoute(`random seed`)
       await fc.assert(
         fc.asyncProperty(
           fc.array(command, { minLength: 1, maxLength: 30 }),
@@ -1065,6 +1078,7 @@ describe(`LiveQueryObserver generated histories`, () => {
   it.each([`granular`, `wholesale`] as const)(
     `%s listeners joining during dispatch start with the next eligible publication`,
     async (mode) => {
+      oracleRoute(`fixed history`)
       const history: Array<Command> = [
         { type: `subscribe`, listener: 0 },
         {
@@ -1094,6 +1108,7 @@ describe(`LiveQueryObserver generated histories`, () => {
   )
 
   it(`executes every command and reaction kind in fixed production histories`, async () => {
+    oracleRoute(`fixed history`)
     const reach = emptyReach()
     for (const mode of [`granular`, `wholesale`] as const) {
       await runHistory(
@@ -1119,6 +1134,7 @@ describe(`LiveQueryObserver generated histories`, () => {
   it.each([`granular`, `wholesale`] as const)(
     `%s one-row version margins retain the no-change boundary`,
     async (mode) => {
+      oracleRoute(`fixed history`)
       await runHistory(mode, [
         {
           type: `publish`,
@@ -1152,6 +1168,7 @@ describe(`LiveQueryObserver generated histories`, () => {
   it.each([`granular`, `wholesale`] as const)(
     `rejects dropped peer delivery after a throwing listener through the %s production path`,
     async (mode) => {
+      oracleRoute(`calibration`)
       const history = reactionHistory(`throw`)
       await runHistory(mode, history)
       const reach = emptyReach()
@@ -1163,6 +1180,7 @@ describe(`LiveQueryObserver generated histories`, () => {
   )
 
   it(`rejects a duplicate granular bootstrap through the production seed path`, async () => {
+    oracleRoute(`calibration`)
     const history: Array<Command> = [
       {
         type: `publish`,
@@ -1183,6 +1201,7 @@ describe(`LiveQueryObserver generated histories`, () => {
   it.each([`granular`, `wholesale`] as const)(
     `rejects a reentrant publication delivered out of FIFO order through the %s production path`,
     async (mode) => {
+      oracleRoute(`calibration`)
       const history = reactionHistory(`nested`)
       await runHistory(mode, history)
       const reach = emptyReach()

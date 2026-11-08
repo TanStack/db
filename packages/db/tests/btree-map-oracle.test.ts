@@ -4,6 +4,7 @@ import { BTree } from '../src/utils/btree.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -51,6 +52,7 @@ it.each([
 ])(
   `preserves the Map across a split after %s accepted entries`,
   (size, rightKey) => {
+    oracleRoute(`case`)
     const insertedKey = size * 2
     const tree = new BTree<number, Payload>(
       (left, right) =>
@@ -71,6 +73,7 @@ it.each([
 )
 
 it(`accepts infinite comparison results that still provide an order`, () => {
+  oracleRoute(`fixed history`)
   const tree = new BTree<number, Payload>((left, right) =>
     left === right ? 0 : left < right ? -Infinity : Infinity,
   )
@@ -281,7 +284,14 @@ function expectRefinement(
   expectPair(tree.nextLowerPair(undefined), sorted[sorted.length - 1], model)
 }
 
-declareOracle({ check: [expectRefinement], model: [stepModel] })
+// What this oracle owns: the gap report judges the B+ tree in
+// utils/btree.ts by this file's tests. The refinement check and the Map model
+// judge every public observation of the tree.
+declareOracle({
+  owns: [`src/utils/btree.ts`],
+  check: [expectRefinement],
+  model: [stepModel],
+})
 
 describe(`BTree Map oracle`, () => {
   // The 120,000-operation corpus takes about nine seconds with CI coverage.
@@ -291,6 +301,7 @@ describe(`BTree Map oracle`, () => {
     `matches a Map oracle under random insert/delete/overwrite with small nodes`,
     { timeout: 30_000 },
     () => {
+      oracleRoute(`fixed seed`)
       let seed = 12345
       const rnd = () =>
         (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff
@@ -338,11 +349,13 @@ describe(`BTree Map oracle`, () => {
     campaign.test(
       `matches complete Map cuts across shrinkable histories (${campaign.name})`,
       () => {
+        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
         fc.assert(mapHistoryProperty, campaign.parameters)
       },
     )
 
   it(`replays a shrunk Map mismatch with the reported seed and path`, () => {
+    oracleRoute(`calibration`)
     // A scanner that drops every row keeps the initial empty cut green. The
     // first retained put fails at the public scan checkpoint.
     const wrongScan = vi
@@ -373,6 +386,7 @@ describe(`BTree Map oracle`, () => {
   it.each([4, 5, 6, 7, 8])(
     `preserves every cut through dense growth, retirement and reuse with node size %s`,
     (nodeSize) => {
+      oracleRoute(`fixed history`)
       const tree = new BTree<number, Payload>((a, b) => a - b, nodeSize)
       const model: ReferenceModel = new Map()
       expectRefinement(tree, model, 0)
@@ -412,6 +426,7 @@ describe(`BTree Map oracle`, () => {
   )
 
   it(`rejects wrong pair payloads, shared payload mutation and transient stale state`, () => {
+    oracleRoute(`calibration`)
     const tree = new BTree<number, Payload>((a, b) => a - b, 4)
     const value = { v: 1 }
     const model: ReferenceModel = new Map([
@@ -467,6 +482,7 @@ describe(`BTree Map oracle`, () => {
           scan(-Infinity, high, includeHigh, onFound)) as typeof scan,
     },
   ])(`rejects a range scan that $design`, ({ wrap }) => {
+    oracleRoute(`calibration`)
     const tree = new BTree<number, Payload>((a, b) => a - b, 4)
     const model: ReferenceModel = new Map()
     for (let key = 0; key < 40; key += 2)
@@ -483,6 +499,7 @@ describe(`BTree Map oracle`, () => {
   })
 
   it(`shrinks and replays a wrong neighbor payload without losing its pair key`, () => {
+    oracleRoute(`calibration`)
     const property = fc.property(
       fc.array(fc.integer({ min: 0, max: 20 }), { minLength: 1, maxLength: 8 }),
       (values) => {

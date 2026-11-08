@@ -12,8 +12,10 @@ import {
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
+  oracleRoute,
   readOracleRunConfig,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { createOracleReach } from './oracle-reach.js'
 import { resetCleanupQueue, withOracleCleanup } from './utils.js'
 import type { GcAction, GcModel } from './collection-gc-retention-oracle.js'
@@ -353,11 +355,21 @@ const historyArbitrary = fc.record({
   age: fc.integer({ min: 0, max: 80 }),
   sourceValue: fc.integer({ min: -3, max: 3 }),
 })
+// What this oracle owns: the gap report judges the garbage-collection
+// retention of Collections touched by a mutation, in lifecycle.ts, by this
+// file's tests. The companion retention module declares the shared check and
+// model.
+declareOracle({
+  owns: [`src/collection/lifecycle.ts`],
+  grammar: [historyArbitrary],
+})
+
 it.each(
   runConfig.campaignSeed === undefined ? [20261026, undefined] : [undefined],
 )(
   `retains every touched Collection across mutation shapes (seed %s)`,
   async (seed) => {
+    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
     reach = createOracleReach(propertyName, states)
     await fc.assert(fc.asyncProperty(historyArbitrary, runMutationHistory), {
       ...oraclePropertyOptions(150, propertyName),
@@ -376,6 +388,7 @@ it.each(
 it.skipIf(oracleReplayRequested())(
   `rejects corruption of a supplied mutation projection`,
   () => {
+    oracleRoute(`calibration`)
     const model = createGcModel(100)
     stepGcModel(model, { kind: `mutate`, commit: true })
     const observation = {

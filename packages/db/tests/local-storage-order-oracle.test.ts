@@ -38,6 +38,7 @@ import { DbClient, collectionOptions } from '../src/client'
 import { createDeferred } from '../src/deferred'
 import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
+import { oracleRoute } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
 import {
   observeHistoryPromise,
@@ -66,12 +67,18 @@ function expectedRows(
   return [...rows.values()].sort((a, b) => a.id.localeCompare(b.id))
 }
 
-declareOracle({ model: [expectedRows] })
+// What this oracle owns: the gap report judges every function in
+// src/local-storage.ts by this file's fixed LocalStorage write-order histories.
+declareOracle({
+  owns: [`src/local-storage.ts`],
+  model: [expectedRows],
+})
 
 // The outer handler admits a nested write while it is held. The independent
 // authored fold expects the outer row before the inner row. The storage trace
 // checks that order, while the held checkpoint rules out early inner persistence.
 it('persists a nested fire-and-forget mutation after its handler returns', async () => {
+  oracleRoute(`fixed history`)
   const storage = makeSeededStorage()
   const snapshots: Array<Array<Row>> = []
   const setItem = storage.setItem
@@ -131,6 +138,7 @@ it('persists a nested fire-and-forget mutation after its handler returns', async
  * stays at 0; after both receipts it is 2. The materialized Collection and a
  * fresh restore are the public observations. */
 it('orders module-level manual acceptance with a DbClient Collection', async () => {
+  oracleRoute(`fixed history`)
   const storage = makeSeededStorage()
   const entered = createDeferred<void>()
   const release = createDeferred<void>()
@@ -227,6 +235,7 @@ it('orders module-level manual acceptance with a DbClient Collection', async () 
 // Waiting for the rejected receipt is a neighboring control: both cuts must
 // have the same durable rows, without an empty failed slot delaying the first.
 it('persists a direct write at return after a synchronous handler failure', async () => {
+  oracleRoute(`fixed history`)
   const storage = makeSeededStorage()
   const failure = new Error('update rejected before writing')
   const collection = createCollection(

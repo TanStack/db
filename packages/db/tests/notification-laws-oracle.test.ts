@@ -23,14 +23,23 @@ import {
   expectNotificationsStopped,
 } from '../../db-collection-e2e/src/utils/notification-laws-oracle'
 import { ScenarioLifetime } from './conformance/scenario-lifetime'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import { oraclePropertyOptions, oracleRoute, oracleRuns } from './oracle-config'
+import { declareOracle } from './oracle-declaration'
 import type { Notification } from '../../db-collection-e2e/src/utils/notification-laws-oracle'
 
 type Row = { id: string; count: number }
 
+// What this oracle owns: the gap report judges every function in the
+// Collection change-message path (subscribeChanges) by this file's generated
+// publication histories and the calibration of its Map checker.
+declareOracle({
+  owns: [`src/collection/changes.ts#CollectionChangesManager.subscribeChanges`],
+})
+
 it.each([20260913, undefined])(
   `checks real query publications against generated worlds seed=%s`,
   async (seed) => {
+    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
     await fc.assert(
       fc.asyncProperty(
         fc.option(fc.integer(), { nil: null }),
@@ -125,6 +134,7 @@ it.each([20260913, undefined])(
 it.each([20260913, undefined])(
   `reconstructs generated publication histories seed=%s`,
   (seed) => {
+    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
     fc.assert(
       fc.property(
         fc.array(fc.dictionary(fc.constantFrom('a', 'b', 'c'), fc.integer()), {
@@ -200,6 +210,7 @@ it.each([
   'absent-delete',
   'unknown-type',
 ])(`rejects the %s publication mutant`, (fault) => {
+  oracleRoute(`calibration`)
   const peer = { id: 'peer', count: 2 }
   const row = { id: 'owned', count: 1 }
   const insert = { type: 'insert', key: row.id, value: row }
@@ -227,6 +238,7 @@ it.each([
 it.each([20260913, undefined])(
   `rejects corrupt prior values and repeated updates seed=%s`,
   (seed) => {
+    oracleRoute(`calibration`)
     fc.assert(
       fc.property(fc.integer({ min: -1000, max: 1000 }), (count) => {
         const old = { id: 'owned', count }

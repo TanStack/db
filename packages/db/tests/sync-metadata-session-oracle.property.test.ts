@@ -6,6 +6,7 @@ import { createOracleReach } from './oracle-reach.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from './oracle-config.js'
 import {
@@ -26,6 +27,7 @@ import {
   sessionCollectionKeys,
   sessionHistoryArbitrary,
 } from './sync-metadata-session-oracle.js'
+import { declareOracle } from './oracle-declaration.js'
 import type {
   ReceiptState,
   SessionAction,
@@ -34,6 +36,11 @@ import type {
   SessionModel,
 } from './sync-metadata-session-oracle.js'
 import type { SyncConfig } from '../src/types.js'
+
+// What this oracle owns: the gap report judges the DbClient Collection's sync
+// path, which applies sources, seeds, holds, and commits, by this file's tests.
+// The contract, model, and grammar live in sync-metadata-session-oracle.ts.
+declareOracle({ owns: [`src/client.ts`, `src/collection/sync.ts`] })
 
 /**
  * Core driver for the sync metadata session oracle. The contract, model,
@@ -706,6 +713,7 @@ function createCampaignReach(grammar: SessionGrammar, property: string) {
 
 describe(`sync metadata session oracle`, () => {
   it(`derives the named witnesses from the laws`, async () => {
+    oracleRoute(`fixed history`)
     type Observation = ReturnType<SessionModel[`observe`]>
     const at = async (name: keyof typeof witnesses, step: number) => {
       const { grammar, history } = witnesses[name]
@@ -827,6 +835,7 @@ describe(`sync metadata session oracle`, () => {
   it.each(Object.entries(witnesses))(
     `keeps the session law on witness %s`,
     async (_name, { grammar, history }) => {
+      oracleRoute(`fixed history`)
       await assertSessionHistory(grammar, history)
     },
   )
@@ -882,6 +891,7 @@ describe(`sync metadata session grammar ablation`, () => {
   it.each(ablations.map((ablation) => [ablation.regime, ablation] as const))(
     `removing the axis for %s removes that regime`,
     (_regime, { grammar, drop, regime }) => {
+      oracleRoute(`fixed seed`)
       const count = (filter: (action: SessionAction) => boolean) =>
         fc
           .sample(sessionHistoryArbitrary(grammar), {
@@ -927,7 +937,10 @@ describe(`sync metadata session hold invariance`, () => {
       seed: seed + 100,
     })(
       `keeps ${grammar.name} source reads independent of holds (fixed)`,
-      run,
+      (history) => {
+        oracleRoute(`fixed seed`)
+        return run(history)
+      },
       60_000,
     )
     // A path replay of this property runs here.
@@ -936,7 +949,10 @@ describe(`sync metadata session hold invariance`, () => {
       oraclePropertyOptions(50, invariance),
     )(
       `keeps ${grammar.name} source reads independent of holds (random)`,
-      run,
+      (history) => {
+        oracleRoute(`random seed`)
+        return run(history)
+      },
       60_000,
     )
   }
@@ -976,7 +992,10 @@ describe(`sync metadata session paired formulations`, () => {
         seed: seed + 200,
       })(
         `${formulation.title} on ${grammar.name} histories (fixed)`,
-        run,
+        (history) => {
+          oracleRoute(`fixed seed`)
+          return run(history)
+        },
         60_000,
       )
       // A path replay of this property runs here.
@@ -985,7 +1004,10 @@ describe(`sync metadata session paired formulations`, () => {
         oraclePropertyOptions(50, name),
       )(
         `${formulation.title} on ${grammar.name} histories (random)`,
-        run,
+        (history) => {
+          oracleRoute(`random seed`)
+          return run(history)
+        },
         60_000,
       )
     }
@@ -1003,6 +1025,7 @@ describe(`sync metadata session campaigns`, () => {
     })(
       `keeps the session law on ${grammar.name} histories (fixed)`,
       (history) => {
+        oracleRoute(`fixed seed`)
         reach.record(history)
         return run(history)
       },
@@ -1010,7 +1033,10 @@ describe(`sync metadata session campaigns`, () => {
     )
     oracleReplayTest(it)(
       `reaches the declared states in the ${grammar.name} fixed campaign`,
-      () => reach.assertReached(),
+      () => {
+        oracleRoute(`fixed seed`)
+        reach.assertReached()
+      },
     )
     // A path replay of this property runs here.
     oracleReplayTest(fcTest, property).prop(
@@ -1018,7 +1044,10 @@ describe(`sync metadata session campaigns`, () => {
       oraclePropertyOptions(100, property),
     )(
       `keeps the session law on ${grammar.name} histories (random)`,
-      run,
+      (history) => {
+        oracleRoute(`random seed`)
+        return run(history)
+      },
       60_000,
     )
   }

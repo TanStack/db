@@ -23,6 +23,7 @@ import {
   getLiveQueryHash,
   resolveLiveQueryValue,
 } from '../src'
+import { oracleRoute } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
 import { createOracleReach } from './oracle-reach'
 import { withOracleCleanup } from './utils'
@@ -80,7 +81,13 @@ afterAll(() => {
       ),
     )
 })
+// What this oracle owns: the gap report judges prepareLiveQueryValue and
+// resolveLiveQueryValue by this file's admission histories.
 declareOracle({
+  owns: [
+    `src/live-query-options.ts#prepareLiveQueryValue`,
+    `src/live-query-options.ts#resolveLiveQueryValue`,
+  ],
   check: [
     checkCacheOptionAdmission,
     checkCacheOptionPromise,
@@ -100,6 +107,7 @@ test.each(
     ),
   ),
 )(`cache admission history %j`, async ({ history, held, path, claimant }) => {
+  oracleRoute(`case`)
   const route = `${claimant}/${path}`
   executedRoutes.add(route)
   const reach = reaches[route]!
@@ -384,12 +392,14 @@ test.each(
 test.each(
   cacheOptionHistories.filter((history) => conflictingCacheOptions(history)),
 )(`cache admission rejects hostile acceptance %j`, (history) => {
+  oracleRoute(`calibration`)
   for (let attempt = 0; attempt < 2; attempt++)
     expect(() => checkCacheOptionAdmission(() => {}, history)).toThrow()
 })
 test.each([`first`, `other`] as const)(
   `cache rows reject hostile keys and leading publication for %s`,
   (key) => {
+    oracleRoute(`calibration`)
     const rows = [{ id: `one`, label: `authored` }]
     const correct = [{ key: `${key}-one`, value: rows[0] }]
     const wrong = [{ key: `borrowed`, value: rows[0] }]
@@ -406,6 +416,7 @@ test.each([`first`, `other`] as const)(
 test.each([`pending`, `fulfilled`, `unrelated-error`, `conflict`] as const)(
   `rejects wrong pre-delivery admission outcome: %s`,
   async (outcome) => {
+    oracleRoute(`calibration`)
     const history = cacheOptionHistories.find(conflictingCacheOptions)!
     const result =
       outcome === `pending`

@@ -21,6 +21,7 @@
  * or ordered source operations. Those dimensions are exercised by the owners
  * that still drive `runOptimisticHistory` with fixed histories (coverage map).
  */
+import { declareOracle } from './oracle-declaration.js'
 import { oracleProperty } from './oracle-property.js'
 import {
   checkOptimisticHistory,
@@ -180,6 +181,14 @@ const cases: Array<{
     steps: [edit({ a: 1 }), settle(0), sync([], true), sync([])],
   },
 ]
+
+// What this oracle owns: the gap report judges every function in
+// src/transactions.ts and src/collection/state.ts by this file's generated
+// optimistic and sync histories.
+
+declareOracle({
+  owns: [`src/transactions.ts`, `src/collection/state.ts`],
+})
 
 oracleProperty({
   id: `optimistic-history.core`,

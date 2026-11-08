@@ -240,6 +240,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   readOracleRunConfig,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -261,7 +262,15 @@ import type {
 
 // The model steps each Collection and derives the trees, rows, request errors,
 // and gates that the public observations must equal; the checks compare them.
+// What this oracle owns: the gap report judges the Collection's status and
+// health tree, its request errors, and the demand that loads its rows, by this
+// file's tests.
 declareOracle({
+  owns: [
+    `src/collection/health-tree.ts`,
+    `src/collection/lifecycle.ts`,
+    `src/collection/subscription.ts`,
+  ],
   check: [expectIdentity, expectRequestErrors, expectHeldDemandCovered],
   model: [
     applyModel,
@@ -3128,7 +3137,10 @@ const it = oracleReplayTest(vitestIt)
 describe(`source failure and health oracle`, () => {
   for (const shape of shapes) {
     for (const [name, steps] of Object.entries(namedHistories)) {
-      it(`${shape}: ${name}`, () => runHistory(shape, steps))
+      it(`${shape}: ${name}`, () => {
+        oracleRoute(`fixed history`)
+        return runHistory(shape, steps)
+      })
     }
   }
 
@@ -3384,6 +3396,7 @@ describe(`source failure and health oracle`, () => {
   )(
     `generated histories refine the model`,
     ([shape, steps], directSubscribers) => {
+      oracleRoute(`random seed`)
       historiesRan = true
       historyReach.beginHistory()
       return withDeadline(
@@ -3420,6 +3433,7 @@ describe(`source failure and health oracle`, () => {
     )(
       `required histories refine the model (${seed ?? `random`})`,
       async (rest) => {
+        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
         requiredRan = true
         historiesRan = true
         for (const prefix of reachPrefixes) {
@@ -3487,6 +3501,7 @@ describe(`overlapping root loads`, () => {
   it.each(histories)(
     `outcomes $outcomes, load $first settles first`,
     async (history) => {
+      oracleRoute(`case`)
       const loads: Array<ReturnType<typeof createDeferred<void>>> = []
       let deferLoads = false
       let params!: SyncParams
@@ -3647,6 +3662,7 @@ describe(`on-demand reload`, () => {
   it.each(histories)(
     `first commit $firstCommit, query $query`,
     async (history) => {
+      oracleRoute(`case`)
       let runs = 0
       const runLoads: Array<Array<() => void>> = [[], [], []]
       const newRunReady = createDeferred<void>()
@@ -5229,7 +5245,10 @@ describe(`on-demand demand grammar`, () => {
     `settle-ok`,
   ]
   for (const [name, steps] of Object.entries(named))
-    it(name, () => runDemandHistory(steps))
+    it(name, () => {
+      oracleRoute(`fixed history`)
+      return runDemandHistory(steps)
+    })
 
   const step = fc.constantFrom<WindowStep>(
     `window`,
@@ -5325,6 +5344,7 @@ describe(`on-demand demand grammar`, () => {
   )(
     `generated demand histories refine the model`,
     (steps, directSubscriber) => {
+      oracleRoute(`random seed`)
       demandHistoriesRan = true
       // fast-check passes an example's input by reference.
       demandReach.beginHistory({
@@ -6292,11 +6312,15 @@ describe(`lazy join demand grammar`, () => {
       ],
   }
   for (const [name, steps] of Object.entries(named))
-    it(name, () => runLazyHistory(steps))
+    it(name, () => {
+      oracleRoute(`fixed history`)
+      return runLazyHistory(steps)
+    })
   // A churn replay request fails, then a demand change releases it while it
   // still shares a key with a replay load that later fails too.
-  it(`a failed replay does not list a load the query released before its verdict`, () =>
-    runLazyHistory([
+  it(`a failed replay does not list a load the query released before its verdict`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `parent`, key: 2 },
       { kind: `parent`, key: 3 },
@@ -6311,46 +6335,58 @@ describe(`lazy join demand grammar`, () => {
       { kind: `settle-last-fail` },
       { kind: `unparent`, key: 1 },
       { kind: `settle-fail` },
-    ]))
-  it(`a demand change that asks for a failed key again keeps its replay open`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`a demand change that asks for a failed key again keeps its replay open`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `reload` },
       { kind: `parent`, key: 2 },
       { kind: `settle-last-fail` },
       { kind: `unparent`, key: 1 },
-    ]))
-  it(`a first load waits for a replay load that no demand change follows`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`a first load waits for a replay load that no demand change follows`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `parent`, key: 3 },
       { kind: `settle-first-ok` },
       { kind: `reload` },
       { kind: `unparent`, key: 3 },
-    ]))
-  it(`a demand change after a failed replay load requests its key again`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`a demand change after a failed replay load requests its key again`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `reload` },
       { kind: `parent`, key: 2 },
       { kind: `settle-last-fail` },
       { kind: `unparent`, key: 1 },
-    ]))
-  it(`a reload's retired load decides nothing when its abort rejects it`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`a reload's retired load decides nothing when its abort rejects it`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `reload` },
       { kind: `settle-last-ok` },
       { kind: `settle-first-fail` },
-    ]))
-  it(`a later load of the failed key clears its error while another load is pending`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`a later load of the failed key clears its error while another load is pending`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `unparent`, key: 1 },
       { kind: `parent`, key: 1 },
       { kind: `parent`, key: 2 },
       { kind: `settle-first-fail` },
       { kind: `parent`, key: 3 },
       { kind: `settle-last-ok` },
-    ]))
-  it(`a demand change aborts a replay load and must request its still-held key again`, () =>
-    runLazyHistory(
+    ])
+  })
+  it(`a demand change aborts a replay load and must request its still-held key again`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `settle-ok` },
         { kind: `parent`, key: 2 },
@@ -6361,12 +6397,14 @@ describe(`lazy join demand grammar`, () => {
         { kind: `parent`, key: 1 },
       ],
       { holdChildReady: true },
-    ))
+    )
+  })
   // Neighbours of the parked-join history: the parked demand is requested
   // when its source restarts, and the replay then settles as usual; the
   // parked demand retires instead, which aborts the replay.
-  it(`a parked demand loads when its source restarts, and the replay then settles`, () =>
-    runLazyHistory(
+  it(`a parked demand loads when its source restarts, and the replay then settles`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `settle-ok` },
         { kind: `parent`, key: 2 },
@@ -6379,9 +6417,11 @@ describe(`lazy join demand grammar`, () => {
         { kind: `settle-ok` },
       ],
       { holdChildReady: true },
-    ))
-  it(`a parked replay ends when its last demand retires`, () =>
-    runLazyHistory(
+    )
+  })
+  it(`a parked replay ends when its last demand retires`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `settle-ok` },
         { kind: `parent`, key: 2 },
@@ -6394,35 +6434,43 @@ describe(`lazy join demand grammar`, () => {
         { kind: `unparent`, key: 2 },
       ],
       { holdChildReady: true },
-    ))
-  it(`a load that fails during a replay is decided by the replay's verdict`, () =>
-    runLazyHistory([
+    )
+  })
+  it(`a load that fails during a replay is decided by the replay's verdict`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `reload` },
       { kind: `parent`, key: 3 },
       { kind: `settle-last-fail` },
       { kind: `settle-first-fail` },
       { kind: `unparent`, key: 3 },
-    ]))
-  it(`a reload during the first load fails it only for a demand still held`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`a reload during the first load fails it only for a demand still held`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `parent`, key: 3 },
       { kind: `reload` },
       { kind: `settle-first-fail` },
       { kind: `parent`, key: 2 },
       { kind: `unparent`, key: 3 },
       { kind: `unparent`, key: 2 },
-    ]))
-  it(`a second reload replaces a load that failed during the first replay`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`a second reload replaces a load that failed during the first replay`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `reload` },
       { kind: `parent`, key: 3 },
       { kind: `settle-last-fail` },
       { kind: `reload` },
       { kind: `settle-ok` },
-    ]))
-  it(`a second reload's replay replaces the first replay's loads`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`a second reload's replay replaces the first replay's loads`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `parent`, key: 2 },
       { kind: `reload` },
       { kind: `reload` },
@@ -6430,26 +6478,32 @@ describe(`lazy join demand grammar`, () => {
       { kind: `settle-first-ok` },
       { kind: `settle-last-ok` },
       { kind: `settle-first-fail` },
-    ]))
-  it(`a reload after a truncate keeps the first load waiting for its replay`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`a reload after a truncate keeps the first load waiting for its replay`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `parent`, key: 3 },
       { kind: `settle-last-ok` },
       { kind: `truncate` },
       { kind: `unparent`, key: 1 },
       { kind: `reload` },
-    ]))
-  it(`a truncate replay's success clears the error of a key whose retry it replaced`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`a truncate replay's success clears the error of a key whose retry it replaced`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `parent`, key: 2 },
       { kind: `settle-fail` },
       { kind: `unparent`, key: 1 },
       { kind: `truncate` },
       { kind: `settle-last-ok` },
-    ]))
-  it(`a failed replay succeeds for the demand left after its failed demand retires`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`a failed replay succeeds for the demand left after its failed demand retires`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `reload` },
       { kind: `settle-fail` },
@@ -6457,9 +6511,11 @@ describe(`lazy join demand grammar`, () => {
       { kind: `unparent`, key: 1 },
       { kind: `settle-ok` },
       { kind: `settle-fail` },
-    ]))
-  it(`a demand change's replacement keeps a reload's replay open in the first load`, () =>
-    runLazyHistory(
+    ])
+  })
+  it(`a demand change's replacement keeps a reload's replay open in the first load`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `reload` },
         { kind: `truncate` },
@@ -6470,20 +6526,24 @@ describe(`lazy join demand grammar`, () => {
         { kind: `unparent`, key: 3 },
       ],
       { holdChildReady: true },
-    ))
-  it(`a first load waits for a source reload's whole replay`, () =>
-    runLazyHistory([
+    )
+  })
+  it(`a first load waits for a source reload's whole replay`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `parent`, key: 3 },
       { kind: `parent`, key: 2 },
       { kind: `unparent`, key: 1 },
       { kind: `reload` },
       { kind: `settle-last-fail` },
-    ]))
+    ])
+  })
   // The CI counterexample of the coarse verdict's predecessor (seed
   // -838690579): a reload after the source stopped replays the demand, a
   // demand change joins the replay, and the replay fails with both loads.
-  it(`a reload after the source stopped replays its demand and fails with every load`, () =>
-    runLazyHistory(
+  it(`a reload after the source stopped replays its demand and fails with every load`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `settle-ok` },
         { kind: `fail` },
@@ -6494,17 +6554,21 @@ describe(`lazy join demand grammar`, () => {
         { kind: `settle-fail` },
       ],
       { holdChildReady: true },
-    ))
-  it(`a reload during the first load with a late ready does not fail the query`, () =>
-    runLazyHistory([{ kind: `reload` }, { kind: `settle-ok` }], {
+    )
+  })
+  it(`a reload during the first load with a late ready does not fail the query`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([{ kind: `reload` }, { kind: `settle-ok` }], {
       asyncChildReady: true,
-    }))
+    })
+  })
   // A failed replay stays open for the demand the query still holds (law
   // 9). The newer errors of key 3's joined load and of the replacement that
   // throws, a rejection like any other, show over the replay's error; once
   // their keys retire, the replay's error, still open, shows again.
-  it(`a failed replay's error shows again when the newer errors over it retire`, () =>
-    runLazyHistory([
+  it(`a failed replay's error shows again when the newer errors over it retire`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `reload` },
       { kind: `settle-fail` },
@@ -6516,10 +6580,12 @@ describe(`lazy join demand grammar`, () => {
       { kind: `unparent`, key: 2 },
       { kind: `parent`, key: 1 },
       { kind: `unparent`, key: 3 },
-    ]))
+    ])
+  })
   // Law 10: a later load decides its key, also after a replay loaded it.
-  it(`a load that throws after a failed replay shows its own error`, () =>
-    runLazyHistory([
+  it(`a load that throws after a failed replay shows its own error`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `reload` },
       { kind: `settle-fail` },
@@ -6528,21 +6594,25 @@ describe(`lazy join demand grammar`, () => {
       { kind: `settle-ok` },
       { kind: `throw-next` },
       { kind: `unparent`, key: 1 },
-    ]))
+    ])
+  })
   // Law 9: once the failed demand retires, the replay succeeds for the
   // demand it loaded, without another load.
-  it(`a failed replay succeeds when its failed demand retires after the rest loaded`, () =>
-    runLazyHistory([
+  it(`a failed replay succeeds when its failed demand retires after the rest loaded`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `reload` },
       { kind: `settle-fail` },
       { kind: `parent`, key: 2 },
       { kind: `settle-ok` },
       { kind: `unparent`, key: 1 },
-    ]))
+    ])
+  })
   // Law 10: a replacement that loads the failed key again decides it.
-  it(`a replacement that loads a failed replay key again lets the replay succeed`, () =>
-    runLazyHistory([
+  it(`a replacement that loads a failed replay key again lets the replay succeed`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `reload` },
       { kind: `settle-fail` },
@@ -6550,12 +6620,14 @@ describe(`lazy join demand grammar`, () => {
       { kind: `parent`, key: 2 },
       { kind: `unparent`, key: 3 },
       { kind: `settle-ok` },
-    ]))
+    ])
+  })
   // Law 9: only a demand that made no request waits as parked. A replay
   // load that a child with a failed first load still serves fails the replay
   // as any replay load does.
-  it(`a replay load fails the replay while its child shows a failed first load`, () =>
-    runLazyHistory(
+  it(`a replay load fails the replay while its child shows a failed first load`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `settle-ok` },
         { kind: `fail` },
@@ -6563,11 +6635,13 @@ describe(`lazy join demand grammar`, () => {
         { kind: `settle-fail` },
       ],
       { holdChildReady: true },
-    ))
+    )
+  })
   // Law 9: a replay load that the query aborted settled nothing, so the
   // parked demand that replaces it is still owed a load.
-  it(`a parked demand that replaces an aborted replay load holds the replay`, () =>
-    runLazyHistory(
+  it(`a parked demand that replaces an aborted replay load holds the replay`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `settle-ok` },
         { kind: `parent`, key: 2 },
@@ -6577,26 +6651,30 @@ describe(`lazy join demand grammar`, () => {
         { kind: `unparent`, key: 1 },
       ],
       { holdChildReady: true },
-    ))
+    )
+  })
   // Law 9: a truncate aborts the loads before it and replays the demand; an
   // aborted load that the adapter still finishes decides nothing, so a
   // request error waits for the replay.
-  it(`a load the truncate aborted does not clear a request error`, () =>
-    runLazyHistory([
+  it(`a load the truncate aborted does not clear a request error`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `parent`, key: 2 },
       { kind: `settle-fail` },
       { kind: `parent`, key: 3 },
       { kind: `truncate` },
       { kind: `settle-first-ok` },
-    ]))
+    ])
+  })
   // Law 10: a demand change retries a segment whose load failed, also while
   // that failure waits for a replay; the retry then decides the key, and the
   // first load succeeds.
   // The truncate after the reload began is the run's own replacement: it
   // replays again, as every truncate does.
-  it(`a demand change retries a load that failed during a replay in the first load`, () =>
-    runLazyHistory(
+  it(`a demand change retries a load that failed during a replay in the first load`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `reload` },
         { kind: `truncate` },
@@ -6607,22 +6685,26 @@ describe(`lazy join demand grammar`, () => {
         { kind: `settle-ok` },
       ],
       { holdChildReady: true },
-    ))
+    )
+  })
   // Law 10 and law 9: a demand change retries a key whose replay load
   // failed, and the retry decides it, before the replay is judged.
-  it(`a demand change retries a key whose truncate replay load failed in the first load`, () =>
-    runLazyHistory([
+  it(`a demand change retries a key whose truncate replay load failed in the first load`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `parent`, key: 3 },
       { kind: `truncate` },
       { kind: `settle-last-fail` },
       { kind: `parent`, key: 2 },
       { kind: `unparent`, key: 1 },
       { kind: `settle-ok` },
-    ]))
+    ])
+  })
   // A replay re-requests a demand parked behind a failed first load; that
   // request replaces the parked wait, so the replay completes and publishes.
-  it(`a truncate replay re-requests parked demand and then publishes it`, () =>
-    runLazyHistory(
+  it(`a truncate replay re-requests parked demand and then publishes it`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `settle-ok` },
         { kind: `fail` },
@@ -6632,11 +6714,13 @@ describe(`lazy join demand grammar`, () => {
         { kind: `settle-ok` },
       ],
       { holdChildReady: true },
-    ))
+    )
+  })
   // Releasing a parked demand removes its parked acquisition, so a demand
   // for the same key parks again.
-  it(`a parked demand released and asked for again parks again`, () =>
-    runLazyHistory(
+  it(`a parked demand released and asked for again parks again`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `settle-ok` },
         { kind: `fail` },
@@ -6646,11 +6730,13 @@ describe(`lazy join demand grammar`, () => {
         { kind: `parent`, key: 2 },
       ],
       { holdChildReady: true },
-    ))
+    )
+  })
   // Replays a 30x counterexample: request failures, a thrown request, and a
   // reload's replay, then a demand change that retires a failed request.
-  it(`a request error frame after a thrown request and a reload`, () =>
-    runLazyHistory([
+  it(`a request error frame after a thrown request and a reload`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `parent`, key: 2 },
       { kind: `parent`, key: 3 },
@@ -6666,7 +6752,8 @@ describe(`lazy join demand grammar`, () => {
       { kind: `throw-next` },
       { kind: `reload` },
       { kind: `unparent`, key: 3 },
-    ]))
+    ])
+  })
   // A reload of a failed first load fails its replay, then the child's
   // restart requests the parked demand; when that demand retires, the
   // replay's failure still belongs to key 1, which the query holds, so its
@@ -6677,8 +6764,9 @@ describe(`lazy join demand grammar`, () => {
   // and the next demand change parks a retry that holds the failed replay
   // open (law 10; a 30-times counterexample of the model, which let the
   // failed request cover the key and judged the replay a success).
-  it(`a demand change retries a parked key whose replay request failed`, () =>
-    runLazyHistory(
+  it(`a demand change retries a parked key whose replay request failed`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `settle-ok` },
         { kind: `fail` },
@@ -6692,9 +6780,11 @@ describe(`lazy join demand grammar`, () => {
         { kind: `settle-ok` },
       ],
       { holdChildReady: true },
-    ))
-  it(`a failed replay's error stays when parked demand retires after the child restarts`, () =>
-    runLazyHistory(
+    )
+  })
+  it(`a failed replay's error stays when parked demand retires after the child restarts`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `settle-ok` },
         { kind: `fail` },
@@ -6706,12 +6796,14 @@ describe(`lazy join demand grammar`, () => {
         { kind: `unparent`, key: 2 },
       ],
       { holdChildReady: true },
-    ))
+    )
+  })
   // A replay's failed request keeps its acquisition's coverage, so releasing
   // a parked key requests nothing more and the replay fails for the key it
   // could not load again.
-  it(`a failed replay request still covers its key when a parked key retires`, () =>
-    runLazyHistory(
+  it(`a failed replay request still covers its key when a parked key retires`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `settle-ok` },
         { kind: `fail` },
@@ -6721,12 +6813,14 @@ describe(`lazy join demand grammar`, () => {
         { kind: `unparent`, key: 3 },
       ],
       { holdChildReady: true },
-    ))
+    )
+  })
   // Law 10: a later demand change drops a parked replacement that no longer
   // matches the held keys, so a replay failure it would have replaced
   // stands.
-  it(`a demand change drops a parked replacement that no longer matches`, () =>
-    runLazyHistory(
+  it(`a demand change drops a parked replacement that no longer matches`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `settle-ok` },
         { kind: `fail` },
@@ -6738,7 +6832,8 @@ describe(`lazy join demand grammar`, () => {
         { kind: `unparent`, key: 3 },
       ],
       { holdChildReady: true },
-    ))
+    )
+  })
   // A reload from inside the adapter's loadSubset rejects and changes
   // nothing; the query keeps its demand and does not crash.
   // Law 9: a demand change counts as one step. This change retires a
@@ -6746,8 +6841,9 @@ describe(`lazy join demand grammar`, () => {
   // segment's replay load has failed; judged between the two releases, the
   // replay would succeed, but judged once after the change it fails for the
   // key the query still holds (law 16).
-  it(`a demand change that retires a replacement and another segment judges the replay once`, () =>
-    runLazyHistory([
+  it(`a demand change that retires a replacement and another segment judges the replay once`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `parent`, key: 2 },
       { kind: `settle-ok` },
@@ -6758,14 +6854,17 @@ describe(`lazy join demand grammar`, () => {
       { kind: `settle-last-ok` },
       { kind: `settle-last-fail` },
       { kind: `unparent`, key: 1 },
-    ]))
-  it(`a reload from inside loadSubset rejects and leaves the query running`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`a reload from inside loadSubset rejects and leaves the query running`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `reload-in-load` },
       { kind: `parent`, key: 2 },
       { kind: `settle-ok` },
-    ]))
+    ])
+  })
   // Maintainer decision (law 16): of several open request errors, the node
   // shows the newest. The load of key 3 fails first and the older load of
   // key 2 fails after it, so key 2's error shows; once key 2 retires, key
@@ -6774,26 +6873,31 @@ describe(`lazy join demand grammar`, () => {
   // shows, and a replay then fails for keys 2 and 3. The replay's problem
   // lists both failed loads in failure order after key 2's earlier failure,
   // which stays open, and shows the newest.
-  it(`a failed replay's verdict replaces an earlier open failure`, () =>
-    runLazyHistory([
+  it(`a failed replay's verdict replaces an earlier open failure`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `parent`, key: 2 },
       { kind: `settle-fail` },
       { kind: `parent`, key: 3 },
       { kind: `reload` },
       { kind: `settle-fail` },
-    ]))
-  it(`a failed truncate replay's verdict replaces an earlier open failure`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`a failed truncate replay's verdict replaces an earlier open failure`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `parent`, key: 2 },
       { kind: `settle-fail` },
       { kind: `parent`, key: 3 },
       { kind: `truncate` },
       { kind: `settle-fail` },
-    ]))
-  it(`a replay load replaced by a later load of its key leaves the replay's list`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`a replay load replaced by a later load of its key leaves the replay's list`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `parent`, key: 2 },
       { kind: `settle-fail` },
@@ -6801,22 +6905,26 @@ describe(`lazy join demand grammar`, () => {
       { kind: `settle-last-fail` },
       { kind: `unparent`, key: 1 },
       { kind: `settle-last-fail` },
-    ]))
-  it(`the node shows the newest open request error`, () =>
-    runLazyHistory([
+    ])
+  })
+  it(`the node shows the newest open request error`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `parent`, key: 2 },
       { kind: `parent`, key: 3 },
       { kind: `settle-last-fail` },
       { kind: `settle-first-fail` },
       { kind: `unparent`, key: 2 },
-    ]))
+    ])
+  })
   // Maintainer decision (law 16): a replay's success clears the error of
   // every key it loaded again, also a key whose earlier load threw. The
   // churn replacement for keys 1 and 2 throws; the truncate replay then
   // loads both again through the older loads the query still holds.
-  it(`a replay's success clears every request error of its demand`, () =>
-    runLazyHistory([
+  it(`a replay's success clears every request error of its demand`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `parent`, key: 2 },
       { kind: `settle-ok` },
@@ -6826,13 +6934,15 @@ describe(`lazy join demand grammar`, () => {
       { kind: `unparent`, key: 3 },
       { kind: `truncate` },
       { kind: `settle-ok` },
-    ]))
+    ])
+  })
   // Maintainer decision: a request error belongs to the request that
   // failed. The churn replacement for keys 1 and 2 throws while the
   // truncate replay is in flight; when its demand retires, the replay's
   // older load of key 1 decides that key, and its success leaves no error.
-  it(`a replay's success clears the error of a failed request whose demand retired`, () =>
-    runLazyHistory([
+  it(`a replay's success clears the error of a failed request whose demand retired`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `parent`, key: 2 },
       { kind: `parent`, key: 3 },
@@ -6841,14 +6951,16 @@ describe(`lazy join demand grammar`, () => {
       { kind: `unparent`, key: 3 },
       { kind: `unparent`, key: 2 },
       { kind: `settle-ok` },
-    ]))
+    ])
+  })
   // Law 9 (maintainer decision): a failed replay stays open while the query
   // holds demand, and its error clears when its failed demand retires after
   // the rest loaded. Here the failed demand is the churn replacement for
   // keys 1 and 3, which fails after the replay failed; when it retires, key
   // 3's earlier replay load decides key 3, and the replay succeeds.
-  it(`a failed replay succeeds when a failed replacement retires after the rest loaded`, () =>
-    runLazyHistory([
+  it(`a failed replay succeeds when a failed replacement retires after the rest loaded`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `reload` },
       { kind: `settle-fail` },
@@ -6858,13 +6970,15 @@ describe(`lazy join demand grammar`, () => {
       { kind: `unparent`, key: 2 },
       { kind: `settle-last-fail` },
       { kind: `unparent`, key: 1 },
-    ]))
+    ])
+  })
   // Law 16 (maintainer decision): only a replay in flight defers a load's
   // error. After the truncate replay failed, key 3's load and the churn
   // replacement join it; the replacement's failure shows its own error at
   // once, although key 3's load is still pending.
-  it(`a load that joins a failed replay shows its own error when it fails`, () =>
-    runLazyHistory([
+  it(`a load that joins a failed replay shows its own error when it fails`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `parent`, key: 2 },
       { kind: `truncate` },
@@ -6873,25 +6987,29 @@ describe(`lazy join demand grammar`, () => {
       { kind: `parent`, key: 3 },
       { kind: `unparent`, key: 1 },
       { kind: `settle-last-fail` },
-    ]))
+    ])
+  })
   // Law 16 and the maintainer decision on which error shows: keys 2 and 3
   // join the reload's replay in flight, and all three loads fail in order.
   // The replay reports its error, then each joined load fails with its own
   // error in failure order, so key 3's error, the newest, shows.
-  it(`a failed replay lists the loads that failed during it in failure order`, () =>
-    runLazyHistory([
+  it(`a failed replay lists the loads that failed during it in failure order`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `reload` },
       { kind: `parent`, key: 2 },
       { kind: `parent`, key: 3 },
       { kind: `settle-fail` },
-    ]))
+    ])
+  })
   // Law 10: a key's latest load decides it. After the replay failed, key 2's
   // load and the churn replacement for keys 2 and 3 join it; key 2's older
   // load then fails while the replacement is pending, and decides nothing,
   // so the replay's error still shows.
-  it(`an older load's failure decides nothing while its key's replacement is pending`, () =>
-    runLazyHistory([
+  it(`an older load's failure decides nothing while its key's replacement is pending`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `reload` },
       { kind: `settle-fail` },
@@ -6899,15 +7017,17 @@ describe(`lazy join demand grammar`, () => {
       { kind: `parent`, key: 3 },
       { kind: `unparent`, key: 1 },
       { kind: `settle-first-fail` },
-    ]))
+    ])
+  })
   // A thrown churn replacement fails its keys as a rejected one does
   // (maintainer decision: a throw is a rejection; law 10: a failed load
   // covers nothing), so the next demand change retires it, and the older
   // load that still covers the held key decides it: its failure is the
   // key's request error now. The twins must agree.
   for (const replacement of [`throws`, `rejects`] as const)
-    it(`a churn replacement that ${replacement} leaves its key to the older load after the next demand change`, () =>
-      runLazyHistory([
+    it(`a churn replacement that ${replacement} leaves its key to the older load after the next demand change`, () => {
+      oracleRoute(`fixed history`)
+      return runLazyHistory([
         { kind: `settle-ok` },
         { kind: `parent`, key: 2 },
         { kind: `parent`, key: 3 },
@@ -6922,15 +7042,17 @@ describe(`lazy join demand grammar`, () => {
             ]),
         { kind: `unparent`, key: 1 },
         { kind: `settle-first-fail` },
-      ]))
+      ])
+    })
   // Law 9: the replay succeeds only as a replacement for the demand that
   // remains. A replay load of the churn replacement for {1, 2} loads both
   // keys, then the replay load of {2} fails, and the query releases the
   // replacement: what it loaded before its release does not count, so the
   // replay fails for key 2 (a 30-times counterexample of the model, which
   // let the released load decide key 2).
-  it(`a released replay load's success does not count for the replay's verdict`, () =>
-    runLazyHistory([
+  it(`a released replay load's success does not count for the replay's verdict`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory([
       { kind: `settle-ok` },
       { kind: `parent`, key: 2 },
       { kind: `parent`, key: 3 },
@@ -6946,7 +7068,8 @@ describe(`lazy join demand grammar`, () => {
       { kind: `settle-last-fail` },
       { kind: `unparent`, key: 1 },
       { kind: `settle-ok` },
-    ]))
+    ])
+  })
   // Law 10: a failed load covers nothing, so a replacement that asks for its
   // keys again after it failed is their acquisition now. A failed replay
   // lists a failed replay load only until such a request, also when the
@@ -6981,14 +7104,17 @@ describe(`lazy join demand grammar`, () => {
       ],
     ],
   ] as const)
-    it(`a failed replay does not list a failed load that ${name} asked for again`, () =>
-      runLazyHistory(steps))
+    it(`a failed replay does not list a failed load that ${name} asked for again`, () => {
+      oracleRoute(`fixed history`)
+      return runLazyHistory(steps)
+    })
   // Law 9: a failed replay request the query released holds nothing, so a
   // parked demand change that asks for its key again parks it, and the key
   // stays covered (a 30-times counterexample of the model, which left it to
   // the released request's verdict).
-  it(`a parked growth asks again for a key whose released replay request failed`, () =>
-    runLazyHistory(
+  it(`a parked growth asks again for a key whose released replay request failed`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `settle-ok` },
         { kind: `fail` },
@@ -7000,12 +7126,14 @@ describe(`lazy join demand grammar`, () => {
         { kind: `unparent`, key: 2 },
       ],
       { holdChildReady: true },
-    ))
+    )
+  })
   // Q1 (review 2): an ordered window over the join. A lazy load that fails
   // after readiness is a request error, and the query still publishes the
   // window's rows (law 16: a failed request does not hold publication).
-  it(`a failed lazy load under an ordered window still publishes the window`, () =>
-    runLazyHistory(
+  it(`a failed lazy load under an ordered window still publishes the window`, () => {
+    oracleRoute(`fixed history`)
+    return runLazyHistory(
       [
         { kind: `settle-ok` },
         { kind: `parent`, key: 2 },
@@ -7014,16 +7142,19 @@ describe(`lazy join demand grammar`, () => {
         { kind: `settle-ok` },
       ],
       { window: 2 },
-    ))
+    )
+  })
   // The generated replay of the fixed cleanup witness in source-health.test.ts:
   // a cleanup from the query's subscription's status listener while the
   // reload replays its demand, for each cleanup form.
   it.each([false, true])(
     `a cleanup from a subscription's status listener during a reload leaves no replacement armed (dependents: %s)`,
-    (dependents) =>
-      runLazyHistory([{ kind: `settle-ok` }], {
+    (dependents) => {
+      oracleRoute(`case`)
+      return runLazyHistory([{ kind: `settle-ok` }], {
         ending: { at: `subscription-status`, dependents },
-      }),
+      })
+    },
   )
   // A load, then a reload whose load fails.
   const failedReload: { steps: ReadonlyArray<LazyStep> } = {
@@ -7248,6 +7379,7 @@ describe(`lazy join demand grammar`, () => {
         ending,
       },
     ) => {
+      oracleRoute(`random seed`)
       const { prefix, rest } = lazySteps
       const steps = [...(prefix?.steps ?? []), ...rest]
       const holdChildReady = prefix?.holdChildReady ?? generatedHoldChildReady
@@ -7319,6 +7451,7 @@ describe(`request error bookkeeping`, () => {
   )(
     `a node shows the latest failure still failing and lists them all`,
     (steps) => {
+      oracleRoute(`random seed`)
       const tracker = new RequestErrors()
       const failing: Array<{ key: string; cause: Error; order: number }> = []
       let failures = 0

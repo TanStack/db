@@ -13,7 +13,11 @@ import {
   greenLifecycleHistoryArbitrary,
   reduceLifecycle,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
-import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
+import {
+  oracleRandomParameters,
+  oracleRoute,
+  readOracleRunConfig,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import { createOracleReach } from './oracle-reach.js'
 import { flushPromises } from './utils.js'
@@ -1812,7 +1816,11 @@ function expectedSelection(
 // The publication check compares each command's batches, visible rows, status,
 // and unloads with the model. The model predicts the publication step by
 // step, and the selection model predicts which keys local snapshots select.
+// What this oracle owns: the gap report judges which rows a subscription
+// publishes to subscribers, in subscription.ts and in the Collection state that
+// holds the rows, by this file's tests across replay, restart, and cleanup.
 declareOracle({
+  owns: [`src/collection/subscription.ts`, `src/collection/state.ts`],
   check: [runPublicationHistory, runPublicationProduct, runRestartReceiver],
   model: [
     observeRestartRow,
@@ -1869,6 +1877,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   it.each(selectionCases)(
     `selects each local key once across $first then ordered, includeInitialState=$includeInitialState, reenter=$reenter`,
     async ({ includeInitialState, first, reenter }) => {
+      oracleRoute(`case`)
       // Local selections are modeled by expectedSelection; visible is the
       // independent callback consumer's row set.
       const { batches: expectedBatches, selected } = expectedSelection(
@@ -1975,6 +1984,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     },
   )
   it(`reconstructs every bounded deferral cleanup history`, () => {
+    oracleRoute(`case`)
     expect(deferralCleanupHistories).toHaveLength(32)
     expect(new Set(deferralCleanupHistories.map(({ name }) => name)).size).toBe(
       32,
@@ -1983,6 +1993,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   it.each(deferralCleanupHistories)(
     `publishes independent batches after deferral cleanup: $name`,
     async ({ commands }) => {
+      oracleRoute(`case`)
       await runDeferralCleanupHistory(commands)
     },
   )
@@ -2002,6 +2013,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   )(
     `observes retired transports without subscriber activity: %j`,
     async ({ phase, demandCount, outcome, order }) => {
+      oracleRoute(`case`)
       const history: Array<PublicationCommand> = [
         { type: `source`, key: `c`, action: `upsert`, value: 42 },
         { type: `request`, demand: `a` },
@@ -2029,6 +2041,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     },
   )
   it(`keeps raw source updates after retiring the final replay owner`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `cleanup` },
       { type: `release`, demand: `b` },
@@ -2045,6 +2058,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`keeps raw truncate deletes after retiring the final replay owner`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       {
         type: `settle`,
@@ -2070,6 +2084,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`records requested snapshot rows before a canceled reset`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `request`, demand: `b` },
       { type: `truncate` },
@@ -2087,6 +2102,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`does not invent a publication for an unchanged private row`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `request`, demand: `a` },
       { type: `cleanup` },
@@ -2107,6 +2123,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   )(
     `distinguishes raw source resets from retained replacements: $baseline/$reset`,
     async ({ baseline, reset }) => {
+      oracleRoute(`case`)
       await runPublicationHistory([
         ...(baseline === `retained` || baseline === `refreshed`
           ? [{ type: `source`, key: `d`, action: `upsert`, value: 0 } as const]
@@ -2134,6 +2151,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     },
   )
   it(`reconciles a repeated reset after the last replay owner aborts`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 0 },
       { type: `request`, demand: `a` },
@@ -2151,6 +2169,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`keeps independent source rows when a replay settles after redundant restart calls`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 0 },
       { type: `request`, demand: `a` },
@@ -2185,6 +2204,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`defines all 288 unique row-publication lifecycle cells`, () => {
+    oracleRoute(`case`)
     expect(publicationProductCases).toHaveLength(288)
     expect(new Set(publicationProductCases.map(({ name }) => name)).size).toBe(
       288,
@@ -2197,30 +2217,36 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   it.each(publicationControlSlices)(
     `matches row publications for lifecycle control cells $name`,
     async ({ scenarios }) => {
+      oracleRoute(`case`)
       expectNoPublicationMismatches(await runPublicationProduct(scenarios))
     },
   )
   it(`preserves independent source work when a successful replay publishes`, async () => {
+    oracleRoute(`fixed history`)
     expectNoPublicationMismatches(
       await runPublicationProduct(successfulReplacementCases),
     )
   })
   it(`publishes complete replacement batches regardless of independent key order`, async () => {
+    oracleRoute(`fixed history`)
     expectNoPublicationMismatches(
       await runPublicationProduct(replacementOrderingCases),
     )
   })
   it(`retires incomplete or failed replacement without changing independent public rows`, async () => {
+    oracleRoute(`fixed history`)
     expectNoPublicationMismatches(
       await runPublicationProduct(replacementRetirementCases),
     )
   })
   it(`maps every canonical green lifecycle history to public rows`, async () => {
+    oracleRoute(`case`)
     for (const history of greenLifecycleHistories) {
       await runPublicationHistory(history)
     }
   })
   it(`suppresses canceled source writes when a released acquisition settles`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory(
       [
         { type: `request`, demand: `a` },
@@ -2242,6 +2268,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
   it(`publishes an authoritative truncate after the final demand is released`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `request`, demand: `b` },
       {
@@ -2257,6 +2284,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`publishes independent source changes with a successful replay`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory(
       [
         { type: `request`, demand: `a` },
@@ -2285,6 +2313,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
   it(`does not republish a row already delivered by a live change`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory(
       [
         { type: `source`, key: `a`, action: `upsert`, value: 0 },
@@ -2301,6 +2330,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
   it(`suppresses canceled source writes when an aborted acquisition settles`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory(
       [
         { type: `request`, demand: `a` },
@@ -2321,6 +2351,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
   it(`keeps later source changes private after a failed replay`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `request`, demand: `a` },
       {
@@ -2462,12 +2493,14 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   ] as Array<[string, Array<PublicationCommand>]>)(
     `leaves no stale row after a retired replay: %s`,
     async (_, history) => {
+      oracleRoute(`case`)
       await runPublicationHistory(history)
     },
   )
   // Law 9: a failed replay stays private until an authoritative replay
   // succeeds, even after its failed owner is released and nothing remains.
   it(`keeps a failed replay private when its final owner releases`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 1 },
       { type: `request`, demand: `a` },
@@ -2491,6 +2524,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`retires failed private replacement rows when its final owner releases`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory(
       [
         { type: `source`, key: `b`, action: `upsert`, value: 7 },
@@ -2521,6 +2555,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
   it(`does not delete an independent public row when releasing a restarted demand`, async () => {
+    oracleRoute(`fixed history`)
     await runPublicationHistory(
       [
         { type: `source`, key: `b`, action: `upsert`, value: 0 },
@@ -2535,6 +2570,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
   it(`keeps a restarted snapshot private while canceled replay work settles`, async () => {
+    oracleRoute(`fixed history`)
     // Seed 2018803696, path 65:10:2:10:13:12:12:0:0:0. A canceled-only
     // truncate does not discharge the earlier replay's publication wait.
     await runPublicationHistory(
@@ -2568,6 +2604,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
   it(`matches retained rows across an empty restart and canceled-only truncates`, async () => {
+    oracleRoute(`fixed history`)
     // Seed 2018803696, path 65:29:0:0:0 exposed the model's missing retained-row
     // deletion: an authoritative empty reset is not limited to resident rows.
     await runPublicationHistory(
@@ -2611,6 +2648,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   )(
     `publishes an authoritative empty reset: %j`,
     async ({ restart, canceledOwner }) => {
+      oracleRoute(`case`)
       await runPublicationHistory([
         { type: `source`, key: `a`, action: `upsert`, value: 0 },
         ...(restart
@@ -2651,6 +2689,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   )(
     `installs a retained-row replacement atomically: %j`,
     async ({ canceledOwner, replacement }) => {
+      oracleRoute(`case`)
       await runPublicationHistory([
         { type: `source`, key: `a`, action: `upsert`, value: 0 },
         { type: `cleanup` },
@@ -2676,6 +2715,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   ] satisfies Array<Row | undefined>)(
     `publishes eager restart before a later source reset: %j`,
     async (replacement) => {
+      oracleRoute(`case`)
       await runPublicationHistory(
         [
           { type: `source`, key: `a`, action: `upsert`, value: 0 },
@@ -2690,6 +2730,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     },
   )
   it(`resets retained rows after no-op cleanup and release commands`, async () => {
+    oracleRoute(`fixed history`)
     // Seed 1657005, path 164:18 after removing the visible-row request omission.
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 1 },
@@ -2713,6 +2754,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`resets retained rows after the last replay owner retires`, async () => {
+    oracleRoute(`fixed history`)
     // Seed 333468655, path 59:13:0:0:0.
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 0 },
@@ -2735,6 +2777,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`does not restore source rows when the final replay owner retires`, async () => {
+    oracleRoute(`fixed history`)
     // Seed 1337491191, path 591:20:1:8:8:8:7:7.
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 0 },
@@ -2750,6 +2793,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     ])
   })
   it(`keeps an equal row restored by the restarted acquisition`, async () => {
+    oracleRoute(`fixed history`)
     // Original generated failure: seed -1439698414, path 1:22.
     await runPublicationHistory([
       { type: `source`, key: `b`, action: `upsert`, value: 1 },
@@ -2792,6 +2836,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     : [undefined]) {
     for (const delivery of restartDeliveries) {
       it(`matches restarted row publication ${delivery} (${seed === undefined ? `random or replayed seed` : `fixed seed`})`, async () => {
+        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
         const scenarios = restartScenarios.filter(
           (item) => item.delivery === delivery,
         )
@@ -2873,6 +2918,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     : [undefined]) {
     for (const path of restartReceiverPaths) {
       it(`matches restarted row publication receiver ${path} (${seed === undefined ? `random or replayed seed` : `fixed seed`})`, async () => {
+        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
         const reach = createOracleReach(
           restartProperty,
           restartRowStates.map((row) => `${path}:${row}`),
@@ -2901,6 +2947,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   })(
     `matches row publications for a fixed seed`,
     async (history) => {
+      oracleRoute(`fixed seed`)
       await runPublicationHistory(history)
     },
     120_000,
@@ -2915,6 +2962,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   )(
     `matches row publications for a random or replayed seed`,
     async (history) => {
+      oracleRoute(`random seed`)
       await runPublicationHistory(history)
     },
     120_000,

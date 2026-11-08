@@ -6,7 +6,11 @@ import { getLiveQueryHash } from '../src/live-query-options.js'
 import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { Query, createLiveQueryCollection } from '../src/query/index.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRuns,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import { createOracleReach } from './oracle-reach.js'
 import type { HealthNode } from '../src/types.js'
@@ -290,7 +294,11 @@ async function checkHistory(
   }
 }
 
+// What this oracle owns: the gap report judges every function in
+// src/live-query-observer.ts by this file's snapshot histories, which read
+// retained getSnapshot() objects and the health tree of the observer.
 declareOracle({
+  owns: [`src/live-query-observer.ts`],
   check: [checkRead, checkHistory, checkHealthHistory],
   model: [modelRows],
 })
@@ -318,6 +326,7 @@ describe(`retained live-query snapshots are point-in-time`, () => {
   )(
     `first reads match the capture-time rows (%s, attached=%s, %s)`,
     async (shape, attached, campaign) => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(
         `snapshot-${shape}-${attached}-${campaign}`,
         [`server-getter`, `client-getter`],
@@ -341,6 +350,7 @@ describe(`retained live-query snapshots are point-in-time`, () => {
   )
 
   it(`reads a snapshot after several newer snapshots were built`, async () => {
+    oracleRoute(`fixed history`)
     const commands: Array<Command> = [
       { type: `upsert`, id: `a`, version: 1 },
       { type: `upsert`, id: `b`, version: 1 },
@@ -363,6 +373,7 @@ describe(`retained live-query snapshots are point-in-time`, () => {
   })
 
   it(`rejects a snapshot that reads the live Collection on first access`, async () => {
+    oracleRoute(`calibration`)
     // Calibration: the #1542 design. Its getters read the live query when
     // first accessed instead of the rows captured at snapshot time.
     const { observer, query, source } = setup(`ordered`)
@@ -602,6 +613,8 @@ async function checkHealthHistory(
 
 describe(`a snapshot shows the current health tree`, () => {
   it(`every read matches the model across attach cuts`, async () => {
+    oracleRoute(`fixed seed`)
+    oracleRoute(`random seed`)
     const reach = createOracleReach<HealthReach>(
       `live-query-observer.snapshot-health`,
       [
@@ -627,6 +640,7 @@ describe(`a snapshot shows the current health tree`, () => {
   })
 
   it(`shows a health-only change made between a detached read and attach`, async () => {
+    oracleRoute(`fixed history`)
     // Replay of the reported trace: a framework renders (detached read), a
     // source reports a problem before commit, the framework commits
     // (attach), then reads again.

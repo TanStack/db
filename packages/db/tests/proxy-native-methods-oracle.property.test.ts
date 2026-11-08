@@ -3,6 +3,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -68,16 +69,23 @@ const it = oracleReplayTest(vitestIt)
 
 // The model is native array and typed-array behavior. observeArray and
 // observeTyped record a call on either side, so they are not declared.
-declareOracle({ check: [expectArrayCall, expectTypedCall] })
+// What this oracle owns: the gap report judges the built-in array and typed
+// array method behavior of drafts in proxy.ts by this file's tests.
+declareOracle({
+  owns: [`src/proxy.ts`],
+  check: [expectArrayCall, expectTypedCall],
+})
 
 describe(`array methods behave like native arrays`, () => {
   // The row of the original fixed table, for every method.
   it.each(arrayMethods)(`%s on a fixed row gives the native result`, (m) => {
+    oracleRoute(`case`)
     for (const k of [0, 1, 3])
       expectArrayCall([{ x: 1 }, 2, [{ x: 3 }], { x: 0 }], m, k)
   })
 
   it(`matches native arrays across generated rows (${FIXED_SEED})`, () => {
+    oracleRoute(`fixed seed`)
     fc.assert(
       fc.property(
         arraySpecArb,
@@ -91,21 +99,27 @@ describe(`array methods behave like native arrays`, () => {
   oracleReplayTest(fcTest, ARRAY_METHODS).prop(
     [arraySpecArb, fc.constantFrom(...arrayMethods), fc.nat(4)],
     oraclePropertyOptions(RUNS, ARRAY_METHODS),
-  )(`matches native arrays across generated rows (random)`, expectArrayCall)
+  )(`matches native arrays across generated rows (random)`, (...args) => {
+    oracleRoute(`random seed`)
+    expectArrayCall(...args)
+  })
 })
 describe(`typed-array methods behave like native typed arrays`, () => {
   // The row of the original fixed table, for every method.
   it.each(typedMethods)(`%s on a fixed row gives the native result`, (m) => {
+    oracleRoute(`case`)
     for (const write of [false, true]) expectTypedCall([3, 1, 2], m, 1, write)
   })
 
   // A mutator counts as a change without a revert check, even when the
   // result equals the original under draft equality (-0 equals 0).
   it(`reversing [-0, 0] is a change although the result is draft-equal`, () => {
+    oracleRoute(`case`)
     expectTypedCall([-0, 0], `reverse`, 0, false)
   })
 
   it(`matches native typed arrays across generated rows (${FIXED_SEED})`, () => {
+    oracleRoute(`fixed seed`)
     fc.assert(
       fc.property(
         typedSpecArb,
@@ -120,8 +134,8 @@ describe(`typed-array methods behave like native typed arrays`, () => {
   oracleReplayTest(fcTest, TYPED_METHODS).prop(
     [typedSpecArb, fc.constantFrom(...typedMethods), fc.nat(4), fc.boolean()],
     oraclePropertyOptions(RUNS, TYPED_METHODS),
-  )(
-    `matches native typed arrays across generated rows (random)`,
-    expectTypedCall,
-  )
+  )(`matches native typed arrays across generated rows (random)`, (...args) => {
+    oracleRoute(`random seed`)
+    expectTypedCall(...args)
+  })
 })

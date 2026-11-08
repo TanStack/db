@@ -35,6 +35,7 @@ import {
   sortedRows,
 } from './local-storage-fixtures'
 import { withHistoryCleanup } from './optimistic-history-oracle'
+import { declareOracle } from './oracle-declaration'
 import { oracleProperty, pass, violation } from './oracle-property'
 import type { Row } from './local-storage-fixtures'
 
@@ -334,6 +335,13 @@ function checkHistory(
   }
   return pass
 }
+
+// What this oracle owns: the gap report judges every function in
+// src/local-storage.ts by this file's generated automatic-write histories.
+
+declareOracle({
+  owns: [`src/local-storage.ts`],
+})
 
 oracleProperty({
   id: `local-storage.write-order`,
