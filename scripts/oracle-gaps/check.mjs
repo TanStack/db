@@ -309,6 +309,11 @@ export default mergeConfig(base, {
       teardownTimeout: settings.testTimeout,
       typecheck: { enabled: false },
       coverage: { enabled: false },
+      // Vitest 5 caches transformed modules on disk by default, keyed by
+      // the file, not by what this runner's plugin serves for it, so a
+      // patched or instrumented source could come back as an earlier text.
+      // Vitest 4 caches nothing unless asked.
+      fsModuleCache: false,
       // Every module each test file imports, which a unit records as its
       // inputs.
       experimental: { importDurations: { limit: 1_000_000 } },
@@ -375,6 +380,16 @@ export default mergeConfig(base, {
     }
   }
 
+  // Cancels a context's run so that its close stops the workers at once.
+  // Vitest 5 stops a worker by asking it to and waits up to a minute for
+  // the answer, which a worker stuck in a synchronous loop never gives; a
+  // second cancel while the first is under way stops it by force, as a
+  // second Ctrl+C does. Vitest 4 needs only the first.
+  function forceCancel(context) {
+    context.cancelCurrentRun(`keyboard-input`).catch(() => undefined)
+    context.cancelCurrentRun(`keyboard-input`).catch(() => undefined)
+  }
+
   /** One Vitest run of one test file, as plain data. */
   async function runUnit(
     context,
@@ -424,7 +439,7 @@ export default mergeConfig(base, {
       // replacement close the context at once, which stops the worker (a
       // close with no cancel waits for the run).
       running.catch(() => undefined)
-      context.cancelCurrentRun(`keyboard-input`).catch(() => undefined)
+      forceCancel(context)
       span(`run`, started, { ...profiled, timedOut: true })
       rmSync(capture, { force: true })
       return { file, timedOut: true, seconds }
@@ -610,7 +625,7 @@ export default mergeConfig(base, {
         // Cancelled without waiting; the caller replaces the context (see
         // runUnit).
         running.catch(() => undefined)
-        context.cancelCurrentRun(`keyboard-input`).catch(() => undefined)
+        forceCancel(context)
         span(`run`, started, { file: `batch`, items: items.length, timedOut: current })
         // The copies before the one that hung finished: their units come
         // from their capture rows.
