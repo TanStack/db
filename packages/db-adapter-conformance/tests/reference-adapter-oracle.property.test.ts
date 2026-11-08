@@ -145,7 +145,7 @@ describe(`eager live-source conformance: reference adapter`, () => {
     async (mutant, law) => {
       oracleRoute(`calibration`)
       const result = await fc.check(
-        eagerLiveSourceProperty(referenceDriver(mutant)),
+        eagerLiveSourceProperty(referenceDriver(mutant), undefined, law),
         {
           seed: 2118,
           numRuns: runs,
@@ -201,10 +201,13 @@ describe(`eager live-source conformance: per-change commits`, () => {
     async () => {
       oracleRoute(`calibration`)
       const reversed = referenceDriver(`reverses-batch`, { perChange: true })
-      const result = await fc.check(eagerLiveSourceProperty(reversed), {
-        seed: 2118,
-        numRuns: runs,
-      })
+      const result = await fc.check(
+        eagerLiveSourceProperty(reversed, undefined, `PUB-1`),
+        {
+          seed: 2118,
+          numRuns: runs,
+        },
+      )
       expect(result.failed).toBe(true)
       expect((result.errorInstance as ConformanceViolation).law).toContain(
         `PUB-1`,
@@ -255,7 +258,11 @@ describe(`eager live-source conformance: outage threshold, client values`, () =>
     async (mutant, law) => {
       oracleRoute(`calibration`)
       const result = await fc.check(
-        eagerLiveSourceProperty(referenceDriver(mutant, { outage })),
+        eagerLiveSourceProperty(
+          referenceDriver(mutant, { outage }),
+          undefined,
+          law,
+        ),
         { seed: 2118, numRuns: runs },
       )
       expect(result.failed).toBe(true)

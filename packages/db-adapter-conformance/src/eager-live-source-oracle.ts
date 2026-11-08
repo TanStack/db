@@ -2834,10 +2834,17 @@ export interface ReachCounter {
  * a smaller history that fails a different law, or fails outside the
  * comparison, counts as passing, so the reported counterexample violates the
  * law and observation that the campaign found.
+ *
+ * A calibration names the law it calibrates (`law`: a substring of the
+ * violation's law, or a pattern for a mutant that either of two laws may
+ * reject). Only that law's violations fail a history then, so the calibration
+ * checks that this law rejects the mutant, whichever other law a generated
+ * history happens to break first.
  */
 export function eagerLiveSourceProperty(
   driver: EagerLiveSourceDriver,
   reach?: ReachCounter,
+  law?: string | RegExp,
 ) {
   let target: string | undefined
   return fc.asyncProperty(
@@ -2849,12 +2856,15 @@ export function eagerLiveSourceProperty(
           reach: reach?.reach,
         })
       } catch (error) {
-        const law =
+        const violated =
           error instanceof ConformanceViolation
             ? error.law
             : `failure outside the comparison`
-        target ??= law
-        if (law === target) throw error
+        const calibrated =
+          law === undefined ||
+          (typeof law === `string` ? violated.includes(law) : law.test(violated))
+        if (calibrated) target ??= violated
+        if (violated === target) throw error
       }
     },
   )
