@@ -31,6 +31,7 @@ import {
   declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import type {
@@ -248,6 +249,7 @@ describe(`Svelte client page identity`, () => {
           ? oracleReplayTest(it)
           : oracleReplayTest(it, property)
       test(`${keyed ? `keyed` : `derived`}/${campaign}`, async () => {
+        oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
         const reach = createOracleReach(
           `${property}/${keyed}/${campaign}`,
           states,
@@ -283,7 +285,10 @@ describe(`Svelte client page identity`, () => {
       }, 30_000)
     }
 })
-declareOracle({ check: [checkClientWindowHistory] })
+declareOracle({
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
+  check: [checkClientWindowHistory],
+})
 
 /** An unchanged explicit client key retains the authored input, including after
  * a rejected key read. Recovery must not replay a prior declarative move over
@@ -451,6 +456,7 @@ for (const campaign of [`fixed`, `fresh`] as const) {
   const test =
     campaign === `fixed` ? oracleReplayTest(it) : oracleReplayTest(it, property)
   test(`client key recovery/${campaign}`, async () => {
+    oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
     const reach = createOracleReach(`${property}/${campaign}`, recoveryStates)
     const fidelity = createOracleFailureFidelity<RecoveryHistory>()
     try {
