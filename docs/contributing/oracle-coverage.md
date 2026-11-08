@@ -4290,13 +4290,20 @@ selects only oracle files, so production reports appear in `pnpm lint`, not in
 the edit hook. Authority: the maintainer's probe-form decision and the glossary's
 state probe entry.
 
-`packages/db/tests/declared-reach-oracle.property.test.ts`
-(`oracle.declared-reach`; [review record](oracle-reviews/pr-2290-declared-reach.md))
-owns what `createOracleReach` (ORC-015) counts, when
-it checks reach, and what fixed examples prove. It also owns the run
-parameters that `oracleRandomParameters` and `oraclePropertyOptions` return,
-and the campaigns that `runOracleCampaign` in
-`packages/db/tests/oracle-campaign.ts` runs.
+The oracle framework's own laws moved to `@tanstack/oracles` in
+TanStack/oracles#1, with the self-tests that judge them. In the TanStack/oracles
+repository, `packages/oracles/tests/declared-reach-oracle.property.test.ts`
+(`oracle.declared-reach`; the earlier TanStack DB
+[review record](oracle-reviews/pr-2290-declared-reach.md)) owns what
+`createOracleReach` (ORC-015) counts, when it checks reach, and what fixed
+examples prove. It also owns the run parameters that `oracleRandomParameters`
+and `oraclePropertyOptions` return. `packages/oracles/tests/oracle-campaign.test.ts`
+in the same repository owns the campaigns that `runOracleCampaign` runs.
+TanStack DB no longer runs these self-tests: `packages/db/tests/oracle-reach.ts`
+and `packages/db/tests/oracle-campaign.ts` only re-export the framework after
+they load TanStack DB's configuration (`oracle-config.ts`). The laws below are
+the ones those self-tests judge; their limits are recorded with them in
+TanStack/oracles.
 
 - A history counts once per declared state it enters. A `reach()` call for an
   undeclared state, or before the first history, throws and counts nothing.
@@ -4328,8 +4335,8 @@ each reach prefix, and each driver option that a declared state needs, as
 examples, so their reach does not depend on the seed (#2287).
 `source-health.history` gets the same guarantee from
 `source-health.required-history`, which runs every reach prefix in each
-campaign and shares its reach without fixed histories. The oracle generates
-ledgers over two to four states, up to six histories with fixed marks,
+campaign and shares its reach without fixed histories. The
+`oracle.declared-reach` self-test in TanStack/oracles generates ledgers over two to four states, up to six histories with fixed marks,
 minimums up to three, up to four declared fixed histories, invalid options,
 undeclared and early reaches, an optional `replaying` option, a fixed campaign
 seed, and invalid campaign environments, under four run kinds: ordinary,
