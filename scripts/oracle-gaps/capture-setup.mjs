@@ -25,7 +25,7 @@
 // of shrinking it: a kill needs one failing history, not the smallest one.
 import { createHash } from 'node:crypto'
 import { appendFileSync, readFileSync } from 'node:fs'
-import { afterAll, afterEach, beforeEach, chai, expect, inject, vi } from 'vitest'
+import { afterAll, beforeEach, chai, expect, inject, vi } from 'vitest'
 
 const run =
   inject(`oracleGaps`) ??
@@ -526,6 +526,10 @@ globalThis.__oracleObserve = (checkpoint, value) => {
 }
 
 beforeEach((context) => {
+  // The row is written after all the test's hooks: a test file's own
+  // `afterEach` that throws skips the hooks after it, and the row must not
+  // depend on the test's cleanup.
+  context.onTestFinished(() => finishTest(context))
   currentFile = context.task.file?.filepath
   currentTask = context.task
   observed = createHash(`sha1`)
@@ -551,7 +555,9 @@ beforeEach((context) => {
 // Tests whose observations varied between the two unmutated runs: their
 // verdicts judge nothing, so they never stop a run.
 const ignored = new Set(state.ignore ?? [])
-afterEach((context) => {
+// A test's row, written once the test has finished (registered in the
+// first `beforeEach`).
+function finishTest(context) {
   inTest = false
   if (
     state.stopOnKill &&
@@ -599,7 +605,7 @@ afterEach((context) => {
   )
   hits = new Set()
   infected = new Set()
-})
+}
 
 const thisFile = globalThis.__vitest_worker__?.filepath
 
@@ -631,10 +637,12 @@ if (state.capture || idleProfile) {
     longest = 0
     sawIo = false
   })
-  afterEach((context) => {
-    baseTimers = undefined
-    if (idleProfile)
-      appendFileSync(idleProfile, `${JSON.stringify({ key: testKey(context.task), longest })}\n`)
+  beforeEach((context) => {
+    context.onTestFinished(() => {
+      baseTimers = undefined
+      if (idleProfile)
+        appendFileSync(idleProfile, `${JSON.stringify({ key: testKey(context.task), longest })}\n`)
+    })
   })
   realInterval(() => {
     const now = realNow()

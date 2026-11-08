@@ -143,6 +143,9 @@ const testCase = fc.record({
   shrinks: fc.constant(false),
   // Only a witness waits on a child process: seconds of real time.
   ioWait: fc.constant(false),
+  // A test's own cleanup hook may throw once the test has failed, as a
+  // controlled clock's release does. The test's failure still judges.
+  cleanupThrows: fc.constantFrom(false, false, false, true),
   // A test may run a second campaign, on its own route and input, as
   // `runOracleCampaign` does.
   then: fc.option(
@@ -258,6 +261,7 @@ const judging = (file, route, input, extra = {}) => ({
   slow: false,
   shrinks: false,
   ioWait: false,
+  cleanupThrows: false,
   then: null,
   ...extra,
 })
@@ -497,6 +501,13 @@ const witness = [
     body: [kill],
     tests: [judging(`a`, `fixed seed`, 7, { ioWait: true })],
   },
+  // A kill whose test's cleanup hook then throws: the kill stands.
+  {
+    id: `w_cleanup`,
+    owners: [`a`],
+    body: [kill],
+    tests: [judging(`a`, `fixed seed`, 7, { cleanupThrows: true })],
+  },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -548,6 +559,7 @@ const captureWitness = new Set([
   `w_dep`,
   `w_loop`,
   `w_iowait`,
+  `w_cleanup`,
 ])
 
 // ## Rendering and layout
@@ -1708,7 +1720,7 @@ function oracleTestFile(plan, file) {
       ? [`const OWNS = [${entries.join(`, `)}]`, `declareOracle({ owns: OWNS })`]
       : [`declareOracle({ owns: [${entries.join(`, `)}] })`]
   const out = [
-    `import { describe, expect, test } from 'vitest'`,
+    `import { ${plan.tests.some((t) => t.file === file && t.cleanupThrows) ? `afterEach, ` : ``}describe, expect, test } from 'vitest'`,
     ...(plan.tests.some((t) => t.file === file && t.shrinks) ? [`import fc from 'fast-check'`] : []),
     ...(plan.tests.some((t) => t.file === file && t.ioWait) ? [`import { spawn } from 'node:child_process'`] : []),
     `import * as sut from '../src/sut'`,
@@ -1813,6 +1825,13 @@ function oracleTestFile(plan, file) {
     }
     out.push(
       `describe('t${index}', () => {`,
+      ...(t.cleanupThrows
+        ? [
+            `  afterEach((context) => {`,
+            `    if (context.task.result?.state === 'fail') throw new Error('cleanup failed after the failure')`,
+            `  })`,
+          ]
+        : []),
       `  test('${testName(t, index)}', ${(t.hangs && !t.flaky) || t.slow || t.ioWait ? `async ` : ``}() => {`,
       ...partsOf(t).flatMap(campaign),
       `  })`,
