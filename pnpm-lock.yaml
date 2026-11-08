@@ -63,8 +63,8 @@ importers:
         specifier: 0.3.3
         version: 0.3.3(typescript@5.9.3)
       '@tanstack/vite-config':
-        specifier: 0.6.0
-        version: 0.6.0(@microsoft/api-extractor@7.47.7(@types/node@25.2.2))(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(typescript@5.9.3)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
+        specifier: 0.5.2
+        version: 0.5.2(@types/node@25.2.2)(rollup@4.64.12)(typescript@5.9.3)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))
       '@testing-library/jest-dom':
         specifier: ^6.9.1
         version: 6.9.1
@@ -141,7 +141,7 @@ importers:
         specifier: ^8.3.5
         version: 8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)
       vitest:
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(@types/node@25.2.2)(@vitest/coverage-istanbul@5.0.5)(@vitest/ui@5.0.5)(jsdom@27.4.0)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))
       zod:
         specifier: ^4.6.7
@@ -595,7 +595,7 @@ importers:
         version: 1.159.5(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(@tanstack/router-core@1.171.34)(csstype@3.2.3)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@tanstack/react-start':
         specifier: ^1.168.60
-        version: 1.168.60(esbuild@0.28.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(rolldown@1.2.16)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
+        version: 1.168.60(esbuild@0.28.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
       react:
         specifier: ^19.2.4
         version: 19.2.4
@@ -804,7 +804,7 @@ importers:
         specifier: ^5.9.2
         version: 5.9.3
       vitest:
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(@types/node@25.2.2)(@vitest/coverage-istanbul@5.0.5)(@vitest/ui@5.0.5)(jsdom@27.4.0)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.25.11)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))
       web-vitals:
         specifier: ^5.1.0
@@ -823,7 +823,7 @@ importers:
         version: link:../../../packages/react-router-with-db
       '@tanstack/react-start':
         specifier: ^1.168.60
-        version: 1.168.60(esbuild@0.28.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(rolldown@1.2.16)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
+        version: 1.168.60(esbuild@0.28.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
       react:
         specifier: ^19.2.4
         version: 19.2.4
@@ -875,7 +875,7 @@ importers:
         version: 1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@tanstack/react-start':
         specifier: ^1.168.60
-        version: 1.168.60(esbuild@0.28.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(rolldown@1.2.16)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
+        version: 1.168.60(esbuild@0.28.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
       '@tanstack/trailbase-db-collection':
         specifier: ^1.0.0-rc.1.4
         version: link:../../../packages/trailbase-db-collection
@@ -996,7 +996,7 @@ importers:
         version: 1.170.38(solid-js@1.9.11)
       '@tanstack/solid-start':
         specifier: ^1.168.57
-        version: 1.168.57(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(solid-js@1.9.11)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
+        version: 1.168.57(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rollup@4.64.12)(solid-js@1.9.11)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
       '@tanstack/trailbase-db-collection':
         specifier: ^1.0.0-rc.1.4
         version: link:../../../packages/trailbase-db-collection
@@ -1105,7 +1105,7 @@ importers:
         specifier: ^20.3.34
         version: 20.3.34(@angular/common@20.3.34(@angular/core@20.3.34(@angular/compiler@20.3.34)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/compiler@20.3.34)(@angular/core@20.3.34(@angular/compiler@20.3.34)(rxjs@7.8.2)(zone.js@0.15.1))(@angular/platform-browser@20.3.34(@angular/common@20.3.34(@angular/core@20.3.34(@angular/compiler@20.3.34)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.34(@angular/compiler@20.3.34)(rxjs@7.8.2)(zone.js@0.15.1)))
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       rxjs:
         specifier: ^7.8.2
@@ -1139,7 +1139,7 @@ importers:
         specifier: ^7.6.13
         version: 7.6.13
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       better-sqlite3:
         specifier: ^12.6.2
@@ -1173,7 +1173,7 @@ importers:
         specifier: ^7.6.13
         version: 7.6.13
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       better-sqlite3:
         specifier: ^12.6.2
@@ -1226,7 +1226,7 @@ importers:
         specifier: ^7.6.13
         version: 7.6.13
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       better-sqlite3:
         specifier: ^12.6.2
@@ -1251,7 +1251,7 @@ importers:
         version: 5.9.3
     devDependencies:
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       convex:
         specifier: ^1.47.0
@@ -1300,7 +1300,7 @@ importers:
         specifier: ^0.22.2
         version: 0.22.2(@types/node@25.2.2)(@typescript-eslint/utils@8.55.0(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.4(jiti@2.7.0))(rollup@4.64.12)(typescript@5.9.3)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       arktype:
         specifier: ^2.1.29
@@ -1337,7 +1337,7 @@ importers:
         specifier: ^1.1.0
         version: 1.1.0
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
 
   packages/db-collection-e2e:
@@ -1359,7 +1359,7 @@ importers:
         specifier: ^8.16.0
         version: 8.16.0
       '@vitest/ui':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       typescript:
         specifier: ^5.9.2
@@ -1368,7 +1368,7 @@ importers:
         specifier: ^8.3.5
         version: 8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)
       vitest:
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(@types/node@25.2.2)(@vitest/coverage-istanbul@5.0.5)(@vitest/ui@5.0.5)(jsdom@27.4.0)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))
 
   packages/db-collections: {}
@@ -1383,7 +1383,7 @@ importers:
         version: 5.9.3
     devDependencies:
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       temporal-polyfill:
         specifier: ^0.3.0
@@ -1402,7 +1402,7 @@ importers:
         version: 5.9.3
     devDependencies:
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       temporal-polyfill:
         specifier: ^0.3.0
@@ -1433,7 +1433,7 @@ importers:
         specifier: ^8.16.0
         version: 8.16.0
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       pg:
         specifier: ^8.20.0
@@ -1449,7 +1449,7 @@ importers:
         version: 5.9.3
     devDependencies:
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       electron:
         specifier: ^42.0.0
@@ -1471,7 +1471,7 @@ importers:
         specifier: ^7.6.13
         version: 7.6.13
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       better-sqlite3:
         specifier: ^12.6.2
@@ -1517,7 +1517,7 @@ importers:
         specifier: ^7.6.13
         version: 7.6.13
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
 
   packages/offline-transactions:
@@ -1541,7 +1541,7 @@ importers:
         specifier: ^5.9.2
         version: 5.9.3
       vitest:
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(@types/node@25.2.2)(@vitest/coverage-istanbul@5.0.5)(@vitest/ui@5.0.5)(jsdom@27.4.0)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))
 
   packages/powersync-db-collection:
@@ -1572,7 +1572,7 @@ importers:
         specifier: ^4.1.12
         version: 4.1.12
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       better-sqlite3:
         specifier: ^12.6.2
@@ -1585,7 +1585,7 @@ importers:
         version: link:../db
     devDependencies:
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       preact:
         specifier: ^11.0.1
@@ -1613,7 +1613,7 @@ importers:
         specifier: ^5.90.20
         version: 5.90.20
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       seroval:
         specifier: 1.6.3
@@ -1638,7 +1638,7 @@ importers:
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.13)
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       react:
         specifier: ^19.2.4
@@ -1669,7 +1669,7 @@ importers:
         specifier: ^7.6.13
         version: 7.6.13
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       better-sqlite3:
         specifier: ^12.6.2
@@ -1690,7 +1690,7 @@ importers:
         specifier: ^6.2.1
         version: 6.2.1(babel-plugin-react-compiler@1.0.0)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       react:
         specifier: ^19.2.4
@@ -1727,7 +1727,7 @@ importers:
         specifier: ^4.1.12
         version: 4.1.12
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
 
   packages/solid-db:
@@ -1746,7 +1746,7 @@ importers:
         specifier: ^0.8.10
         version: 0.8.10(solid-js@1.9.11)
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       jsdom:
         specifier: ^27.4.0
@@ -1758,7 +1758,7 @@ importers:
         specifier: ^2.11.15
         version: 2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))
       vitest:
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(@types/node@25.2.2)(@vitest/coverage-istanbul@5.0.5)(@vitest/ui@5.0.5)(jsdom@27.4.0)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))
 
   packages/svelte-db:
@@ -1774,7 +1774,7 @@ importers:
         specifier: ^7.3.1
         version: 7.3.1(svelte@5.55.7(@typescript-eslint/types@8.55.0))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       publint:
         specifier: ^0.3.17
@@ -1802,7 +1802,7 @@ importers:
         specifier: ^7.6.13
         version: 7.6.13
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       better-sqlite3:
         specifier: ^12.6.2
@@ -1861,7 +1861,7 @@ importers:
         specifier: ^4.1.12
         version: 4.1.12
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
 
   packages/vue-db:
@@ -1877,7 +1877,7 @@ importers:
         specifier: ^6.0.4
         version: 6.0.4(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(vue@3.5.28(typescript@5.9.3))
       '@vitest/coverage-istanbul':
-        specifier: 5.0.5
+        specifier: ^5.0.5
         version: 5.0.5(vitest@5.0.5)
       vue:
         specifier: ^3.5.28
@@ -6779,8 +6779,8 @@ packages:
     resolution: {integrity: sha512-FOl8EF6SAcljanKSm5aBeJaflFcxQAytTbxtNW8HC6D4x+UBW68IC4tBcrlrsI0wXHBmC/Gz4Ovvv8qCtiXSgQ==}
     engines: {node: '>=18'}
 
-  '@tanstack/vite-config@0.6.0':
-    resolution: {integrity: sha512-TtcetFc7aBm9BBclG3/8pM8ZlyzS8yNwi+eScN4gqsB9xnxyOPCbuvvkk//ybfQj8MVEZavQ03EOQxmOJdW8Rw==}
+  '@tanstack/vite-config@0.5.2':
+    resolution: {integrity: sha512-cTswDmoTn5UZA5pV2z/IWhGYgb8NS0zPRYYLv5q9JxHY4WxL/l/Riy6Aq76QttH8w6IHAIO/ZGwHBfF/OV0Kcw==}
     engines: {node: '>=18'}
     peerDependencies:
       vite: ^8.0.0
@@ -7384,9 +7384,6 @@ packages:
   '@vitest/utils@5.0.5':
     resolution: {integrity: sha512-/rBu7gzLDQI/SC79Tn98b5DwOgaHU/Gt4I9OVeP3YofzNaYtbImRCOJQmT1S6vOJg9gEIlWC+r3QxKkjuSa1nQ==}
 
-  '@volar/language-core@2.4.23':
-    resolution: {integrity: sha512-hEEd5ET/oSmBC6pi1j6NaNYRWoAiDhINbT8rmwtINugR39loROSlufGdYMF9TaKGfz+ViGs1Idi3mAhnuPcoGQ==}
-
   '@volar/language-core@2.4.30':
     resolution: {integrity: sha512-73fjwEV8wat6aOZ6U/y/hqtE30ocrIWECg67b0txGczOMNw+MffLmvJ5fnFfN9drVUEYZzLdaNo6VAy6G6avMw==}
 
@@ -7398,14 +7395,8 @@ packages:
       typescript:
         optional: true
 
-  '@volar/source-map@2.4.23':
-    resolution: {integrity: sha512-Z1Uc8IB57Lm6k7q6KIDu/p+JWtf3xsXJqAX/5r18hYOTpJyBn0KXUR8oTJ4WFYOcDzWC9n3IflGgHowx6U6z9Q==}
-
   '@volar/source-map@2.4.30':
     resolution: {integrity: sha512-zym1ob/KwDDyN+0jGVtxwbxJSRRnUvv5HspCtz3yEfVVdCG4/dzxJktMGPAgemqRuVs81O0o/y0q3qOUErR8kg==}
-
-  '@volar/typescript@2.4.23':
-    resolution: {integrity: sha512-lAB5zJghWxVPqfcStmAP1ZqQacMpe90UrP5RJ3arDyrhy4aCUQqmxPPLB2PWDKugvylmO41ljK7vZ+t6INMTag==}
 
   '@volar/typescript@2.4.30':
     resolution: {integrity: sha512-/DgA5tgYFPfrLFuSjIMXMGHk1LQv2+P8eny6+BhGNzFJELWIW7UZlc56ZLIRFhLsPpMfIFxM8/HvOPBggrjTZg==}
@@ -8283,9 +8274,6 @@ packages:
 
   confbox@0.1.8:
     resolution: {integrity: sha512-RMtmw0iFkeR4YV+fUOSucriAQNb9g8zFR52MWCtl+cCZOFRNL6zeB395vPzFhEjjn4fMxXudmELnl/KF/WrK6w==}
-
-  confbox@0.3.2:
-    resolution: {integrity: sha512-ZUAKhKlkCOrIGKc8cj7zek9s9z1mveHif/25nUshI2BzCRzF7KH7KHa+Lnh2ubq+e1tIlaFuP763mzW4qVoehg==}
 
   connect@3.7.0:
     resolution: {integrity: sha512-ZqRXc+tZukToSNmh5C2iWMSoV3X1YUcPbqEM4DkEG5tNQXrQUZCNVGGv3IuicnkMtPfGf3Xtp8WCXs295iQ1pQ==}
@@ -9291,9 +9279,6 @@ packages:
 
   exsolve@1.1.1:
     resolution: {integrity: sha512-9U/jZUgjnSGyntRr6y5Muu1MJcwFl6kPu7k8qLF0IMNfLqvw0NZ4nnVDq0RVoZ0RvCyumib4Ez3KYrVfilrw+g==}
-
-  exsolve@1.2.0:
-    resolution: {integrity: sha512-h1pQPR9XoeSMdntRNCjyTznaume4UpfXrULBnlkZ2CUM/G5eSa+pBByGldO5uR8dxbPC+OuJXsPPNf+JZ81ADg==}
 
   extendable-error@0.1.7:
     resolution: {integrity: sha512-UOiS2in6/Q0FK0R0q6UY9vYpQ21mr/Qn1KOnte7vsACuNJf514WvCCUHSRCPcgjPT2bAhNIJdlE6bVap1GKmeg==}
@@ -10595,10 +10580,6 @@ packages:
     resolution: {integrity: sha512-9rrA30MRRP3gBD3HTGnC6cDFpaE1kVDWxWgqWJUN0RvDNAo+Nz/9GxB+nHOH0ifbVFy0hSA1V6vFDvnx54lTEQ==}
     engines: {node: '>=14'}
 
-  local-pkg@1.2.1:
-    resolution: {integrity: sha512-++gUqRDEvcnN6Zhqrr+y/CkVEHhlrR96vZn3nZZPYzMcBUyBtTKzB9NadClFIsIVSsu+3i9tfk/erqy9kAmt7Q==}
-    engines: {node: '>=14'}
-
   localforage@1.10.0:
     resolution: {integrity: sha512-14/H1aX7hzBBmmh7sGPd+AOMkkIrHM3Z1PAyGgZigA1H1p5O5ANnMyWzvpAETtG68/dC4pC0ncy3+PPGzXZHPg==}
 
@@ -11527,9 +11508,6 @@ packages:
 
   pkg-types@1.3.1:
     resolution: {integrity: sha512-/Jm5M4RvtBFVkKWRu2BLUTNP8/M2a+UwuAX+ae4770q1qVGtfjG+WTCupoZixokjmHiry8uI+dlY8KXYV5HVVQ==}
-
-  pkg-types@2.4.0:
-    resolution: {integrity: sha512-07Fys7iVx0X6TcviMOgogM1Lk33ZyqOezMnU79S+kffWqwolG/5W9V8EgQSeYCIfFTYVgssRbnH630Oa2+soBA==}
 
   playwright-core@1.60.0:
     resolution: {integrity: sha512-9bW6zvX/m0lEbgTKJ6YppOKx8H3VOPBMOCFh2irXFOT4BbHgrx5hPjwJYLT40Lu+4qtD36qKc/Hn56StUW57IA==}
@@ -13007,40 +12985,6 @@ packages:
     resolution: {integrity: sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==}
     engines: {node: '>= 0.8'}
 
-  unplugin-dts@1.0.3:
-    resolution: {integrity: sha512-/GR887wfG4r1cWyt1UZsLRuMIjsmEbGkS9yJrz+0dsToHAYUD5CTyP3JMGVLv25j9K0mJcwAVvZno/aTuSUvNg==}
-    peerDependencies:
-      '@microsoft/api-extractor': '>=7'
-      '@rspack/core': ^1
-      '@vue/language-core': ^3.1.5
-      esbuild: '*'
-      rolldown: '*'
-      rollup: '>=3'
-      typescript: '>=4'
-      vite: '>=3'
-      webpack: ^4 || ^5
-    peerDependenciesMeta:
-      '@microsoft/api-extractor':
-        optional: true
-      '@rspack/core':
-        optional: true
-      '@vue/language-core':
-        optional: true
-      esbuild:
-        optional: true
-      rolldown:
-        optional: true
-      rollup:
-        optional: true
-      vite:
-        optional: true
-      webpack:
-        optional: true
-
-  unplugin@2.3.11:
-    resolution: {integrity: sha512-5uKD0nqiYVzlmCRs01Fhs2BdkEgBS3SAVP6ndrBsuK42iC2+JHyxM05Rm9G8+5mkmRtzMZGY8Ct5+mliZxU/Ww==}
-    engines: {node: '>=18.12.0'}
-
   unplugin@3.4.0:
     resolution: {integrity: sha512-9skdIFlCsPdFV7wUfZxNsFInlW+7nJmGu2gkTu0OUhF56aXGsHab9x52/QhdJ4lC7ZDPWTxbiC4ANqVlsuaW3w==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -13163,20 +13107,6 @@ packages:
       typescript: '*'
       vite: '*'
     peerDependenciesMeta:
-      vite:
-        optional: true
-
-  vite-plugin-dts@5.0.3:
-    resolution: {integrity: sha512-gIth6NdCEHWPiiRMCK3N6C8WjvdsrtEQrmsiG8h6Ov+lFP+b07Y+wcs9H0H7n146l0PDTYK4cQN1vgeG1pMdRQ==}
-    peerDependencies:
-      '@microsoft/api-extractor': '>=7'
-      rollup: '>=3'
-      vite: '>=3'
-    peerDependenciesMeta:
-      '@microsoft/api-extractor':
-        optional: true
-      rollup:
-        optional: true
       vite:
         optional: true
 
@@ -19424,14 +19354,14 @@ snapshots:
       - vite-plugin-solid
       - webpack
 
-  '@tanstack/react-start-rsc@0.1.59(esbuild@0.28.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(rolldown@1.2.16)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))':
+  '@tanstack/react-start-rsc@0.1.59(esbuild@0.28.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))':
     dependencies:
       '@tanstack/react-router': 1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@tanstack/router-core': 1.171.34
       '@tanstack/router-utils': 1.162.3
       '@tanstack/start-client-core': 1.170.34
       '@tanstack/start-fn-stubs': 1.162.0
-      '@tanstack/start-plugin-core': 1.171.49(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
+      '@tanstack/start-plugin-core': 1.171.49(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
       '@tanstack/start-storage-context': 1.167.36
       pathe: 2.0.3
       react: 19.2.4
@@ -19489,15 +19419,15 @@ snapshots:
       - vite-plugin-solid
       - webpack
 
-  '@tanstack/react-start@1.168.60(esbuild@0.28.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(rolldown@1.2.16)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))':
+  '@tanstack/react-start@1.168.60(esbuild@0.28.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))':
     dependencies:
       '@tanstack/react-router': 1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@tanstack/react-start-client': 1.168.39(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-      '@tanstack/react-start-rsc': 0.1.59(esbuild@0.28.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(rolldown@1.2.16)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
+      '@tanstack/react-start-rsc': 0.1.59(esbuild@0.28.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
       '@tanstack/react-start-server': 1.167.46(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@tanstack/router-utils': 1.162.3
       '@tanstack/start-client-core': 1.170.34
-      '@tanstack/start-plugin-core': 1.171.49(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
+      '@tanstack/start-plugin-core': 1.171.49(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
       '@tanstack/start-server-core': 1.169.39
       pathe: 2.0.3
       react: 19.2.4
@@ -19580,7 +19510,7 @@ snapshots:
       - supports-color
       - unloader
 
-  '@tanstack/router-plugin@1.168.42(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))':
+  '@tanstack/router-plugin@1.168.42(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))':
     dependencies:
       '@babel/core': 7.29.7
       '@babel/template': 7.29.7
@@ -19589,7 +19519,7 @@ snapshots:
       '@tanstack/router-generator': 1.167.40
       '@tanstack/router-utils': 1.162.3
       chokidar: 5.0.0
-      unplugin: 3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
+      unplugin: 3.4.0(esbuild@0.28.1)(rollup@4.64.12)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
       zod: 4.6.6
     optionalDependencies:
       '@tanstack/react-router': 1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -19671,13 +19601,13 @@ snapshots:
       - webpack
     optional: true
 
-  '@tanstack/solid-start@1.168.57(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(solid-js@1.9.11)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))':
+  '@tanstack/solid-start@1.168.57(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rollup@4.64.12)(solid-js@1.9.11)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))':
     dependencies:
       '@tanstack/solid-router': 1.170.38(solid-js@1.9.11)
       '@tanstack/solid-start-client': 1.168.37(solid-js@1.9.11)
       '@tanstack/solid-start-server': 1.167.44(solid-js@1.9.11)
       '@tanstack/start-client-core': 1.170.34
-      '@tanstack/start-plugin-core': 1.171.49(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
+      '@tanstack/start-plugin-core': 1.171.49(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
       '@tanstack/start-server-core': 1.169.39
       pathe: 2.0.3
       solid-js: 1.9.11
@@ -19745,7 +19675,7 @@ snapshots:
       - vite-plugin-solid
       - webpack
 
-  '@tanstack/start-plugin-core@1.171.49(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))':
+  '@tanstack/start-plugin-core@1.171.49(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))':
     dependencies:
       '@babel/code-frame': 7.29.7
       '@babel/core': 7.29.7
@@ -19753,7 +19683,7 @@ snapshots:
       '@jridgewell/remapping': 2.3.5
       '@tanstack/router-core': 1.171.34
       '@tanstack/router-generator': 1.167.40
-      '@tanstack/router-plugin': 1.168.42(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
+      '@tanstack/router-plugin': 1.168.42(@tanstack/react-router@1.170.41(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(esbuild@0.28.1)(rollup@4.64.12)(vite-plugin-solid@2.11.15(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)))(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
       '@tanstack/router-utils': 1.162.3
       '@tanstack/start-server-core': 1.169.39
       exsolve: 1.1.1
@@ -19835,22 +19765,17 @@ snapshots:
       - typescript
       - vite
 
-  '@tanstack/vite-config@0.6.0(@microsoft/api-extractor@7.47.7(@types/node@25.2.2))(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(typescript@5.9.3)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))':
+  '@tanstack/vite-config@0.5.2(@types/node@25.2.2)(rollup@4.64.12)(typescript@5.9.3)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))':
     dependencies:
       vite: 8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)
-      vite-plugin-dts: 5.0.3(@microsoft/api-extractor@7.47.7(@types/node@25.2.2))(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(typescript@5.9.3)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
+      vite-plugin-dts: 4.2.3(@types/node@25.2.2)(rollup@4.64.12)(typescript@5.9.3)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))
       vite-plugin-externalize-deps: 0.10.0(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))
       vite-tsconfig-paths: 6.1.1(typescript@5.9.3)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))
     transitivePeerDependencies:
-      - '@microsoft/api-extractor'
-      - '@rspack/core'
-      - '@vue/language-core'
-      - esbuild
-      - rolldown
+      - '@types/node'
       - rollup
       - supports-color
       - typescript
-      - webpack
 
   '@tauri-apps/api@2.10.1': {}
 
@@ -20489,10 +20414,6 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.2.0
 
-  '@volar/language-core@2.4.23':
-    dependencies:
-      '@volar/source-map': 2.4.23
-
   '@volar/language-core@2.4.30':
     dependencies:
       '@volar/source-map': 2.4.30
@@ -20506,15 +20427,7 @@ snapshots:
     optionalDependencies:
       typescript: 5.9.3
 
-  '@volar/source-map@2.4.23': {}
-
   '@volar/source-map@2.4.30': {}
-
-  '@volar/typescript@2.4.23':
-    dependencies:
-      '@volar/language-core': 2.4.23
-      path-browserify: 1.0.1
-      vscode-uri: 3.1.0
 
   '@volar/typescript@2.4.30(typescript@5.9.3)':
     dependencies:
@@ -20562,7 +20475,7 @@ snapshots:
 
   '@vue/language-core@2.1.6(typescript@5.9.3)':
     dependencies:
-      '@volar/language-core': 2.4.23
+      '@volar/language-core': 2.4.30
       '@vue/compiler-dom': 3.5.28
       '@vue/compiler-vue2': 2.7.16
       '@vue/shared': 3.5.28
@@ -21703,8 +21616,6 @@ snapshots:
       yargs: 17.7.2
 
   confbox@0.1.8: {}
-
-  confbox@0.3.2: {}
 
   connect@3.7.0:
     dependencies:
@@ -23287,8 +23198,6 @@ snapshots:
 
   exsolve@1.1.1: {}
 
-  exsolve@1.2.0: {}
-
   extendable-error@0.1.7: {}
 
   fake-indexeddb@6.2.5: {}
@@ -24554,12 +24463,6 @@ snapshots:
       mlly: 1.8.0
       pkg-types: 1.3.1
 
-  local-pkg@1.2.1:
-    dependencies:
-      mlly: 1.8.0
-      pkg-types: 2.4.0
-      quansync: 0.2.11
-
   localforage@1.10.0:
     dependencies:
       lie: 3.1.1
@@ -25625,12 +25528,6 @@ snapshots:
     dependencies:
       confbox: 0.1.8
       mlly: 1.8.0
-      pathe: 2.0.3
-
-  pkg-types@2.4.0:
-    dependencies:
-      confbox: 0.3.2
-      exsolve: 1.2.0
       pathe: 2.0.3
 
   playwright-core@1.60.0: {}
@@ -27661,34 +27558,6 @@ snapshots:
 
   unpipe@1.0.0: {}
 
-  unplugin-dts@1.0.3(@microsoft/api-extractor@7.47.7(@types/node@25.2.2))(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(typescript@5.9.3)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1)):
-    dependencies:
-      '@rollup/pluginutils': 5.3.0(rollup@4.64.12)
-      '@volar/typescript': 2.4.30(typescript@5.9.3)
-      compare-versions: 6.1.1
-      debug: 4.4.3
-      kolorist: 1.8.0
-      local-pkg: 1.2.1
-      magic-string: 0.30.21
-      typescript: 5.9.3
-      unplugin: 2.3.11
-    optionalDependencies:
-      '@microsoft/api-extractor': 7.47.7(@types/node@25.2.2)
-      esbuild: 0.28.1
-      rolldown: 1.2.16
-      rollup: 4.64.12
-      vite: 8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)
-      webpack: 5.112.0(esbuild@0.28.1)
-    transitivePeerDependencies:
-      - supports-color
-
-  unplugin@2.3.11:
-    dependencies:
-      '@jridgewell/remapping': 2.3.5
-      acorn: 8.18.0
-      picomatch: 4.0.7
-      webpack-virtual-modules: 0.6.2
-
   unplugin@3.4.0(esbuild@0.25.11)(rolldown@1.2.16)(rollup@4.64.12)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.25.11)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.25.11)):
     dependencies:
       '@jridgewell/remapping': 2.3.5
@@ -27701,14 +27570,13 @@ snapshots:
       vite: 8.3.5(@types/node@25.2.2)(esbuild@0.25.11)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)
       webpack: 5.112.0(esbuild@0.25.11)
 
-  unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1)):
+  unplugin@3.4.0(esbuild@0.28.1)(rollup@4.64.12)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1)):
     dependencies:
       '@jridgewell/remapping': 2.3.5
       picomatch: 4.0.7
       webpack-virtual-modules: 0.6.2
     optionalDependencies:
       esbuild: 0.28.1
-      rolldown: 1.2.16
       rollup: 4.64.12
       vite: 8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)
       webpack: 5.112.0(esbuild@0.28.1)
@@ -27818,7 +27686,7 @@ snapshots:
     dependencies:
       '@microsoft/api-extractor': 7.47.7(@types/node@25.2.2)
       '@rollup/pluginutils': 5.3.0(rollup@4.64.12)
-      '@volar/typescript': 2.4.23
+      '@volar/typescript': 2.4.30(typescript@5.9.3)
       '@vue/language-core': 2.1.6(typescript@5.9.3)
       compare-versions: 6.1.1
       debug: 4.4.3
@@ -27832,22 +27700,6 @@ snapshots:
       - '@types/node'
       - rollup
       - supports-color
-
-  vite-plugin-dts@5.0.3(@microsoft/api-extractor@7.47.7(@types/node@25.2.2))(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(typescript@5.9.3)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1)):
-    dependencies:
-      unplugin-dts: 1.0.3(@microsoft/api-extractor@7.47.7(@types/node@25.2.2))(esbuild@0.28.1)(rolldown@1.2.16)(rollup@4.64.12)(typescript@5.9.3)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))(webpack@5.112.0(esbuild@0.28.1))
-    optionalDependencies:
-      '@microsoft/api-extractor': 7.47.7(@types/node@25.2.2)
-      rollup: 4.64.12
-      vite: 8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)
-    transitivePeerDependencies:
-      - '@rspack/core'
-      - '@vue/language-core'
-      - esbuild
-      - rolldown
-      - supports-color
-      - typescript
-      - webpack
 
   vite-plugin-externalize-deps@0.10.0(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1)):
     dependencies:

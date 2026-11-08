@@ -56,6 +56,6 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@vitest/coverage-istanbul": "5.0.5"
+    "@vitest/coverage-istanbul": "^5.0.5"
   }
 }

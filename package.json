@@ -52,7 +52,7 @@
     "@svitejs/changesets-changelog-github-compact": "^1.2.0",
     "@tanstack/eslint-config": "0.3.4",
     "@tanstack/typedoc-config": "0.3.3",
-    "@tanstack/vite-config": "0.6.0",
+    "@tanstack/vite-config": "0.5.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@types/node": "^25.2.2",
     "@types/react": "^19.2.13",
@@ -78,7 +78,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.2",
     "vite": "^8.3.5",
-    "vitest": "5.0.5",
+    "vitest": "^5.0.5",
     "zod": "^4.6.7"
   }
 }
