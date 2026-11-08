@@ -32,8 +32,13 @@ import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
 import { oracleRuns } from '../../db/tests/oracle-config'
 import { convexCollectionOptions } from '../src/index'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { controlledClient, withTestCleanup } from './helpers'
 import type { Row } from './helpers'
+
+declareOracle({
+  owns: [`src/index.ts#convexCollectionOptions`],
+})
 
 type KeyedRow = Row & { key: string | number }
 const query = makeFunctionReference<

@@ -9,6 +9,8 @@ import { ConvexClient } from 'convex/browser'
 import { ConvexReactClient } from 'convex/react'
 import { makeFunctionReference } from 'convex/server'
 import { expect, it } from 'vitest'
+import { oracleRoute } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   assertLazyPublications,
   expectedLazyRows,
@@ -16,6 +18,9 @@ import {
 import { withTestCleanup } from './helpers'
 import type { LazyRow } from './lazy-paging-model-oracle'
 import type { PaginationOptions, PaginationResult } from 'convex/server'
+
+// Owns no convex source: this receiving premise drives the Convex SDK clients, not the convex collection options.
+declareOracle({})
 
 type Outgoing = {
   type: string
@@ -53,6 +58,7 @@ const timestamp = (value: number) => {
 it.each([`javascript`, `react`] as const)(
   `reads coherent range caches before every %s SDK callback`,
   async (kind) => {
+    oracleRoute(`case`)
     const options = {
       webSocketConstructor: Socket as unknown as typeof WebSocket,
       unsavedChangesWarning: false,
