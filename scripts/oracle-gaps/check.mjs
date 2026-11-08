@@ -404,10 +404,11 @@ export default mergeConfig(base, {
       select = null,
       stopOnKill = false,
       ignore = [],
+      callBudget = null,
     } = {},
   ) {
     const capture = join(out, `run-${process.pid}-${++runCounter}.jsonl`)
-    const state = { mutant, select, capture, seed, stopOnKill, ignore }
+    const state = { mutant, select, capture, seed, stopOnKill, ignore, callBudget }
     // Vitest 3 and 4 both expose the root project's `provide`; the state file
     // remains for setups that cannot `inject`.
     context.getRootProject?.().provide(`oracleGaps`, state)
@@ -418,6 +419,12 @@ export default mergeConfig(base, {
       false,
     )
     let timer
+    let poller
+    // A run past its call budget (capture-setup.mjs) is cut off once it has
+    // had IDLE_MS to end on its own, as in a batch.
+    const spinRow = () =>
+      existsSync(capture) && readFileSync(capture, `utf8`).includes(`"spin":true`)
+    let spunAt
     const result =
       limitMs === undefined
         ? await running
@@ -425,10 +432,20 @@ export default mergeConfig(base, {
             running,
             new Promise((resolve) => {
               timer = setTimeout(() => resolve(undefined), limitMs)
+              const poll = () => {
+                if (spinRow()) spunAt ??= Date.now()
+                if (spunAt !== undefined && Date.now() - spunAt > IDLE_MS)
+                  return resolve(undefined)
+                poller = setTimeout(poll, 50)
+              }
+              poller = setTimeout(poll, 50)
             }),
           ])
     clearTimeout(timer)
+    clearTimeout(poller)
     const seconds = (Date.now() - started) / 1000
+    // A run that spun is a timeout as it stands, even one that then ended.
+    const spun = spinRow()
     const profiled = {
       file: file.split(`/`).at(-1),
       mutant,
@@ -444,7 +461,11 @@ export default mergeConfig(base, {
       forceCancel(context)
       span(`run`, started, { ...profiled, timedOut: true })
       rmSync(capture, { force: true })
-      return { file, timedOut: true, seconds }
+      return { file, timedOut: true, seconds, ...(spun ? { spin: true } : {}) }
+    }
+    if (spun) {
+      rmSync(capture, { force: true })
+      return { file, timedOut: true, spin: true, seconds }
     }
     // The result also lists test modules from earlier runs, with their old
     // results. Only this run's file counts.
@@ -907,7 +928,9 @@ export default mergeConfig(base, {
                 stopOnKill: r.stopOnKill,
                 ignore: r.ignore,
                 limitMs: r.limitMs,
+                callBudget: r.callBudget,
               })
+              if (got[r.i].spin) evidence.spin += 1
               if (got[r.i].timedOut) await replace(slot)
             }
           break
@@ -971,7 +994,9 @@ export default mergeConfig(base, {
           stopOnKill: hung.stopOnKill,
           ignore: hung.ignore,
           limitMs: full,
+          callBudget: hung.callBudget,
         })
+        if (u.spin) evidence.spin += 1
         if (u.timedOut) await replace(slot)
         return { unit: u }
       }
