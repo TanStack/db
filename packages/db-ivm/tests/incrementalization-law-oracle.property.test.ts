@@ -863,6 +863,7 @@ describe(`DBSP incrementalization laws`, () => {
   // can promote, so worlds too small to fill it would lose this law while
   // every comparison still passed.
   it(`generates ordered histories that promote retained rows`, () => {
+    oracleRoute(`fixed seed`)
     const promotions = { global: 0, perParity: 0 }
     const promoted = (
       window: (rows: Weighted<Keyed>) => Weighted<Keyed>,
@@ -892,6 +893,7 @@ describe(`DBSP incrementalization laws`, () => {
   })
 
   it(`replays empty, duplicate, replacement, cancellation, and presence-flip cells`, () => {
+    oracleRoute(`case`)
     const unaryReach = assertUnaryIncrementalization({
       name: `named unary cells`,
       initial: [],

@@ -57,6 +57,7 @@ import { Index } from '../src/indexes.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -259,6 +260,7 @@ const INDEX_REFINEMENT_PROPERTY = `ivm.index-refinement`
 describe(`Index refinement oracle`, () => {
   for (const { name, additions } of fixedHistories) {
     oracleReplayTest(it)(`matches the multiset model when ${name}`, () => {
+      oracleRoute(`fixed history`)
       expectRefinement(additions)
       expectRefinement(additions, `prefixIdentity`)
     })
@@ -267,6 +269,7 @@ describe(`Index refinement oracle`, () => {
   oracleReplayTest(it)(
     `matches the multiset model across generated additions (20260930)`,
     () => {
+      oracleRoute(`fixed seed`)
       fc.assert(
         fc.property(historyArbitrary, (additions) => {
           expectRefinement(additions)
@@ -280,6 +283,7 @@ describe(`Index refinement oracle`, () => {
   oracleReplayTest(it, INDEX_REFINEMENT_PROPERTY)(
     `matches the multiset model across generated additions (random or replayed)`,
     () => {
+      oracleRoute(`random seed`)
       fc.assert(
         fc.property(historyArbitrary, (additions) => {
           expectRefinement(additions)
@@ -293,6 +297,7 @@ describe(`Index refinement oracle`, () => {
   // Positive execution witness: generated histories reach a NaN prefix that
   // cancels after another value joined its key.
   it(`reaches cancelled NaN-prefixed values beside other values`, () => {
+    oracleRoute(`fixed seed`)
     const sample = fc.sample(historyArbitrary, { seed: 20260930, numRuns: 300 })
     const reached = sample.filter((additions) =>
       additions.some(

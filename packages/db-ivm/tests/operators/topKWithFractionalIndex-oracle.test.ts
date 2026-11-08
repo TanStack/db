@@ -9,6 +9,7 @@ import { join, map, output } from '../../src/operators/index.js'
 import { assertOnlyKeysAffected } from '../test-utils.js'
 import {
   oraclePropertyOptions,
+  oracleRoute,
   oracleRuns,
 } from '../../../db/tests/oracle-config.js'
 import { declareOracle } from '../../../db/tests/oracle-declaration'
@@ -104,6 +105,7 @@ describe.each([
     it.each([409036, undefined])(
       `preserves cyclic payloads through replacements and fresh transients (seed %s)`,
       (seed) => {
+        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
         fc.assert(
           fc.property(
             fc.boolean(),
@@ -206,6 +208,7 @@ describe.each([
     it.each([409032, undefined])(
       `matches outer-join replacements (seed %s)`,
       (seed) => {
+        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
         fc.assert(
           fc.property(
             fc.integer({ min: 0, max: 4 }),
@@ -290,6 +293,7 @@ describe.each([
     )(
       `matches a signed cumulative relation through keyed histories (seed $seed, collision $collision)`,
       ({ seed, collision }) => {
+        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
         // The reference relation observes full rows and signed weights. Forcing
         // every bucket to collide must not change what the graph publishes.
         if (collision) vi.spyOn(hashing, `hash`).mockReturnValue(7)
@@ -433,6 +437,7 @@ describe(`Operators`, () => {
   describe(`TopKWithFractionalIndex operator`, () => {
     const topK = topKWithFractionalIndex
     it(`should assign fractional indices to sorted elements`, () => {
+      oracleRoute(`case`)
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
       const tracker = new TopKMessageTracker<number>()
@@ -520,6 +525,7 @@ describe(`Operators`, () => {
     })
 
     it(`should support duplicate ordering keys`, () => {
+      oracleRoute(`case`)
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
       const tracker = new TopKMessageTracker<number>()
@@ -602,6 +608,7 @@ describe(`Operators`, () => {
     })
 
     it(`should handle limit and offset correctly`, () => {
+      oracleRoute(`case`)
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
       const tracker = new TopKMessageTracker<number>()
@@ -688,6 +695,7 @@ describe(`Operators`, () => {
     })
 
     it(`should handle elements moving positions correctly`, () => {
+      oracleRoute(`case`)
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
       const tracker = new TopKMessageTracker<number>()
@@ -773,6 +781,7 @@ describe(`Operators`, () => {
     })
 
     it(`should maintain lexicographic order through multiple updates`, () => {
+      oracleRoute(`case`)
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
       const tracker = new TopKMessageTracker<number>()
@@ -876,6 +885,7 @@ describe(`Operators`, () => {
     })
 
     it(`should maintain correct order when cycling through multiple changes`, () => {
+      oracleRoute(`case`)
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
       const tracker = new TopKMessageTracker<number>()
@@ -983,6 +993,7 @@ describe(`Operators`, () => {
     })
 
     it(`should handle insertion at the start of the sorted collection`, () => {
+      oracleRoute(`case`)
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
       const allMessages: Array<any> = []
@@ -1077,6 +1088,7 @@ describe(`Operators`, () => {
     })
 
     it(`should handle multiple insertion at the start of the sorted collection`, () => {
+      oracleRoute(`case`)
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
       const allMessages: Array<any> = []

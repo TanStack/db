@@ -849,6 +849,7 @@ describe(`hash identity oracle`, () => {
   // Positive execution witness: the fixed campaign reaches every value kind
   // and every mutation, with both verdicts.
   it(`reaches every kind, mutation, and verdict in the fixed campaign`, () => {
+    oracleRoute(`fixed seed`)
     const sample = fc.sample(pairArb, { seed: FIXED_SEED, numRuns: 300 })
     const kinds = new Set<string>()
     for (const { left } of sample)
@@ -1053,6 +1054,7 @@ describe(`hash identity oracle`, () => {
   })
 
   it(`does not accept a second copy because the first copy matched`, () => {
+    oracleRoute(`case`)
     const spec: Spec = {
       k: `twice`,
       child: { k: `obj`, entries: [[`a`, num(1)]], syms: [] },
@@ -1089,6 +1091,7 @@ describe(`hash identity oracle`, () => {
   })
 
   it(`treats shared and copied subtrees, prototypes, and hidden properties as equal`, () => {
+    oracleRoute(`case`)
     const spec: Spec = {
       k: `twice`,
       child: {

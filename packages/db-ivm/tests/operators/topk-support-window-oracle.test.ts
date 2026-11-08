@@ -10,6 +10,7 @@ import { orderByWithFractionalIndex } from '../../src/operators/orderBy.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../../db/tests/oracle-config.js'
 import { declareOracle } from '../../../db/tests/oracle-declaration.js'
@@ -134,6 +135,7 @@ describe.each([
     campaign.test(
       `matches counted typed keys at every cut (${campaign.name} campaign)`,
       () => {
+        oracleRoute(campaign.name === 'fixed' ? `fixed seed` : `random seed`)
         let firstFailure:
           | {
               observation: `rows` | `size`
@@ -402,6 +404,7 @@ describe.each([
       campaign.test(
         `preserves ${profile} bounds and demand (${campaign.name} campaign)`,
         () => {
+          oracleRoute(campaign.name === 'fixed' ? `fixed seed` : `random seed`)
           const profileState =
             profile === `offset`
               ? `large offset move returned`
@@ -720,6 +723,7 @@ declareOracle({
 // wrong rows to the same signed-output checker; no production helper supplies
 // the expected answer, and no output normalization removes the distinction.
 it(`rejects end-relative slicing and offset-first clamping`, () => {
+  oracleRoute(`calibration`)
   const present = orderedKeys.slice(0, 3)
   for (const window of [
     { offset: -2, limit: 1 },
@@ -768,6 +772,7 @@ describe.each([
           ? oracleReplayTest(it)
           : oracleReplayTest(it, property)
       test(`preserves rank intersections and source edits (${campaign})`, async () => {
+        oracleRoute(campaign === 'fixed' ? `fixed seed` : `random seed`)
         const reach = createOracleReach(
           `${property}/${name}/${campaign}`,
           negativeStates,
@@ -817,6 +822,7 @@ describe.each([
 it.each([-2, 2])(
   `rejects excess signed weight %s across a moved window`,
   (weight) => {
+    oracleRoute(`calibration`)
     const check = (corrupt: boolean) => {
       const relation = new TopKRelation<Key>()
       relation.add([[[1, [{ id: 9, value: `tie` }, `a0`]], 1]])
