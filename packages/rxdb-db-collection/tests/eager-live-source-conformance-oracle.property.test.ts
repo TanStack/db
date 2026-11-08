@@ -3,6 +3,7 @@ import { describe, it } from 'vitest'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -55,6 +56,7 @@ describe(`eager live-source conformance: RxDB`, () => {
   oracleReplayTest(it)(
     `conforms on a fixed-seed campaign`,
     async () => {
+      oracleRoute(`fixed seed`)
       const reach = await campaign({ seed: 2118, numRuns: oracleRuns(runs) })
       reach.assertReached()
     },
@@ -64,6 +66,8 @@ describe(`eager live-source conformance: RxDB`, () => {
   oracleReplayTest(it, property)(
     `conforms on a random campaign or a replayed seed`,
     async () => {
+      // oraclePropertyOptions registers this test's route: `random seed`, or
+      // `fixed history` on a path replay.
       const reach = await campaign(oraclePropertyOptions(runs, property))
       reach.assertReached()
     },
@@ -72,6 +76,7 @@ describe(`eager live-source conformance: RxDB`, () => {
 })
 
 declareOracle({
+  owns: [`src/rxdb.ts#rxdbCollectionOptions`],
   check: [checkEagerLiveSourceHistory, eagerLiveSourceProperty],
   model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
   grammar: [historyArb],

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -73,6 +74,7 @@ describe(`eager live-source conformance: reference adapter`, () => {
   oracleReplayTest(it)(
     `conforms on a fixed-seed campaign`,
     async () => {
+      oracleRoute(`fixed seed`)
       const reach = await campaign({ seed: 2118, numRuns: oracleRuns(runs) })
       reach.assertReached()
     },
@@ -82,6 +84,8 @@ describe(`eager live-source conformance: reference adapter`, () => {
   oracleReplayTest(it, property)(
     `conforms on a random campaign or a replayed seed`,
     async () => {
+      // oraclePropertyOptions registers this test's route: `random seed`, or
+      // `fixed history` on a path replay.
       const reach = await campaign(oraclePropertyOptions(runs, property))
       reach.assertReached()
     },
@@ -139,6 +143,7 @@ describe(`eager live-source conformance: reference adapter`, () => {
   oracleReplayTest(it).each(mutants)(
     `rejects the %s mutant with %s`,
     async (mutant, law) => {
+      oracleRoute(`calibration`)
       const result = await fc.check(
         eagerLiveSourceProperty(referenceDriver(mutant)),
         {
@@ -162,6 +167,7 @@ describe(`eager live-source conformance: prompt restart cut`, () => {
   oracleReplayTest(it)(
     `rejects a run that is ready at its prompt restart`,
     async () => {
+      oracleRoute(`calibration`)
       await expect(
         checkEagerLiveSourceHistory(referenceDriver(`ready-at-restart`), [
           { kind: `fail` },
@@ -180,6 +186,7 @@ describe(`eager live-source conformance: per-change commits`, () => {
   oracleReplayTest(it)(
     `the per-change reference adapter conforms`,
     async () => {
+      oracleRoute(`fixed seed`)
       const perChange = referenceDriver(undefined, { perChange: true })
       await fc.assert(eagerLiveSourceProperty(perChange), {
         seed: 2118,
@@ -192,6 +199,7 @@ describe(`eager live-source conformance: per-change commits`, () => {
   oracleReplayTest(it)(
     `rejects a batch committed out of order with PUB-1`,
     async () => {
+      oracleRoute(`calibration`)
       const reversed = referenceDriver(`reverses-batch`, { perChange: true })
       const result = await fc.check(eagerLiveSourceProperty(reversed), {
         seed: 2118,
@@ -217,6 +225,7 @@ describe(`eager live-source conformance: outage threshold, client values`, () =>
   oracleReplayTest(it)(
     `the reference adapter with an outage threshold conforms`,
     async () => {
+      oracleRoute(`fixed seed`)
       const reach = createOracleReach(
         `${property}.outage`,
         reachStatesFor(thresholdDriver),
@@ -244,6 +253,7 @@ describe(`eager live-source conformance: outage threshold, client values`, () =>
   oracleReplayTest(it).each(outageMutants)(
     `rejects the %s mutant with %s`,
     async (mutant, law) => {
+      oracleRoute(`calibration`)
       const result = await fc.check(
         eagerLiveSourceProperty(referenceDriver(mutant, { outage })),
         { seed: 2118, numRuns: runs },
@@ -493,6 +503,7 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it).each(witnesses)(
     `reconstructs %s`,
     async (_name, history) => {
+      oracleRoute(`fixed history`)
       expect(withinGrammar(history, withoutValues)).toBe(true)
       const { skipped } = await checkEagerLiveSourceHistory(
         withoutValues,
@@ -505,6 +516,7 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it).each(valueWitnesses)(
     `reconstructs %s`,
     async (_name, history) => {
+      oracleRoute(`fixed history`)
       expect(withinGrammar(history, withoutFields)).toBe(true)
       const { skipped } = await checkEagerLiveSourceHistory(
         withoutFields,
@@ -527,6 +539,7 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it)(
     `excludes a batch before the first ready without listen-before-fetch`,
     async () => {
+      oracleRoute(`fixed history`)
       const history = [{ kind: `changes` as const, changes: [] }]
       const { skipped } = await checkEagerLiveSourceHistory(
         lateListener,
@@ -558,6 +571,7 @@ describe(`eager live-source grammar controls`, () => {
     ],
   ]
   oracleReplayTest(it).each(invalid)(`excludes %s`, async (_name, history) => {
+    oracleRoute(`fixed history`)
     const { skipped } = await checkEagerLiveSourceHistory(
       withoutValues,
       history,
@@ -584,6 +598,7 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it).each(ablations)(
     `without %s steps, histories never reach %s`,
     async (kind, lost) => {
+      oracleRoute(`fixed seed`)
       const states = reachStatesFor(driver)
       const reach = createOracleReach(`${property}.ablation`, states, {
         replaying: false,
@@ -610,6 +625,7 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it)(
     `without notes, histories never reach field-removed`,
     async () => {
+      oracleRoute(`fixed seed`)
       const reach = createOracleReach(
         `${property}.ablation`,
         reachStatesFor(driver),
@@ -658,6 +674,7 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it)(
     `without values in live changes, histories never reach value:date:change`,
     async () => {
+      oracleRoute(`fixed seed`)
       const reach = createOracleReach(
         `${property}.ablation`,
         reachStatesFor(driver),
@@ -701,6 +718,7 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it)(
     `with every read after all buffered batches, histories never reach read-missed-change`,
     async () => {
+      oracleRoute(`fixed seed`)
       const reach = createOracleReach(
         `${property}.ablation`,
         reachStatesFor(driver),
@@ -730,6 +748,9 @@ describe(`eager live-source grammar controls`, () => {
   )
 })
 
+// Owns nothing: this package's src is the shared oracle itself, and the
+// reference adapter under test is a fixture in tests/. The published adapters'
+// receiving drivers own their adapters' entry points.
 declareOracle({
   check: [checkEagerLiveSourceHistory, eagerLiveSourceProperty],
   model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],

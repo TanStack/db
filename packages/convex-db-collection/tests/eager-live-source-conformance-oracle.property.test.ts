@@ -3,6 +3,7 @@ import { describe, it } from 'vitest'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -57,6 +58,7 @@ describe(`eager live-source conformance: Convex`, () => {
   oracleReplayTest(it)(
     `conforms on a fixed-seed campaign`,
     async () => {
+      oracleRoute(`fixed seed`)
       const reach = await campaign({ seed: 2118, numRuns: oracleRuns(runs) })
       reach.assertReached()
     },
@@ -66,6 +68,8 @@ describe(`eager live-source conformance: Convex`, () => {
   oracleReplayTest(it, property)(
     `conforms on a random campaign or a replayed seed`,
     async () => {
+      // oraclePropertyOptions registers this test's route: `random seed`, or
+      // `fixed history` on a path replay.
       const reach = await campaign(oraclePropertyOptions(runs, property))
       reach.assertReached()
     },
@@ -76,6 +80,7 @@ describe(`eager live-source conformance: Convex`, () => {
   oracleReplayTest(it)(
     `conforms over the React client on a fixed-seed campaign`,
     async () => {
+      oracleRoute(`fixed seed`)
       const reach = await campaign(
         { seed: 2118, numRuns: oracleRuns(runs) },
         convexConformanceDriver({ client: `react` }),
@@ -91,6 +96,7 @@ describe(`eager live-source conformance: Convex`, () => {
   oracleReplayTest(it)(
     `conforms over a wrapped JavaScript client on a fixed-seed campaign`,
     async () => {
+      oracleRoute(`fixed seed`)
       const reach = await campaign(
         { seed: 2118, numRuns: oracleRuns(runs) },
         convexConformanceDriver({ client: `wrapped` }),
@@ -103,6 +109,7 @@ describe(`eager live-source conformance: Convex`, () => {
 })
 
 declareOracle({
+  owns: [`src/index.ts#convexCollectionOptions`],
   check: [checkEagerLiveSourceHistory, eagerLiveSourceProperty],
   model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
   grammar: [historyArb],
