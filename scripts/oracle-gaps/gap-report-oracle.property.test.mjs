@@ -605,6 +605,8 @@ async function driver(plan, observe) {
         states.add(`a workspace dependency's state judged fresh`)
       if (m.function === `w_shrink` && m.operator === `if-true` && m.class === `comparison-gap`)
         states.add(`a shrinking calibration passes under a mutant`)
+      if (m.function === `w_iowait` && m.outcome === `killed`)
+        states.add(`a copy waiting on I/O killed, not cut for idleness`)
       if (m.function === `w_slowkill` && m.outcome === `killed`)
         states.add(`a slow kill past the first time limit killed`)
       if (m.function === `w_hang` && m.outcome === `timeout`)
@@ -633,6 +635,8 @@ async function driver(plan, observe) {
     }
     // A batch that a hang cut off reran its other items in a new context.
     if (cli.evidence?.rerun > 0) states.add(`a batch cut off by a hang reran the rest`)
+    // A hang that waited on nothing was cut off for idleness.
+    if (cli.evidence?.idle > 0) states.add(`a hang cut off for idleness`)
     // A mutant that changed no value was judged from the unmutated runs.
     if (cli.evidence?.unchanged > 0) states.add(`a mutant that changes no value judged without a run`)
     if (plan.ordinary && cli.mutants.some((m) => m.ordinaryOutcome))
@@ -1067,6 +1071,8 @@ const required = [
   `a boolean flip killed`,
   `a value-position call killed`,
   `a loop that never runs killed`,
+  `a hang cut off for idleness`,
+  `a copy waiting on I/O killed, not cut for idleness`,
   `a shrinking calibration passes under a mutant`,
   `a workspace dependency's state judged fresh`,
   `each owner's value change killed its own mutant`,

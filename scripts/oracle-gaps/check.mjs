@@ -50,6 +50,10 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url))
 const sha1 = (text) => createHash(`sha1`).update(text).digest(`hex`)
+// How long a copy of a file with no I/O may sit idle before it is cut off as
+// a hang (capture-setup.mjs). The longest idle stretch measured in correct
+// tests was 51 ms (79,180 test runs, 2026-11-07), so this is ten times that.
+const IDLE_MS = 500
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // This CLI's own code and the framework it reads. They are part of the run
@@ -445,7 +449,7 @@ export default mergeConfig(base, {
       for (const line of readFileSync(capture, `utf8`).split(`\n`).filter(Boolean)) {
         const row = JSON.parse(line)
         // A closing row marks the end of a file for a batch's watchdog.
-        if (!row.closed) rows.push([row.key, row])
+        if (!row.closed && !row.idle) rows.push([row.key, row])
       }
       rmSync(capture)
     }
@@ -534,6 +538,8 @@ export default mergeConfig(base, {
           select: items[i].select ? inCopy(copy, items[i].file, items[i].select) : null,
           stopOnKill: items[i].stopOnKill ?? false,
           ignore: inCopy(copy, items[i].file, items[i].ignore ?? []),
+          idleMs: items[i].idleMs ?? null,
+          idleHorizonMs: items[i].idleHorizonMs ?? null,
         },
       ]),
     )
@@ -549,11 +555,15 @@ export default mergeConfig(base, {
     // The watchdog: each copy writes a closing row when it finishes, so the
     // copy that is running is the first without one. A copy that passes its
     // file's time limit is cut off.
+    // A copy that reported itself idle is cut off at once (capture-setup.mjs).
+    const idle = new Set()
     const finished = () => {
       if (!existsSync(capture)) return 0
       const done = new Set()
-      for (const line of readFileSync(capture, `utf8`).split(`\n`))
+      for (const line of readFileSync(capture, `utf8`).split(`\n`)) {
         if (line.includes(`"closed":true`)) done.add(JSON.parse(line).file)
+        if (line.includes(`"idle":true`)) idle.add(JSON.parse(line).file)
+      }
       return copies.findIndex((copy) => !done.has(copy))
     }
     let current = 0
@@ -567,7 +577,8 @@ export default mergeConfig(base, {
           current = at
           copyStarted = Date.now()
         }
-        if (Date.now() - copyStarted > items[current].limitMs) return resolve(undefined)
+        if (idle.has(copies[current]) || Date.now() - copyStarted > items[current].limitMs)
+          return resolve(undefined)
         timer = setTimeout(poll, 50)
       }
       timer = setTimeout(poll, 50)
@@ -585,7 +596,7 @@ export default mergeConfig(base, {
           const row = JSON.parse(line)
           const copy = copies.find((c) => row.key?.startsWith(`${c} > `) || row.file === c)
           if (copy && row.skipped) skipped.add(copy)
-          if (copy && !row.closed) rows.get(copy).push(row)
+          if (copy && !row.closed && !row.idle) rows.get(copy).push(row)
         }
       return rows
     }
@@ -623,6 +634,7 @@ export default mergeConfig(base, {
             }
           }),
           timedOutAt: current,
+          idle: idle.has(copies[current]),
         }
       }
       // Errors outside any test cannot be attributed to one copy, so the
@@ -755,9 +767,10 @@ export default mergeConfig(base, {
       ]),
     )
     // How the evidence was produced: units reused and computed, runs cut off
-    // at their time limit, items rerun after a cut-off batch, and mutants
-    // that changed no value and so needed no run.
-    const evidence = { reused: 0, computed: 0, cut: 0, rerun: 0, unchanged: 0 }
+    // at their time limit or for idleness (of them, `idle`), items rerun
+    // after a cut-off batch, and mutants that changed no value and so needed
+    // no run.
+    const evidence = { reused: 0, computed: 0, cut: 0, idle: 0, rerun: 0, unchanged: 0 }
     // Each file's imports in its unmutated run. A run that timed out reports
     // none, so it is stored under these: a mutant changes no import.
     const fileInputs = new Map()
@@ -856,13 +869,21 @@ export default mergeConfig(base, {
         const hung = rest[batch.timedOutAt]
         const full = limitFor(hung.file)
         evidence.cut += 1
+        if (batch.idle) evidence.idle += 1
         await replace(slot)
-        // A copy that already had the full limit is a timeout as it stands.
+        // A copy that already had the full limit, or that sat idle in a file
+        // with no I/O, is a timeout as it stands: an idle copy waits on
+        // nothing that can come.
         const alone =
-          hung.limitMs >= full
+          hung.limitMs >= full || batch.idle
             ? { timedOutAt: 0, units: [] }
-            : await runBatch(slot.context, options.out, [{ ...hung, limitMs: full }], options.seed ?? null)
-        const hadFullLimit = hung.limitMs >= full
+            : await runBatch(
+                slot.context,
+                options.out,
+                [{ ...hung, limitMs: full }],
+                options.seed ?? null,
+              )
+        const hadFullLimit = hung.limitMs >= full || batch.idle
         if (alone.unattributed)
           got[hung.i] = await unit(slot.context, hung.file, hung.spec, {
             mutant: hung.mutant,
@@ -878,6 +899,7 @@ export default mergeConfig(base, {
               : alone.units[0]
           if (alone.timedOutAt === 0 && !hadFullLimit) {
             evidence.cut += 1
+            if (alone.idle) evidence.idle += 1
             await replace(slot)
           }
           if (!confirmed.skipped) {
@@ -1089,6 +1111,12 @@ export default mergeConfig(base, {
         for (const number of row.infected ?? []) valueChanges.get(file).add(number)
       }
     const unmutatedUnits = new Map(first.units.map((u) => [u.file, u]))
+    // Files whose unmutated tests had an I/O handle open (a socket, a child
+    // process, file I/O): a test there may wait on something outside the
+    // worker, so no copy of it is cut for idleness (capture-setup.mjs).
+    const ioFiles = new Set()
+    for (const rows of [first.rows, second.rows])
+      for (const [key, row] of rows) if (row.io) ioFiles.add(fileOf(key))
     const changesNothing = (mutant, targets) =>
       targets.oracleTargets.every(
         (file) => unmutatedUnits.has(file) && !valueChanges.get(file)?.has(mutant.number),
@@ -1152,6 +1180,10 @@ export default mergeConfig(base, {
             mutant: st.mutant.number,
             select: await selectionFor(slot, file, keysOf(st)),
             limitMs: firstLimitFor(file),
+            // Idle detection only where no unmutated test of the file did I/O.
+            idleMs: ioFiles.has(file) ? null : IDLE_MS,
+            // Timers due after the full limit do not keep a copy busy.
+            idleHorizonMs: limitFor(file),
             stopOnKill: true,
             ignore: ignoredIn(file),
           })

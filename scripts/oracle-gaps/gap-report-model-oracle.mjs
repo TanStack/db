@@ -141,6 +141,8 @@ const testCase = fc.record({
   slow: fc.constant(false),
   // Only a witness checks that fast-check shrinks an injected failure.
   shrinks: fc.constant(false),
+  // Only a witness waits on a child process: seconds of real time.
+  ioWait: fc.constant(false),
   // A test may run a second campaign, on its own route and input, as
   // `runOracleCampaign` does.
   then: fc.option(
@@ -255,6 +257,7 @@ const judging = (file, route, input, extra = {}) => ({
   hangs: false,
   slow: false,
   shrinks: false,
+  ioWait: false,
   then: null,
   ...extra,
 })
@@ -485,6 +488,15 @@ const witness = [
     body: [{ kind: `loop`, quote: `'` }],
     tests: [judging(`a`, `fixed seed`, 1)],
   },
+  // A test that waits on a child process where the output differs: an I/O
+  // handle is open, so its copy is busy, never cut for idleness, and the
+  // confirming run kills it.
+  {
+    id: `w_iowait`,
+    owners: [`a`],
+    body: [kill],
+    tests: [judging(`a`, `fixed seed`, 7, { ioWait: true })],
+  },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -535,6 +547,7 @@ const captureWitness = new Set([
   `w_flag`,
   `w_dep`,
   `w_loop`,
+  `w_iowait`,
 ])
 
 // ## Rendering and layout
@@ -1697,6 +1710,7 @@ function oracleTestFile(plan, file) {
   const out = [
     `import { describe, expect, test } from 'vitest'`,
     ...(plan.tests.some((t) => t.file === file && t.shrinks) ? [`import fc from 'fast-check'`] : []),
+    ...(plan.tests.some((t) => t.file === file && t.ioWait) ? [`import { spawn } from 'node:child_process'`] : []),
     `import * as sut from '../src/sut'`,
     ...(file === `b` ? [`import { strict } from './strict'`] : []),
     `function declareOracle(_parts: { owns: Array<string> }): void {}`,
@@ -1763,6 +1777,13 @@ function oracleTestFile(plan, file) {
               `    if (${gate} && JSON.stringify(${out}) !== '${expected}') await new Promise((r) => setTimeout(r, ${SLOW_MS}))`,
             ]
           : []),
+        // A test that waits on I/O (a child process, about 3 s) where the
+        // output differs, then judges as usual.
+        ...(t.ioWait
+          ? [
+              `    if (${gate} && JSON.stringify(${out}) !== '${expected}') await new Promise((r) => spawn(process.execPath, ['-e', 'setTimeout(() => {}, ${SLOW_MS})']).on('exit', r))`,
+            ]
+          : []),
         // An injected failure shrinks to its smallest counterexample.
         ...(t.shrinks
           ? [
@@ -1792,7 +1813,7 @@ function oracleTestFile(plan, file) {
     }
     out.push(
       `describe('t${index}', () => {`,
-      `  test('${testName(t, index)}', ${(t.hangs && !t.flaky) || t.slow ? `async ` : ``}() => {`,
+      `  test('${testName(t, index)}', ${(t.hangs && !t.flaky) || t.slow || t.ioWait ? `async ` : ``}() => {`,
       ...partsOf(t).flatMap(campaign),
       `  })`,
       `})`,

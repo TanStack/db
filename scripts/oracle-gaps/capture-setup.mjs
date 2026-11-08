@@ -37,6 +37,50 @@ const run =
 // that copy's settings, and resets the module registry: the copy's imports
 // then load the package's modules afresh, under its mutant, with no state
 // left by an earlier copy.
+// Real clocks and timers, taken once per worker, when the first copy's setup
+// runs: before any test fakes timers, `Date`, or `performance`, and before
+// the counting wrappers below replace the timers.
+const real = (globalThis.__oracleGapsReal ??= {
+  setInterval: globalThis.setInterval,
+  now: Date.now.bind(Date),
+  use: performance.eventLoopUtilization.bind(performance),
+})
+const realInterval = real.setInterval
+const realNow = real.now
+const realUse = real.use
+
+// The timers that code in this worker has pending, counted where they are
+// made, each with when it is next due: Node's resource list does not
+// reliably show one entry per timer.
+// The wrappers are installed once per worker, before any test file loads, so
+// a timer a module makes when it loads is counted too. Vitest's own timers
+// are not: it took the real functions before this file ran. Fake timers
+// install over the wrappers and give them back.
+const pending = (globalThis.__oracleGapsPendingTimers ??= (() => {
+  const handles = new Map()
+  const wrap = (make, clear, once) => {
+    globalThis[make.name] = function (callback, ...rest) {
+      if (typeof callback !== `function`) return make(callback, ...rest)
+      // An immediate is due at once; a timer or interval after its delay.
+      const delay = make === globalThis.setImmediate ? 0 : Number(rest[0]) || 0
+      const handle = make(function (...args) {
+        if (once) handles.delete(handle)
+        else handles.set(handle, real.now() + delay)
+        return callback.apply(this, args)
+      }, ...rest)
+      handles.set(handle, real.now() + delay)
+      return handle
+    }
+    globalThis[clear.name] = function (handle) {
+      handles.delete(handle)
+      return clear(handle)
+    }
+  }
+  wrap(globalThis.setTimeout, globalThis.clearTimeout, true)
+  wrap(globalThis.setInterval, globalThis.clearInterval, false)
+  wrap(globalThis.setImmediate, globalThis.clearImmediate, true)
+  return handles
+})())
 const unit = run.units?.[globalThis.__vitest_worker__?.filepath]
 // The mutants that a copy earlier in this batch killed. A later copy of the
 // same mutant runs nothing: the mutant is decided (stop at first kill).
@@ -532,6 +576,7 @@ afterEach((context) => {
       observed: observations > 0 ? observed.digest(`hex`) : undefined,
       hits: [...hits],
       infected: [...infected],
+      ...(sawIo ? { io: true } : {}),
       outcomes: [...outcomes],
       verdicts: [...verdicts.values()],
       route,
@@ -557,6 +602,72 @@ afterEach((context) => {
 })
 
 const thisFile = globalThis.__vitest_worker__?.filepath
+
+// I/O and idleness (maintainer decision, 2026-11-07). Each test's row says
+// whether the test ever had an I/O handle open: anything but the runner's
+// own channel, stdio, and timers. A copy given `idleMs` (a file whose
+// unmutated tests did no I/O) is idle when no counted timer is pending, no
+// more timers are listed than when its test began (which covers timers made
+// outside the wrappers, such as `node:timers/promises`), nothing but the
+// channel and stdio is open, and its event loop is under 5% busy. After
+// `idleMs` of that it writes an idle row, and the batch's watchdog cuts it
+// off as a hang. A late sample means the thread was busy. With
+// ORACLE_GAPS_IDLE set, each test's longest idle stretch is recorded
+// (profiling).
+const quiet = new Set([`MessagePort`, `PipeWrap`, `TTYWrap`, `Timeout`, `Immediate`])
+const timersListed = (kinds) => kinds.filter((kind) => kind === `Timeout` || kind === `Immediate`).length
+let sawIo = false
+const idleProfile = process.env.ORACLE_GAPS_IDLE
+if (state.capture || idleProfile) {
+  let baseTimers
+  let since
+  let last
+  let longest = 0
+  let use = realUse()
+  let reported = false
+  beforeEach(() => {
+    baseTimers = timersListed(process.getActiveResourcesInfo())
+    since = undefined
+    longest = 0
+    sawIo = false
+  })
+  afterEach((context) => {
+    baseTimers = undefined
+    if (idleProfile)
+      appendFileSync(idleProfile, `${JSON.stringify({ key: testKey(context.task), longest })}\n`)
+  })
+  realInterval(() => {
+    const now = realNow()
+    const late = last !== undefined && now - last > 150
+    last = now
+    const used = realUse(use)
+    use = realUse()
+    if (baseTimers === undefined || reported) return
+    const kinds = process.getActiveResourcesInfo()
+    const io = kinds.some((kind) => !quiet.has(kind))
+    sawIo ||= io
+    // A timer due after the copy's full time limit cannot end its wait in
+    // time, so it does not keep the copy busy: a test waiting on it would be
+    // a timeout at the limit anyway (a collection's five-minute GC timer).
+    const horizon = now + (state.idleHorizonMs ?? Infinity)
+    const timerDue = [...pending.values()].some((due) => due <= horizon)
+    if (
+      late ||
+      io ||
+      used.utilization > 0.05 ||
+      timerDue ||
+      timersListed(kinds) > baseTimers
+    ) {
+      since = undefined
+      return
+    }
+    since ??= now
+    longest = Math.max(longest, now - since)
+    if (!state.idleMs || now - since < state.idleMs) return
+    reported = true
+    appendFileSync(state.capture, `${JSON.stringify({ file: thisFile, idle: true })}\n`)
+  }, 50).unref()
+}
 afterAll(() => {
   if (!state.capture) return
   if (currentFile)
