@@ -17,15 +17,6 @@ const config = defineConfig({
     typecheck: {
       enabled: true,
       include: [`tests/**/*.test.ts`, `tests/**/*.test-d.ts`],
-      // Vitest 5 fails a typecheck file with no suite. These wrappers only
-      // register shared suites when they run as tests.
-      exclude: [
-        `**/node_modules/**`,
-        `**/.git/**`,
-        `tests/electron-persisted-collection.e2e.test.ts`,
-        `tests/electron-runtime-bridge.e2e.test.ts`,
-        `tests/electron-sqlite-core-adapter-contract.test.ts`,
-      ],
     },
   },
 })

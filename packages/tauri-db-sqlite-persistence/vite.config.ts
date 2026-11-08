@@ -12,14 +12,6 @@ const config = defineConfig({
     typecheck: {
       enabled: true,
       include: [`tests/**/*.test.ts`],
-      // Vitest 5 fails a typecheck file with no suite. These wrappers only
-      // register shared suites when they run as tests.
-      exclude: [
-        `**/node_modules/**`,
-        `**/.git/**`,
-        `tests/tauri-sql-driver-contract.test.ts`,
-        `tests/tauri-sqlite-core-adapter-contract.test.ts`,
-      ],
     },
   },
 })

@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe } from 'vitest'
 import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 import { ExpoSQLiteDriver } from '../src/expo-sqlite-driver'
 import { createExpoSQLiteTestDatabase } from './helpers/expo-sqlite-test-db'
@@ -26,4 +27,6 @@ function createDriverHarness(): SQLiteDriverContractHarness {
   }
 }
 
-runSQLiteDriverContractSuite(`expo sqlite driver`, createDriverHarness)
+describe(`expo-sqlite-driver-contract.test`, () => {
+  runSQLiteDriverContractSuite(`expo sqlite driver`, createDriverHarness)
+})

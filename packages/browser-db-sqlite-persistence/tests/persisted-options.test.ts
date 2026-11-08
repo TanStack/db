@@ -1,3 +1,4 @@
+import { describe } from 'vitest'
 // Browser re-export and Query Collection receiving paths use the core law.
 import { persistedCollectionOptions } from '../src/index.js'
 import {
@@ -5,5 +6,7 @@ import {
   registerPersistedUtilityAdmissionOracle,
 } from '../../db-sqlite-persistence-core/tests/persisted-options-type-oracle.js'
 
-registerPersistedOptionsTypeOracle(`browser`)
-registerPersistedUtilityAdmissionOracle(`browser`, persistedCollectionOptions)
+describe(`persisted-options.test`, () => {
+  registerPersistedOptionsTypeOracle(`browser`)
+  registerPersistedUtilityAdmissionOracle(`browser`, persistedCollectionOptions)
+})

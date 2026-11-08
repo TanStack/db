@@ -12,13 +12,6 @@ const config = defineConfig({
     typecheck: {
       enabled: true,
       include: [`tests/**/*.test.ts`, `tests/**/*.test-d.ts`],
-      // Vitest 5 fails a typecheck file with no suite. This wrapper only
-      // registers the shared oracles when it runs as a test.
-      exclude: [
-        `**/node_modules/**`,
-        `**/.git/**`,
-        `tests/persisted-options.test.ts`,
-      ],
     },
   },
 })

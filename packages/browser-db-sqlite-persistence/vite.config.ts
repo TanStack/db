@@ -98,14 +98,6 @@ const config = defineConfig({
     typecheck: {
       enabled: true,
       include: [`tests/**/*.test.ts`, `tests/**/*.test-d.ts`],
-      // Vitest 5 fails a typecheck file with no suite. These files only
-      // register shared suites or helpers when they run as tests.
-      exclude: [
-        `**/node_modules/**`,
-        `**/.git/**`,
-        `tests/persisted-options.test.ts`,
-        `tests/wa-sqlite-driver.test.ts`,
-      ],
     },
   },
 })

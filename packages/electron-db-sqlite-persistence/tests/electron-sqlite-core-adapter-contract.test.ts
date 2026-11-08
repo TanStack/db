@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe } from 'vitest'
 import { createSQLiteCorePersistenceAdapter } from '@tanstack/db-sqlite-persistence-core'
 import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract'
 import { BetterSqlite3SQLiteDriver } from '../../node-db-sqlite-persistence/src/node-driver'
@@ -99,7 +100,9 @@ const electronContractMode = isElectronFullE2EEnabled()
   ? `real electron e2e invoke`
   : `in-process invoke`
 
-runSQLiteCoreAdapterContractSuite(
-  `SQLiteCorePersistenceAdapter contract over electron IPC bridge (${electronContractMode})`,
-  createHarness,
-)
+describe(`electron-sqlite-core-adapter-contract.test`, () => {
+  runSQLiteCoreAdapterContractSuite(
+    `SQLiteCorePersistenceAdapter contract over electron IPC bridge (${electronContractMode})`,
+    createHarness,
+  )
+})

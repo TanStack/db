@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe } from 'vitest'
 import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 import { BrowserWASQLiteDriver } from '../src/wa-sqlite-driver'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
@@ -24,4 +25,6 @@ function createDriverHarness(): SQLiteDriverContractHarness {
   }
 }
 
-runSQLiteDriverContractSuite(`browser wa-sqlite driver`, createDriverHarness)
+describe(`wa-sqlite-driver.test`, () => {
+  runSQLiteDriverContractSuite(`browser wa-sqlite driver`, createDriverHarness)
+})

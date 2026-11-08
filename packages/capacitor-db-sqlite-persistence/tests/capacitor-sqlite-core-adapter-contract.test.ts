@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe } from 'vitest'
 import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract'
 import { CapacitorSQLiteDriver } from '../src/capacitor-sqlite-driver'
 import { SQLiteCorePersistenceAdapter } from '../../db-sqlite-persistence-core/src'
@@ -30,7 +31,9 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   }
 }
 
-runSQLiteCoreAdapterContractSuite(
-  `SQLiteCorePersistenceAdapter (capacitor sqlite driver harness)`,
-  createHarness,
-)
+describe(`capacitor-sqlite-core-adapter-contract.test`, () => {
+  runSQLiteCoreAdapterContractSuite(
+    `SQLiteCorePersistenceAdapter (capacitor sqlite driver harness)`,
+    createHarness,
+  )
+})

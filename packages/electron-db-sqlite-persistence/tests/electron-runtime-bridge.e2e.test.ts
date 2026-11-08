@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe } from 'vitest'
 import { runRuntimeBridgeE2EContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-bridge-e2e-contract'
 import { runElectronRuntimeBridgeScenario } from './e2e/electron-process-client'
 import type {
@@ -84,10 +85,12 @@ const createHarness: RuntimeBridgeE2EContractHarnessFactory = () => {
   return harness
 }
 
-runRuntimeBridgeE2EContractSuite(
-  `electron runtime bridge e2e (real main/renderer IPC)`,
-  createHarness,
-  {
-    testTimeoutMs: 45_000,
-  },
-)
+describe(`electron-runtime-bridge.e2e.test`, () => {
+  runRuntimeBridgeE2EContractSuite(
+    `electron runtime bridge e2e (real main/renderer IPC)`,
+    createHarness,
+    {
+      testTimeoutMs: 45_000,
+    },
+  )
+})

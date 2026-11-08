@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe } from 'vitest'
 import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 import { TauriSQLiteDriver } from '../src/tauri-sql-driver'
 import { createTauriSQLiteTestDatabase } from './helpers/tauri-sql-test-db'
@@ -24,4 +25,6 @@ function createDriverHarness(): SQLiteDriverContractHarness {
   }
 }
 
-runSQLiteDriverContractSuite(`tauri sqlite driver`, createDriverHarness)
+describe(`tauri-sql-driver-contract.test`, () => {
+  runSQLiteDriverContractSuite(`tauri sqlite driver`, createDriverHarness)
+})

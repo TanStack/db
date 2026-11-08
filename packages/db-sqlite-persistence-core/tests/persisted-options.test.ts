@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { describe } from 'vitest'
 // Core entry; the shared oracle owns the grammar, model, and comparison.
 import { persistedCollectionOptions } from '../src/index.js'
 import {
@@ -6,5 +7,7 @@ import {
   registerPersistedUtilityAdmissionOracle,
 } from './persisted-options-type-oracle.js'
 
-registerPersistedOptionsTypeOracle(`core`)
-registerPersistedUtilityAdmissionOracle(`core`, persistedCollectionOptions)
+describe(`persisted-options.test`, () => {
+  registerPersistedOptionsTypeOracle(`core`)
+  registerPersistedUtilityAdmissionOracle(`core`, persistedCollectionOptions)
+})
