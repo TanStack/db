@@ -21,7 +21,12 @@ import { test as fcTest } from '@fast-check/vitest'
 import { describe, expect, onTestFinished } from 'vitest'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
 import { BetterSqlite3SQLiteDriver } from '../../node-db-sqlite-persistence/src/node-driver'
-import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   fixedReloadHistories,
   inProcessSeams,
@@ -205,12 +210,23 @@ async function expectLawful(history: ReloadHistory) {
   expect(violations).toEqual([])
 }
 
+declareOracle({
+  owns: [
+    `src/main.ts#exposeElectronSQLitePersistence`,
+    `src/renderer.ts#createElectronSQLitePersistence`,
+    `src/electron-coordinator.ts`,
+  ],
+  check: [expectLawful],
+  grammar: [reloadHistoryArb],
+})
+
 describe(`reload class oracle (Electron driver)`, () => {
   fcTest.each(
     fixedReloadHistories.map(([name, history]) => ({ name, history })),
   )(
     `keeps a reload free of avoidable work: $name`,
     async ({ history }) => {
+      oracleRoute(`fixed history`)
       await expectLawful(history)
     },
     30_000,
@@ -218,7 +234,10 @@ describe(`reload class oracle (Electron driver)`, () => {
 
   fcTest.prop([reloadHistoryArb], { seed: 2205, numRuns: oracleRuns(12) })(
     `keeps generated reloads lawful (fixed seed)`,
-    expectLawful,
+    (history) => {
+      oracleRoute(`fixed seed`)
+      return expectLawful(history)
+    },
     300_000,
   )
 
@@ -227,7 +246,10 @@ describe(`reload class oracle (Electron driver)`, () => {
     oraclePropertyOptions(12, `sqlite-reload.class.electron`),
   )(
     `keeps generated reloads lawful (random or replayed)`,
-    expectLawful,
+    (history) => {
+      oracleRoute(`random seed`)
+      return expectLawful(history)
+    },
     300_000,
   )
 })

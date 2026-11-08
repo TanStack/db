@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { persistedCollectionOptions } from '@tanstack/db-sqlite-persistence-core'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
+import { oracleRoute } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   IR,
@@ -398,6 +399,7 @@ async function compareIpcReadinessHistory(
 }
 
 declareOracle({
+  owns: [`src/renderer.ts#createElectronSQLitePersistence`, `src/electron-coordinator.ts`],
   check: [compareIpcReadinessHistory],
   model: [expectedCheckpoints],
 })
@@ -406,6 +408,7 @@ describe(`Electron renderer initial readiness follows the composed load`, () => 
   it.each(ipcReadinessHistories)(
     `matches the model: $renderer renderer, hydration $hydration, then $next`,
     async (history) => {
+      oracleRoute(`case`)
       await compareIpcReadinessHistory(history)
     },
     historyTimeout,
@@ -644,6 +647,7 @@ describe(`Electron follower renderer settles with its owner's rows`, () => {
   )(
     `matches the model: apply $apply, consumer $consumer`,
     async (history) => {
+      oracleRoute(`case`)
       await compareCoordinatedRendererHistory(history)
     },
     isElectronFullE2EEnabled() ? 180_000 : 20_000,

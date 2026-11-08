@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import electronPath from 'electron'
 import { expect, it, onTestFinished } from 'vitest'
+import { oracleRoute } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 
 const fixture = join(
@@ -140,9 +141,17 @@ function expectReloadClassLawsHold(result: Result): void {
   ).toEqual([])
 }
 
-declareOracle({ check: [expectReloadClassLawsHold] })
+declareOracle({
+  owns: [
+    `src/main.ts#exposeElectronSQLitePersistence`,
+    `src/renderer.ts#createElectronSQLitePersistence`,
+    `src/electron-coordinator.ts`,
+  ],
+  check: [expectReloadClassLawsHold],
+})
 
 it(`real Electron reload is free of avoidable work ahead of its reads`, async () => {
+  oracleRoute(`fixed history`)
   const out = mkdtempSync(join(tmpdir(), `reload-class-app-`))
   const databases = mkdtempSync(join(tmpdir(), `reload-class-db-`))
   onTestFinished(() => {
