@@ -176,7 +176,9 @@ function resolveViteAssetUrls({
   // depths from the code. In place, as when the package is excluded from
   // pre-bundling, both URLs share dist/. A moved module resolves them to
   // different directories and needs the lookup, which can fail when the app
-  // root cannot resolve the package name.
+  // root cannot resolve the package name. Under Vite 8 the optimizer keeps the
+  // assets beside the moved module, so both URLs share a directory and this
+  // returns early (maintainer decision on TanStack/db#2371, 2026-11-08).
   if (new URL(`../`, workerFileUrl).href === new URL(`./`, wasmFileUrl).href) {
     return undefined
   }

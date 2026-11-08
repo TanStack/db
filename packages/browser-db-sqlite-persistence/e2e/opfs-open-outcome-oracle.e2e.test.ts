@@ -24,7 +24,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createServer } from 'vite'
+import * as vite8 from 'vite'
+import * as vite7 from 'vite-7'
 import {
   describeHistory,
   expectOpenOutcome,
@@ -52,7 +53,20 @@ const chromiumReach: OpenDriverReach = {
   init: [`answers`],
   interrupt: [`none`, `deadline`, `abort`],
 }
-const histories = openHistories(chromiumReach)
+// Under Vite 8 the dev server never receives the asset lookup, so the lookup
+// states are declared for Vite 7 only. Authority: maintainer decision on
+// TanStack/db#2371 (2026-11-08).
+const vite8Reach: OpenDriverReach = {
+  ...chromiumReach,
+  lookup: [`not needed`],
+}
+const historiesByVite = {
+  7: openHistories(chromiumReach),
+  8: openHistories(vite8Reach),
+}
+// A held lookup that never reaches the dev server fails the history here, in
+// seconds, rather than waiting for the test timeout.
+const heldLookupWaitMs = 10_000
 // A delay no other page timer uses, so the init script can hold it back.
 const deadlineMs = 987_654
 const wasmLookup = `/@id/@tanstack/browser-db-sqlite-persistence/wa-sqlite.wasm`
@@ -89,11 +103,13 @@ const temporaryDirectory = realpathSync(
 )
 let browser: Browser
 let server: ViteDevServer
+const consumerDirectory = join(temporaryDirectory, `consumer`)
 
-beforeAll(async () => {
-  const consumerDirectory = join(temporaryDirectory, `consumer`)
-  createPackagedConsumer(consumerDirectory)
-  server = await createServer({
+// Starts a dev server for the consumer under one Vite major.
+async function startServer(
+  createDevServer: typeof vite8.createServer,
+): Promise<void> {
+  server = await createDevServer({
     configFile: false,
     root: consumerDirectory,
     base: `/nested/`,
@@ -148,13 +164,15 @@ beforeAll(async () => {
     ],
   })
   await server.listen()
+}
+
+beforeAll(async () => {
+  createPackagedConsumer(consumerDirectory)
   browser = await chromium.launch({ headless: true })
 }, 120_000)
 
 afterAll(async () => {
-  for (const release of premises.heldLookups.splice(0)) release()
   await browser.close()
-  await server.close()
   rmSync(temporaryDirectory, { recursive: true, force: true })
 })
 
@@ -194,6 +212,25 @@ let historyIndex = 0
 // The middleware sets this during a history, after the driver reset it.
 function readHeldLookupPath(): string | undefined {
   return premises.heldLookupPath
+}
+
+// Waits for the held lookup to reach the dev server, or fails the history.
+async function awaitHeldLookup(lookupHeld: Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      lookupHeld,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(new Error(`the asset lookup never reached the dev server`)),
+          heldLookupWaitMs,
+        )
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
@@ -255,7 +292,7 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
         return probe.settlement!
       })
     } else {
-      await lookupHeld
+      await awaitHeldLookup(lookupHeld)
       if (history.interrupt === `deadline`) {
         await page.evaluate(() => (globalThis as OracleProbe).elapseDeadline())
       } else {
@@ -332,23 +369,47 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
   }
 }
 
-describe(`OPFS open outcome oracle (Chromium driver)`, () => {
-  it(`reaches every outcome that this driver controls`, () => {
-    expect(reachedOutcomes(histories)).toEqual([
-      `lookup: AbortError`,
-      `lookup: PersistenceUnavailableError`,
-      `lookup: TimeoutError`,
-      `none: opened`,
-      `wasm: PersistenceUnavailableError`,
-      `worker start: PersistenceUnavailableError`,
-    ])
-  })
+// One block per consumer Vite major. Each runs its histories against a dev
+// server of that major.
+function describeOpenOutcomes(
+  major: 7 | 8,
+  createDevServer: typeof vite8.createServer,
+  reached: ReadonlyArray<string>,
+): void {
+  const histories = historiesByVite[major]
+  describe(`vite ${major} OPFS open outcome oracle (Chromium driver)`, () => {
+    beforeAll(async () => {
+      await startServer(createDevServer)
+    }, 120_000)
+    afterAll(async () => {
+      for (const release of premises.heldLookups.splice(0)) release()
+      await server.close()
+    })
 
-  it.each(histories.map((history) => [describeHistory(history), history]))(
-    `%s`,
-    async (_name, history) => {
-      expectOpenOutcome(history, await runOpenHistory(history))
-    },
-    120_000,
-  )
-})
+    it(`reaches every outcome that this driver controls`, () => {
+      expect(reachedOutcomes(histories)).toEqual([...reached])
+    })
+
+    it.each(histories.map((history) => [describeHistory(history), history]))(
+      `%s`,
+      async (_name, history) => {
+        expectOpenOutcome(history, await runOpenHistory(history))
+      },
+      120_000,
+    )
+  })
+}
+
+describeOpenOutcomes(7, vite7.createServer as typeof vite8.createServer, [
+  `lookup: AbortError`,
+  `lookup: PersistenceUnavailableError`,
+  `lookup: TimeoutError`,
+  `none: opened`,
+  `wasm: PersistenceUnavailableError`,
+  `worker start: PersistenceUnavailableError`,
+])
+describeOpenOutcomes(8, vite8.createServer, [
+  `none: opened`,
+  `wasm: PersistenceUnavailableError`,
+  `worker start: PersistenceUnavailableError`,
+])

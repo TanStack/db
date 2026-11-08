@@ -3218,7 +3218,11 @@ and a later open after an interruption. The
 reaches worker start, initialization, and the worker's WASM failure response.
 The [Chromium driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-open-outcome-oracle.e2e.test.ts)
 reaches the lookup, the real worker's WASM fetch, and worker start against a
-Vite dev server that pre-bundles the built package. It holds back only the
+Vite dev server that pre-bundles the built package, for Vite 7 and Vite 8
+consumers. Under Vite 8 the lookup never reaches the dev server, so the lookup
+states are declared for Vite 7 only and a held lookup that never arrives fails
+the history after 10 seconds instead of hanging (decision on TanStack/db#2371,
+2026-11-08). It holds back only the
 opener's deadline timer and fires it explicitly, interrupts only after the
 server holds the lookup, and reads the settlement and worker counts one task
 after each event, so no observation depends on elapsed time. Each driver checks that its
@@ -3235,7 +3239,11 @@ The
 [install-layout oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/install-layout-oracle.e2e.test.ts)
 models which installs open in Vite development and production: direct,
 hoisted, pnpm, transitive, npm-alias, and two-copy installs, three cache
-directories, and exclusion by import name or package name. It reads the
+directories, and exclusion by import name or package name. Every history runs
+for each consumer Vite major, 7 and 8. The Vite 8 rule has the maintainer
+decision on TanStack/db#2371 (2026-11-08) as its authority: under Vite 8
+development, the pre-bundled copy loads its own worker and WASM and opens with
+the imported copy in every layout. Under Vite 7 the rules below apply. It reads the
 importer's specifier and the Node resolution of the package name from each
 installed tree rather than from a table per layout. A pre-bundled copy
 opens when the app root resolves the package name and otherwise reports
