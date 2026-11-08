@@ -51,6 +51,7 @@ import {
 } from '../../db/tests/conformance/indexing-config-oracle'
 import { expectUnorderedRows } from '../../db/tests/conformance/result-laws'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { withOracleCleanup } from '../../db/tests/utils'
 import type { InitialQueryBuilder } from '@tanstack/db'
@@ -59,6 +60,10 @@ import type { IndexSettings } from '../../db/tests/conformance/indexing-config-o
 import type { Row } from '../../db/tests/conformance/contract'
 
 declareOracle({
+  owns: [
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    `src/DbProvider.tsx#DbProvider`,
+  ],
   grammar: [indexConfigurationPairs, indexOptionAbsencePairs],
   model: [expectedIndexing, expectedIndexingReuse],
   check: [
@@ -152,6 +157,7 @@ afterAll(() => {
 test.each(histories)(
   `each initial Suspense binding keeps its indexing settings: %j`,
   async ({ first, second, identity, cell, scope, kind, phase }) => {
+    oracleRoute(`case`)
     const reach = createOracleReach(
       `React Suspense indexing/${scope}/${phase}/${kind}/${identity}/${cell}`,
       [

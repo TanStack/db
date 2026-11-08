@@ -113,7 +113,11 @@ import {
   ssrSnapshotHistoryArbitrary,
 } from '../../db/tests/ssr-snapshot-admission-oracle'
 import { ssrStreamHydrationMismatches } from '../../db/tests/ssr-stream-view-oracle'
-import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { DbProvider } from '../src/DbProvider'
@@ -176,6 +180,12 @@ function applyModelWrite(model: Map<string, Row>, next: Row): void {
 }
 
 declareOracle({
+  owns: [
+    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   check: [checkStreamCut],
   model: [expectedRows, applyModelWrite],
 })
@@ -214,6 +224,7 @@ describe(`standalone descriptor query binding`, () => {
   )(
     `$reader after an abandoned render (startSync=$startSync, $syncMode, cleanup=$cleanupAt, pending=$cleanupPending)`,
     async (history) => {
+      oracleRoute(`case`)
       const { reader, startSync, syncMode, cleanupAt, cleanupPending } = history
       const expected = modelSubscriberStartCleanup(history)
       const pendingCleanup = createDeferred<void>()
@@ -352,6 +363,7 @@ describe(`standalone descriptor query binding`, () => {
   it.each(histories)(
     `binds one prebuilt Query to each receiving DbClient with $name`,
     async ({ name, initial, writes }) => {
+      oracleRoute(`case`)
       const descriptor = collectionOptions(
         `standalone-descriptor-rows-${name}`,
         (client) =>
@@ -504,6 +516,7 @@ describe(`descriptor error handoff at React commit`, () => {
     for (const observation of [`error-surface`, `ownership`] as const) {
       for (const campaign of [`fixed`, `random`] as const) {
         it(`${hook} ${observation} after descriptor failure (${campaign})`, async () => {
+          oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
           const reach = createOracleReach(`react-error-handoff-${hook}`, [
             `fail-before-release`,
             `fail-during-release`,
@@ -931,11 +944,13 @@ describe(`SSR snapshot admission`, () => {
     }
     for (const history of ssrSnapshotExamples) {
       it(`replays ${hook} SSR ${history.preparation}/${history.sourceState}/${history.rows.length}`, async () => {
+        oracleRoute(`fixed history`)
         await checkHistory(history, makeReach())
       })
     }
     for (const campaign of [`fixed`, `random`] as const) {
       it(`${hook} admits reproducible SSR snapshots (${campaign})`, async () => {
+        oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
         const reach = makeReach()
         await fc.assert(
           fc.asyncProperty(ssrSnapshotHistoryArbitrary, (history) =>
@@ -1316,8 +1331,9 @@ const createStreamReach = () =>
 describe(`stream render snapshot cut`, () => {
   for (const ordinaryFirst of [false, true])
     for (const splitHydration of [false, true])
-      it(`retains an ordinary loading view when its stream later fails, ordinaryFirst=${ordinaryFirst}, split=${splitHydration}`, () =>
-        checkStreamCut(
+      it(`retains an ordinary loading view when its stream later fails, ordinaryFirst=${ordinaryFirst}, split=${splitHydration}`, () => {
+        oracleRoute(`case`)
+        return checkStreamCut(
           {
             count: 0,
             writes: 0,
@@ -1328,12 +1344,14 @@ describe(`stream render snapshot cut`, () => {
             splitHydration,
           },
           createStreamReach(),
-        ))
+        )
+      })
   for (const count of [0, 1])
     for (const ordinaryFirst of [false, true])
       for (const splitHydration of [false, true])
-        it(`hydrates each held-source view with count=${count}, ordinaryFirst=${ordinaryFirst}, split=${splitHydration}`, () =>
-          checkStreamCut(
+        it(`hydrates each held-source view with count=${count}, ordinaryFirst=${ordinaryFirst}, split=${splitHydration}`, () => {
+          oracleRoute(`case`)
+          return checkStreamCut(
             {
               count,
               writes: 0,
@@ -1344,19 +1362,25 @@ describe(`stream render snapshot cut`, () => {
               splitHydration,
             },
             createStreamReach(),
-          ))
-  it(`keeps an ordinary reader from blocking a shared Suspense preload`, () =>
-    checkStreamCut(
+          )
+        })
+  it(`keeps an ordinary reader from blocking a shared Suspense preload`, () => {
+    oracleRoute(`fixed history`)
+    return checkStreamCut(
       { count: 1, writes: 0, ordinaryFirst: true, browserWrite: true },
       createStreamReach(),
-    ))
-  it(`hydrates an ordinary reader rendered after its Suspense sibling`, () =>
-    checkStreamCut(
+    )
+  })
+  it(`hydrates an ordinary reader rendered after its Suspense sibling`, () => {
+    oracleRoute(`fixed history`)
+    return checkStreamCut(
       { count: 1, writes: 0, ordinaryLast: true, browserWrite: true },
       createStreamReach(),
-    ))
-  it(`retains the Suspense view after its ordinary sibling commits`, () =>
-    checkStreamCut(
+    )
+  })
+  it(`retains the Suspense view after its ordinary sibling commits`, () => {
+    oracleRoute(`fixed history`)
+    return checkStreamCut(
       {
         count: 1,
         writes: 0,
@@ -1365,16 +1389,20 @@ describe(`stream render snapshot cut`, () => {
         splitHydration: true,
       },
       createStreamReach(),
-    ))
+    )
+  })
   for (const history of [
     { count: 0, writes: 1 },
     { count: 1, writes: 1 },
     { count: 1, writes: 0 },
   ])
-    it(`replays count=${history.count} later-writes=${history.writes}`, () =>
-      checkStreamCut(history, createStreamReach()))
+    it(`replays count=${history.count} later-writes=${history.writes}`, () => {
+      oracleRoute(`fixed history`)
+      return checkStreamCut(history, createStreamReach())
+    })
   for (const campaign of [`fixed`, `random`] as const)
     it(`transports the rendered view (${campaign})`, async () => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createStreamReach()
       try {
         await fc.assert(

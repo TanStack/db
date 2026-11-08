@@ -27,11 +27,17 @@ import {
   conflictingCacheOptions,
 } from '../../db/tests/live-query-cache-options-oracle'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { withOracleCleanup } from '../../db/tests/utils'
 import type { CacheRow } from '../../db/tests/live-query-cache-options-oracle'
 
 declareOracle({
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   check: [checkCacheOptionAdmission, checkCacheOptionRows],
   model: [conflictingCacheOptions],
   grammar: [cacheOptionHistories],
@@ -68,6 +74,7 @@ test.each(
     paths.map((path) => ({ history, path })),
   ),
 )(`React cache admission %j`, async ({ history, path }) => {
+  oracleRoute(`case`)
   const reach = reaches[path]!
   reach.beginHistory()
   const client = new DbClient()

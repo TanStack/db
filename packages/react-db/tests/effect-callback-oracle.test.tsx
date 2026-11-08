@@ -15,6 +15,8 @@ import {
   runCallbackHistory,
 } from '../../db/tests/query/effect-callback-oracle'
 import { checkWithCleanup } from '../../db/tests/query/virtual-row-fields-support'
+import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { flushPromises, mockSyncCollectionOptions } from '../../db/tests/utils'
 import type {
   CallbackOutput,
@@ -35,6 +37,7 @@ afterAll(() => {
 test.each(callbackHistories)(
   `receives current Effect values across callback profiles: %j`,
   async (history) => {
+    oracleRoute(`case`)
     ran = true
     await runCallbackHistory(
       history,
@@ -100,3 +103,8 @@ test.each(callbackHistories)(
     )
   },
 )
+
+declareOracle({
+  owns: [`src/useLiveQueryEffect.ts#useLiveQueryEffect`],
+  grammar: [callbackHistories],
+})

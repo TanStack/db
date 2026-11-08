@@ -28,6 +28,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -288,16 +289,27 @@ async function checkRuntimeHistory(
 
 // checkRuntimeHistory compares the server view, the browser's first hydration
 // view and its committed view with the shared runtime model's expected views.
-declareOracle({ check: [checkRuntimeHistory] })
+declareOracle({
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+    `src/useLiveQuery.ts#useLiveQuery`,
+  ],
+  check: [checkRuntimeHistory],
+})
 
 describe(`runtime errors across SSR hydration`, () => {
   for (const hook of [`ordinary`, `infinite`] as const) {
     for (const history of ssrRuntimeErrorExamples)
       it.skipIf(oracleReplayRequested())(
         `${hook} runtime ${history.serverOutcome}/${history.browserOutcome} preload=${history.browserPreload} cause=${history.definedError}`,
-        () => checkRuntimeHistory(hook, history, runtimeReach(hook)),
+        () => {
+          oracleRoute(`case`)
+          return checkRuntimeHistory(hook, history, runtimeReach(hook))
+        },
       )
     const runCampaign = async (campaign: `fixed` | `random`) => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = runtimeReach(hook)
       try {
         await fc.assert(

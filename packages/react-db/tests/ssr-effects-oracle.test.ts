@@ -34,6 +34,7 @@ import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import {
@@ -166,7 +167,15 @@ function checkRender(
   })
 }
 
-declareOracle({ check: [checkRender], grammar: [histories] })
+declareOracle({
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
+  check: [checkRender],
+  grammar: [histories],
+})
 for (const runtime of runtimes) {
   for (const path of paths) {
     const project = (history: SsrSnapshotHistory): SsrSnapshotHistory =>
@@ -188,6 +197,7 @@ for (const runtime of runtimes) {
       register(
         `${runtime.name} ${path} renders without client layout diagnostics (${campaign})`,
         async () => {
+          oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
           const states = path.startsWith(`ordinary`)
             ? [
                 `rendered`,
@@ -269,6 +279,7 @@ for (const runtime of runtimes) {
 // without presenting repeated constant inputs as a generated history campaign.
 for (const runtime of runtimes) {
   oracleReplayTest(it)(`${runtime.name} disabled SSR diagnostic replay`, () => {
+    oracleRoute(`fixed history`)
     const history: SsrSnapshotHistory = {
       preparation: `none`,
       sourceState: `idle`,
@@ -293,6 +304,7 @@ for (const runtime of runtimes) {
 oracleReplayTest(it)(
   `distinguishes a client-layout diagnostic from unrelated messages`,
   () => {
+    oracleRoute(`calibration`)
     const history: SsrSnapshotHistory = {
       preparation: `none`,
       sourceState: `idle`,
