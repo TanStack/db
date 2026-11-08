@@ -1,6 +1,6 @@
 import { createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
-import { expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import { OfflineExecutor } from '../src/OfflineExecutor'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
@@ -13,7 +13,11 @@ import {
   turn,
 } from './harness'
 import { storedTransaction } from './leadership-replay-support'
-import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
+import {
+  atOracleCheckpoint,
+  cleanupOfflineOracle,
+  useControlledClock,
+} from './oracle-lifecycle'
 import { oracleCampaignOptions, readOfflineOracleConfig } from './oracle-config'
 import type { OfflineTransaction } from '../src/types'
 
@@ -57,6 +61,10 @@ import type { OfflineTransaction } from '../src/types'
  * unchanged. Gates control causal events. Named checkpoints compare provider
  * calls and idempotency keys, outbox contents, scheduler counts, leadership,
  * retry records, caller promise settlement, optimistic rows, and cleanup.
+ * Each test runs on a controlled clock (timers and `Date` virtual, macrotask
+ * turns real; `useControlledClock`), so a checkpoint that a retry backoff or
+ * a stuck replay would end fails at its virtual bound at once, and timers
+ * that never go quiet fail under law `bounded clock`.
  *
  * Reach and controls: fixed histories force each lifecycle boundary and both
  * mixed-deletion positions. Fixed and random campaigns cover legal adjacent
@@ -73,6 +81,14 @@ import type { OfflineTransaction } from '../src/types'
  * storage engine. Exactly-once network execution across independent leaders is
  * not promised. Provider side effects after an issued call remain provider-owned.
  */
+let releaseClock: (() => void) | undefined
+beforeEach(() => {
+  releaseClock = useControlledClock()
+})
+afterEach(() => {
+  releaseClock?.()
+})
+
 type ReplayLedgerEvent =
   | { type: `stored`; id: string }
   | { type: `read-captured`; ids: Array<string> }
@@ -328,7 +344,6 @@ async function checkSerialWork({
       fc.integer({ min: 2, max: 5 }),
       fc.string({ maxLength: 20 }),
       async (count, payload) => {
-        vi.useFakeTimers()
         const executions = vi.spyOn(TransactionExecutor.prototype, `executeAll`)
         const entered = gate()
         const provider = gate()
@@ -481,7 +496,6 @@ async function checkSerialWork({
           provider.resolve()
           acknowledgment.resolve()
           executions.mockRestore()
-          vi.useRealTimers()
           await cleanupOfflineOracle(
             [
               () => env.executor.dispose(),
