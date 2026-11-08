@@ -37,7 +37,7 @@ import { basename, dirname, join, relative as relativePath } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { applyAuthored, loadAuthored } from './authored.mjs'
 import { assignKeys, renderReport } from './report.mjs'
-import { analyze } from './analysis.mjs'
+import { analyze, isRunnerCopy } from './analysis.mjs'
 import {
   baselineOf,
   judgeAuthored,
@@ -340,9 +340,7 @@ export default mergeConfig(base, {
     context.clearSpecificationsCache?.()
     const map = new Map()
     for (const spec of await context.globTestSpecifications()) {
-      // A runner copy (runBatch), this process's or one a check that died
-      // left behind, is never a test file.
-      if (basename(spec.moduleId).startsWith(`.oracle-gaps-`)) continue
+      if (isRunnerCopy(spec.moduleId)) continue
       map.set(spec.moduleId, [...(map.get(spec.moduleId) ?? []), spec])
     }
     contextSpecs.set(context, map)

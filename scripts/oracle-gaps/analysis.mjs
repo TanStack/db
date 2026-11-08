@@ -5,9 +5,16 @@
 // function each mutant belongs to. It reads only files, so the CLI's own
 // oracle checks it in-process.
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { ownership, readOwns } from './owners.mjs'
 import { instrument } from './schemata.mjs'
+
+/**
+ * Whether a path is a runner copy of a test file (check.mjs, runBatch), this
+ * process's or one that a check which died left behind. Discovery skips
+ * copies: a copy is never a test file.
+ */
+export const isRunnerCopy = (path) => basename(path).startsWith(`.oracle-gaps-`)
 
 // One compiler host per TypeScript copy. The declarations under
 // node_modules, such as the standard library's, are parsed once and kept,

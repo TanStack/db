@@ -49,7 +49,7 @@ import {
   pass,
   violation,
 } from '../../packages/db/tests/oracle-property.ts'
-import { analyze } from './analysis.mjs'
+import { analyze, isRunnerCopy } from './analysis.mjs'
 import {
   LIB,
   SOURCE,
@@ -72,14 +72,16 @@ const ts = createRequire(join(here, `../../package.json`))(`typescript`)
 // ## Production driver
 //
 // The driver writes the fixture as the end-to-end driver does, lists the
-// test files the fixture's Vitest config includes (`tests/**/*.test.ts`),
-// and calls `analyze` and `assignKeys`. It records a refusal's message, or
+// test files the fixture's Vitest config includes (`tests/**/*.test.ts`)
+// less the runner copies, as the CLI's discovery does (`isRunnerCopy`; the
+// end-to-end oracle checks that discovery), and calls `analyze` and
+// `assignKeys`. It records a refusal's message, or
 // each mutant's site, probe mark, ownership, and key. For a stability
 // history it rewrites the source and records the same again.
 function analyzeFixture(dir, files) {
   writeFixture(dir, files)
   const tests = readdirSync(join(dir, `tests`))
-    .filter((name) => name.endsWith(`.test.ts`))
+    .filter((name) => name.endsWith(`.test.ts`) && !isRunnerCopy(name))
     .map((name) => join(dir, `tests`, name))
   try {
     const { mutants, owned } = analyze(ts, dir, [SOURCE, LIB], tests)
