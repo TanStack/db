@@ -120,11 +120,6 @@ const ownerGroups: ReadonlyArray<
   [`../scripts/run-budget-oracle.property.test.js`, `scripts`, `run-budget`],
   [`../scripts/lint-scope-oracle.property.test.js`, `scripts`, `lint-scope`],
   [
-    `db/tests/declared-reach-oracle.property.test.ts`,
-    `oracle`,
-    `declared-reach`,
-  ],
-  [
     `../scripts/release-history-oracle.property.test.js`,
     `scripts`,
     `release-version release-seed-failure`,
@@ -593,17 +588,6 @@ const ownerGroups: ReadonlyArray<
     `ordered-window`,
   ],
   [`db/tests/reverse-index-oracle.property.test.ts`, `reverse-index`, `reads`],
-  [`db/tests/oracle-property-self-oracle.test.ts`, `self-oracle`, `framework`],
-  [
-    `db/tests/oracle-property-scheduler-oracle.property.test.ts`,
-    `self-oracle`,
-    `scheduler`,
-  ],
-  [
-    `db/tests/oracle-property-self-oracle-fixture.ts`,
-    `self-oracle`,
-    `synthetic-0 synthetic-1 synthetic-2 synthetic-3`,
-  ],
   [
     `db/tests/optimistic-history-oracle.property.test.ts`,
     `optimistic-history`,
