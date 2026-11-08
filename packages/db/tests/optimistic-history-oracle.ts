@@ -2080,12 +2080,18 @@ function replayOptimisticHistory(history: OptimisticHistory) {
             ? schemaInsert
               ? { id: intent.key, a: intent.row.a, b: intent.row.b }
               : plain(intent.row)
-            : Object.fromEntries(
+            : // An authored field is a change unless it is the same value;
+              // -0 and 0 are distinct row values (maintainer decision,
+              // 2026-10-29).
+              Object.fromEntries(
                 Object.entries(step.fields).filter(
                   ([key, value]) =>
-                    before.find((row) => row.id === intent.key)?.[
-                      key as keyof Fields
-                    ] !== value,
+                    !Object.is(
+                      before.find((row) => row.id === intent.key)?.[
+                        key as keyof Fields
+                      ],
+                      value,
+                    ),
                 ),
               ),
       )
@@ -2176,8 +2182,9 @@ function replayOptimisticHistory(history: OptimisticHistory) {
       actions.push(action)
       owe(checkpointOf(action), {
         settledRows: cuts[0],
-        // A settlement that changes no visible row publishes nothing.
-        quiet: JSON.stringify(before) === JSON.stringify(visible()),
+        // A settlement that changes no visible row publishes nothing. Strict
+        // equality, so a row whose zero changed sign counts as changed.
+        quiet: isDeepStrictEqual(before, visible()),
       })
       continue
     }
