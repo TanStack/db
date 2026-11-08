@@ -272,7 +272,18 @@ async function runHistory(history: History): Promise<void> {
   ])
 }
 
-declareOracle({ check: [runHistory], model: [expectedPairs] })
+declareOracle({
+  owns: [
+    `src/collection/index.ts#createCollection`,
+    `src/query/builder/include-functions.ts#include`,
+    `src/query/builder/include-functions.ts#materialize`,
+    `src/query/builder/include-functions.ts#toArray`,
+    `src/query/compiler/joins.ts#processJoins`,
+    `src/query/live-query-collection.ts#createLiveQueryCollection`,
+  ],
+  check: [runHistory],
+  model: [expectedPairs],
+})
 
 describe(`joined result key oracle`, () => {
   // The fixed histories and the fixed-seed campaign stand aside during any path
