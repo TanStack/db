@@ -148,8 +148,32 @@ type ControlledStream = {
 
 const streams: Array<ControlledStream> = []
 
+// The module the Electric collection imports, found through the client's
+// `import` export from the electric package, which is where the collection
+// resolves it. Vite's module id is the file this resolves to.
+const electricClientModule = await vi.hoisted(async () => {
+  const { readFileSync } = await import(`node:fs`)
+  const { dirname, join } = await import(`node:path`)
+  const { fileURLToPath } = await import(`node:url`)
+  const clientDirectory = join(
+    dirname(
+      fileURLToPath(
+        new URL(
+          `../../electric-db-collection/node_modules/@electric-sql/client/package.json`,
+          import.meta.url,
+        ),
+      ),
+    ),
+  )
+  const manifest = JSON.parse(
+    readFileSync(join(clientDirectory, `package.json`), `utf8`),
+  )
+  const entry = manifest.exports[`.`].import.default
+  return join(clientDirectory, entry)
+})
+
 vi.mock(
-  `../../electric-db-collection/node_modules/@electric-sql/client/dist/index.mjs`,
+  electricClientModule,
   async (importOriginal) => {
     const actual = await importOriginal<Record<string, unknown>>()
     return {
