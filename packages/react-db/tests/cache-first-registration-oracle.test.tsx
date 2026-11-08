@@ -38,6 +38,7 @@ import {
 } from '../../db/tests/live-query-cache-options-oracle'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { withOracleCleanup } from '../../db/tests/utils'
 import type { CacheRow } from '../../db/tests/live-query-cache-options-oracle'
 
@@ -60,6 +61,7 @@ test.each(
 )(
   `first React registration without transported result: %j`,
   async ({ history, firstReader, secondReader, held }) => {
+    oracleRoute(`case`)
     const reach = createOracleReach(
       `React first registration ${firstReader}/${secondReader}`,
       [
@@ -339,6 +341,11 @@ test.each(
 )
 
 declareOracle({
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   check: [
     checkCacheOptionAdmission,
     checkCacheOptionPromise,

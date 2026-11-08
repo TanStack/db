@@ -10,6 +10,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 import { declareOracle } from '../../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../../db/tests/oracle-config.js'
 import { waitFor } from '../utils/helpers'
 import { expectNotificationHistory } from '../utils/notification-laws-oracle'
 import type { E2ETestConfig, Post, User } from '../types'
@@ -375,6 +376,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
     function runTestsForSyncMode(syncMode: SyncMode) {
       describe(`${syncMode} mode`, () => {
         it(`Initial snapshot contains only posts from active users`, async () => {
+          oracleRoute(`fixed history`)
           await withMoveHistory(async (history) => {
             if (!config.mutations) {
               throw new Error(`Mutations not configured`)
@@ -491,6 +493,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
         })
 
         it(`Move-in: row becomes eligible for subquery`, async () => {
+          oracleRoute(`fixed history`)
           await withMoveHistory(async (history) => {
             const collection = history.own(
               createPostsByActiveUsersCollection(syncMode),
@@ -548,6 +551,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
         })
 
         it(`Move-out: row becomes ineligible for subquery`, async () => {
+          oracleRoute(`fixed history`)
           await withMoveHistory(async (history) => {
             const collection = history.own(
               createPostsByActiveUsersCollection(syncMode),
@@ -604,6 +608,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
         })
 
         it(`Move-out → move-in cycle`, async () => {
+          oracleRoute(`fixed history`)
           await withMoveHistory(async (history) => {
             const collection = history.own(
               createPostsByActiveUsersCollection(syncMode),
@@ -664,6 +669,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
         })
 
         it(`Title update while row stays within subquery`, async () => {
+          oracleRoute(`fixed history`)
           await withMoveHistory(async (history) => {
             const collection = history.own(
               createPostsByActiveUsersCollection(syncMode),
@@ -724,6 +730,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
         })
 
         it(`Database DELETE leads to row being removed from collection`, async () => {
+          oracleRoute(`fixed history`)
           await withMoveHistory(async (history) => {
             const collection = history.own(
               createPostsByActiveUsersCollection(syncMode),
@@ -781,6 +788,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
         })
 
         it(`Snapshot after move-out should not re-include removed rows`, async () => {
+          oracleRoute(`fixed history`)
           await withMoveHistory(async (history) => {
             if (!config.mutations) {
               throw new Error(`Mutations not configured`)
@@ -852,6 +860,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
         })
 
         it(`Multi-row transaction: some rows move in, some move out`, async () => {
+          oracleRoute(`fixed history`)
           await withMoveHistory(async (history) => {
             const collection = history.own(
               createPostsByActiveUsersCollection(syncMode),
@@ -1008,4 +1017,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
   })
 }
 
+// Owns no production entry in this package: the suite judges the collection
+// adapter that the consuming package runs it against, and that package owns
+// those entries. This package has no production code of its own to own.
 declareOracle({ check: [assertOwnedPosts] })

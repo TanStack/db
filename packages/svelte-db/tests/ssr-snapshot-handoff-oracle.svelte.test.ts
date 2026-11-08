@@ -14,9 +14,11 @@ import {
 import {
   oraclePropertyOptions,
   oracleReplayRequested,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { peopleQuery } from './ssr-test-utils'
 import SsrDbApp from './SsrDbApp.svelte'
 import type { createServer } from 'vite'
@@ -199,10 +201,13 @@ async function check(
 
 describe(`Svelte real SSR handoff`, () => {
   for (const history of ssrSnapshotExamples)
-    it(`replays ${history.preparation}/${history.sourceState}/${history.rows.length} server-write=${!!history.serverWrite} browser-write=${!!history.browserWrite}`, () =>
-      check(history, makeReach()))
+    it(`replays ${history.preparation}/${history.sourceState}/${history.rows.length} server-write=${!!history.serverWrite} browser-write=${!!history.browserWrite}`, () => {
+      oracleRoute(`case`)
+      return check(history, makeReach())
+    })
   for (const campaign of [`fixed`, `random`] as const)
     it(`matches the actual browser initialization (${campaign})`, async () => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = makeReach()
       await fc.assert(
         fc.asyncProperty(ssrSnapshotHistoryArbitrary, (history) =>
@@ -463,10 +468,14 @@ describe(`Svelte SSR receiving readers`, () => {
   for (const history of ssrReceivingExamples)
     it.skipIf(oracleReplayRequested())(
       `replays ${history.initializationKind} ${history.mountLocation ?? `root`} after ${history.previousReaders} readers with ${history.snapshot.sourceState}/${history.snapshot.rows.length} server rows nesting=${history.providerNesting ?? `none`}`,
-      () => checkReceivingHistory(history, makeReceivingReach()),
+      () => {
+        oracleRoute(`case`)
+        return checkReceivingHistory(history, makeReceivingReach())
+      },
     )
 
   const campaign = async (fixed: boolean) => {
+    oracleRoute(fixed ? `fixed seed` : `random seed`)
     const reach = makeReceivingReach()
     try {
       await fc.assert(
@@ -495,4 +504,11 @@ describe(`Svelte SSR receiving readers`, () => {
     () => campaign(false),
     30_000,
   )
+})
+
+declareOracle({
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
+  model: [expectedSsrSnapshot, expectedSsrReceivingViews],
+  check: [check, checkReceivingHistory],
+  grammar: [ssrSnapshotHistoryArbitrary, ssrReceivingHistoryArbitrary],
 })

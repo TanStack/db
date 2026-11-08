@@ -32,6 +32,7 @@ import {
   declareOracle,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import type { InitialQueryBuilder } from '@tanstack/db'
@@ -243,6 +244,7 @@ describe(`window changes at React commit`, () => {
               ? oracleReplayTest(it)
               : oracleReplayTest(it, property)
           test(`${remote ? `on-demand` : `eager`}/${keyed ? `keyed` : `derived`}/${move}/${campaign}`, async () => {
+            oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
             const reach = createOracleReach(
               `${property}/${remote}/${keyed}/${move}/${campaign}`,
               states,
@@ -290,6 +292,7 @@ describe(`window changes at React commit`, () => {
     }
 })
 declareOracle({
+  owns: [`src/useLiveQuery.ts#useLiveQuery`],
   grammar: [renderHistoryArbitrary],
   check: [checkRenderHistory],
 })

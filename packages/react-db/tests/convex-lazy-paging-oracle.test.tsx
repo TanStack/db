@@ -12,10 +12,13 @@ import {
   expectedLazyRows,
 } from '../../convex-db-collection/tests/lazy-paging-model-oracle'
 import { withTestCleanup } from '../../convex-db-collection/tests/helpers'
+import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 
 it.each([1, 2, 3, 4])(
   `receives exact infinite-query pages with provider page size %s`,
   async (pageSize) => {
+    oracleRoute(`case`)
     const rows = Array.from({ length: 7 }, (_, i) => ({
       id: `r${i}`,
       rank: Math.floor(i / 2),
@@ -115,3 +118,8 @@ it.each([1, 2, 3, 4])(
     )
   },
 )
+
+declareOracle({
+  owns: [`src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`],
+  model: [expectedLazyRows],
+})

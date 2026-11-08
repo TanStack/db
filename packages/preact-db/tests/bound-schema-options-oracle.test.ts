@@ -8,6 +8,7 @@ import { act } from 'preact/test-utils'
 import { afterAll, test } from 'vitest'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   boundSchemaHistories,
@@ -32,6 +33,7 @@ afterAll(() => {
 test.each(boundSchemaHistories)(
   `Preact binds mutation schemas %j`,
   async (history) => {
+    oracleRoute(`case`)
     ran = true
     const host: BoundSchemaNativeHost = {
       mount: (input) => {
@@ -57,6 +59,7 @@ test.each(boundSchemaHistories)(
   },
 )
 declareOracle({
+  owns: [`src/useLiveQuery.ts#useLiveQuery`],
   grammar: [boundSchemaHistories],
   check: [checkBoundSchemaMutation],
 })

@@ -31,6 +31,7 @@ import {
   localOptionPairs,
 } from '../../db/tests/live-query-cache-options-oracle'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { withOracleCleanup } from '../../db/tests/utils'
 import type { Collection, Context, InitialQueryBuilder } from '@tanstack/db'
@@ -38,6 +39,10 @@ import type { UseLiveQueryConfig } from '../src/useLiveQuery'
 import type { ReactNode } from 'react'
 
 declareOracle({
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   grammar: [localOptionPairs],
   model: [compatibleLocalOptions],
   check: [checkLocalOptionSharing],
@@ -92,6 +97,7 @@ afterAll(() => {
 test.each(histories)(
   `independent Suspense output options: %j`,
   async (history) => {
+    oracleRoute(`case`)
     const reach = createOracleReach(
       `Suspense local options/${history.scope}/${history.phase}/${history.cell}`,
       [

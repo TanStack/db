@@ -39,6 +39,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection, debounceStrategy } from '@tanstack/db'
 import { usePacedMutations } from '../src/usePacedMutations'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import {
   mockSyncCollectionOptions,
   resetCleanupQueue,
@@ -298,9 +299,14 @@ describe.each([false, true])(
   `paced callback ownership with StrictMode=%s`,
   (strictMode) => {
     it.each(histories)(`models $name`, async (history) => {
+      oracleRoute(`case`)
       await driveHistory(history, strictMode)
     })
   },
 )
 
-declareOracle({ check: [driveHistory], model: [expectedOutcome] })
+declareOracle({
+  owns: [`src/usePacedMutations.ts#usePacedMutations`],
+  check: [driveHistory],
+  model: [expectedOutcome],
+})

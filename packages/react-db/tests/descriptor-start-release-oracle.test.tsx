@@ -18,6 +18,7 @@ import {
 } from '../../db/tests/descriptor-start-release-oracle'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { descriptorStartFixture } from '../../db/tests/descriptor-start-release-support'
 import { withOracleCleanup } from '../../db/tests/utils'
 import type { DescriptorStartHistory } from '../../db/tests/descriptor-start-release-oracle'
@@ -84,8 +85,12 @@ it.each(
   descriptorStartHistories.flatMap((history) =>
     hooks.map((hook) => ({ history, hook })),
   ),
-)(`releases independent descriptor starts in React: %j`, ({ history, hook }) =>
-  checkHistory(history, hook),
+)(
+  `releases independent descriptor starts in React: %j`,
+  ({ history, hook }) => {
+    oracleRoute(`case`)
+    return checkHistory(history, hook)
+  },
 )
 
 it.each([
@@ -94,6 +99,7 @@ it.each([
   `leaked-resource`,
   `wrong-row`,
 ] as const)(`rejects wrong multi-source release observation: %s`, (fault) => {
+  oracleRoute(`calibration`)
   const history = { acquired: 3, failedStarts: 3, eagerStarts: 7 }
   const actual = expectedDescriptorStart(history, `cleaned`)
   checkDescriptorStart(actual, history, `cleaned`)
@@ -105,6 +111,11 @@ it.each([
 })
 
 declareOracle({
+  owns: [
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   check: [checkDescriptorStart],
   model: [expectedDescriptorStart],
   grammar: [descriptorStartHistories],

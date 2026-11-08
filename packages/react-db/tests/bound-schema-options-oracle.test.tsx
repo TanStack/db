@@ -10,6 +10,7 @@ import { afterAll, expect, test } from 'vitest'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   boundSchemaHistories,
@@ -46,6 +47,7 @@ for (const hook of [`live`, `suspense`] as const) {
   test.each(boundSchemaHistories)(
     `React ${hook} binds mutation schemas %j`,
     async (history) => {
+      oracleRoute(`case`)
       ran = true
       const host: BoundSchemaNativeHost = {
         mount: (input) => {
@@ -101,6 +103,7 @@ function observationFromModel(
 test.each(boundSchemaHistories)(
   `schema judgment rejects wrong binding and mutation observations %j`,
   (history) => {
+    oracleRoute(`calibration`)
     const base = [
       { id: `one`, label: `  untouched first  `, rank: 1 },
       { id: `peer`, label: `  untouched peer  `, rank: 2 },
@@ -253,6 +256,10 @@ test.each(boundSchemaHistories)(
   },
 )
 declareOracle({
+  owns: [
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   grammar: [boundSchemaHistories],
   check: [
     checkBoundSchemaMutation,

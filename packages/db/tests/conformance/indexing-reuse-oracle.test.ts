@@ -23,6 +23,8 @@ const histories = indexConfigurationPairs(
     indexTypes: { basic: BasicIndex, btree: BTreeIndex },
   }),
 )
+// Owns no production entry: this file calibrates the shared identity checker
+// with planted wrong relations, so it judges no production code.
 declareOracle({
   owns: ['src/indexes/basic-index.ts', 'src/indexes/btree-index.ts'],
   grammar: [indexConfigurationPairs],
