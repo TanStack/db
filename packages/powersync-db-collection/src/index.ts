@@ -1,5 +1,4 @@
 export * from './definitions'
-export * from './direct-triggers'
 export * from './powersync'
 export * from './PowerSyncTransactor'
 export * from './sqlite-compiler'

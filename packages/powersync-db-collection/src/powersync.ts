@@ -247,6 +247,12 @@ export function powerSyncCollectionOptions<
   )
 }
 
+/**
+ * Builds the collection config shared by every `powerSyncCollectionOptions`
+ * call: wires the eager/on-demand sync implementation (diff-trigger based),
+ * the optimistic-mutation transactor, key derivation, and utils metadata,
+ * branching per storage kind (managed views vs managed tables).
+ */
 function createPowerSyncCollectionConfig<
   TTable extends Table,
   TSchema extends StandardSchemaV1<any> = never,
@@ -916,9 +922,12 @@ function createPowerSyncCollectionConfig<
                   active.length === 1
                     ? active[0]
                     : or(active[0], active[1], ...active.slice(2))
-                // Managed views store rows in a JSON `data` column, managed
-                // tables expose real columns, so trigger `when` clauses
-                // compile against NEW./OLD. row aliases instead.
+                /**
+                 * Chooses compile options per storage kind: managed views
+                 * keep rows in a JSON `data` column, managed tables expose
+                 * real columns, so trigger `when` clauses compile against
+                 * NEW./OLD. row aliases instead.
+                 */
                 const rowCompileOptions = (rowPrefix: 'NEW' | 'OLD') =>
                   isManagedTable
                     ? { rowPrefix }
