@@ -681,8 +681,12 @@ function createPowerSyncCollectionConfig<
         }
       }
 
-      // Eager mode.
-      // Registers a diff trigger for the entire table.
+      /**
+       * Eager sync mode: registers a diff trigger for the entire table and
+       * performs the initial full-table load through its `beforeCreate`
+       * hook (SDK trigger manager for managed views, adapter-built
+       * triggers for managed tables).
+       */
       function runEagerSync() {
         let onUnload: CleanupFn | void | null = null
         let onUnloadStarted = false
@@ -828,8 +832,11 @@ function createPowerSyncCollectionConfig<
         }
       }
 
-      // On-demand mode.
-      // Registers a diff trigger for the active WHERE expressions.
+      /**
+       * On-demand sync mode: registers a diff trigger whose `when` clauses
+       * cover only the active live-query WHERE expressions, loading (and
+       * evicting) rows as the collection's data boundary changes.
+       */
       function runOnDemandSync() {
         type DemandRecord = {
           options: LoadSubsetOptions

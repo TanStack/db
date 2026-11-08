@@ -78,6 +78,10 @@ const describePowerSync = TEST_DATABASE_IMPLEMENTATION
   : describe.skip
 
 describePowerSync(`Managed Tables (direct)`, () => {
+  /**
+   * Builds a real PowerSync database (better-sqlite3 / node:sqlite backend)
+   * for the given schema, with a unique temp directory per call.
+   */
   async function createDatabase(schema: Schema) {
     const db = new PowerSyncDatabase({
       database: {
@@ -96,6 +100,10 @@ describePowerSync(`Managed Tables (direct)`, () => {
     return db
   }
 
+  /**
+   * Inserts the canonical row set used by the managed-tables scenarios
+   * through the SDK's write path (so triggers observe real operations).
+   */
   async function createTestData(db: CommonPowerSyncDatabase) {
     await db.execute(`
         INSERT into documents (id, name, author)
@@ -113,6 +121,10 @@ describePowerSync(`Managed Tables (direct)`, () => {
    * TEMP tracking resources live on the write connection, so they are read
    * under the write lock. Returns whether the tracking table still exists and
    * which diff rows and triggers remain.
+   */
+  /**
+   * Reads a table's tracking-table contents (operation/id/value rows)
+   * for asserting exactly which diffs the adapter triggers recorded.
    */
   async function readTrackingState(
     db: CommonPowerSyncDatabase,
