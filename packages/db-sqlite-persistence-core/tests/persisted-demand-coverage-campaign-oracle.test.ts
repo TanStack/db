@@ -11,6 +11,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplaySkips,
+  oracleRoute,
   oracleRuns,
   recordOracleReplay,
 } from '../../db/tests/oracle-config'
@@ -1258,8 +1259,7 @@ function checkRelease(
   })
 }
 
-declareOracle({
-  check: [coverageViolations, checkFault, checkRelease],
+declareOracle({ owns: [`src/persisted.ts`],   check: [coverageViolations, checkFault, checkRelease],
   grammar: [historyArb, requiredHistoriesArb],
 })
 
@@ -1267,6 +1267,7 @@ describe(`persisted demand coverage over generated histories`, () => {
   it.skipIf(oracleReplayRequested())(
     `keeps the law when any one storage call fails`,
     async () => {
+      oracleRoute(`case`)
       quietConsole()
       const baseline = await runWithFault(undefined)
       // Positive witness: without a failure, session 2 settles D offline.
@@ -1308,6 +1309,7 @@ describe(`persisted demand coverage over generated histories`, () => {
   it.skipIf(oracleReplayRequested())(
     `owns no wait after a release at any step of a load`,
     async () => {
+      oracleRoute(`case`)
       quietConsole()
       const driver = createDriver(new DatabaseSync(`:memory:`))
       await coverGroupA(driver)
@@ -1334,6 +1336,7 @@ describe(`persisted demand coverage over generated histories`, () => {
   it.skipIf(oracleReplayRequested())(
     `rejects observations that ignore lost rows, obsolete loads, or other window rows`,
     () => {
+      oracleRoute(`calibration`)
       // Checker calibration (ORC-006): the shared judgment must reject a wrong
       // observation of each kind. Each record below states what production
       // would wrongly show; the comparison must report it.
@@ -1445,6 +1448,7 @@ describe(`persisted demand coverage over generated histories`, () => {
   it.skipIf(oracleReplayRequested())(
     `refines the model over a fixed campaign`,
     async () => {
+      oracleRoute(`fixed seed`)
       quietConsole()
       await campaign({ seed: 2102, numRuns: oracleRuns(RUNS) })
     },
@@ -1454,6 +1458,7 @@ describe(`persisted demand coverage over generated histories`, () => {
   it.skipIf(oracleReplaySkips(PROPERTY, REQUIRED_PROPERTY))(
     `refines the model over a random or replayed campaign`,
     async () => {
+      oracleRoute(`random seed`)
       quietConsole()
       await campaign(oraclePropertyOptions(RUNS, PROPERTY))
     },
