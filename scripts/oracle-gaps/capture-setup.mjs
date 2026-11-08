@@ -525,7 +525,14 @@ globalThis.__oracleObserve = (checkpoint, value) => {
   observations += 1
 }
 
+// Whether this `beforeEach` call continues the test already running: a
+// property of @fast-check/vitest (`test.prop`) runs the suite's hooks
+// between its runs. Such a call starts nothing: the test's state carries
+// across its runs, and its one row is written when it finishes.
+let continuing = false
 beforeEach((context) => {
+  continuing = context.task === currentTask
+  if (continuing) return
   // The row is written after all the test's hooks: a test file's own
   // `afterEach` that throws skips the hooks after it, and the row must not
   // depend on the test's cleanup.
@@ -632,12 +639,14 @@ if (state.capture || idleProfile) {
   let use = realUse()
   let reported = false
   beforeEach(() => {
+    if (continuing) return
     baseTimers = timersListed(process.getActiveResourcesInfo())
     since = undefined
     longest = 0
     sawIo = false
   })
   beforeEach((context) => {
+    if (continuing) return
     context.onTestFinished(() => {
       baseTimers = undefined
       if (idleProfile)

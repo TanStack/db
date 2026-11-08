@@ -605,6 +605,8 @@ async function driver(plan, observe) {
         states.add(`a workspace dependency's state judged fresh`)
       if (m.function === `w_shrink` && m.operator === `if-true` && m.class === `comparison-gap`)
         states.add(`a shrinking calibration passes under a mutant`)
+      if (m.function === `w_fcprop` && m.outcome === `killed`)
+        states.add(`a test.prop kill whose last run passed`)
       if (m.function === `w_cleanup` && m.outcome === `killed`)
         states.add(`a kill whose test's cleanup then threw`)
       if (m.function === `w_iowait` && m.outcome === `killed`)
@@ -1076,6 +1078,7 @@ const required = [
   `a hang cut off for idleness`,
   `a copy waiting on I/O killed, not cut for idleness`,
   `a kill whose test's cleanup then threw`,
+  `a test.prop kill whose last run passed`,
   `a shrinking calibration passes under a mutant`,
   `a workspace dependency's state judged fresh`,
   `each owner's value change killed its own mutant`,

@@ -146,6 +146,11 @@ const testCase = fc.record({
   // A test's own cleanup hook may throw once the test has failed, as a
   // controlled clock's release does. The test's failure still judges.
   cleanupThrows: fc.constantFrom(false, false, false, true),
+  // A test may be a property of @fast-check/vitest (`test.prop`), which
+  // runs the suite's `afterEach` and `beforeEach` hooks between its runs.
+  // It judges only in runs whose generated `n` is positive, so its last
+  // run, a shrink to 0, passes: the test fails by an earlier run.
+  asProp: fc.constantFrom(false, false, false, true),
   // A test may run a second campaign, on its own route and input, as
   // `runOracleCampaign` does.
   then: fc.option(
@@ -262,6 +267,7 @@ const judging = (file, route, input, extra = {}) => ({
   shrinks: false,
   ioWait: false,
   cleanupThrows: false,
+  asProp: false,
   then: null,
   ...extra,
 })
@@ -508,6 +514,13 @@ const witness = [
     body: [kill],
     tests: [judging(`a`, `fixed seed`, 7, { cleanupThrows: true })],
   },
+  // A kill by a `test.prop` property whose last run passes.
+  {
+    id: `w_fcprop`,
+    owners: [`a`],
+    body: [kill],
+    tests: [judging(`a`, `fixed seed`, 7, { asProp: true })],
+  },
   { id: `wg0`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg1`, file: LIB, owners: [], body: [push], tests: [] },
   { id: `wg2`, file: LIB, owners: [], body: [push], tests: [] },
@@ -560,6 +573,7 @@ const captureWitness = new Set([
   `w_loop`,
   `w_iowait`,
   `w_cleanup`,
+  `w_fcprop`,
 ])
 
 // ## Rendering and layout
@@ -1723,6 +1737,7 @@ function oracleTestFile(plan, file) {
     `import { ${plan.tests.some((t) => t.file === file && t.cleanupThrows) ? `afterEach, ` : ``}describe, expect, test } from 'vitest'`,
     ...(plan.tests.some((t) => t.file === file && t.shrinks) ? [`import fc from 'fast-check'`] : []),
     ...(plan.tests.some((t) => t.file === file && t.ioWait) ? [`import { spawn } from 'node:child_process'`] : []),
+    ...(plan.tests.some((t) => t.file === file && t.asProp) ? [`import { fc as fcv, test as fcTest } from '@fast-check/vitest'`] : []),
     `import * as sut from '../src/sut'`,
     ...(file === `b` ? [`import { strict } from './strict'`] : []),
     `function declareOracle(_parts: { owns: Array<string> }): void {}`,
@@ -1744,6 +1759,8 @@ function oracleTestFile(plan, file) {
         : `true`
   plan.tests.forEach((t, index) => {
     if (t.file !== file) return
+    // A property judges, slows, and hangs only in runs with a positive `n`.
+    const when = t.asProp ? `${gate} && n > 0` : gate
     // Each campaign registers its route, calls the function, observes, and
     // judges the unmutated output, which the model computes.
     const campaign = (part, i) => {
@@ -1786,14 +1803,14 @@ function oracleTestFile(plan, file) {
         // where the output differs; it then judges as usual.
         ...(t.slow
           ? [
-              `    if (${gate} && JSON.stringify(${out}) !== '${expected}') await new Promise((r) => setTimeout(r, ${SLOW_MS}))`,
+              `    if (${when} && JSON.stringify(${out}) !== '${expected}') await new Promise((r) => setTimeout(r, ${SLOW_MS}))`,
             ]
           : []),
         // A test that waits on I/O (a child process, about 3 s) where the
         // output differs, then judges as usual.
         ...(t.ioWait
           ? [
-              `    if (${gate} && JSON.stringify(${out}) !== '${expected}') await new Promise((r) => spawn(process.execPath, ['-e', 'setTimeout(() => {}, ${SLOW_MS})']).on('exit', r))`,
+              `    if (${when} && JSON.stringify(${out}) !== '${expected}') await new Promise((r) => spawn(process.execPath, ['-e', 'setTimeout(() => {}, ${SLOW_MS})']).on('exit', r))`,
             ]
           : []),
         // An injected failure shrinks to its smallest counterexample.
@@ -1806,17 +1823,17 @@ function oracleTestFile(plan, file) {
         // A flaky test never hangs: the model leaves flaky tests out.
         ...(t.hangs && !t.flaky
           ? [
-              `    if (${gate} && JSON.stringify(${out}) !== '${expected}') await new Promise(() => {})`,
+              `    if (${when} && JSON.stringify(${out}) !== '${expected}') await new Promise(() => {})`,
             ]
           : []),
         ...(!t.judges
           ? []
           : t.judgeBy !== `verdict`
             ? [
-                `    if (${gate}) expect${t.judgeBy === `soft` ? `.soft` : ``}(${out}).toEqual(${expected})`,
+                `    if (${when}) expect${t.judgeBy === `soft` ? `.soft` : ``}(${out}).toEqual(${expected})`,
               ]
             : [
-                `    if (${gate} && JSON.stringify(${out}) !== '${expected}') {`,
+                `    if (${when} && JSON.stringify(${out}) !== '${expected}') {`,
                 `      g.__oracleVerdict?.({ property: 'fixture-${file}', law: '${t.law}', checkpoint: 'trace' })`,
                 `      throw new Error('violation')`,
                 `    }`,
@@ -1832,7 +1849,9 @@ function oracleTestFile(plan, file) {
             `  })`,
           ]
         : []),
-      `  test('${testName(t, index)}', ${(t.hangs && !t.flaky) || t.slow || t.ioWait ? `async ` : ``}() => {`,
+      t.asProp
+        ? `  fcTest.prop([fcv.integer({ min: 0, max: 10 })], { numRuns: 20, seed: 1 })('${testName(t, index)}', async (n) => {`
+        : `  test('${testName(t, index)}', ${(t.hangs && !t.flaky) || t.slow || t.ioWait ? `async ` : ``}() => {`,
       ...partsOf(t).flatMap(campaign),
       `  })`,
       `})`,
