@@ -104,6 +104,7 @@ import {
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
@@ -676,6 +677,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
     stop,
     recovery,
   }: (typeof stormHistories)[number]) => {
+    oracleRoute(`case`)
     host = openHost()
     const tabs = await openWarmTabs(host, tabCount, syncMode)
     for (const tab of tabs) {
@@ -1798,15 +1800,21 @@ describe(`multi-tab Electric over one persisted database`, () => {
   }
   it.skipIf(oracleReplayRequested())(
     `converges after interleaved source prefixes (fixed seed)`,
-    () => runSourcePrefixCampaign({ numRuns: oracleRuns(80), seed: 2281 }),
+    () => {
+      oracleRoute(`fixed seed`)
+      return runSourcePrefixCampaign({ numRuns: oracleRuns(80), seed: 2281 })
+    },
     600_000,
   )
   oracleReplayTest(it, `browser.electric-source-prefix`)(
     `converges after interleaved source prefixes (random or replayed)`,
     () =>
-      runSourcePrefixCampaign(
+      {
+      oracleRoute(`random seed`)
+      return runSourcePrefixCampaign(
         oraclePropertyOptions(80, `browser.electric-source-prefix`),
-      ),
+      )
+    },
     600_000,
   )
 
@@ -1830,6 +1838,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // generated driver folds committed batches into its own model of durable
   // rows. The storm cells and the generated-history arbitrary are the grammar.
   declareOracle({
+    owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`],
     check: [runStormHistory, runGeneratedHistory],
     grammar: [stormHistories, generatedHistory, sourcePrefixHistory],
   })
@@ -1881,18 +1890,24 @@ describe(`multi-tab Electric over one persisted database`, () => {
   it.skipIf(oracleReplayRequested())(
     `keeps reserved commits lawful across generated multi-tab histories (fixed seed)`,
     () =>
-      runGeneratedCampaign({
+      {
+      oracleRoute(`fixed seed`)
+      return runGeneratedCampaign({
         numRuns: oracleRuns(GENERATED_RUNS),
         seed: GENERATED_FIXED_SEED,
-      }),
+      })
+    },
     600_000,
   )
   oracleReplayTest(it, GENERATED_PROPERTY)(
     `keeps reserved commits lawful across generated multi-tab histories (random or replayed)`,
     () =>
-      runGeneratedCampaign(
+      {
+      oracleRoute(`random seed`)
+      return runGeneratedCampaign(
         oraclePropertyOptions(GENERATED_RUNS, GENERATED_PROPERTY),
-      ),
+      )
+    },
     600_000,
   )
 
@@ -1904,7 +1919,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
   it.fails(
     `keeps a resumed lagging tab out of error when a peer deleted the row it updates`,
     () =>
-      runGeneratedHistory(
+      {
+      oracleRoute(`calibration`)
+      return runGeneratedHistory(
         {
           tabCount: 2,
           steps: [
@@ -1917,7 +1934,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
           ],
         },
         () => undefined,
-      ),
+      )
+    },
     60_000,
   )
 
@@ -1927,7 +1945,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
   it(
     `recovers a reset-abandoned source that fails during final catch-up`,
     () =>
-      runGeneratedHistory(
+      {
+      oracleRoute(`fixed history`)
+      return runGeneratedHistory(
         {
           tabCount: 2,
           steps: [
@@ -1944,7 +1964,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
           ],
         },
         () => undefined,
-      ),
+      )
+    },
     60_000,
   )
 
@@ -1954,7 +1975,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
   it(
     `recovers a reloaded source whose final commit was abandoned by a peer reset`,
     () =>
-      runGeneratedHistory(
+      {
+      oracleRoute(`fixed history`)
+      return runGeneratedHistory(
         {
           tabCount: 2,
           steps: [
@@ -1969,7 +1992,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
           ],
         },
         () => undefined,
-      ),
+      )
+    },
     60_000,
   )
 
@@ -1979,7 +2003,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
   it(
     `keeps cached rows visible while recovering a discontinuous source`,
     () =>
-      runGeneratedHistory(
+      {
+      oracleRoute(`fixed history`)
+      return runGeneratedHistory(
         {
           tabCount: 2,
           steps: [
@@ -1999,7 +2025,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
           ],
         },
         () => undefined,
-      ),
+      )
+    },
     60_000,
   )
 
@@ -2012,7 +2039,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
   it.fails(
     `converges an open tab to the head after a lagging tab commits an older row and closes`,
     () =>
-      runGeneratedHistory(
+      {
+      oracleRoute(`calibration`)
+      return runGeneratedHistory(
         {
           tabCount: 2,
           steps: [
@@ -2025,7 +2054,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
           ],
         },
         () => undefined,
-      ),
+      )
+    },
     60_000,
   )
 
@@ -2039,7 +2069,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
   it(
     `keeps a durable row after both tabs catch up to it and then stop`,
     () =>
-      runGeneratedHistory(
+      {
+      oracleRoute(`fixed history`)
+      return runGeneratedHistory(
         {
           tabCount: 2,
           steps: [
@@ -2055,7 +2087,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
           ],
         },
         () => undefined,
-      ),
+      )
+    },
     60_000,
   )
 
@@ -2083,13 +2116,16 @@ describe(`multi-tab Electric over one persisted database`, () => {
     it(
       `${behavior} after a cursor-only commit and a lagging tab reload`,
       () =>
-        runGeneratedHistory(
+        {
+        oracleRoute(`fixed history`)
+        return runGeneratedHistory(
           {
             tabCount: 2,
             steps: [...stalePrefix, publishCursor, reopenPeer],
           },
           () => undefined,
-        ),
+        )
+      },
       60_000,
     )
 
@@ -2097,7 +2133,9 @@ describe(`multi-tab Electric over one persisted database`, () => {
     it(
       `${behavior} when the lagging stream drains before reloading`,
       () =>
-        runGeneratedHistory(
+        {
+        oracleRoute(`fixed history`)
+        return runGeneratedHistory(
           {
             tabCount: 2,
             steps: [
@@ -2108,7 +2146,8 @@ describe(`multi-tab Electric over one persisted database`, () => {
             ],
           },
           () => undefined,
-        ),
+        )
+      },
       60_000,
     )
 
@@ -2118,10 +2157,13 @@ describe(`multi-tab Electric over one persisted database`, () => {
     it(
       `${behavior} when the lagging tab reloads before the cursor advances`,
       () =>
-        runGeneratedHistory(
+        {
+        oracleRoute(`fixed history`)
+        return runGeneratedHistory(
           { tabCount: 2, steps: [...stalePrefix, reopenPeer] },
           () => undefined,
-        ),
+        )
+      },
       60_000,
     )
   }

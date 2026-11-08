@@ -3,6 +3,7 @@ import { afterEach, describe, expect, vi } from 'vitest'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -907,6 +908,7 @@ path reseeds the unseeded campaigns. Run it with this file's package-local
 Vitest command.
 */
 declareOracle({
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   check: [runFailureHistory],
   model: [expectedCloseSettlements],
 })
@@ -919,7 +921,10 @@ describe(`OPFS page lifecycle oracle`, () => {
     verbose: true,
   })(
     `matches the independent model across generated histories (fixed)`,
-    runPagehideHistory,
+    (history) => {
+      oracleRoute(`fixed seed`)
+      return runPagehideHistory(history)
+    },
   )
   oracleReplayTest(fcTest, `opfs.page-lifecycle`).prop([pagehideHistory], {
     ...oraclePropertyOptions(48, `opfs.page-lifecycle`),
@@ -927,7 +932,10 @@ describe(`OPFS page lifecycle oracle`, () => {
     verbose: true,
   })(
     `matches the independent model across generated histories (random)`,
-    runPagehideHistory,
+    (history) => {
+      oracleRoute(`random seed`)
+      return runPagehideHistory(history)
+    },
   )
   oracleReplayTest(fcTest).prop([mixedExecuteHistory], {
     seed: 1845,
@@ -936,7 +944,10 @@ describe(`OPFS page lifecycle oracle`, () => {
     verbose: true,
   })(
     `preserves completed siblings while aborting pending siblings (fixed)`,
-    runMixedExecuteHistory,
+    (history) => {
+      oracleRoute(`fixed seed`)
+      return runMixedExecuteHistory(history)
+    },
   )
   oracleReplayTest(fcTest, `opfs.mixed-execute`).prop([mixedExecuteHistory], {
     ...oraclePropertyOptions(32, `opfs.mixed-execute`),
@@ -944,7 +955,10 @@ describe(`OPFS page lifecycle oracle`, () => {
     verbose: true,
   })(
     `preserves completed siblings while aborting pending siblings (random)`,
-    runMixedExecuteHistory,
+    (history) => {
+      oracleRoute(`random seed`)
+      return runMixedExecuteHistory(history)
+    },
   )
   oracleReplayTest(fcTest).prop([terminalEventHistory], {
     seed: 1847,
@@ -953,7 +967,10 @@ describe(`OPFS page lifecycle oracle`, () => {
     verbose: true,
   })(
     `rejects pending work across Worker terminal event paths (fixed)`,
-    runTerminalEventHistory,
+    (history) => {
+      oracleRoute(`fixed seed`)
+      return runTerminalEventHistory(history)
+    },
   )
   oracleReplayTest(fcTest, `opfs.terminal-event`).prop([terminalEventHistory], {
     ...oraclePropertyOptions(24, `opfs.terminal-event`),
@@ -961,7 +978,10 @@ describe(`OPFS page lifecycle oracle`, () => {
     verbose: true,
   })(
     `rejects pending work across Worker terminal event paths (random)`,
-    runTerminalEventHistory,
+    (history) => {
+      oracleRoute(`random seed`)
+      return runTerminalEventHistory(history)
+    },
   )
   oracleReplayTest(fcTest).prop([closeHistory], {
     seed: 1848,
@@ -970,7 +990,10 @@ describe(`OPFS page lifecycle oracle`, () => {
     verbose: true,
   })(
     `settles pending work and refuses new work across explicit close (fixed)`,
-    runCloseHistory,
+    (history) => {
+      oracleRoute(`fixed seed`)
+      return runCloseHistory(history)
+    },
   )
   oracleReplayTest(fcTest, `opfs.close`).prop([closeHistory], {
     ...oraclePropertyOptions(32, `opfs.close`),
@@ -978,7 +1001,10 @@ describe(`OPFS page lifecycle oracle`, () => {
     verbose: true,
   })(
     `settles pending work and refuses new work across explicit close (random)`,
-    runCloseHistory,
+    (history) => {
+      oracleRoute(`random seed`)
+      return runCloseHistory(history)
+    },
   )
   oracleReplayTest(fcTest).prop([failureHistory], {
     seed: 1846,
@@ -987,7 +1013,10 @@ describe(`OPFS page lifecycle oracle`, () => {
     verbose: true,
   })(
     `matches terminal cleanup and error mapping across worker failures (fixed)`,
-    runFailureHistory,
+    (history) => {
+      oracleRoute(`fixed seed`)
+      return runFailureHistory(history)
+    },
   )
   oracleReplayTest(fcTest, `opfs.failure-cleanup`).prop([failureHistory], {
     ...oraclePropertyOptions(18, `opfs.failure-cleanup`),
@@ -995,6 +1024,9 @@ describe(`OPFS page lifecycle oracle`, () => {
     verbose: true,
   })(
     `matches terminal cleanup and error mapping across worker failures (random)`,
-    runFailureHistory,
+    (history) => {
+      oracleRoute(`random seed`)
+      return runFailureHistory(history)
+    },
   )
 })

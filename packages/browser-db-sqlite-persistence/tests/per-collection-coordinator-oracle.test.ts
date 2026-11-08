@@ -14,6 +14,7 @@ import {
   createBrowserWASQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
 import {
@@ -84,6 +85,17 @@ type CoordinatorOracleCampaign = {
 }
 
 const { runs: RUNS, replay: REPLAY } = readCoordinatorOracleConfig()
+
+// The gap report reads a campaign's route here: the fixed seed, a seedless random run, or a replayed path.
+function routeCampaign(campaign: CoordinatorOracleCampaign): void {
+  oracleRoute(
+    campaign.mode === `fixed`
+      ? `fixed seed`
+      : campaign.mode === `random`
+        ? `random seed`
+        : `fixed history`,
+  )
+}
 
 function coordinatorOracleCampaigns(
   property: CoordinatorOracleProperty,
@@ -320,6 +332,7 @@ async function observeOwnerEntryOrResponse(
 
 describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
   it(`posts the callback-bearing subset witness as clone-safe wire data`, async () => {
+    oracleRoute(`fixed history`)
     const decoded: Array<SemanticValue> = []
     const leaderAdapter = createRecordingAdapter({
       id: `leader`,
@@ -413,6 +426,7 @@ describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
   })
 
   it(`calibrates the clone checker against safe and function-valued payloads`, () => {
+    oracleRoute(`calibration`)
     const safe = {
       collectionId: `alpha`,
       where: { type: `eq`, field: `group`, value: `kept` },
@@ -444,6 +458,7 @@ describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
   })
 
   it(`calibrates acknowledgement checks against entry-only and false-success faults`, () => {
+    oracleRoute(`calibration`)
     const expected = subsetSemantics(complexSubsetDemand(false))
     const allowed: SubsetAckTrace = {
       ownerInvocation: `coordinator`,
@@ -474,6 +489,7 @@ describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
   })
 
   it(`acknowledges a follower subset only after the leader source completed it`, async () => {
+    oracleRoute(`fixed history`)
     const upstreamEvents: Array<{
       phase: `entered` | `completed`
       semantics: SemanticValue
@@ -916,6 +932,7 @@ function remoteLeaseHistoryViolations(
 
 describe(`remote subset ownership lease oracle`, () => {
   it(`calibrates collection-scoped acquisition identity against a global-id mutant`, () => {
+    oracleRoute(`calibration`)
     const expected: CollectionScopedLeaseSnapshot = {
       alpha: { loads: 1, unloads: 0, active: 1 },
       beta: { loads: 1, unloads: 0, active: 1 },
@@ -933,6 +950,7 @@ describe(`remote subset ownership lease oracle`, () => {
   })
 
   it(`keeps reused option identities independent per collection across bounded histories`, async () => {
+    oracleRoute(`fixed history`)
     type Action = {
       kind: `ensure` | `release`
       collectionId: `alpha` | `beta`
@@ -1074,6 +1092,7 @@ describe(`remote subset ownership lease oracle`, () => {
   })
 
   it(`retains the outer Collection acquisition across leader takeover and releases both owner acquisition leases exactly`, async () => {
+    oracleRoute(`fixed history`)
     type Todo = { id: string; title: string }
     const firstOwner = new RemoteLeaseOwnerLedger()
     const secondOwner = new RemoteLeaseOwnerLedger()
@@ -1206,6 +1225,7 @@ describe(`remote subset ownership lease oracle`, () => {
   })
 
   it(`calibrates the lease checker against leak, missing replay, and inexact release mutants`, () => {
+    oracleRoute(`calibration`)
     expect(
       remoteLeaseTakeoverViolations(expectedRemoteLeaseTakeoverTrace),
     ).toEqual([])
@@ -1241,6 +1261,7 @@ describe(`remote subset ownership lease oracle`, () => {
   async function runRemoteLeaseCampaign(
     campaign: CoordinatorOracleCampaign,
   ): Promise<void> {
+    routeCampaign(campaign)
     let originalHistory: RemoteLeaseHistory | undefined
     let originalViolation: RemoteLeaseTakeoverViolation | undefined
     let targetDiscriminant: string | undefined
@@ -1568,6 +1589,7 @@ async function readRawCollectionSnapshot(
 
 describe(`per-collection adapter and SQLite-state oracle`, () => {
   it(`preserves alpha rows, schema, and reset epoch when beta registers a different adapter`, async () => {
+    oracleRoute(`fixed history`)
     let directory: string | undefined
     let database: BrowserWASQLiteDatabase | undefined
     let coordinator: BrowserCollectionCoordinator | undefined
@@ -1663,6 +1685,7 @@ describe(`per-collection adapter and SQLite-state oracle`, () => {
   })
 
   it(`initializes one fresh collection safely across matching adapter instances`, async () => {
+    oracleRoute(`fixed history`)
     let directory: string | undefined
     let database: BrowserWASQLiteDatabase | undefined
 
@@ -1737,6 +1760,7 @@ describe(`per-collection adapter and SQLite-state oracle`, () => {
   })
 
   it(`calibrates SQLite-state and fresh-registry checks against mutant results`, () => {
+    oracleRoute(`calibration`)
     const expected: RawCollectionSnapshot = {
       registryRowCount: 1,
       schemaVersion: 11,
@@ -2006,6 +2030,7 @@ async function requestBothCollections(
 
 describe(`generated collection-route histories`, () => {
   it(`calibrates collection-key comparison against one peer-routed apply`, () => {
+    oracleRoute(`calibration`)
     const expected: Array<RoutedApply> = [
       {
         phase: `initial-owner`,
@@ -2071,6 +2096,7 @@ describe(`generated collection-route histories`, () => {
   })
 
   it(`routes every adapter-bound RPC by collection before and after leadership transfer`, async () => {
+    oracleRoute(`fixed history`)
     const makePullResult = (
       marker: string,
       latestRowVersion: number,
@@ -2322,6 +2348,7 @@ describe(`generated collection-route histories`, () => {
   async function runRoutingCampaign(
     campaign: CoordinatorOracleCampaign,
   ): Promise<void> {
+    routeCampaign(campaign)
     let originalFailingTrace: RoutingHistory | undefined
     let originalViolation: RouteViolation | undefined
     let targetDiscriminant: string | undefined
@@ -2591,6 +2618,7 @@ function findUnownedWrites(
 
 describe(`sync-ingested write ownership oracle`, () => {
   it(`applies a source commit through the elected persistence owner after leadership changes`, async () => {
+    oracleRoute(`fixed history`)
     type Todo = { id: string; title: string }
     type SourceParams = Parameters<SyncConfig<Todo, string>[`sync`]>[0]
 
@@ -2703,6 +2731,7 @@ describe(`sync-ingested write ownership oracle`, () => {
   })
 
   it(`calibrates the owner checker against one bypass and one owned write`, () => {
+    oracleRoute(`calibration`)
     expect(
       findUnownedWrites(
         [
@@ -2975,7 +3004,10 @@ describe(`follower remote-demand settlement across real tabs`, () => {
           histories.push({ source, placement, apply, consumer })
   it.each(histories)(
     `settles a follower $consumer with the owner's rows: $source source, $placement, apply $apply`,
-    (history) => assertRealTabFollowerHistory(history),
+    (history) => {
+      oracleRoute(`case`)
+      return assertRealTabFollowerHistory(history)
+    },
     20_000,
   )
 })
@@ -2985,6 +3017,7 @@ describe(`follower remote-demand settlement across real tabs`, () => {
 // independent of the coordinator and its adapter routing. Declared last
 // because the model classes are defined above and cannot be read earlier.
 declareOracle({
+  owns: [`src/browser-coordinator.ts`],
   check: [
     subsetWireViolations,
     subsetAckViolations,

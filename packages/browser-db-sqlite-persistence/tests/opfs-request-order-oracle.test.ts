@@ -16,8 +16,10 @@ import { afterAll, beforeAll, describe, expect, vi } from 'vitest'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { openBrowserWASQLiteOPFSDatabase } from '../src/opfs-database'
 import {
   findRequestOrderViolation,
@@ -269,6 +271,12 @@ const requestOrderHistory = fc
 
 const requestOrderProperty = `opfs.request-order`
 
+declareOracle({
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+  check: [runRequestOrderHistory],
+  grammar: [requestOrderHistory],
+})
+
 describe(`OPFS request order oracle (Node driver)`, () => {
   // A path replay of this property selects only its random campaign.
   oracleReplayTest(fcTest).prop([requestOrderHistory], {
@@ -280,7 +288,10 @@ describe(`OPFS request order oracle (Node driver)`, () => {
     verbose: true,
   })(
     `answers requests in order and closes after them (fixed)`,
-    runRequestOrderHistory,
+    (history) => {
+      oracleRoute(`fixed seed`)
+      return runRequestOrderHistory(history)
+    },
   )
   oracleReplayTest(fcTest, requestOrderProperty).prop([requestOrderHistory], {
     ...oraclePropertyOptions(24, requestOrderProperty),
@@ -290,6 +301,9 @@ describe(`OPFS request order oracle (Node driver)`, () => {
     verbose: true,
   })(
     `answers requests in order and closes after them (random)`,
-    runRequestOrderHistory,
+    (history) => {
+      oracleRoute(`random seed`)
+      return runRequestOrderHistory(history)
+    },
   )
 })
