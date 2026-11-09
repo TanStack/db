@@ -641,6 +641,19 @@ async function runHistory(
               )
             }
             watchCoreAbortListeners(observed.id, options.signal)
+            // A replay that replaces an attempt aborts it before the
+            // replacement's load starts (header: "A replay that replaces an
+            // attempt aborts it too"). The model has already reduced this
+            // command, so every earlier attempt it marks aborted must have an
+            // aborted signal at this call, not merely by the next checkpoint.
+            for (const earlier of runtimeAttempts.values()) {
+              if (earlier.id === observed.id) continue
+              if (!model.attempts[earlier.id]?.aborted) continue
+              check(
+                earlier.options.signal?.aborted,
+                `replaced attempt ${earlier.id} is aborted before replacement ${observed.id} loads`,
+              ).toBe(true)
+            }
             owner.attemptId = observed.id
             attemptByOptions.set(options, observed.id)
             observedLoads.push(observed)
