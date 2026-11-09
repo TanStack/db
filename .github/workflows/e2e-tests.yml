@@ -187,6 +187,13 @@ jobs:
           cd packages/electron-db-sqlite-persistence
           pnpm exec vitest --config vitest.e2e.config.ts --run
 
+      - name: Check Electron example SQLite native module
+        if: matrix.group == 'desktop'
+        working-directory: examples/electron/offline-first
+        env:
+          ELECTRON_RUN_AS_NODE: '1'
+        run: pnpm exec electron -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close()"
+
       - name: Run Cloudflare Durable Object persisted collection E2E tests
         if: matrix.group == 'cloud-mobile'
         run: |

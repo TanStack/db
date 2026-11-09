@@ -52,6 +52,8 @@ jobs:
         run: pnpm run check:mangle
       - name: Build DB packages
         run: pnpm --filter @tanstack/db-ivm --filter @tanstack/db --filter @tanstack/react-db build
+      - name: Check CommonJS entrypoint without require(ESM)
+        run: node --no-experimental-require-module -e "require('./packages/db/dist/cjs/index.cjs')"
       - name: Check minified public API
         run: pnpm run test:minified-db
       - name: Check client-only query bundles
