@@ -16,6 +16,10 @@ function createWorkspace() {
   const root = mkdtempSync(join(tmpdir(), 'tanstack-db-publish-test-'))
   mkdirSync(join(root, '.changeset'))
   writeFileSync(
+    join(root, '.changeset', 'config.json'),
+    JSON.stringify({ privatePackages: false, ignore: [], access: 'public' }),
+  )
+  writeFileSync(
     join(root, 'package.json'),
     JSON.stringify({ name: 'release-fixture', private: true }),
   )

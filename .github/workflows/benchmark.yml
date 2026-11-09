@@ -37,7 +37,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -67,8 +67,8 @@ jobs:
       - name: Run benchmark on PR
         if: steps.inputs.outputs.changed == 'true'
         run: |
-          pnpm --filter @tanstack/db-ivm build
-          pnpm exec tsx scripts/bench/incremental-update.ts \
+          pnpm --filter @tanstack/db-ivm --filter @tanstack/db build
+          node scripts/bench/production.mjs scripts/bench/incremental-update.ts \
             --iterations=100 --warmup=20 --repetitions=3 \
             --outFile="$RUNNER_TEMP/candidate.json"
       - name: Run benchmark on base
@@ -80,11 +80,12 @@ jobs:
           BASE_SHA=$(git merge-base "origin/$BASE_REF" HEAD)
           echo "Benchmarking base commit $BASE_SHA"
           git checkout --force "$BASE_SHA"
-          # Run the exact same benchmark code on both sides
-          git checkout "$HEAD_SHA" -- scripts/bench
+          # Run the exact same benchmark code on both sides, including the
+          # runner's dist freshness check
+          git checkout "$HEAD_SHA" -- scripts/bench packages/db/scripts/assert-dist-fresh.mjs
           pnpm install --frozen-lockfile
-          pnpm --filter @tanstack/db-ivm build
-          pnpm exec tsx scripts/bench/incremental-update.ts \
+          pnpm --filter @tanstack/db-ivm --filter @tanstack/db build
+          node scripts/bench/production.mjs scripts/bench/incremental-update.ts \
             --iterations=100 --warmup=20 --repetitions=3 \
             --outFile="$RUNNER_TEMP/base.json"
       - name: Compare results

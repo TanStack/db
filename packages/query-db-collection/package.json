@@ -57,8 +57,8 @@
   "devDependencies": {
     "@tanstack/node-db-sqlite-persistence": "workspace:*",
     "@tanstack/offline-transactions": "workspace:*",
-    "@tanstack/query-core": "^5.90.20",
-    "@vitest/coverage-istanbul": "^5.0.5",
-    "seroval": "1.6.3"
+    "@tanstack/query-core": "^5.107.1",
+    "@vitest/coverage-istanbul": "^5.1.0",
+    "seroval": "1.6.11"
   }
 }

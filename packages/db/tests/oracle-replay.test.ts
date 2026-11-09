@@ -562,6 +562,25 @@ describe(`named oracle replay manifest`, () => {
           expect(source).toContain(
             `windowHistoryProperty(driver, \`${family}\`)`,
           )
+      } else if (entry.property.startsWith(`electric.sdk-resume-checkpoint.`)) {
+        const [, , tagged, consumer, emptySecond, delivery] =
+          entry.property.split(`.`)
+        expect(entry.property.split(`.`)).toHaveLength(6)
+        expect([`false`, `true`]).toContain(tagged)
+        expect([`direct`, `live-query`, `cursor`]).toContain(consumer)
+        expect([`false`, `true`]).toContain(emptySecond)
+        expect([`apply`, `hold`, `reject`]).toContain(delivery)
+        if (consumer === `cursor`) expect(delivery).toBe(`hold`)
+        expect(source).toContain(`for (const tagged of [false, true])`)
+        expect(source).toContain(`for (const emptySecond of [false, true])`)
+        expect(source).toContain('[`direct`, `live-query`, `cursor`] as const')
+        expect(source).toContain('[`apply`, `hold`, `reject`] as const')
+        expect(source).toContain(
+          'if (consumer === `cursor` && delivery !== `hold`) continue',
+        )
+        expect(source).toContain(
+          'electric.sdk-resume-checkpoint.${tagged}.${consumer}.${emptySecond}.${delivery}',
+        )
       } else if (entry.property.startsWith(`react.ssr-effects-`)) {
         const [runtime, ...parts] = entry.property
           .slice(`react.ssr-effects-`.length)
