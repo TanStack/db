@@ -20,7 +20,7 @@
     "tailwindcss": "^4.1.18",
     "trailbase": "^0.10.0",
     "vite-tsconfig-paths": "^6.1.1",
-    "zod": "^4.6.7"
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
