@@ -1,14 +1,16 @@
-import { fc } from '@fast-check/vitest'
-import { afterAll, describe, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
+import fc from 'fast-check'
 import { DbClient } from '../src/client.js'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import {
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
+import { oracleProperty, pass, violation } from './oracle-property.js'
 import { createOracleReach } from './oracle-reach.js'
 import { ScenarioLifetime } from './conformance/scenario-lifetime.js'
 import {
@@ -55,6 +57,22 @@ import type {
  *    and a cleaned-up Collection restarts on demand. While the seed is active,
  *    cleanup and a restart are part of "not produced yet": the snapshot keeps
  *    showing the seed as `ready`, and the next sync run's readiness hands off.
+ *    Once the seed has ended, the observer shows the live Collection through
+ *    cleanup and restart too: `cleaned-up` with no rows (cleanup discards all
+ *    of the Collection's state, glossary "crash"), then each row the new sync
+ *    run writes. That includes a row equal to one shown before cleanup: the
+ *    observer let that row go at cleanup, so a Collection subscription that
+ *    reconciles later writes against the rows it published before cleanup
+ *    must not count it as already shown ([#2334](https://github.com/TanStack/db/issues/2334)).
+ *    This claim adds no rule of its own. Its authority is law 2 (an observer
+ *    whose seed ended behaves like one without a seed, which shows the live
+ *    Collection) and the glossary: "cleanup" ends the sync run and leaves the
+ *    Collection available for restart, and "crash" says that cleanup discards
+ *    all of the Collection's state, so a later start is a fresh start. A row
+ *    the new sync run writes is a row the live Collection holds, whether or
+ *    not an equal row was shown before. ARCHITECTURE "Cleanup, restart, and
+ *    detached waiters" documents the mechanism that keeps it: the observer's
+ *    Collection subscription retains no rows across cleanup.
  * 4. **Every visible change is announced.** Wholesale consumers re-read
  *    `getSnapshot()` only when notified (`useSyncExternalStore` does one
  *    consistency read right after subscribing). So, while attached, the
@@ -65,23 +83,37 @@ import type {
  *
  * The model is the seed, whether an attached observer has ended it, and
  * whether the observer is attached. The Collection is the observer's input:
- * the driver reads its public status and rows and does not model the
- * Collection lifecycle. Rows under a failure status are not claimed, because
- * that status says the data cannot be shown; law 4 still checks them.
+ * the driver records its public status and rows as the step's input, and the
+ * model reads only those, so it does not model the Collection lifecycle. The
+ * observer's snapshot and announcements are the step's output, which only the
+ * check reads. Rows under a failure status are not claimed, because that
+ * status says the data cannot be shown; law 4 still checks them.
  *
  * ## Contract and ownership table
 
 | Contract | History/domain | Production path | Observation and checkpoint | Owner and limits |
 | --- | --- | --- | --- | --- |
-| failure shown under a seed | seed of 0..3 rows; live writes; `fail()`, `crash()`, cleanup, restart, `markReady()`, attach, in any legal order | DbClient hydrate -> getSnapshot status mapping; status listener -> notify | snapshot `status` and flags after each step and a macrotask | this generated oracle |
+| failure shown under a seed | seed of 0..3 rows, or none; live writes; `fail()`, `crash()`, cleanup, restart, `markReady()`, attach, in any legal order | DbClient hydrate -> getSnapshot status mapping; status listener -> notify | snapshot `status` and flags after each step and a macrotask | this generated oracle |
 | failure ends the seed | the same, with cleanup after the failure | notify/attach -> seed handoff | `cleaned-up` and live rows after cleanup | this generated oracle |
 | cleanup keeps the seed | cleanup and restart while the seed is active | notify early return under the seed | `ready` and seed rows | this generated oracle; recorded decision, not a law-16 claim |
+| restart after the seed ended | cleanup and restart after readiness or a failure ended the seed; the new sync run rewrites a row equal to one shown before cleanup | notify `cleaned-up` reset -> Collection subscription reconciliation | live rows after each later step | this generated oracle |
 | announced changes | every step while attached | emit -> flushPublications | last-read snapshot and granular rebuilt rows equal the current snapshot | this generated oracle |
 | already-ready subset handoff | held subset at attach, then settlement without row/status change; both modes | seeded observer -> subset settlement | seed while held, live snapshot and announced granular/wholesale rows after settlement | generated ready-subset lane below; Svelte page receiver |
 | other handoff timing, streamed errors, consumption | | | | focused `live-query-observer.test.ts` hydration tests |
 
- * Keys are `a`..`c`, versions 0..3, histories of 1..10 generated steps after
- * an optional fixed three-step prefix, both modes. Rows are
+ * Keys are `a`..`c`, versions 0..3, histories of 1..10 steps, both modes,
+ * and an eager or an on-demand source. Every sync write also lands in the
+ * provider's rows, which survive cleanup, and the on-demand source's loader
+ * writes all of them again whenever a subscription loads a subset. So an
+ * on-demand restart reacquires the subscription's demand and re-delivers rows
+ * the observer showed before cleanup, which the restart claim of law 3 must
+ * survive. A fifth of the histories hydrate no seed and build the observer
+ * without a DbClient. Law 2 says an observer whose seed ended behaves like
+ * that one, so it is the reference case, and it is the only observer whose
+ * granular subscription asks the source for its initial rows: the subset
+ * demand that an on-demand restart reacquires.
+ * Constructed histories start a generated history with the steps that enter each declared
+ * state, so every grammar reaches every state. Rows are
  * compared as sets by key: this oracle makes no order claim. The source is a
  * plain controlled Collection, not a live-query Collection, so source health
  * propagation through a query graph belongs to `source-health-oracle.test.ts`.
@@ -89,6 +121,7 @@ import type {
 
 type Row = { id: string; version: number }
 type Mode = `granular` | `wholesale`
+type SyncMode = `eager` | `on-demand`
 type Key = `a` | `b` | `c`
 type Event =
   | { type: `write`; key: Key; version: number | null }
@@ -100,11 +133,126 @@ type Event =
   | { type: `attach` }
 type History = {
   mode: Mode
-  seed: Array<[Key, number]>
+  syncMode: SyncMode
+  /** The hydrated server rows, or `null` for an observer with no DbClient. */
+  seed: Array<[Key, number]> | null
   events: Array<Event>
 }
 type VisibleRow = [string, number]
 type View = { status: CollectionStatus | `disabled`; rows: Array<VisibleRow> }
+
+// ---------------------------------------------------------------------------
+// Histories
+// ---------------------------------------------------------------------------
+
+const MAX_EVENTS = 10
+const key = fc.constantFrom<Key>(`a`, `b`, `c`)
+const version = fc.integer({ min: 0, max: 3 })
+// A record of constants, not `fc.constant(object)`, so that a fixed or constructed history
+// built from a literal is a member of the language (fast-check compares a
+// constant by identity).
+const step = <Type extends Event[`type`]>(type: Type) =>
+  fc.record({ type: fc.constant(type) })
+const event: fc.Arbitrary<Event> = fc.oneof(
+  {
+    arbitrary: fc.record({
+      type: fc.constant(`write` as const),
+      key,
+      version: fc.option(version, { freq: 3 }),
+    }),
+    weight: 2,
+  },
+  { arbitrary: step(`ready`), weight: 1 },
+  { arbitrary: step(`fail`), weight: 1 },
+  { arbitrary: step(`crash`), weight: 1 },
+  { arbitrary: step(`cleanup`), weight: 1 },
+  { arbitrary: step(`restart`), weight: 1 },
+  { arbitrary: step(`attach`), weight: 2 },
+)
+const history: fc.Arbitrary<History> = fc.record({
+  mode: fc.constantFrom<Mode>(`granular`, `wholesale`),
+  syncMode: fc.constantFrom<SyncMode>(`eager`, `on-demand`),
+  seed: fc.option(
+    fc.uniqueArray(fc.tuple(key, version), {
+      selector: ([id]) => id,
+      maxLength: 3,
+    }),
+    { nil: null, freq: 4 },
+  ),
+  events: fc.array(event, { minLength: 1, maxLength: MAX_EVENTS }),
+})
+
+/** A step written as its type alone, or as a whole event (a write). */
+type StepSpec = Event[`type`] | Event
+const toEvent = (spec: StepSpec): Event =>
+  typeof spec === `string` ? ({ type: spec } as Event) : spec
+
+/** Starts a generated history with `prefix`, keeping it inside the grammar. */
+const startWith =
+  (...prefix: Array<StepSpec>) =>
+  (generated: History): History => ({
+    ...generated,
+    events: [...prefix.map(toEvent), ...generated.events].slice(0, MAX_EVENTS),
+  })
+
+/** `startWith` for a state under the seed: an unseeded history gets an empty seed. */
+const startSeededWith =
+  (...prefix: Array<StepSpec>) =>
+  (generated: History): History =>
+    startWith(...prefix)({ ...generated, seed: generated.seed ?? [] })
+
+/**
+ * Starts a generated history by ending the seed with `end`, writing a row,
+ * cleaning up, restarting, and writing the same row again. The row is the
+ * generated history's first upsert, so the repeated key and version vary.
+ * `plan` fixes the dimensions a declared state needs.
+ */
+const rewriteAfterRestart =
+  (end: `ready` | `fail`, plan: Partial<History> = {}) =>
+  (generated: History): History => {
+    const row = generated.events.find(
+      (next) => next.type === `write` && next.version !== null,
+    ) ?? { type: `write`, key: `a`, version: 0 }
+    const prefix: Array<StepSpec> =
+      end === `ready`
+        ? [`attach`, `ready`, row, `cleanup`, `restart`, row]
+        : [`attach`, row, `fail`, `cleanup`, `restart`, row]
+    return startWith(...prefix)({ ...generated, ...plan })
+  }
+
+// ---------------------------------------------------------------------------
+// Trace
+// ---------------------------------------------------------------------------
+//
+// One record per checkpoint: `start`, then one per step. A skipped step (one
+// that is illegal in the Collection's current status) records only that it
+// was skipped. An executed step records its input, the Collection's status
+// before the step, right after it, and after a macrotask, and its rows then;
+// and its output, what the observer showed and announced.
+
+type StepInput = {
+  action: Event[`type`] | `start`
+  before: CollectionStatus
+  during: CollectionStatus
+  after: CollectionStatus
+  live: Array<VisibleRow>
+}
+type StepOutput = {
+  view: View
+  flags: Record<
+    `isReady` | `isLoadingError` | `isCrashed` | `isCleanedUp`,
+    boolean
+  >
+  /** The snapshot a listener last read; undefined before attach. */
+  lastRead: View | undefined
+  /** A granular listener's rows rebuilt from delivered changes. */
+  rebuilt: Array<VisibleRow> | undefined
+}
+type StepRecord = { skipped: true } | { input: StepInput; output: StepOutput }
+
+// ---------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------
 
 const reachStates = [
   `ready-under-seed:attached`,
@@ -118,39 +266,10 @@ const reachStates = [
   `attach-to-failure-under-seed`,
   `cleanup-after-failure-ended-seed`,
   `restart-under-seed`,
+  `restart-rewrites-row-from-before-cleanup`,
+  `restart-reacquires-row-from-before-cleanup`,
 ] as const
 type ReachState = (typeof reachStates)[number]
-
-const key = fc.constantFrom<Key>(`a`, `b`, `c`)
-const version = fc.integer({ min: 0, max: 3 })
-const event: fc.Arbitrary<Event> = fc.oneof(
-  {
-    arbitrary: fc.record({
-      type: fc.constant(`write` as const),
-      key,
-      version: fc.option(version, { freq: 3 }),
-    }),
-    weight: 2,
-  },
-  { arbitrary: fc.constant({ type: `ready` as const }), weight: 1 },
-  { arbitrary: fc.constant({ type: `fail` as const }), weight: 1 },
-  { arbitrary: fc.constant({ type: `crash` as const }), weight: 1 },
-  { arbitrary: fc.constant({ type: `cleanup` as const }), weight: 1 },
-  { arbitrary: fc.constant({ type: `restart` as const }), weight: 1 },
-  { arbitrary: fc.constant({ type: `attach` as const }), weight: 2 },
-)
-const history: fc.Arbitrary<History> = fc.record({
-  mode: fc.constantFrom<Mode>(`granular`, `wholesale`),
-  seed: fc.uniqueArray(fc.tuple(key, version), {
-    selector: ([id]) => id,
-    maxLength: 3,
-  }),
-  events: fc.array(event, { minLength: 1, maxLength: 10 }),
-})
-
-// ---------------------------------------------------------------------------
-// Model
-// ---------------------------------------------------------------------------
 
 /**
  * `ended` records law 2: an attached observer saw a status that ends the
@@ -164,6 +283,12 @@ type Model = {
 }
 
 const failures: ReadonlySet<string> = new Set([`error`, `crashed`])
+const shownUnderSeed: ReadonlySet<string> = new Set([
+  `ready`,
+  `error`,
+  `crashed`,
+  `cleaned-up`,
+])
 
 function seedActive(model: Model): boolean {
   return !model.ended
@@ -171,7 +296,7 @@ function seedActive(model: Model): boolean {
 
 /**
  * Advance the model across one step. `statuses` are the Collection statuses
- * before and after the step. An attached observer ends the seed when it sees
+ * the observer could see. An attached observer ends the seed when it sees
  * readiness or a failure (laws 1 and 2); cleanup and restart do not (law 3).
  */
 function advance(model: Model, statuses: ReadonlyArray<string>): void {
@@ -195,9 +320,87 @@ function expectedView(
   return { status: liveStatus, rows: liveRows }
 }
 
-// The model predicts the view; the grammar draws the histories that the
-// driver below replays, including the fixed replays at the end of the file.
-declareOracle({ model: [advance, expectedView], grammar: [history] })
+type Expectation = ReturnType<typeof expectedView> & { attached: boolean }
+
+/**
+ * Folds the trace's inputs through the model: the view owed at each
+ * checkpoint, and the declared states the history entered, which are model
+ * states (whether the seed is active), so the model names them.
+ */
+function hydrationModel(
+  { seed, mode, syncMode }: History,
+  trace: ReadonlyArray<{ checkpoint: string; value: unknown }>,
+): { owed: Map<string, Expectation>; reached: Set<ReachState> } {
+  const model: Model = {
+    seed: sortedRows(
+      (seed ?? []).map(([id, value]) => [id, { id, version: value }]),
+    ),
+    // An observer without a seed is the one that law 2's ended seed
+    // behaves like.
+    ended: seed === null,
+    endedByFailure: false,
+    attached: false,
+  }
+  const owed = new Map<string, Expectation>()
+  const reached = new Set<ReachState>()
+  // The rows the Collection held right before the latest cleanup, and
+  // whether a sync run has restarted since. A step of the new run that
+  // brings one of those rows back is where law 3's restart claim matters
+  // after the seed ended. On an on-demand source, an unseeded granular
+  // observer's own subset demand brings it back when the restart reacquires
+  // that demand. Rows are compared by value as JSON.
+  // The two restart states owe nothing new: `expectedView` already owes the
+  // live rows once the seed ended (law 2), and the glossary's "cleanup" and
+  // "crash" make the restarted run a fresh start. The states only mark the
+  // histories where that law meets a row equal to one from before cleanup.
+  let previousLive: Array<VisibleRow> = []
+  let heldBeforeCleanup = new Set<string>()
+  let restarted = false
+  for (const { checkpoint, value } of trace) {
+    const record = value as StepRecord
+    if (`skipped` in record) continue
+    const { action, before, during, after, live } = record.input
+    if (action === `cleanup` && model.endedByFailure && failures.has(before))
+      reached.add(`cleanup-after-failure-ended-seed`)
+    if (action === `restart` && seedActive(model))
+      reached.add(`restart-under-seed`)
+    if (action === `cleanup`) {
+      heldBeforeCleanup = new Set(
+        previousLive.map((row) => JSON.stringify(row)),
+      )
+      restarted = false
+    }
+    if (action === `restart`) restarted = true
+    if (
+      (action === `write` || action === `restart`) &&
+      restarted &&
+      model.attached &&
+      !seedActive(model) &&
+      live.some((row) => heldBeforeCleanup.has(JSON.stringify(row)))
+    ) {
+      reached.add(`restart-rewrites-row-from-before-cleanup`)
+      if (seed === null && mode === `granular` && syncMode === `on-demand`)
+        reached.add(`restart-reacquires-row-from-before-cleanup`)
+    }
+    previousLive = live
+    if (action === `attach`) {
+      if (seedActive(model) && failures.has(before))
+        reached.add(`attach-to-failure-under-seed`)
+      model.attached = true
+    }
+    if (seedActive(model) && before !== during && shownUnderSeed.has(during))
+      reached.add(
+        `${during}-under-seed:${model.attached ? `attached` : `detached`}` as ReachState,
+      )
+    advance(model, [before, during])
+    advance(model, [after])
+    owed.set(checkpoint, {
+      ...expectedView(model, after, live),
+      attached: model.attached,
+    })
+  }
+  return { owed, reached }
+}
 
 // ---------------------------------------------------------------------------
 // Production driver
@@ -216,62 +419,69 @@ function settle(): Promise<void> {
 let sequence = 0
 
 /**
- * Runs one history. Steps that are illegal in the Collection's current
- * status, such as `markReady()` outside `loading`, are skipped, so every
- * executed step is a legal source history.
+ * Runs one history and records each checkpoint. Steps that are illegal in
+ * the Collection's current status, such as `markReady()` outside `loading`,
+ * are skipped, so every executed step is a legal source history. Attach
+ * subscribes once and does the consistency read `useSyncExternalStore` does.
  */
-async function runHistory(
-  { mode, seed, events }: History,
-  reach?: ReturnType<typeof createOracleReach<ReachState>>,
+async function driveHistory(
+  { mode, syncMode, seed, events }: History,
+  observe: (checkpoint: string, value: StepRecord) => void,
 ): Promise<void> {
   const id = `observer-hydration-${sequence++}`
   const queryHash = `${id}-query`
   let ops: Parameters<SyncConfig<Row, string>[`sync`]>[0] | undefined
+  const provider = new Map<string, Row>()
   const source = createCollection<Row, string>({
     id,
     getKey: (row) => row.id,
     startSync: false,
+    syncMode,
     sync: {
       sync: (params) => {
         ops = params
+        if (syncMode === `eager`) return
+        // A subset load re-delivers every provider row and settles at once.
+        return {
+          loadSubset: () => {
+            params.begin()
+            for (const value of provider.values())
+              params.write({
+                type: source.has(value.id) ? `update` : `insert`,
+                value,
+              })
+            params.commit()
+            return true
+          },
+        }
       },
     },
   })
   const client = new DbClient()
-  client.hydrate({
-    collections: [],
-    liveQueries: [
-      {
-        queryHash,
-        dehydratedAt: 1,
-        snapshot: {
-          rows: seed.map(([rowKey, rowVersion]) => ({
-            key: rowKey,
-            value: { id: rowKey, version: rowVersion },
-          })),
+  if (seed)
+    client.hydrate({
+      collections: [],
+      liveQueries: [
+        {
+          queryHash,
+          dehydratedAt: 1,
+          snapshot: {
+            rows: seed.map(([rowKey, rowVersion]) => ({
+              key: rowKey,
+              value: { id: rowKey, version: rowVersion },
+            })),
+          },
         },
-      },
-    ],
-  })
+      ],
+    })
   source.startSyncImmediate()
-  const observer = createLiveQueryObserver<Row, string>(source, {
-    client,
-    queryHash,
-    mode,
-  })
+  const observer = createLiveQueryObserver<Row, string>(
+    source,
+    seed ? { client, queryHash, mode } : { mode },
+  )
 
-  const model: Model = {
-    seed: sortedRows(
-      seed.map(([rowKey, rowVersion]) => [
-        rowKey,
-        { id: rowKey, version: rowVersion },
-      ]),
-    ),
-    ended: false,
-    endedByFailure: false,
-    attached: false,
-  }
   const rebuilt = new Map<string, Row>()
+  let attached = false
   let lastRead: View | undefined
   const read = (): View => {
     const snapshot = observer.getSnapshot()
@@ -296,110 +506,106 @@ async function runHistory(
     }
     lastRead = read()
   }
-
-  const check = (step: number) => {
-    const context = JSON.stringify({ mode, seed, events, step })
+  const record = (
+    checkpoint: string,
+    input: Omit<StepInput, `after` | `live`>,
+  ) => {
     const snapshot = observer.getSnapshot()
-    const view = read()
-    const expected = expectedView(
-      model,
-      source.status,
-      sortedRows(source.entries()),
-    )
-    expect(view.status, context).toBe(expected.status)
-    expect(
-      {
-        isReady: snapshot.isReady,
-        isLoadingError: snapshot.isLoadingError,
-        isCrashed: snapshot.isCrashed,
-        isCleanedUp: snapshot.isCleanedUp,
+    observe(checkpoint, {
+      input: {
+        ...input,
+        after: source.status,
+        live: sortedRows(source.entries()),
       },
-      context,
-    ).toEqual({
-      isReady: expected.status === `ready`,
-      isLoadingError: expected.status === `error`,
-      isCrashed: expected.status === `crashed`,
-      isCleanedUp: expected.status === `cleaned-up`,
+      output: {
+        view: read(),
+        flags: {
+          isReady: snapshot.isReady,
+          isLoadingError: snapshot.isLoadingError,
+          isCrashed: snapshot.isCrashed,
+          isCleanedUp: snapshot.isCleanedUp,
+        },
+        lastRead,
+        rebuilt:
+          attached && mode === `granular` ? sortedRows(rebuilt) : undefined,
+      },
     })
-    if (expected.rows) expect(view.rows, context).toEqual(expected.rows)
-    if (model.attached) {
-      expect(lastRead, `${context} (unannounced change)`).toEqual(view)
-      if (mode === `granular`) {
-        expect(sortedRows(rebuilt), `${context} (granular rows)`).toEqual(
-          view.rows,
-        )
-      }
-    }
-  }
-
-  const note = (state: ReachState) => reach?.reach(state)
-  const noteStatusUnderSeed = (before: string, after: string) => {
-    if (!seedActive(model) || before === after) return
-    if (
-      after === `ready` ||
-      after === `error` ||
-      after === `crashed` ||
-      after === `cleaned-up`
-    ) {
-      note(`${after}-under-seed:${model.attached ? `attached` : `detached`}`)
-    }
   }
 
   let failure: { error: unknown } | undefined
   try {
-    check(-1)
-    for (const [step, next] of events.entries()) {
+    record(`start`, {
+      action: `start`,
+      before: source.status,
+      during: source.status,
+    })
+    for (const [index, next] of events.entries()) {
+      const checkpoint = `step ${index} (${next.type})`
       const before = source.status
+      const skip = () => observe(checkpoint, { skipped: true })
       if (next.type === `write`) {
-        if (before !== `loading` && before !== `ready`) continue
+        if (before !== `loading` && before !== `ready`) {
+          skip()
+          continue
+        }
         const present = source.has(next.key)
-        if (next.version === null && !present) continue
+        if (next.version === null && !present) {
+          skip()
+          continue
+        }
+        const value = { id: next.key, version: next.version ?? 0 }
+        if (next.version === null) provider.delete(next.key)
+        else provider.set(next.key, value)
         ops!.begin()
         ops!.write(
           next.version === null
             ? { type: `delete`, key: next.key }
-            : {
-                type: present ? `update` : `insert`,
-                value: { id: next.key, version: next.version },
-              },
+            : { type: present ? `update` : `insert`, value },
         )
         ops!.commit()
       } else if (next.type === `ready`) {
-        if (before !== `loading`) continue
+        if (before !== `loading`) {
+          skip()
+          continue
+        }
         ops!.markReady()
       } else if (next.type === `fail`) {
-        if (before !== `loading`) continue
+        if (before !== `loading`) {
+          skip()
+          continue
+        }
         ops!.fail(new Error(`first load failed`))
       } else if (next.type === `crash`) {
         if (before !== `loading` && before !== `ready` && before !== `error`) {
+          skip()
           continue
         }
         source._lifecycle.crash(new Error(`local storage closed`))
       } else if (next.type === `cleanup`) {
-        if (before === `cleaned-up`) continue
-        if (model.endedByFailure && failures.has(before)) {
-          note(`cleanup-after-failure-ended-seed`)
+        if (before === `cleaned-up`) {
+          skip()
+          continue
         }
         await source.cleanup()
       } else if (next.type === `restart`) {
-        if (before !== `cleaned-up`) continue
-        if (seedActive(model)) note(`restart-under-seed`)
+        if (before !== `cleaned-up`) {
+          skip()
+          continue
+        }
         source.startSyncImmediate()
       } else {
-        if (model.attached) continue
-        if (seedActive(model) && failures.has(before)) {
-          note(`attach-to-failure-under-seed`)
+        if (attached) {
+          skip()
+          continue
         }
-        model.attached = true
+        attached = true
         observer.subscribe(listener)
         // The consistency read useSyncExternalStore does after subscribing.
         lastRead = read()
       }
-      noteStatusUnderSeed(before, source.status)
-      advance(model, [before, source.status])
+      const during = source.status
       await settle()
-      advance(model, [source.status])
-      check(step)
+      record(checkpoint, { action: next.type, before, during })
     }
   } catch (error) {
     failure = { error }
@@ -410,84 +616,303 @@ async function runHistory(
 }
 
 // ---------------------------------------------------------------------------
-// Properties
+// Check
+// ---------------------------------------------------------------------------
+//
+// At every executed checkpoint the snapshot's status and flags are the owed
+// status, and its rows are the owed rows when the model claims them (law
+// `view`: laws 1-3). While attached, the snapshot a listener last read and a
+// granular listener's rebuilt rows equal the current snapshot (law
+// `announcement`: law 4). The trace must cover the start and every step; that
+// is judged last, so a driver error cannot hide an earlier violation.
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+
+function checkHistory(
+  { events }: History,
+  trace: ReadonlyArray<{ checkpoint: string; value: unknown }>,
+  { owed }: ReturnType<typeof hydrationModel>,
+) {
+  for (const { checkpoint, value } of trace) {
+    const record = value as StepRecord
+    if (`skipped` in record) continue
+    const { view, flags, lastRead, rebuilt } = record.output
+    const expected = owed.get(checkpoint)!
+    if (view.status !== expected.status)
+      return violation(
+        checkpoint,
+        `status ${view.status}, owed ${expected.status}`,
+        `view`,
+        { actual: view.status, expected: expected.status },
+      )
+    const owedFlags = {
+      isReady: expected.status === `ready`,
+      isLoadingError: expected.status === `error`,
+      isCrashed: expected.status === `crashed`,
+      isCleanedUp: expected.status === `cleaned-up`,
+    }
+    if (!same(flags, owedFlags))
+      return violation(
+        checkpoint,
+        `flags ${JSON.stringify(flags)}, owed ${JSON.stringify(owedFlags)}`,
+        `view`,
+        { actual: flags, expected: owedFlags },
+      )
+    if (expected.rows !== undefined && !same(view.rows, expected.rows))
+      return violation(
+        checkpoint,
+        `rows ${JSON.stringify(view.rows)}, owed ${JSON.stringify(expected.rows)}`,
+        `view`,
+        { actual: view.rows, expected: expected.rows },
+      )
+    if (!expected.attached) continue
+    if (!same(lastRead, view))
+      return violation(
+        checkpoint,
+        `a listener last read ${JSON.stringify(lastRead)}; the snapshot is ${JSON.stringify(view)} (unannounced change)`,
+        `announcement`,
+        { actual: lastRead, expected: view },
+      )
+    if (rebuilt !== undefined && !same(rebuilt, view.rows))
+      return violation(
+        checkpoint,
+        `granular rows ${JSON.stringify(rebuilt)}; the snapshot has ${JSON.stringify(view.rows)}`,
+        `announcement`,
+        { actual: rebuilt, expected: view.rows },
+      )
+  }
+  // Completeness last: a history whose driver threw keeps the violation
+  // found at a recorded checkpoint.
+  if (trace.length !== events.length + 1)
+    return violation(
+      `trace`,
+      `the driver recorded ${trace.length} checkpoints for ${events.length} steps`,
+      `trace`,
+    )
+  return pass
+}
+
+// ---------------------------------------------------------------------------
+// Property
 // ---------------------------------------------------------------------------
 
-/**
- * Fixed prefixes put each declared state within reach of every run budget;
- * the generated suffix explores what follows.
- */
-const prefixes: ReadonlyArray<Array<Event>> = [
-  [{ type: `attach` }, { type: `crash` }, { type: `cleanup` }],
-  [{ type: `attach` }, { type: `fail` }, { type: `cleanup` }],
-  [{ type: `crash` }, { type: `attach` }, { type: `cleanup` }],
-  [{ type: `attach` }, { type: `cleanup` }, { type: `restart` }],
-  [{ type: `cleanup` }, { type: `attach` }, { type: `ready` }],
+// Replays of the reported trace and its neighbors, in both modes. Each one
+// failed before the fix (see the coverage map entry for this owner).
+const rowA: Event = { type: `write`, key: `a`, version: 1 }
+const replays: ReadonlyArray<
+  [name: string, events: Array<StepSpec>, unseeded?: `also unseeded`]
+> = [
+  [
+    `shows and announces a crash under an active seed`,
+    [`attach`, `crash`, `cleanup`],
+  ],
+  [
+    `shows cleanup after a first-load failure instead of the stale error`,
+    [`attach`, `fail`, `cleanup`],
+  ],
+  [
+    `shows a crash that happened before it attached`,
+    [`crash`, `attach`, `cleanup`],
+  ],
+  // #2334 and the random campaign's seed 1779366423: the restarted sync run
+  // writes the row the observer showed before cleanup. The trailing `ready`
+  // judges the same rows again at a ready checkpoint.
+  [
+    `shows a row the restarted sync run rewrites after readiness ended the seed`,
+    [`attach`, `ready`, rowA, `cleanup`, `restart`, rowA, `ready`],
+    `also unseeded`,
+  ],
+  [
+    `shows a row the restarted sync run rewrites after a failure ended the seed`,
+    [`attach`, rowA, `fail`, `cleanup`, `restart`, rowA, `ready`],
+    `also unseeded`,
+  ],
 ]
-const prefixedHistory: fc.Arbitrary<History> = fc
-  .tuple(history, fc.option(fc.constantFrom(...prefixes), { freq: 2 }))
-  .map(([generated, prefix]) => ({
-    ...generated,
-    events: [...(prefix ?? []), ...generated.events],
-  }))
 
-describe(`LiveQueryObserver hydration seed under terminal statuses`, () => {
-  const reach = createOracleReach<ReachState>(
-    `live-query-observer.hydration-terminal`,
-    reachStates,
-  )
-  let historiesRan = false
-  afterAll(() => {
-    if (historiesRan) reach.assertReached()
-  })
+// What this oracle owns: the gap report judges every function in
+// src/live-query-observer.ts and DbClient.hydrate by this file's generated
+// hydration-terminal histories, which end a seed's sync run in every way. It
+// also judges CollectionSubscription.handleCollectionCleanup, where the
+// observer's `discardsRowsOnCleanup` drops the rows it showed before cleanup
+// (law 3's restart claim, #2334). The two kinds of entry differ. A whole-file
+// entry owns the functions defined in that file and nothing it refers to in
+// another file, so `src/live-query-observer.ts` alone never reached the
+// subscription. A `#function` entry owns that function's text, every function
+// defined inside it, and its static reference tree within the package: each
+// package function, method, or class its text refers to, then what those refer
+// to in turn, stopping at the package boundary (owners.mjs in @tanstack/oracles,
+// maintainer decisions 2026-11-05 and 2026-11-08). So this entry owns, through
+// that walk, the functions it reaches, including
+// CollectionSubscription.discardTruncateReplay,
+// CollectionSubscription.setReadyIfIdle, and cancelAcquisition. No Collection
+// subscription owner subscribes with the option.
 
-  it.each([20260, -88123])(
-    `generated histories refine the hydration model with fixed seed=%s`,
-    async (seed) => {
-      await fc.assert(
-        fc.asyncProperty(prefixedHistory, async (generated) => {
-          historiesRan = true
-          reach.beginHistory()
-          await runHistory(generated, reach)
+declareOracle({
+  owns: [
+    `src/live-query-observer.ts`,
+    `src/client.ts#DbClient.hydrate`,
+    `src/collection/subscription.ts#CollectionSubscription.handleCollectionCleanup`,
+  ],
+})
+
+oracleProperty({
+  id: `live-query-observer.hydration-terminal`,
+  law: {
+    statement: `While a hydration seed is active, the observer shows a Collection error or crashed status, attached or detached; an attached observer that sees a failure ends the seed, so a later cleanup shows the live Collection; cleanup and restart alone keep the seed as ready; after the seed ends, cleanup and restart show the live Collection, including a row the new sync run writes again; and every change visible to an attached observer is announced.`,
+    authority: `packages/db/src/query/live/ARCHITECTURE.md law 16; glossary "crash" and "cleanup"; the coverage-map decision that cleanup under a seed keeps the seed`,
+    limits: `A plain controlled Collection, not a live-query Collection; keys a..c, versions 0..3, up to ${MAX_EVENTS} steps; rows compared as sets; handoff timing, on-demand predicates and pending subset loads, streamed errors, and consumption belong to the focused tests in live-query-observer.test.ts.`,
+    owner: `Observer hydration under terminal statuses`,
+  },
+  histories: {
+    arbitrary: history,
+    states: reachStates,
+    runs: 100,
+    fixedSeeds: [20260, -88123],
+    constructed: [
+      {
+        name: `crash while attached, then cleanup`,
+        enters: [
+          `crashed-under-seed:attached`,
+          `cleanup-after-failure-ended-seed`,
+        ],
+        build: startSeededWith(`attach`, `crash`, `cleanup`),
+      },
+      {
+        name: `first-load failure while attached, then cleanup`,
+        enters: [
+          `error-under-seed:attached`,
+          `cleanup-after-failure-ended-seed`,
+        ],
+        build: startSeededWith(`attach`, `fail`, `cleanup`),
+      },
+      {
+        name: `crash before attach`,
+        enters: [`crashed-under-seed:detached`, `attach-to-failure-under-seed`],
+        build: startSeededWith(`crash`, `attach`, `cleanup`),
+      },
+      {
+        name: `first-load failure before attach`,
+        enters: [`error-under-seed:detached`, `attach-to-failure-under-seed`],
+        build: startSeededWith(`fail`, `attach`),
+      },
+      {
+        name: `cleanup and restart while attached`,
+        enters: [`cleaned-up-under-seed:attached`, `restart-under-seed`],
+        build: startSeededWith(`attach`, `cleanup`, `restart`),
+      },
+      {
+        name: `cleanup before attach`,
+        enters: [`cleaned-up-under-seed:detached`],
+        build: startSeededWith(`cleanup`, `attach`, `ready`),
+      },
+      {
+        name: `readiness while detached`,
+        enters: [`ready-under-seed:detached`],
+        build: startSeededWith(`ready`),
+      },
+      {
+        name: `readiness while attached`,
+        enters: [`ready-under-seed:attached`],
+        build: startSeededWith(`attach`, `ready`),
+      },
+      {
+        name: `rewrite a row after readiness, cleanup, and restart`,
+        enters: [`restart-rewrites-row-from-before-cleanup`],
+        build: rewriteAfterRestart(`ready`),
+      },
+      {
+        name: `rewrite a row after a failure, cleanup, and restart`,
+        enters: [`restart-rewrites-row-from-before-cleanup`],
+        build: rewriteAfterRestart(`fail`),
+      },
+      {
+        name: `reacquire an unseeded granular observer's demand on restart`,
+        enters: [
+          `restart-rewrites-row-from-before-cleanup`,
+          `restart-reacquires-row-from-before-cleanup`,
+        ],
+        build: rewriteAfterRestart(`ready`, {
+          seed: null,
+          mode: `granular`,
+          syncMode: `on-demand`,
         }),
-        { numRuns: oracleRuns(100), seed },
-      )
+      },
+    ],
+    fixed: ([`granular`, `wholesale`] as const).flatMap((mode) =>
+      ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
+        replays.flatMap(([name, events, unseeded]) =>
+          [[[`a`, 1]] as Array<[Key, number]>, null]
+            .filter((seed) => seed !== null || unseeded !== undefined)
+            .map((seed) => ({
+              name: `${mode} observer of an ${syncMode} source${seed ? `` : ` without a seed`} ${name}`,
+              history: { mode, syncMode, seed, events: events.map(toEvent) },
+            })),
+        ),
+      ),
+    ),
+  },
+  // Wrong answers the check must reject: a failure shown as `ready` under
+  // the seed (law 1), and a change the listener never heard about (law 4).
+  calibrations: [
+    {
+      name: `failure shown as ready`,
+      law: `view`,
+      corrupt: (trace) => {
+        const at = trace.findIndex(({ value }) => {
+          const record = value as StepRecord
+          return !(`skipped` in record) && failures.has(record.input.after)
+        })
+        if (at < 0) return undefined
+        return trace.map((entry, index) => {
+          if (index !== at) return entry
+          const record = entry.value as Extract<StepRecord, { input: unknown }>
+          return {
+            ...entry,
+            value: {
+              ...record,
+              output: {
+                ...record.output,
+                view: { ...record.output.view, status: `ready` },
+              },
+            },
+          }
+        })
+      },
     },
-    60_000,
-  )
-
-  it(`generated histories refine the hydration model with a random or replayed seed`, async () => {
-    await fc.assert(
-      fc.asyncProperty(prefixedHistory, async (generated) => {
-        historiesRan = true
-        reach.beginHistory()
-        await runHistory(generated, reach)
-      }),
-      oraclePropertyOptions(100),
-    )
-  }, 60_000)
-
-  // Replays of the reported trace and its neighbors, in both modes. Each one
-  // failed before the fix (see the coverage map entry for this owner).
-  const replays: ReadonlyArray<[string, Array<Event>]> = [
-    [
-      `shows and announces a crash under an active seed`,
-      [{ type: `attach` }, { type: `crash` }, { type: `cleanup` }],
-    ],
-    [
-      `shows cleanup after a first-load failure instead of the stale error`,
-      [{ type: `attach` }, { type: `fail` }, { type: `cleanup` }],
-    ],
-    [
-      `shows a crash that happened before it attached`,
-      [{ type: `crash` }, { type: `attach` }, { type: `cleanup` }],
-    ],
-  ]
-  for (const mode of [`granular`, `wholesale`] as const) {
-    it.each(replays)(`${mode} observer %s`, async (_name, events) => {
-      await runHistory({ mode, seed: [[`a`, 1]], events })
-    })
-  }
+    {
+      name: `unannounced change`,
+      law: `announcement`,
+      corrupt: (trace) => {
+        const at = trace.findIndex(({ value }) => {
+          const record = value as StepRecord
+          return (
+            !(`skipped` in record) &&
+            record.output.lastRead !== undefined &&
+            record.output.view.rows.length > 0
+          )
+        })
+        if (at < 0) return undefined
+        return trace.map((entry, index) => {
+          if (index !== at) return entry
+          const record = entry.value as Extract<StepRecord, { input: unknown }>
+          return {
+            ...entry,
+            value: {
+              ...record,
+              output: {
+                ...record.output,
+                lastRead: { ...record.output.lastRead!, rows: [] },
+              },
+            },
+          }
+        })
+      },
+    },
+  ],
+  model: hydrationModel,
+  reached: (_history, _trace, expected) => expected.reached,
+  driver: driveHistory,
+  check: checkHistory,
 })
 
 /**
@@ -636,6 +1061,7 @@ for (const mode of [`granular`, `wholesale`] as const)
         ? oracleReplayTest(it)
         : oracleReplayTest(it, property)
     test(`${mode} seeded ready-subset handoff (${campaign})`, async () => {
+      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach<string>(
         `${property}/${mode}/${campaign}`,
         [`ready while subset held`, `subset-only handoff`],
@@ -665,6 +1091,7 @@ for (const mode of [`granular`, `wholesale`] as const)
     })
   }
 declareOracle({
+  owns: [`src/live-query-observer.ts`, `src/client.ts#DbClient.hydrate`],
   grammar: [subsetHandoffArbitrary],
   check: [checkSubsetHandoff],
 })

@@ -11,6 +11,7 @@ import {
 } from '@tanstack/db'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../db/tests/oracle-config.js'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { withOracleCleanup } from '../../db/tests/utils'
 import { atMutationCheckpoint } from '../../db/tests/mutation-confirmation-support'
@@ -1646,7 +1647,11 @@ function checkPostHandlerRefetch(
   }
 }
 
+// What this oracle owns: the query collection's mutation confirmation, explicit
+// refetch application, fetch-record ownership and reacquisition (queryCollectionOptions
+// and the manual-sync write path it reaches).
 declareOracle({
+  owns: [`src/query.ts#queryCollectionOptions`],
   check: [
     checkMutationConfirmation,
     checkPostHandlerRefetch,
@@ -1701,6 +1706,7 @@ describe(`query collection ownership lifecycle`, () => {
     it.each(mutationHistories)(
       `refreshes only when the handler requests it: %j`,
       async (history) => {
+        oracleRoute(`case`)
         mutationReach.beginHistory()
         const { operation, confirmation, outcome, returned } = history
         const localReach = createOracleReach(`query.mutation-cuts`, [
@@ -1968,6 +1974,7 @@ describe(`query collection ownership lifecycle`, () => {
     it.each([`early-receipt`, `partial-rows`, `stale-waiter`] as const)(
       `rejects post-handler wrong observation: %s`,
       (fault) => {
+        oracleRoute(`calibration`)
         let model = createRefetchCallSettlementModel([`query`], true)
         model = reduceRefetchCallSettlement(model, {
           type: `accept-application`,
@@ -2003,6 +2010,7 @@ describe(`query collection ownership lifecycle`, () => {
     it.each(histories)(
       `waits for later application after handler $operation rejection:$reject`,
       async ({ operation, reject }) => {
+        oracleRoute(`case`)
         reach.beginHistory()
         const initial: Array<Item> = [
           { id: `peer`, category: `peer`, name: `Peer` },
@@ -2174,6 +2182,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`keeps an accepted empty-diff result pending until application`, () => {
+    oracleRoute(`case`)
     const initial: ExplicitRefetchApplicationModel = {
       calls: new Map(),
       publicValues: new Map([[`query`, `same`]]),
@@ -2214,6 +2223,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`retains separate outcomes for a retired caller and its successor`, () => {
+    oracleRoute(`case`)
     let model: ExplicitRefetchApplicationModel = {
       calls: new Map(),
       publicValues: new Map([[`query`, `initial`]]),
@@ -2279,6 +2289,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`rejects a fetch-boundary-only wrong-result control`, () => {
+    oracleRoute(`calibration`)
     let model: ExplicitRefetchApplicationModel = {
       calls: new Map(),
       publicValues: new Map([[`query`, `Optimistic`]]),
@@ -2312,6 +2323,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`rejects illegal explicit-refetch model histories`, () => {
+    oracleRoute(`calibration`)
     const started = reduceExplicitRefetchApplication(
       { calls: new Map(), publicValues: new Map() },
       {
@@ -2366,6 +2378,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`keeps a suppressed fetch failure pending for its accepted application`, () => {
+    oracleRoute(`case`)
     let model = createRefetchCallSettlementModel([`query`], false)
     model = reduceRefetchCallSettlement(model, {
       type: `accept-application`,
@@ -2393,6 +2406,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`excludes unrelated background applications from a refetch call`, () => {
+    oracleRoute(`case`)
     let model = createRefetchCallSettlementModel([`query`], true)
     model = reduceRefetchCallSettlement(model, {
       type: `accept-application`,
@@ -2428,6 +2442,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`preserves the result slot of a Query removed during refetch startup`, () => {
+    oracleRoute(`case`)
     let model = createRefetchCallSettlementModel([`first`, `second`], true)
     model = reduceRefetchCallSettlement(model, {
       type: `accept-application`,
@@ -2456,6 +2471,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`rejects fail-fast while an independent application remains pending`, () => {
+    oracleRoute(`case`)
     let model = createRefetchCallSettlementModel([`detail`, `list`], true)
     model = reduceRefetchCallSettlement(model, {
       type: `accept-application`,
@@ -2487,6 +2503,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`rejects a handler call that resolves before its Query fetch`, () => {
+    oracleRoute(`calibration`)
     const model: HandlerRefetchBoundaryModel = {
       fetch: `pending`,
       application: `unaccepted`,
@@ -2506,6 +2523,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`preserves every direct handler identity legacy replay coordinate`, () => {
+    oracleRoute(`case`)
     const historyKeys = handlerCollectionHistoryGrammar.map(
       ({ handlerKind, accessPath, legacyOperation }) =>
         `${handlerKind}:${accessPath}:${legacyOperation}`,
@@ -2536,6 +2554,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`rejects handler identity wrong-result controls`, () => {
+    oracleRoute(`calibration`)
     const history = handlerCollectionHistoryGrammar[0]!
     const expected = observeHandlerIdentity(history, 2)
     const mutants: Array<HandlerIdentityObservation> = [
@@ -2562,6 +2581,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`resolves a refetch with no tracked Query results`, async () => {
+    oracleRoute(`case`)
     const { collection, queryFn } = createOwnershipFixture({
       id: `explicit-refetch-empty-aggregate`,
       results: [],
@@ -2588,6 +2608,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`applies a successful on-demand refetch without Query listeners`, async () => {
+    oracleRoute(`case`)
     const before = { ...shared, name: `Before` }
     const after = { ...shared, name: `After` }
     const { collection } = createOwnershipFixture({
@@ -2635,6 +2656,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`skips a snapshotted Query removed while an earlier refetch starts`, async () => {
+    oracleRoute(`case`)
     const queryClient = createQueryClient()
     const first = { limit: 1 }
     const second = { limit: 2 }
@@ -2697,6 +2719,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`settles a suppressed fetch failure at the fetch boundary while a mutation persists`, async () => {
+    oracleRoute(`case`)
     const initial = { ...shared, name: `Initial` }
     const fetchError = new Error(`Explicit refetch fetch failed`)
     const queryClient = createQueryClient()
@@ -2783,6 +2806,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`waits for every Query result and preserves tracked-key order`, async () => {
+    oracleRoute(`case`)
     const firstRefresh = createDeferred<Array<Item>>()
     const secondRefresh = createDeferred<Array<Item>>()
     const refreshedDetail = { ...detailOnly, name: `Detail refreshed` }
@@ -2891,6 +2915,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`does not adopt a background application from the same Query`, async () => {
+    oracleRoute(`case`)
     const id = `explicit-refetch-excludes-background-application`
     const queryKey = [id] as const
     const initial = { ...shared, name: `Initial` }
@@ -3002,6 +3027,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`rejects before an independent accepted application settles`, async () => {
+    oracleRoute(`case`)
     const id = `explicit-refetch-fail-fast`
     const detail = { where: eq(new IR.PropRef([`category`]), `detail`) }
     const list = { where: eq(new IR.PropRef([`category`]), `list`) }
@@ -3105,6 +3131,7 @@ describe(`query collection ownership lifecycle`, () => {
   ])(
     `settles a $caseName accepted result at fetch and applies it after mutation`,
     async ({ id, initialName, authoritativeName }) => {
+      oracleRoute(`case`)
       const initial = { ...shared, name: initialName }
       const authoritative = { ...shared, name: authoritativeName }
       const { collection, queryClient, queryFn } = createOwnershipFixture({
@@ -3187,6 +3214,7 @@ describe(`query collection ownership lifecycle`, () => {
   )
 
   it(`settles an eager refetch at fetch while another collection refetches`, async () => {
+    oracleRoute(`case`)
     const queryClient = createQueryClient()
     const concurrentResult = createDeferred<Array<Item>>()
     const explicitResult = createDeferred<Array<Item>>()
@@ -3308,6 +3336,7 @@ describe(`query collection ownership lifecycle`, () => {
   )(
     `settles an external refetch at fetch with $schedule overlap (legacy replay: $legacyOperation)`,
     async ({ legacyOperation, schedule }) => {
+      oracleRoute(`case`)
       const initial = { ...shared, name: `Initial` }
       const authoritative = { ...shared, name: `Authoritative` }
       const refreshResult = createDeferred<Array<Item>>()
@@ -3424,6 +3453,7 @@ describe(`query collection ownership lifecycle`, () => {
   )(
     `settles an external refetch when mutation starts during persisted application preparation (legacy replay: $legacyOperation)`,
     async ({ legacyOperation }) => {
+      oracleRoute(`case`)
       const id = `external-${legacyOperation}-persisted-application-overlap`
       const queryHash = hashKey([id])
       const initial = { ...shared, name: `Initial` }
@@ -3533,6 +3563,7 @@ describe(`query collection ownership lifecycle`, () => {
   )
 
   it(`rejects a call-entry-only boundary mutant for refresh-first overlap`, () => {
+    oracleRoute(`calibration`)
     const history = mutationRefreshHistoryGrammar.find(
       ({ invocation, legacyOperation, schedule }) =>
         invocation === `external-handler-overlap` &&
@@ -3565,6 +3596,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`preserves every mutation refresh legacy replay coordinate`, () => {
+    oracleRoute(`case`)
     expect(mutationRefreshHistoryGrammar).toHaveLength(12)
     expect(
       new Set(
@@ -3592,6 +3624,7 @@ describe(`query collection ownership lifecycle`, () => {
   )(
     `settles a $invocation refetch at the fetch boundary (legacy replay: $legacyOperation)`,
     async ({ invocation, legacyOperation }) => {
+      oracleRoute(`case`)
       const id = `mutation-refresh-${invocation}-${legacyOperation}`
       const initial = { ...shared, name: `Initial` }
       const authoritative = { ...shared, name: `Authoritative` }
@@ -3702,6 +3735,7 @@ describe(`query collection ownership lifecycle`, () => {
   )(
     `settles a captured handler Collection refetch at the fetch boundary (legacy replay: $legacyOperation)`,
     async ({ legacyOperation }) => {
+      oracleRoute(`case`)
       const id = `captured-handler-refresh-${legacyOperation}`
       const initial = { ...shared, name: `Initial` }
       const authoritative = { ...shared, name: `Authoritative` }
@@ -3795,6 +3829,7 @@ describe(`query collection ownership lifecycle`, () => {
   )
 
   it(`does not schedule Collection work for a foreign Query`, async () => {
+    oracleRoute(`case`)
     const queryClient = createQueryClient()
     const baselineClient = createQueryClient()
     const first = createCollection(
@@ -3863,6 +3898,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`does not defer reverted fetch record retirement to a successor fetch`, async () => {
+    oracleRoute(`case`)
     const measureSuccessorFetchMicrotasks = async (
       cancelFirst: boolean,
     ): Promise<number> => {
@@ -3937,6 +3973,7 @@ describe(`query collection ownership lifecycle`, () => {
   it.each(handlerCollectionHistoryGrammar)(
     `preserves $handlerKind handler identity through $accessPath refetch (legacy replay: $legacyOperation)`,
     async (history) => {
+      oracleRoute(`case`)
       const { handlerKind, accessPath, legacyOperation } = history
       const initial = [
         { id: `first`, category: `shared`, name: `First` },
@@ -4143,6 +4180,7 @@ describe(`query collection ownership lifecycle`, () => {
   ])(
     `settles an application failure with throwOnError=$throwOnError`,
     async ({ throwOnError, expectedOutcome }) => {
+      oracleRoute(`case`)
       const initial = { ...shared, name: `Initial` }
       const invalid = { ...shared, name: `Invalid` }
       const applicationError = new Error(`Explicit refetch application failed`)
@@ -4220,6 +4258,7 @@ describe(`query collection ownership lifecycle`, () => {
   )
 
   it(`records a handler-phase application failure after fetch settlement`, async () => {
+    oracleRoute(`case`)
     const initial = { ...shared, name: `Initial` }
     const invalid = { ...shared, name: `Invalid` }
     const applicationError = new Error(`Handler application failed`)
@@ -4292,6 +4331,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`rejects silent fulfillment in the public result-settlement checker`, () => {
+    oracleRoute(`calibration`)
     const deferredOperation = `deferred`
     const deferred = advanceResultSettlementModel(
       startResultSettlementModel(deferredOperation),
@@ -4358,6 +4398,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`fulfills a public refetch after applying a valid empty result`, async () => {
+    oracleRoute(`case`)
     const id = `empty-result-settlement`
     const queryClient = createQueryClient()
     const queryFn = vi
@@ -4403,6 +4444,7 @@ describe(`query collection ownership lifecycle`, () => {
   it.each([`fulfilled`, `rejected`] as const)(
     `keeps a same-result reentrant $receiptOutcome receipt attached to its refetch`,
     async (receiptOutcome) => {
+      oracleRoute(`case`)
       const id = `same-result-reentrant-application`
       const initial = { ...shared, name: `Initial` }
       const updated = { ...shared, name: `Updated` }
@@ -4581,6 +4623,7 @@ describe(`query collection ownership lifecycle`, () => {
   ] as const)(
     `rejects a public refetch whose successful Query result has an invalid $invalidShape shape, throwOnError=$throwOnError`,
     async ({ throwOnError, invalidResult, diagnostic }) => {
+      oracleRoute(`case`)
       const id = `invalid-result-settlement`
       const queryClient = createQueryClient()
       const queryFn = vi
@@ -4647,6 +4690,7 @@ describe(`query collection ownership lifecycle`, () => {
   )
 
   it(`keeps a deferred public refetch pending until its replacement applies`, async () => {
+    oracleRoute(`case`)
     const id = `deferred-result-settlement`
     const barrier = createDeferred<void>()
     const initial = { ...shared, name: `Initial` }
@@ -4724,6 +4768,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`cancels a deferred public refetch when cleanup retires it`, async () => {
+    oracleRoute(`case`)
     const id = `deferred-result-cleanup`
     const barrier = createDeferred<void>()
     const queryClient = createQueryClient()
@@ -4781,6 +4826,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`does not reuse an invalid result rejection for a later valid refetch`, async () => {
+    oracleRoute(`case`)
     const id = `recovered-result-settlement`
     const queryHash = hashKey([id])
     const persistedScan =
@@ -4849,6 +4895,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`does not reuse an eager initial rejection when a refetch applies a valid result`, async () => {
+    oracleRoute(`case`)
     const id = `eager-recovered-result-settlement`
     const invalidResult = 42 as unknown as Array<Item>
     const recovered = { ...shared, name: `Recovered` }
@@ -4921,6 +4968,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`rejects an invalid retained revalidation before its persisted baseline loads`, async () => {
+    oracleRoute(`case`)
     const id = `retained-invalid-result-settlement`
     const queryHash = hashKey([id])
     const persistedScan =
@@ -4987,6 +5035,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`keeps refetches pending when an older barrier refresh reaches a newer barrier`, async () => {
+    oracleRoute(`case`)
     const id = `overlapping-defer-generations`
     const barrierA = createDeferred<void>()
     const barrierB = createDeferred<void>()
@@ -5123,6 +5172,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`settles a fresh applied refetch independently of an older deferred result`, async () => {
+    oracleRoute(`case`)
     const id = `independent-refetch-settlement`
     const barrier = createDeferred<void>()
     const initial = { ...shared, name: `Initial` }
@@ -5224,6 +5274,7 @@ describe(`query collection ownership lifecycle`, () => {
   it.each(reacquisitionHistories)(
     `keeps a reacquired lease's result (staleTime $staleTime, refetch $refetch, settles $settles, peers $peers, rows $rows)`,
     async (history) => {
+      oracleRoute(`case`)
       const id = `reacquired-lease-${history.staleTime}-${history.refetch}-${history.settles}-${history.peers}-${history.rows}`
       const detail = categorySubset(`detail`)
       const peerSubsets = [
@@ -5336,6 +5387,7 @@ describe(`query collection ownership lifecycle`, () => {
   it.each(publishedOwnerHistories)(
     `publishes only active owners when a lease claims a released row (claims $claims, peer $peer, reacquired $reacquired)`,
     async (history) => {
+      oracleRoute(`case`)
       const id = `published-owners-${history.claims}-${history.peer}-${history.reacquired}`
       const subset = (category: string): LoadSubsetOptions => ({
         where: new IR.Func(`in`, [
@@ -5480,6 +5532,7 @@ describe(`query collection ownership lifecycle`, () => {
   ])(
     `keeps server rows a direct write did not touch when an older fetch settles: %s`,
     async (cut) => {
+      oracleRoute(`case`)
       type Row = { id: string; value: string }
       const id = `older-fetch-merge-${cut}`
       let server: Array<Row> =
@@ -5621,7 +5674,7 @@ describe(`query collection ownership lifecycle`, () => {
    * those indices to the documented static on-demand Query key for metadata
    * comparison. It compares public rows and exact accepted owner identities
    * after each action and release; forgetting ownership on any write fails the
-   * update lane, while retaining a deleted lifetime fails the reinsert lane.
+   * update grammar, while retaining a deleted lifetime fails the reinsert grammar.
    */
   it.each(
     ([1, 2] as const).flatMap((ownerCount) =>
@@ -5639,7 +5692,10 @@ describe(`query collection ownership lifecycle`, () => {
     ),
   )(
     `tracks a direct row lifetime through $history with $ownerCount owners and metadata=$withMetadata`,
-    runDirectRowLifetimeHistory,
+    (history) => {
+      oracleRoute(`case`)
+      return runDirectRowLifetimeHistory(history)
+    },
   )
 
   /**
@@ -5657,7 +5713,7 @@ describe(`query collection ownership lifecycle`, () => {
    * and subset release it compares public rows with the reference. A fetched
    * cached result needs no request; a local cache edit with no later fetch
    * requires one to establish authority. The inverse order rejects blindly
-   * trusting any cached result; the cache-edit lanes reject mistaking
+   * trusting any cached result; the cache-edit grammars reject mistaking
    * setQueryData for a remote success.
    */
   it.each(
@@ -5675,7 +5731,10 @@ describe(`query collection ownership lifecycle`, () => {
     ),
   )(
     `orders shared fetches, writes, and cache edits before acquisition: $order/$laterWrite/cache=$cacheEdit/refetch=$finalRefetch`,
-    runDirectWriteOrderHistory,
+    (history) => {
+      oracleRoute(`case`)
+      return runDirectWriteOrderHistory(history)
+    },
   )
 
   /**
@@ -5725,10 +5784,14 @@ describe(`query collection ownership lifecycle`, () => {
     },
   ])(
     `orders overlapping subset values and owners: existing=$existingOwner/newer-first=$settleNewerFirst/write=$directWrite/equal=$sameValue`,
-    runOverlappingSubsetHistory,
+    (history) => {
+      oracleRoute(`case`)
+      return runOverlappingSubsetHistory(history)
+    },
   )
 
   it(`does not rescan a stable empty persisted baseline on retained reacquisition`, async () => {
+    oracleRoute(`case`)
     const id = `empty-persisted-baseline-work`
     const queryHash = hashKey([id])
     const scanPersistedRows = vi.fn(() => Promise.resolve([]))
@@ -5765,6 +5828,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`scans a cold durable owner that appeared after an empty sync run`, async () => {
+    oracleRoute(`case`)
     const id = `cold-owner-after-empty-baseline`
     const queryHash = hashKey([id])
     const hotStorage = createOwnershipStorage()
@@ -5801,6 +5865,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it(`rejects a superseded accepted result while publishing its successor`, async () => {
+    oracleRoute(`case`)
     const id = `superseded-retained-scan`
     const queryKey = [id] as const
     const queryHash = hashKey(queryKey)

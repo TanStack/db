@@ -11,7 +11,7 @@ import { createCollection } from '@tanstack/db'
 import { queryCollectionOptions } from '../src/query'
 import { createDeferred } from '../../db/src/deferred'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { oracleReplayTest } from '../../db/tests/oracle-config'
+import { oracleReplayTest, oracleRoute } from '../../db/tests/oracle-config'
 import {
   checkDocumentedMutation,
   documentedMutationHistories,
@@ -33,6 +33,7 @@ afterAll(() => reach.finish())
 oracleReplayTest(test).each(histories)(
   `runs the actual documented handler: $id`,
   async (history) => {
+    oracleRoute(`case`)
     reach.begin(history.id)
     await runDocumentedMutation(
       history,
@@ -108,7 +109,11 @@ oracleReplayTest(test).each(histories)(
   },
 )
 
+// What this oracle owns: the documented Query handlers run through
+// queryCollectionOptions, whose mutation confirmation and refetch wrappers the
+// documentation grammar judges.
 declareOracle({
+  owns: [`src/query.ts#queryCollectionOptions`],
   check: [checkDocumentedMutation],
   grammar: [documentedMutationHistories],
 })

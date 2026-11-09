@@ -732,7 +732,7 @@ These operations:
 - In on-demand mode, patch changed keys already present in active raw or directly selected Query cache arrays when no other Collection owns that Query. Remove inactive matching-prefix entries when no other Collection or observer retains them, without refetching
 
 The promise does not wait for a separately requested Query refetch. If a handler returns before it writes the server response, its optimistic state drops and the row shows the previous server value until the response arrives.
-An explicit `utils.refetch()` after a direct write may cancel an older request for the same Query key. Collection refetch callers follow the replacement, but a caller using `queryClient.fetchQuery()` on that key can receive Query Core's `CancelledError`. Avoid sharing exact Query keys with callers that require their original request to settle normally.
+An explicit `utils.refetch()` after a direct write may cancel an older request for the same Query key. Collection refetch callers follow the replacement. With Query Core 5.107.1, `queryClient.fetchQuery()` callers also follow a replacement after silent cancellation. Earlier supported Query Core versions can reject those callers with `CancelledError`. The raw `Query.promise` retains its cancellation behavior. Avoid sharing exact Query keys with callers that require the original request's result.
 After Collection cleanup starts, direct writes fail with `SyncNotInitializedError` until a new sync run starts.
 
 ### Batch Operations

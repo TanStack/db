@@ -10,7 +10,7 @@
  * portable error-object identity. The fixture supplies native SSR, JSON
  * transport and hydrate(); construction and pre-effects record the two public
  * cuts. A failure is the provider's fail() before readiness, a loading error
- * (`isLoadingError`). This lane does not model throwing provider callbacks,
+ * (`isLoadingError`). This grammar does not model throwing provider callbacks,
  * which crash the Collection (`isCrashed`), or Suspense.
  */
 import { TextEncoder } from 'node:util'
@@ -24,9 +24,12 @@ import {
   ssrRuntimeErrorHistoryArbitrary,
 } from '../../db/tests/ssr-snapshot-admission-oracle'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -218,27 +221,35 @@ async function checkRuntimeHistory(
 
 // checkRuntimeHistory compares the server view, the browser's first hydration
 // view and its committed view with the shared runtime model's expected views.
-declareOracle({ check: [checkRuntimeHistory] })
+declareOracle({
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
+  check: [checkRuntimeHistory],
+})
 
 describe(`Svelte SSR runtime errors`, () => {
   for (const history of ssrRuntimeErrorExamples)
     it.skipIf(oracleReplayRequested())(
       `runtime ${history.serverOutcome}/${history.browserOutcome} preload=${history.browserPreload} cause=${history.definedError}`,
-      () => checkRuntimeHistory(history, makeRuntimeReach()),
+      () => {
+        oracleRoute(`case`)
+        return checkRuntimeHistory(history, makeRuntimeReach())
+      },
     )
   const runCampaign = async (campaign: `fixed` | `random`) => {
     const reach = makeRuntimeReach()
     try {
+      const parameters = {
+        ...(campaign === `fixed`
+          ? oracleFixedSeed(2229, { numRuns: oracleRuns(64) })
+          : oraclePropertyOptions(64, `svelte.ssr-runtime-errors`)),
+        examples: ssrRuntimeErrorExamples.map((history) => [history]),
+      }
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(ssrRuntimeErrorHistoryArbitrary, (history) =>
           checkRuntimeHistory(history, reach),
         ),
-        {
-          ...(campaign === `fixed`
-            ? { numRuns: oracleRuns(64), seed: 2229 }
-            : oraclePropertyOptions(64, `svelte.ssr-runtime-errors`)),
-          examples: ssrRuntimeErrorExamples.map((history) => [history]),
-        },
+        parameters,
       )
       reach.assertReached()
     } finally {

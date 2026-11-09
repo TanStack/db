@@ -10,6 +10,7 @@ import {
 } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import {
   DISK_ROW,
   REMOTE_FAILURE,
@@ -342,6 +343,7 @@ describe(`persisted readiness oracle`, () => {
         [`${effects}: ${describe_(events)}`, events, effects] as const,
     ),
   )(`%s`, async (name, events, effects) => {
+    oracleRoute(`case`)
     const source = networkFirst(`network-first-${name}`)
     if (effects === `throwing`) throwOnReady(source.collection)
     const live = createLiveQueryCollection((q) =>
@@ -424,4 +426,8 @@ function describe_(events: ReadonlyArray<Event>): string {
     .join(` > `)
 }
 
-declareOracle({ model: [expected], grammar: [histories] })
+declareOracle({
+  owns: [`src/persisted.ts`],
+  model: [expected],
+  grammar: [histories],
+})

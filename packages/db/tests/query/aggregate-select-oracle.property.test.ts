@@ -37,9 +37,12 @@ import {
 } from '../../src/errors.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRandomParameters,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
@@ -170,10 +173,12 @@ import { declareOracle } from '../oracle-declaration.js'
  * differ. Each campaign first runs twelve complete structural histories through
  * this same model, driver, and comparison. They guarantee the 21 initial
  * premises, including string ordering, independently of the seed, with no
- * mutations, shadowed alias, or union. A separate reach requires the 160
+ * mutations, shadowed alias, or union. A separate reach requires the
  * generated histories themselves to enter those states and the mutation and
- * route checkpoints below. Their coverage is sampled: a miss fails with the
- * selected campaign seed and counts, rather than borrowing structural reach.
+ * route checkpoints below. A generated prefix constructs one history for each
+ * structural family, varying literals, order direction and legal mutations.
+ * The remaining 160 histories explore the broad grammar. Neither generated
+ * reach nor structural reach can borrow the other's observations.
  *
  * Limits: one parent field (`x`) and one source field (`v`); groups by one,
  * two, or three keys; numbers and string keys only. A boolean, Date, `NaN`,
@@ -1681,6 +1686,50 @@ const structuralHistories = [
 const examples = structuralHistories.map((entry) => [entry] as [History])
 const structuralInputs = new Set(structuralHistories)
 
+/**
+ * Required premises are constructive, rather than a lottery at campaign end.
+ * Each family varies its authored literal, ordering direction and source/parent
+ * writes. The final family also crosses union and shadowed-alias boundaries.
+ * These generated examples use the campaign seed and the ordinary comparison;
+ * they add to the broad run budget and remain available to seed/path replay.
+ */
+const requiredHistories = fc.tuple(
+  ...structuralHistories.map((template) =>
+    fc
+      .record({
+        value: literal,
+        direction: fc.constantFrom(`asc` as const, `desc` as const),
+        route: fc.constantFrom(`b`, `A`),
+        shadow: fc.boolean(),
+        union: fc.boolean(),
+        tail: fc.array(step, { maxLength: 2 }),
+      })
+      .map(({ value, direction, route, shadow, union, tail }): History => {
+        const vary = (s: Shape): Shape => ({
+          ...s,
+          fields: { ...s.fields, generated: { k: `lit`, n: value } },
+          orderBy: s.orderBy?.map((term) => ({ ...term, dir: direction })),
+        })
+        return {
+          ...template,
+          top: vary(template.top),
+          nested: vary(template.nested),
+          shadow: template.grouping === `triple` || shadow,
+          union:
+            template.grouping === `triple` ||
+            (template.top.include === undefined && union),
+          steps: [
+            { t: `parent`, id: 1, x: value },
+            { t: `insert`, k: route, v: value },
+            { t: `update`, pick: 0, k: route, v: value },
+            { t: `delete`, pick: 0 },
+            ...tail,
+          ],
+        }
+      }),
+  ),
+)
+
 /** The states the operator laws need; each campaign must reach all of them. */
 const reachStates = [
   `bare include: field`,
@@ -1736,6 +1785,18 @@ async function runCampaign(
     [...reachStates, ...generatedCheckpoints],
   )
   try {
+    const generatedExamples = fc
+      .sample(requiredHistories, { seed: parameters.seed, numRuns: 1 })[0]!
+      .map((entry) => [entry] as [History])
+    const campaignParameters = {
+      ...parameters,
+      examples: [...parameters.examples, ...generatedExamples],
+      numRuns:
+        parameters.path === undefined
+          ? parameters.numRuns + generatedExamples.length
+          : parameters.numRuns,
+    }
+    oracleRoute(oracleRouteOf(campaignParameters))
     await fc.assert(
       fc.asyncProperty(history, async (entry) => {
         const fixed = structuralInputs.has(entry)
@@ -1743,7 +1804,7 @@ async function runCampaign(
         reach.beginHistory({ fixed })
         await runHistory(entry)
       }),
-      parameters,
+      campaignParameters,
     )
     structuralReach.assertReached()
     generatedReach.assertReached()
@@ -1769,9 +1830,13 @@ async function runCampaign(
 // `modelGroup` and `modelError`. Generated histories, structural examples, and
 // existing model replays use this same check.
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [runHistory],
   model: [modelGroup, modelError],
-  grammar: [history],
+  grammar: [history, requiredHistories],
 })
 
 describe(`aggregate select shapes`, () => {
@@ -1779,14 +1844,19 @@ describe(`aggregate select shapes`, () => {
     `match the model across generated shapes (fixed campaign)`,
     async () => {
       // Keep the literal budget/seed binding visible to the run-budget audit.
-      const options = { numRuns: oracleRuns(160), seed: 2094 }
+      // runCampaign registers the route of the parameters, which declare the
+      // seed fixed.
+      const options = oracleFixedSeed(2094, { numRuns: oracleRuns(160) })
       await runCampaign(
         `fixed`,
-        oracleRandomParameters(
-          options.numRuns,
+        oracleFixedSeed(
           options.seed,
-          undefined,
-          examples,
+          oracleRandomParameters(
+            options.numRuns,
+            options.seed,
+            undefined,
+            examples,
+          ),
         ),
       )
     },
@@ -1802,9 +1872,10 @@ describe(`aggregate select shapes`, () => {
     },
   )
 
-  // Pinned replay of a review counterexample: a grouped select value that
+  // Fixed regression of a review counterexample: a grouped select value that
   // holds the group key inside a function must read the group's key.
   oracleReplayTest(it)(`reads the group key inside a function`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory({
       top: {
         fields: { f0: { k: `add`, a: { k: `lit`, n: 0 }, b: { k: `key` } } },
@@ -1814,9 +1885,10 @@ describe(`aggregate select shapes`, () => {
     })
   })
 
-  // Pinned replay: a published row keeps the select's field order, also
+  // Fixed regression: a published row keeps the select's field order, also
   // when a group key comes before a plain aggregate.
   oracleReplayTest(it)(`keeps the select's field order`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory({
       top: {
         fields: {
@@ -1829,11 +1901,12 @@ describe(`aggregate select shapes`, () => {
     })
   })
 
-  // Pinned replay of a generated counterexample: an aggregate query without
+  // Fixed regression of a generated counterexample: an aggregate query without
   // groupBy whose select wraps its only aggregate still accepts HAVING.
   oracleReplayTest(it)(
     `accepts HAVING beside a wrapped aggregate without groupBy`,
     async () => {
+      oracleRoute(`fixed history`)
       await runHistory({
         top: {
           fields: {
@@ -1856,11 +1929,12 @@ describe(`aggregate select shapes`, () => {
     },
   )
 
-  // Pinned replay: a parent field stays legal when the include's source
+  // Fixed regression: a parent field stays legal when the include's source
   // shadows the parent alias.
   oracleReplayTest(it)(
     `reads a parent field under a shadowing child alias`,
     async () => {
+      oracleRoute(`fixed history`)
       await runHistory({
         top: { fields: { f0: { k: `agg`, fn: `count` } } },
         nested: {

@@ -4,6 +4,7 @@ import { createDeferred } from '../src/deferred.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { where } from './collection-subscription-reentrancy-fixture.js'
 import { reentrantSnapshotHistories } from './collection-subscription-lifecycle-grammar-oracle.js'
+import { oracleRoute } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import type { LoadSubsetOptions } from '../src/types.js'
 
@@ -55,12 +56,19 @@ function expectSnapshotReentryOutcome(observed: {
   )
 }
 
-declareOracle({ check: [expectSnapshotReentryOutcome] })
+// What this oracle owns: the gap report judges the snapshot request and its
+// release on a subscription, in subscription.ts, by this file's tests, when a
+// callback reenters with a demand-retiring action.
+declareOracle({
+  owns: [`src/collection/subscription.ts`],
+  check: [expectSnapshotReentryOutcome],
+})
 
 describe(`Collection subscription callback reentry oracle`, () => {
   it.each(reentrantSnapshotHistories)(
     `stops a direct snapshot after $phase calls $action`,
     async ({ phase, action }) => {
+      oracleRoute(`case`)
       let reentries = 0
       let armSnapshotReentry = false
       const threshold = {

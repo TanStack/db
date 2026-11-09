@@ -42,7 +42,7 @@ Defined in: [packages/db/src/query/ir.ts:267](https://github.com/TanStack/db/blo
 
 ###### processGroupBy
 
-(`pipeline`, `groupByClause`, `valueIdentity`, `isSourceRef`, `havingClauses?`, `selectClause?`, `fnHavingClauses?`, `aggregateCollectionId?`, `mainSource?`, `sanitizeCallbackRows`) => [`NamespacedAndKeyedStream`](../../../../type-aliases/NamespacedAndKeyedStream.md)
+(`pipeline`, `groupByClause`, `valueIdentity`, `isSourceRef`, `havingClauses?`, `selectClause?`, `fnHavingClauses?`, `mainSource?`, `sanitizeCallbackRows`) => [`NamespacedAndKeyedStream`](../../../../type-aliases/NamespacedAndKeyedStream.md)
 
 ###### replaceAggregatesByRefs
 
@@ -101,7 +101,7 @@ Defined in: [packages/db/src/query/ir.ts:271](https://github.com/TanStack/db/blo
 #### processGroupBy()
 
 ```ts
-processGroupBy: (pipeline, groupByClause, valueIdentity, isSourceRef, havingClauses?, selectClause?, fnHavingClauses?, aggregateCollectionId?, mainSource?, sanitizeCallbackRows) => NamespacedAndKeyedStream;
+processGroupBy: (pipeline, groupByClause, valueIdentity, isSourceRef, havingClauses?, selectClause?, fnHavingClauses?, mainSource?, sanitizeCallbackRows) => NamespacedAndKeyedStream;
 ```
 
 Processes the GROUP BY clause with optional HAVING and SELECT
@@ -138,10 +138,6 @@ Whether a ref reads a field of the query's own rows.
 ###### fnHavingClauses?
 
 (`row`) => `any`[]
-
-###### aggregateCollectionId?
-
-`string`
 
 ###### mainSource?
 

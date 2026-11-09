@@ -14,6 +14,11 @@ import {
   createBrowserWASQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
+import {
+  oracleFixedSeed,
+  oracleRoute,
+  oracleRouteOf,
+} from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
 import {
@@ -105,7 +110,7 @@ function coordinatorOracleCampaigns(
   return [
     {
       mode: `fixed`,
-      parameters: { numRuns: RUNS, seed: FIXED_SEED },
+      parameters: oracleFixedSeed(FIXED_SEED, { numRuns: RUNS }),
     },
     { mode: `random`, parameters: { numRuns: RUNS } },
   ]
@@ -185,7 +190,7 @@ Reach, challenge, replay, cleanup, and limits:
   checker rejects an unowned apply. Every production-path test records a
   reached checkpoint before comparing the independent ledger.
 - Each generated property uses the same generator, driver, observations, and
-  run budget in a retained fixed-seed lane and a seedless random lane. Replay
+  run budget in a retained fixed-seed campaign and a seedless random campaign. Replay
   registers only the requested property when
   TANSTACK_DB_COORDINATOR_ORACLE_{PROPERTY,SEED,PATH} are supplied together;
   RUNS may adjust the shared budget. The thrown report retains the first
@@ -320,6 +325,7 @@ async function observeOwnerEntryOrResponse(
 
 describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
   it(`posts the callback-bearing subset witness as clone-safe wire data`, async () => {
+    oracleRoute(`fixed history`)
     const decoded: Array<SemanticValue> = []
     const leaderAdapter = createRecordingAdapter({
       id: `leader`,
@@ -413,6 +419,7 @@ describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
   })
 
   it(`calibrates the clone checker against safe and function-valued payloads`, () => {
+    oracleRoute(`calibration`)
     const safe = {
       collectionId: `alpha`,
       where: { type: `eq`, field: `group`, value: `kept` },
@@ -444,6 +451,7 @@ describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
   })
 
   it(`calibrates acknowledgement checks against entry-only and false-success faults`, () => {
+    oracleRoute(`calibration`)
     const expected = subsetSemantics(complexSubsetDemand(false))
     const allowed: SubsetAckTrace = {
       ownerInvocation: `coordinator`,
@@ -474,6 +482,7 @@ describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
   })
 
   it(`acknowledges a follower subset only after the leader source completed it`, async () => {
+    oracleRoute(`fixed history`)
     const upstreamEvents: Array<{
       phase: `entered` | `completed`
       semantics: SemanticValue
@@ -643,7 +652,7 @@ describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
         ),
         acknowledgedAfterResponseDelivery: acknowledged,
       }
-      // D13 refinement: one comparator owns both the production verdict and hostile
+      // D13 refinement: one comparator owns both the production verdict and mutant
       // entry-only/false-success calibrations above.
       expect(subsetAckViolations(trace)).toEqual([])
     }, [
@@ -916,6 +925,7 @@ function remoteLeaseHistoryViolations(
 
 describe(`remote subset ownership lease oracle`, () => {
   it(`calibrates collection-scoped acquisition identity against a global-id mutant`, () => {
+    oracleRoute(`calibration`)
     const expected: CollectionScopedLeaseSnapshot = {
       alpha: { loads: 1, unloads: 0, active: 1 },
       beta: { loads: 1, unloads: 0, active: 1 },
@@ -933,6 +943,7 @@ describe(`remote subset ownership lease oracle`, () => {
   })
 
   it(`keeps reused option identities independent per collection across bounded histories`, async () => {
+    oracleRoute(`fixed history`)
     type Action = {
       kind: `ensure` | `release`
       collectionId: `alpha` | `beta`
@@ -1074,6 +1085,7 @@ describe(`remote subset ownership lease oracle`, () => {
   })
 
   it(`retains the outer Collection acquisition across leader takeover and releases both owner acquisition leases exactly`, async () => {
+    oracleRoute(`fixed history`)
     type Todo = { id: string; title: string }
     const firstOwner = new RemoteLeaseOwnerLedger()
     const secondOwner = new RemoteLeaseOwnerLedger()
@@ -1206,27 +1218,28 @@ describe(`remote subset ownership lease oracle`, () => {
   })
 
   it(`calibrates the lease checker against leak, missing replay, and inexact release mutants`, () => {
+    oracleRoute(`calibration`)
     expect(
       remoteLeaseTakeoverViolations(expectedRemoteLeaseTakeoverTrace),
     ).toEqual([])
-    const hostile: RemoteLeaseTakeoverTrace = structuredClone(
+    const mutant: RemoteLeaseTakeoverTrace = structuredClone(
       expectedRemoteLeaseTakeoverTrace,
     )
-    hostile.retiredOwnerAfterTakeover = {
+    mutant.retiredOwnerAfterTakeover = {
       loads: 1,
       unloads: 0,
       active: 1,
       exactUnloads: true,
     }
-    hostile.newOwnerAfterTakeover = {
+    mutant.newOwnerAfterTakeover = {
       loads: 0,
       unloads: 0,
       active: 0,
       exactUnloads: true,
     }
-    hostile.newOwnerAfterRelease.exactUnloads = false
+    mutant.newOwnerAfterRelease.exactUnloads = false
     expect(
-      remoteLeaseTakeoverViolations(hostile).map(
+      remoteLeaseTakeoverViolations(mutant).map(
         ({ checkpoint, field }) => `${checkpoint}:${field}`,
       ),
     ).toEqual([
@@ -1255,6 +1268,21 @@ describe(`remote subset ownership lease oracle`, () => {
     let run = 0
 
     try {
+      const campaignParameters = {
+        ...campaign.parameters,
+        examples: [
+          [
+            {
+              siblingCount: 2,
+              releasePrefix: 1,
+              identical: true,
+              duplicateRelease: true,
+              reverseFinalRelease: true,
+            },
+          ],
+        ],
+      }
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(remoteLeaseHistoryArbitrary, async (history) => {
           const firstOwner = new RemoteLeaseOwnerLedger()
@@ -1455,20 +1483,7 @@ describe(`remote subset ownership lease oracle`, () => {
           )
           if (semanticFailure !== NO_PRIMARY_FAILURE) throw semanticFailure
         }),
-        {
-          ...campaign.parameters,
-          examples: [
-            [
-              {
-                siblingCount: 2,
-                releasePrefix: 1,
-                identical: true,
-                duplicateRelease: true,
-                reverseFinalRelease: true,
-              },
-            ],
-          ],
-        },
+        campaignParameters,
       )
     } catch (error) {
       propertyFailure = error
@@ -1568,6 +1583,7 @@ async function readRawCollectionSnapshot(
 
 describe(`per-collection adapter and SQLite-state oracle`, () => {
   it(`preserves alpha rows, schema, and reset epoch when beta registers a different adapter`, async () => {
+    oracleRoute(`fixed history`)
     let directory: string | undefined
     let database: BrowserWASQLiteDatabase | undefined
     let coordinator: BrowserCollectionCoordinator | undefined
@@ -1663,6 +1679,7 @@ describe(`per-collection adapter and SQLite-state oracle`, () => {
   })
 
   it(`initializes one fresh collection safely across matching adapter instances`, async () => {
+    oracleRoute(`fixed history`)
     let directory: string | undefined
     let database: BrowserWASQLiteDatabase | undefined
 
@@ -1736,7 +1753,8 @@ describe(`per-collection adapter and SQLite-state oracle`, () => {
     ])
   })
 
-  it(`calibrates SQLite-state and fresh-registry checks against hostile results`, () => {
+  it(`calibrates SQLite-state and fresh-registry checks against mutant results`, () => {
+    oracleRoute(`calibration`)
     const expected: RawCollectionSnapshot = {
       registryRowCount: 1,
       schemaVersion: 11,
@@ -2006,6 +2024,7 @@ async function requestBothCollections(
 
 describe(`generated collection-route histories`, () => {
   it(`calibrates collection-key comparison against one peer-routed apply`, () => {
+    oracleRoute(`calibration`)
     const expected: Array<RoutedApply> = [
       {
         phase: `initial-owner`,
@@ -2071,6 +2090,7 @@ describe(`generated collection-route histories`, () => {
   })
 
   it(`routes every adapter-bound RPC by collection before and after leadership transfer`, async () => {
+    oracleRoute(`fixed history`)
     const makePullResult = (
       marker: string,
       latestRowVersion: number,
@@ -2335,6 +2355,7 @@ describe(`generated collection-route histories`, () => {
       NO_PRIMARY_FAILURE
 
     try {
+      oracleRoute(oracleRouteOf(campaign.parameters))
       await fc.assert(
         fc.asyncProperty(routingHistoryArbitrary, async (history) => {
           const plan = routingGrammarPlan(history)
@@ -2591,6 +2612,7 @@ function findUnownedWrites(
 
 describe(`sync-ingested write ownership oracle`, () => {
   it(`applies a source commit through the elected persistence owner after leadership changes`, async () => {
+    oracleRoute(`fixed history`)
     type Todo = { id: string; title: string }
     type SourceParams = Parameters<SyncConfig<Todo, string>[`sync`]>[0]
 
@@ -2703,6 +2725,7 @@ describe(`sync-ingested write ownership oracle`, () => {
   })
 
   it(`calibrates the owner checker against one bypass and one owned write`, () => {
+    oracleRoute(`calibration`)
     expect(
       findUnownedWrites(
         [
@@ -2725,11 +2748,11 @@ routes on-demand demand it cannot serve to the elected owner. Its load, and so
 its live query's first ready, settles only when the rows the owner fetched for
 it are visible in the follower; if applying the owner's commit fails here, the
 load rejects and the follower's source enters error. The single-runtime
-`persistence.follower-remote-demand` lane and the follower generation-notice
+`persistence.follower-remote-demand` property and the follower generation-notice
 cells in db-sqlite-persistence-core/tests/persisted-oracle.test.ts own the
 runtime mechanism with a coordinator double. The generation-notice cells are
-fixed histories: their rotation cell is pinned as failing under the known gap
-#2139, and the fix adds their generated campaign back. This lane is their
+fixed histories: their rotation cell is a fixed history that fails under the known limit
+#2139, and the fix adds their generated campaign back. This production path is their
 receiving witness
 across the real boundary: two tabs, each with its own real
 BrowserCollectionCoordinator over Node's real BroadcastChannel and Web Locks,
@@ -2751,7 +2774,7 @@ owner's row, and for the queued placement it holds the other subset's
 hydration read. It does not reorder the channel, which stays FIFO as in a
 browser. The custom source delivers each row once; a source that re-inserts
 an existing row on every ensure made the follower release and request its
-demand again without end, on main as well, and is outside this lane.
+demand again without end, on main as well, and is outside this production path.
 
 Checkpoint and observations: once the owner's reply has reached the follower
 and the apply is still outstanding, whether the consumer has settled. After
@@ -2769,7 +2792,7 @@ persistence.
 
 Rotation: when only the follower's claim expires, it rotates into a
 generation no other tab joins and becomes that generation's owner. The
-rotation cell pins that its rows stay visible and new demand settles from its
+rotation cell checks that its rows stay visible and new demand settles from its
 own source. Another tab never owns the rotated generation in this topology,
 so the elected-owner notice path has no receiving witness here.
 */
@@ -2975,7 +2998,10 @@ describe(`follower remote-demand settlement across real tabs`, () => {
           histories.push({ source, placement, apply, consumer })
   it.each(histories)(
     `settles a follower $consumer with the owner's rows: $source source, $placement, apply $apply`,
-    (history) => assertRealTabFollowerHistory(history),
+    (history) => {
+      oracleRoute(`case`)
+      return assertRealTabFollowerHistory(history)
+    },
     20_000,
   )
 })
@@ -2985,6 +3011,7 @@ describe(`follower remote-demand settlement across real tabs`, () => {
 // independent of the coordinator and its adapter routing. Declared last
 // because the model classes are defined above and cannot be read earlier.
 declareOracle({
+  owns: [`src/browser-coordinator.ts`],
   check: [
     subsetWireViolations,
     subsetAckViolations,

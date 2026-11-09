@@ -192,7 +192,7 @@ createBucketFacades: (...args) => BucketFacadeAdapter;
 
 ###### args
 
-...\[`string`, `BucketFacadeCompilation`[], (`count`) => `void`\]
+...\[`string`, `BucketFacadeCompilation`[], (`count`) => `void`, `ValueResolver`\]
 
 ##### Returns
 

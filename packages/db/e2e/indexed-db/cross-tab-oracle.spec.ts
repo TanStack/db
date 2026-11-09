@@ -23,6 +23,7 @@ import {
 } from '../../tests/indexed-db/cross-tab-oracle'
 import { runCampaign } from '../../tests/indexed-db/campaign'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRuns,
@@ -365,7 +366,10 @@ async function nativeHistoryCampaign(
 oracleReplayTest(test)(
   `native authored histories preserve every publication (fixed)`,
   ({ context }) =>
-    nativeHistoryCampaign(context, { seed: 1179, numRuns: oracleRuns(10) }),
+    nativeHistoryCampaign(
+      context,
+      oracleFixedSeed(1179, { numRuns: oracleRuns(10) }),
+    ),
 )
 oracleReplayTest(test, nativeHistoryProperty)(
   `native authored histories preserve every publication (fresh)`,

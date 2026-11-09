@@ -32,8 +32,11 @@ import {
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import {
@@ -49,7 +52,7 @@ let temporary: string
 const programs = new Map<string, string>()
 const runtimes = [
   { name: `react18`, react: `react18`, dom: `react-dom18`, version: `18.3.1` },
-  { name: `current`, react: `react`, dom: `react-dom`, version: `19.2.4` },
+  { name: `current`, react: `react`, dom: `react-dom`, version: `19.3.1` },
 ] as const
 
 beforeAll(async () => {
@@ -166,7 +169,15 @@ function checkRender(
   })
 }
 
-declareOracle({ check: [checkRender], grammar: [histories] })
+declareOracle({
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
+  check: [checkRender],
+  grammar: [histories],
+})
 for (const runtime of runtimes) {
   for (const path of paths) {
     const project = (history: SsrSnapshotHistory): SsrSnapshotHistory =>
@@ -188,6 +199,7 @@ for (const runtime of runtimes) {
       register(
         `${runtime.name} ${path} renders without client layout diagnostics (${campaign})`,
         async () => {
+          oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
           const states = path.startsWith(`ordinary`)
             ? [
                 `rendered`,
@@ -205,6 +217,14 @@ for (const runtime of runtimes) {
           const fidelity = createOracleFailureFidelity<SsrSnapshotHistory>()
           let index = 0
           try {
+            const parameters =
+              campaign === `fixed`
+                ? oracleFixedSeed(2291, {
+                    numRuns: oracleRuns(24) + inputs.length,
+                    examples: inputs,
+                  })
+                : oraclePropertyOptions(24, property, { examples: inputs })
+            oracleRoute(oracleRouteOf(parameters))
             await fidelity.assert(() =>
               fc.assert(
                 fc.asyncProperty(grammar, (history) =>
@@ -242,13 +262,7 @@ for (const runtime of runtimes) {
                     checkRender(history, actual, path)
                   }),
                 ),
-                campaign === `fixed`
-                  ? {
-                      numRuns: oracleRuns(24) + inputs.length,
-                      seed: 2291,
-                      examples: inputs,
-                    }
-                  : oraclePropertyOptions(24, property, { examples: inputs }),
+                parameters,
               ),
             )
             reach.assertReached()
@@ -269,6 +283,7 @@ for (const runtime of runtimes) {
 // without presenting repeated constant inputs as a generated history campaign.
 for (const runtime of runtimes) {
   oracleReplayTest(it)(`${runtime.name} disabled SSR diagnostic replay`, () => {
+    oracleRoute(`fixed history`)
     const history: SsrSnapshotHistory = {
       preparation: `none`,
       sourceState: `idle`,
@@ -293,6 +308,7 @@ for (const runtime of runtimes) {
 oracleReplayTest(it)(
   `distinguishes a client-layout diagnostic from unrelated messages`,
   () => {
+    oracleRoute(`calibration`)
     const history: SsrSnapshotHistory = {
       preparation: `none`,
       sourceState: `idle`,

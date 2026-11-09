@@ -1210,7 +1210,7 @@ describe(`persistedCollectionOptions`, () => {
           peerStatus: `ready`,
         })
 
-        // This hostile control bypasses the sync-run-owned callback. It proves
+        // This mutant control bypasses the sync-run-owned callback. It proves
         // the status observation above would reject an unfenced late ready.
         expect(() => collection._lifecycle.markReady()).toThrowError(
           expect.objectContaining({ name: `CollectionStateError` }),

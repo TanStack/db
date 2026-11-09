@@ -3,7 +3,10 @@
 import assert from 'node:assert/strict'
 import { setImmediate } from 'node:timers/promises'
 import { D2, MultiSet } from '@tanstack/db-ivm'
-import { BucketFacadeAdapter } from '../src/query/live/bucket-facade-adapter.js'
+import {
+  BucketFacadeAdapter,
+  resolvePublicValue,
+} from '../src/query/live/bucket-facade-adapter.js'
 import { BUCKET_FACADE_REF } from '../src/query/live/materialized-pipeline.js'
 import type { Collection } from '../src/collection/index.js'
 import type {
@@ -33,6 +36,7 @@ function capture(
       },
     ],
     () => {},
+    resolvePublicValue,
   )
   graph.finalize()
   const value = { id: 1, payload: new ArrayBuffer(1024 * 1024) }

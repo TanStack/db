@@ -1,7 +1,7 @@
 /**
  * Ordinary op-sqlite driver tests: provider receipts, result-envelope decoding,
  * transactions, and fixed SQL-alias cases. Each checks a fixed case against
- * values written out in the test, a replay-configuration parser, or a hostile
+ * values written out in the test, a replay-configuration parser, or a mutant
  * fixture. None compares with an independent model, so none is oracle coverage.
  * The alias law and its generated checks are in op-sqlite-driver-oracle.test.ts,
  * and the shared helpers are in op-sqlite-driver-support.ts.
@@ -328,7 +328,7 @@ it(`selects a fresh seed without changing the random alias campaign budget`, () 
   ).toEqual({ numRuns: runs, seed: expect.any(Number) })
 })
 
-it(`reseeds the random alias campaigns from a seed-only replay`, () => {
+it(`reseeds the random alias campaigns from a campaign seed alone`, () => {
   expect(
     oracleRandomParameters(
       50,

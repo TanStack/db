@@ -1,7 +1,13 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it, vi } from 'vitest'
 import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
-import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import { MockRecordApi } from './mock-record-api'
@@ -439,23 +445,27 @@ it.each(
   corpus.flatMap((entry) =>
     ([`eager`, `on-demand`] as const).map((mode) => ({ ...entry, mode })),
   ),
-)(`preserves lifecycle laws: $mode / $name`, ({ mode, syncRuns }) =>
-  checkLifecycle({ mode, syncRuns }),
-)
+)(`preserves lifecycle laws: $mode / $name`, ({ mode, syncRuns }) => {
+  oracleRoute(`case`)
+  return checkLifecycle({ mode, syncRuns })
+})
 it.each([`eager`, `on-demand`] as const)(
   `releases a late acquired stream even when native cancellation rejects: %s`,
-  (mode) =>
-    checkLifecycle({
+  (mode) => {
+    oracleRoute(`case`)
+    return checkLifecycle({
       mode,
       syncRuns: [
         { kind: `cancel-subscribe`, late: `resolve`, cancelRejects: true },
         live(`close`),
       ],
-    }),
+    })
+  },
 )
 it.each([`list`, `set`, `buffered`] as const)(
   `rejects provider-owned row corruption at the %s cut`,
   async (cut) => {
+    oracleRoute(`calibration`)
     const scenario: Scenario = {
       mode: `eager`,
       syncRuns: [live(`buffered-close`)],
@@ -467,13 +477,21 @@ it.each([`list`, `set`, `buffered`] as const)(
     })
   },
 )
-fcTest.prop([scenarioArb], { seed: 714_203, numRuns: oracleRuns(50) })(
+const scenarioFixedSeed = oracleFixedSeed(714_203, { numRuns: oracleRuns(50) })
+fcTest.prop([scenarioArb], scenarioFixedSeed)(
   `matches generated lifecycle histories with a fixed seed`,
-  (scenario) => checkLifecycle(scenario),
+  (scenario) => {
+    oracleRoute(oracleRouteOf(scenarioFixedSeed))
+    return checkLifecycle(scenario)
+  },
 )
-fcTest.prop([scenarioArb], oraclePropertyOptions(50, `trailbase.lifecycle`))(
+const scenarioCampaign = oraclePropertyOptions(50, `trailbase.lifecycle`)
+fcTest.prop([scenarioArb], scenarioCampaign)(
   `matches generated lifecycle histories with a random or replayed seed`,
-  (scenario) => checkLifecycle(scenario),
+  (scenario) => {
+    oracleRoute(oracleRouteOf(scenarioCampaign))
+    return checkLifecycle(scenario)
+  },
 )
 
 /**
@@ -701,7 +719,10 @@ const earlyDemandPlans: Array<EarlyDemandPlan> = (
 
 it.each(earlyDemandPlans)(
   `waits for the listener before an early on-demand fetch: $outcome / change=$serviceChange / $consumer`,
-  (plan) => checkEarlyDemand(plan),
+  (plan) => {
+    oracleRoute(`case`)
+    return checkEarlyDemand(plan)
+  },
 )
 
 /**
@@ -735,7 +756,7 @@ it.each(earlyDemandPlans)(
  * has arrived. A later change to another row then checks that the listener
  * is still alive. An older event delivered after a newer page can show its
  * older value until the newer event that follows it arrives; the adapter has
- * no row version to order an event against a page, so the lane only checks a
+ * no row version to order an event against a page, so the page-event grammar only checks a
  * row once all of its events have arrived.
  */
 type RacePlan = {
@@ -883,7 +904,10 @@ const racePlans: Array<RacePlan> = ([`eager`, `on-demand`] as const).flatMap(
 
 it.each(racePlans)(
   `keeps a newer change over an older page: $mode / $change / $timing / $delivery`,
-  (plan) => checkPageEventRace(plan),
+  (plan) => {
+    oracleRoute(`case`)
+    return checkPageEventRace(plan)
+  },
 )
 
 /**
@@ -1020,7 +1044,10 @@ const heldPlans: Array<HeldPlan> = [true, false].flatMap((held) =>
 
 it.each(heldPlans)(
   `converges while a mutation holds sync commits: held=$held / $change`,
-  (plan) => checkHeldPage(plan),
+  (plan) => {
+    oracleRoute(`case`)
+    return checkHeldPage(plan)
+  },
 )
 
 /**
@@ -1033,8 +1060,8 @@ it.each(heldPlans)(
  * The load lists the service's current rows. Because the sync adapter stops
  * receiving changes, it reports the Collection's `error`, so an application can
  * see that the rows can grow stale; only a reload or restart subscribes again. This
- * lane makes that limit executable; reconnecting is left to the TrailBase
- * provider, and the lane does not claim the limit is the right product
+ * stream-end grammar makes that limit executable; reconnecting is left to the TrailBase
+ * provider, and the grammar does not claim the limit is the right product
  * behavior.
  *
  * Reference: the same service model. The prediction after the stream ends is
@@ -1042,7 +1069,7 @@ it.each(heldPlans)(
  *
  * Grammar (exhaustive, 2 histories): the stream closes gracefully or fails
  * with a read error after the first page applies; then the service changes a
- * row, and an on-demand load runs. The lane pins one stream end followed by
+ * row, and an on-demand load runs. The stream-end grammar covers one stream end followed by
  * one change and one load. It does not cover several later loads, a page in
  * flight when the stream ends, or cleanup between them.
  *
@@ -1120,13 +1147,16 @@ async function checkStreamEnd(ending: `close` | `read-error`) {
 
 it.each([`close`, `read-error`] as const)(
   `keeps rows, reports an error, and does not resubscribe after the stream ends: %s`,
-  (ending) => checkStreamEnd(ending),
+  (ending) => {
+    oracleRoute(`case`)
+    return checkStreamEnd(ending)
+  },
 )
 
 /**
  * ## Do several pages, several changes, and overlapping loads still converge?
  *
- * Law: the same one as the page-event lane. Once every page and every change
+ * Law: the same one as the page-event grammar. Once every page and every change
  * event for a row have arrived, the Collection holds the service's current
  * value for that row, or no row if the service deleted it. Between steps, a
  * row that a change event touched never returns to an older value.
@@ -1387,8 +1417,8 @@ async function checkPageHistory(history: PageHistory) {
   }
 }
 
-// Named replays: each closes one dimension the single-page lane leaves open.
-const pageReplays: Array<[string, PageHistory]> = [
+// Named fixed histories: each closes one dimension the single-page grammar leaves open.
+const pageFixedHistories: Array<[string, PageHistory]> = [
   [
     `an insert and its update in transit until after the page`,
     {
@@ -1460,19 +1490,27 @@ const pageReplays: Array<[string, PageHistory]> = [
   ],
 ]
 
-it.each(pageReplays)(`converges: %s`, (_name, history) =>
-  checkPageHistory(history),
-)
-fcTest.prop([pageHistoryArb], { seed: 205_917, numRuns: oracleRuns(40) })(
+it.each(pageFixedHistories)(`converges: %s`, (_name, history) => {
+  oracleRoute(`fixed history`)
+  return checkPageHistory(history)
+})
+const pageHistoryFixedSeed = oracleFixedSeed(205_917, {
+  numRuns: oracleRuns(40),
+})
+fcTest.prop([pageHistoryArb], pageHistoryFixedSeed)(
   `converges across generated page histories with a fixed seed`,
-  (history) => checkPageHistory(history),
+  (history) => {
+    oracleRoute(oracleRouteOf(pageHistoryFixedSeed))
+    return checkPageHistory(history)
+  },
 )
-fcTest.prop(
-  [pageHistoryArb],
-  oraclePropertyOptions(40, `trailbase.page-event`),
-)(
+const pageHistoryCampaign = oraclePropertyOptions(40, `trailbase.page-event`)
+fcTest.prop([pageHistoryArb], pageHistoryCampaign)(
   `converges across generated page histories with a random or replayed seed`,
-  (history) => checkPageHistory(history),
+  (history) => {
+    oracleRoute(oracleRouteOf(pageHistoryCampaign))
+    return checkPageHistory(history)
+  },
 )
 
 /**
@@ -1535,10 +1573,15 @@ async function checkFreshRunAfterEvent() {
   }
 }
 
-it(`loads a row in a fresh run that an earlier run's event touched`, () =>
-  checkFreshRunAfterEvent())
+it(`loads a row in a fresh run that an earlier run's event touched`, () => {
+  oracleRoute(`case`)
+  return checkFreshRunAfterEvent()
+})
 
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 declareOracle({
+  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
   check: [
     checkLifecycle,
     checkEarlyDemand,

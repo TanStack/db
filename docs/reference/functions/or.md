@@ -3,53 +3,24 @@ id: or
 title: or
 ---
 
-## Call Signature
-
 ```ts
-function or(left, right): BasicExpression<boolean>;
+function or<T>(...args): WithAggregate<BasicExpression<boolean>, T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:229](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L229)
+Defined in: [packages/db/src/query/builder/functions.ts:288](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L288)
 
-### Parameters
+## Type Parameters
 
-#### left
+### T
 
-`ExpressionLike`
+`T` *extends* \[`ExpressionLike`, `ExpressionLike`, `...ExpressionLike[]`\]
 
-#### right
+## Parameters
 
-`ExpressionLike`
+### args
 
-### Returns
+...`T`
 
-[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+## Returns
 
-## Call Signature
-
-```ts
-function or(
-   left, 
-   right, ...
-rest): BasicExpression<boolean>;
-```
-
-Defined in: [packages/db/src/query/builder/functions.ts:233](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L233)
-
-### Parameters
-
-#### left
-
-`ExpressionLike`
-
-#### right
-
-`ExpressionLike`
-
-#### rest
-
-...`ExpressionLike`[]
-
-### Returns
-
-[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+`WithAggregate`\<[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>, `T`\>

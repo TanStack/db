@@ -7,4 +7,4 @@ title: Query
 const Query: InitialQueryBuilderConstructor = BaseQueryBuilder;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:1827](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L1827)
+Defined in: [packages/db/src/query/builder/index.ts:1835](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L1835)

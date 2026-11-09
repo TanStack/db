@@ -1,9 +1,12 @@
 import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -321,7 +324,7 @@ class, and two storage-root examples include WebKit's exact UnknownError. A
 non-Error cause is outside this promise. Removing either class or the absent
 case loses one of those fixed witnesses.
 Challenge/replay: the present-cause examples reject a response that drops the
-cause; the absent-cause examples reject an invented cause. Pinned examples run
+cause; the absent-cause examples reject an invented cause. Fixed histories run
 separately so both generated campaigns share one property and budget, and a
 reported shrink path selects its generated case directly. Verbose FastCheck
 output retains original/reduced traces. Set
@@ -329,19 +332,27 @@ TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and
 TANSTACK_DB_ORACLE_PROPERTY=opfs-worker.diagnostics for direct replay.
 TANSTACK_DB_ORACLE_RUNS_MULTIPLIER scales the generated campaign.
 */
-declareOracle({ check: [checkDiagnostic], model: [referenceMessage] })
+declareOracle({
+  owns: [`src/opfs-worker.ts`],
+  check: [checkDiagnostic],
+  model: [referenceMessage],
+})
 
 describe(`OPFS worker diagnostics oracle`, () => {
   if (!oracleReplayRequested()) {
     it.each(diagnosticExamples)(
-      `preserves the pinned open-failure diagnostic (%#)`,
-      checkDiagnostic,
+      `preserves the fixed open-failure diagnostic (%#)`,
+      (input) => {
+        oracleRoute(`case`)
+        return checkDiagnostic(input)
+      },
     )
   }
 
   it.skipIf(oracleReplayRequested())(
     `rejects a diagnostic that drops an exposed VFS cause`,
     async () => {
+      oracleRoute(`calibration`)
       const input = diagnosticExamples[6]![0] as OpenFailure
       const response = await initialize(input)
       const expected = referenceResponse(input).response
@@ -351,14 +362,25 @@ describe(`OPFS worker diagnostics oracle`, () => {
     },
   )
 
-  const checkDiagnostics = (options: { numRuns: number; seed?: number }) =>
-    fc.assert(fc.asyncProperty(diagnosticInput, checkDiagnostic), {
-      ...options,
-      verbose: true,
-    })
+  // Each campaign registers the route of the parameters it runs with.
+  const checkDiagnostics = (options: {
+    numRuns: number
+    seed?: number
+    path?: string
+  }) => {
+    const parameters = { ...options, verbose: true }
+    oracleRoute(oracleRouteOf(parameters))
+    return fc.assert(
+      fc.asyncProperty(diagnosticInput, checkDiagnostic),
+      parameters,
+    )
+  }
   oracleReplayTest(it)(
     `matches the independent diagnostic formatter (fixed campaign)`,
-    () => checkDiagnostics({ seed: 1846, numRuns: oracleRuns(diagnosticRuns) }),
+    () =>
+      checkDiagnostics(
+        oracleFixedSeed(1846, { numRuns: oracleRuns(diagnosticRuns) }),
+      ),
     15_000,
   )
   oracleReplayTest(it, diagnosticProperty)(

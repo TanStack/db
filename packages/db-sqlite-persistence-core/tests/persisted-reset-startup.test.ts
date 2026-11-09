@@ -1225,7 +1225,7 @@ describe(`persistedCollectionOptions`, () => {
   // native control. Rows use ordinary strings; no unsupported row write is
   // admitted. At settled index work, compare readiness, rows, warnings, and the
   // exact signatures that reached the adapter and coordinator.
-  it.sequential.each(
+  it.each(
     [`startup`, `runtime`].flatMap((phase) =>
       [
         `Instant`,
@@ -1344,7 +1344,7 @@ describe(`persistedCollectionOptions`, () => {
   // request cannot claim completed work before that promise settles. Startup
   // visits indexes serially; runtime additions may overlap, so only per-index
   // causality and exact call multiplicity are promised, not global call order.
-  it.sequential.each(
+  it.each(
     [`startup`, `runtime`].flatMap((phase) =>
       [`local`, `coordinator`, `both`].flatMap((boundary) =>
         [`throw`, `held`].flatMap((settlement) =>
@@ -2184,7 +2184,7 @@ describe(`hydration routing probe calibration`, () => {
   })
 
   // The adapter contract requires call-local forwarding through wrappers. This
-  // positive/hostile pair reaches the real coordinator but lets the recorder
+  // positive/mutant pair reaches the real coordinator but lets the recorder
   // finish bad calls, so losing the loan is a routing assertion, not a timeout.
   it.each([true, false])(
     `detects a wrapper that forwards its loan=%s`,

@@ -72,6 +72,7 @@
     "powersync-failed-load-release",
     "preact-db-adapter",
     "preserve-reentrant-ordering-repair",
+    "quiet-documents-return",
     "react-db-strip-dev-warnings",
     "react-db-unhashable-throws",
     "recover-interleaved-electric-source-commits",

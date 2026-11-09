@@ -9,7 +9,7 @@ import { gt } from '../src/query/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from './utils.js'
 import {
-  boundSchemaLane,
+  boundSchemaGrammar,
   captureBoundOptions,
   checkBoundSchemaMutation,
   checkBoundSchemaRows,
@@ -154,8 +154,8 @@ export async function runBoundSchemaHistory(
   reach: ReturnType<typeof createOracleReach<string>>,
 ): Promise<void> {
   reach.beginHistory()
-  const lane = boundSchemaLane(history)
-  const mark = (cut: string) => reach.reach(`${lane}/${cut}`)
+  const grammar = boundSchemaGrammar(history)
+  const mark = (cut: string) => reach.reach(`${grammar}/${cut}`)
   let base: Array<BoundSchemaRow> = [
     { id: `one`, label: `  source alpha  `, rank: 1 },
     { id: `peer`, label: `  source beta  `, rank: 2 },

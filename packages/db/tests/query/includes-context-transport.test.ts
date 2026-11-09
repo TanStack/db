@@ -16,7 +16,7 @@ import {
 } from '../../src/query/index.js'
 import {
   attachRouteMetadata,
-  stripInternalRouteMetadata,
+  transformPublicContainers,
 } from '../../src/query/compiler/route-metadata.js'
 import {
   createGrammarCollection,
@@ -465,7 +465,11 @@ describe(`correlated include route-context transport grammar`, () => {
     const value: Record<string, unknown> = { routed }
     value.self = value
 
-    const cleaned = stripInternalRouteMetadata(value) as typeof value
+    const cleaned = transformPublicContainers(
+      value,
+      (leaf) => leaf,
+      new Set(Object.getOwnPropertySymbols(routed)),
+    ) as typeof value
 
     expect(cleaned).not.toBe(value)
     expect(cleaned.self).toBe(cleaned)

@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { SortedMap } from '../src/SortedMap'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config'
 import { createOracleReach } from './oracle-reach'
@@ -347,7 +350,11 @@ function withDeferredChange(actions: Array<Action>): Array<Action> {
   ]
 }
 
+// What this oracle owns: the gap report judges every function in
+// SortedMap.ts, and its reference tree within the package, by this file's
+// tests.
 declareOracle({
+  owns: [`src/SortedMap.ts`],
   check: [expectMap, expectView],
   model: [modelOrder, restoreBound],
   grammar: [withDeferredChange],
@@ -382,6 +389,13 @@ describe.each([`key`, `ascending`, `descending`] as const)(
           ],
           { minimum: 5 },
         )
+        const parameters = {
+          ...(seed === undefined
+            ? oraclePropertyOptions(100, property)
+            : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
+          examples: fixedHistories.map((history) => [history]),
+        }
+        oracleRoute(oracleRouteOf(parameters))
         await fc.assert(
           fc.asyncProperty(
             fc
@@ -416,12 +430,7 @@ describe.each([`key`, `ascending`, `descending`] as const)(
               return Promise.resolve()
             },
           ),
-          {
-            ...(seed === undefined
-              ? oraclePropertyOptions(100, property)
-              : { seed, numRuns: oracleRuns(100) }),
-            examples: fixedHistories.map((history) => [history]),
-          },
+          parameters,
         )
         if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
           console.log(property, seed ?? `random`, [...reach.counts()])
@@ -458,6 +467,7 @@ describe.each([`ascending`, `descending`] as const)(
       `unpromised order`,
       `prune observation`,
     ] as const)(`credits only a restoring comparison: %s`, (control) => {
+      oracleRoute(`calibration`)
       const state = `deferred-row-changed-before-restore`
       const reach = createOracleReach<ReachState>(
         `sorted-map.${order}.${control}`,

@@ -270,7 +270,7 @@ const svelteInfiniteDriver: InfiniteQueryDriver = {
   mountCollectionControllable,
   mountConfigControllable,
   mountInputControllable,
-  knownGaps: [],
+  limits: [],
 }
 
 runInfiniteQuerySuite(svelteInfiniteDriver, registerInfiniteQueryUnitScenarios)

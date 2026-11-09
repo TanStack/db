@@ -12,6 +12,7 @@ import { makePgClient } from '../../db-collection-e2e/support/global-setup'
 import { sourceHeadViolation } from '../tests/electric-convergence-oracle'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import type { Page } from '@playwright/test'
 import type {} from './electric-source-prefix.opfs'
 
@@ -88,11 +89,16 @@ const observe = (page: Page) =>
 const rowIds = async (page: Page) =>
   (await observe(page)).rows.map(({ id }) => id)
 
-declareOracle({ check: [sourceHeadViolation], grammar: [cells] })
+declareOracle({
+  owns: [`src/browser-persistence.ts`],
+  check: [sourceHeadViolation],
+  grammar: [cells],
+})
 for (const cell of cells) {
   test(`recovers ${cell.present ? `lost` : `resurrected`} rows after ${cell.advance} advancement${cell.drain ? ` with peer drain` : ``}${cell.legacy ? ` from legacy progress` : ``}${cell.callerCursor !== `none` ? ` with explicit ${cell.callerCursor}` : ``}${cell.interrupted ? ` after interrupted recovery` : ``}`, async ({
     context,
   }) => {
+    oracleRoute(`case`)
     const reach = createOracleReach(
       `browser.electric-source-prefix.opfs`,
       [

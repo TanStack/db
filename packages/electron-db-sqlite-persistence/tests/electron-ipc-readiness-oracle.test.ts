@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { persistedCollectionOptions } from '@tanstack/db-sqlite-persistence-core'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
+import { oracleRoute } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import {
   IR,
@@ -59,7 +60,7 @@ import type {
  * reply, which is the only part of the IPC transport that this law depends
  * on. With `TANSTACK_DB_ELECTRON_E2E_ALL=1`, each envelope instead crosses a
  * real Electron main process through the runtime bridge. The histories cover
- * a renderer without a coordinator. A second lane below runs a follower and
+ * a renderer without a coordinator. A second production path below runs a follower and
  * an owner renderer with coordinators.
  */
 
@@ -253,7 +254,7 @@ type Checkpoints = {
 // before it is ever ready. A demand released while its hydration is in flight
 // starts no live upstream load, installs no upstream rows, and causes no
 // error. Whether locally hydrated rows stay is retention, which the persisted
-// oracle's retained-demand lane owns, so the model does not predict it.
+// oracle's retained-demand grammar owns, so the model does not predict it.
 function expectedCheckpoints(history: IpcReadinessHistory): Checkpoints {
   const local = history.renderer === `reopened` ? [`local`] : []
   if (history.hydration === `fails`)
@@ -398,6 +399,10 @@ async function compareIpcReadinessHistory(
 }
 
 declareOracle({
+  owns: [
+    `src/renderer.ts#createElectronSQLitePersistence`,
+    `src/electron-coordinator.ts`,
+  ],
   check: [compareIpcReadinessHistory],
   model: [expectedCheckpoints],
 })
@@ -406,6 +411,7 @@ describe(`Electron renderer initial readiness follows the composed load`, () => 
   it.each(ipcReadinessHistories)(
     `matches the model: $renderer renderer, hydration $hydration, then $next`,
     async (history) => {
+      oracleRoute(`case`)
       await compareIpcReadinessHistory(history)
     },
     historyTimeout,
@@ -466,7 +472,7 @@ function coordinatedRenderer(options: {
       trace.push(`ensure-settled`),
     )
   }
-  // Record when the owner's commit notice reaches this renderer, so the lane
+  // Record when the owner's commit notice reaches this renderer, so the test
   // can check the premise it relies on: the notice precedes the reply.
   const subscribe = coordinator.subscribe.bind(coordinator)
   coordinator.subscribe = (collectionId, onMessage) =>
@@ -597,7 +603,7 @@ async function observeCoordinatedRendererHistory(
     follower.trace.indexOf(`ensure-settled`),
   )
   const settledWhileApplyHeld = settledAt !== undefined
-  // The topology this lane claims: the owner loads upstream, and the
+  // The topology this test claims: the owner loads upstream, and the
   // follower routes its demand instead of running its own source.
   expect(owner.trace).toContain(`upstream`)
   expect(follower.trace).not.toContain(`upstream`)
@@ -644,6 +650,7 @@ describe(`Electron follower renderer settles with its owner's rows`, () => {
   )(
     `matches the model: apply $apply, consumer $consumer`,
     async (history) => {
+      oracleRoute(`case`)
       await compareCoordinatedRendererHistory(history)
     },
     isElectronFullE2EEnabled() ? 180_000 : 20_000,

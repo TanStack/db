@@ -1,8 +1,11 @@
 import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -13,6 +16,7 @@ import {
   eagerLiveSourceHistoryArb,
   eagerLiveSourceModel,
   eagerLiveSourceProperty,
+  namesLaw,
   reachStatesFor,
 } from '../src'
 import { referenceDriver } from './reference-adapter'
@@ -61,10 +65,20 @@ const runs = 600
 // Timed waits sleep past their timeout, so a campaign takes several seconds.
 const campaignTimeoutMs = 120_000
 
+// A calibration names the whole law that its violation carries, such as
+// `FID-1 (values)`, or a pattern that matches the whole law where the table
+// accepts several. A part of a law, such as `FID-1`, names none, so a
+// calibration cannot pass on a broader law than it names. The property's
+// calibration mode and this check judge the name with the same `namesLaw`.
+function expectNamedLaw(violated: string, law: string | RegExp) {
+  expect(namesLaw(law, violated), `${violated} is named by ${law}`).toBe(true)
+}
+
 async function campaign(options: fc.Parameters<[unknown]>) {
   const reach = createOracleReach(property, reachStatesFor(driver), {
     minimum: 5,
   })
+  oracleRoute(oracleRouteOf(options))
   await fc.assert(eagerLiveSourceProperty(driver, reach), options)
   return reach
 }
@@ -73,7 +87,9 @@ describe(`eager live-source conformance: reference adapter`, () => {
   oracleReplayTest(it)(
     `conforms on a fixed-seed campaign`,
     async () => {
-      const reach = await campaign({ seed: 2118, numRuns: oracleRuns(runs) })
+      const reach = await campaign(
+        oracleFixedSeed(2118, { numRuns: oracleRuns(runs) }),
+      )
       reach.assertReached()
     },
     campaignTimeoutMs,
@@ -88,67 +104,70 @@ describe(`eager live-source conformance: reference adapter`, () => {
     campaignTimeoutMs,
   )
 
-  // Each mutant breaks one law; the check must report that law.
+  // Each mutant breaks one law; the check must report that law, by its whole
+  // name. A pattern accepts several observations of one law (the txid a wait
+  // names) or, where a comment says so, either of two laws.
   const mutants: Array<[ReferenceMutant, string | RegExp]> = [
-    [`ready-before-delivery`, `READY-2`],
-    [`wraps-loading-failure`, `READY-4`],
-    [`failure-clears-rows`, `HEALTH-1`],
-    [`transient-is-fatal`, `HEALTH-1`],
-    [`delivery-error-is-fatal`, `HEALTH-1`],
-    [`never-recovers`, `HEALTH-2`],
-    [`transient-fails-loading`, `RETRY-1`],
-    [`splits-batch`, `PUB-1`],
-    [`drops-deletes`, `PUB-3`],
+    [`ready-before-delivery`, `READY-2 (status)`],
+    [`wraps-loading-failure`, `READY-4 (health error cause)`],
+    [`failure-clears-rows`, `HEALTH-1 (rows)`],
+    [`transient-is-fatal`, `HEALTH-1 (health error)`],
+    [`delivery-error-is-fatal`, `HEALTH-1 (health error)`],
+    [`never-recovers`, `HEALTH-2 (health failureReason)`],
+    [`transient-fails-loading`, `RETRY-1 (status)`],
+    [`splits-batch`, `PUB-1 (publication)`],
+    [`drops-deletes`, `PUB-3/FID-4 (rows)`],
     // It merges a later delivery, so it also applies one that must be
     // rejected for a duplicate key.
-    [`snapshot-merges`, /PUB-7|PUB-4/],
-    [`leaks-subscription`, `LIFE-2`],
-    [`restart-replays-rows`, `LIFE-5`],
-    [`swallows-prompt-failure`, `READY-4`],
-    [`ready-at-restart`, `LIFE-5`],
-    [`keeps-failed-source`, `LIFE-10`],
-    [`double-release`, `LIFE-10`],
+    [`snapshot-merges`, /PUB-7 \(rows\)|PUB-4 \(rows\)/],
+    [`leaks-subscription`, `LIFE-2/LIFE-10 (releases per subscription)`],
+    [`restart-replays-rows`, `LIFE-2/LIFE-5 (rows)`],
+    [`swallows-prompt-failure`, `READY-4 (status)`],
+    [`ready-at-restart`, `LIFE-2/LIFE-5 (status)`],
+    [`keeps-failed-source`, `LIFE-10 (open provider subscriptions)`],
+    [`double-release`, `LIFE-10 (releases per subscription)`],
     [`detached-rejection`, `HEALTH-5`],
     [`logs-failure`, `HEALTH-5`],
     // Its early fulfillment also answers a wait for a retired run's txid
     // before the new run is ready.
-    [`wait-off-by-one`, /EVID-1|EVID-2/],
-    [`retired-evidence-before-ready`, `EVID-2`],
-    [`forgets-retired-evidence`, `EVID-2`],
-    [`leaks-waits-after-fail`, `EVID-2`],
-    [`wait-ignores-timeout`, `EVID-3`],
-    [`disconnect-fails`, `RECON-1`],
-    [`renew-resubscribes`, `RENEW-1`],
-    [`drops-buffered`, `READY-10`],
+    [`wait-off-by-one`, /EVID-1 \(awaitTxId \d+\)|EVID-2 \(awaitTxId \d+\)/],
+    [`retired-evidence-before-ready`, `EVID-2 (awaitTxId 0)`],
+    [`forgets-retired-evidence`, /EVID-2 \(awaitTxId \d+\)/],
+    // The pattern's first alternative is only a prefix of the law, so this
+    // calibration also checks that a pattern names a law only when it matches
+    // all of it: a leftmost match would find `EVID-2` and name nothing.
+    [`leaks-waits-after-fail`, /EVID-2|EVID-2 \(awaitTxId \d+\)/],
+    [`wait-ignores-timeout`, /EVID-3 \(awaitTxId \d+\)/],
+    [`disconnect-fails`, `RECON-1 (health error)`],
+    [`renew-resubscribes`, `RENEW-1 (open provider subscriptions)`],
+    [`drops-buffered`, `READY-10/PUB-9 (rows)`],
     // It applies buffered batches before the rows, also before a delivery
     // that must write nothing.
-    [`buffer-before-rows`, /PUB-9|PUB-4/],
-    [`replays-per-batch`, `PUB-5`],
+    [`buffer-before-rows`, /READY-10\/PUB-9 \(rows\)|PUB-4 \(rows\)/],
+    [`replays-per-batch`, `PUB-5/PUB-9 (publication)`],
     [`ready-before-buffer`, `READY-10 (rows when ready)`],
-    [`shows-buffered`, `READY-10/PUB-9`],
-    [`merges-updates`, `FID-1`],
+    [`shows-buffered`, `READY-10/PUB-9 (rows)`],
+    [`merges-updates`, `FID-1 (fields)`],
     [`dates-as-strings`, `FID-1 (values)`],
     [`bigints-as-numbers`, `FID-1 (values)`],
     [`drops-nulls`, `FID-1 (values)`],
     [`loses-negative-zero`, `FID-1 (values)`],
     [`typed-booleans-as-numbers`, `FID-1 (values)`],
-    [`commits-malformed-prefix`, `PUB-4`],
-    [`ignores-malformed`, `PUB-4`],
-    [`relabels-inserts`, `PUB-2`],
+    [`commits-malformed-prefix`, `PUB-4 (rows)`],
+    [`ignores-malformed`, `PUB-4 (status)`],
+    [`relabels-inserts`, `PUB-2 (change events)`],
   ]
   oracleReplayTest(it).each(mutants)(
     `rejects the %s mutant with %s`,
     async (mutant, law) => {
+      oracleRoute(`calibration`)
       const result = await fc.check(
-        eagerLiveSourceProperty(referenceDriver(mutant)),
-        {
-          seed: 2118,
-          numRuns: runs,
-        },
+        eagerLiveSourceProperty(referenceDriver(mutant), undefined, law),
+        { seed: 2118, numRuns: runs },
       )
       expect(result.failed).toBe(true)
       expect(result.errorInstance).toBeInstanceOf(ConformanceViolation)
-      expect((result.errorInstance as ConformanceViolation).law).toMatch(law)
+      expectNamedLaw((result.errorInstance as ConformanceViolation).law, law)
     },
     campaignTimeoutMs,
   )
@@ -162,6 +181,7 @@ describe(`eager live-source conformance: prompt restart cut`, () => {
   oracleReplayTest(it)(
     `rejects a run that is ready at its prompt restart`,
     async () => {
+      oracleRoute(`calibration`)
       await expect(
         checkEagerLiveSourceHistory(referenceDriver(`ready-at-restart`), [
           { kind: `fail` },
@@ -181,10 +201,9 @@ describe(`eager live-source conformance: per-change commits`, () => {
     `the per-change reference adapter conforms`,
     async () => {
       const perChange = referenceDriver(undefined, { perChange: true })
-      await fc.assert(eagerLiveSourceProperty(perChange), {
-        seed: 2118,
-        numRuns: runs,
-      })
+      const parameters = oracleFixedSeed(2118, { numRuns: runs })
+      oracleRoute(oracleRouteOf(parameters))
+      await fc.assert(eagerLiveSourceProperty(perChange), parameters)
     },
     campaignTimeoutMs,
   )
@@ -192,14 +211,16 @@ describe(`eager live-source conformance: per-change commits`, () => {
   oracleReplayTest(it)(
     `rejects a batch committed out of order with PUB-1`,
     async () => {
+      oracleRoute(`calibration`)
       const reversed = referenceDriver(`reverses-batch`, { perChange: true })
-      const result = await fc.check(eagerLiveSourceProperty(reversed), {
-        seed: 2118,
-        numRuns: runs,
-      })
+      const result = await fc.check(
+        eagerLiveSourceProperty(reversed, undefined, `PUB-1 (publication)`),
+        { seed: 2118, numRuns: runs },
+      )
       expect(result.failed).toBe(true)
-      expect((result.errorInstance as ConformanceViolation).law).toContain(
-        `PUB-1`,
+      expectNamedLaw(
+        (result.errorInstance as ConformanceViolation).law,
+        `PUB-1 (publication)`,
       )
     },
     campaignTimeoutMs,
@@ -222,35 +243,42 @@ describe(`eager live-source conformance: outage threshold, client values`, () =>
         reachStatesFor(thresholdDriver),
         { minimum: 5 },
       )
-      await fc.assert(eagerLiveSourceProperty(thresholdDriver, reach), {
-        seed: 2118,
-        numRuns: runs,
-      })
+      const campaignParameters = oracleFixedSeed(2118, { numRuns: runs })
+      oracleRoute(oracleRouteOf(campaignParameters))
+      await fc.assert(
+        eagerLiveSourceProperty(thresholdDriver, reach),
+        campaignParameters,
+      )
       reach.assertReached()
     },
     campaignTimeoutMs,
   )
 
-  const outageMutants: Array<[ReferenceMutant, string]> = [
-    [`stale-outage-value`, `HEALTH-`],
-    [`replaces-outage-value`, `RETRY-1`],
-    [`reports-outage-early`, `HEALTH-1`],
-    [`outage-count-survives-delivery`, `HEALTH-1`],
-    [`empty-response-keeps-count`, `HEALTH-1`],
-    [`empty-response-recovers`, `RETRY-1`],
-    [`rejected-delivery-fails`, `PUB-4`],
-    [`wraps-loading-failure`, `READY-4`],
+  const outageMutants: Array<[ReferenceMutant, string | RegExp]> = [
+    [`stale-outage-value`, `HEALTH-1 (health failureReason)`],
+    [`replaces-outage-value`, `RETRY-1 (health failureReason)`],
+    [`reports-outage-early`, `HEALTH-1 (health failureReason)`],
+    [`outage-count-survives-delivery`, `HEALTH-1 (health failureReason)`],
+    [`empty-response-keeps-count`, `HEALTH-1 (health failureReason)`],
+    [`empty-response-recovers`, `RETRY-1 (health failureReason)`],
+    [`rejected-delivery-fails`, `PUB-4 (health error)`],
+    [`wraps-loading-failure`, `READY-4 (health error cause)`],
   ]
   oracleReplayTest(it).each(outageMutants)(
     `rejects the %s mutant with %s`,
     async (mutant, law) => {
+      oracleRoute(`calibration`)
       const result = await fc.check(
-        eagerLiveSourceProperty(referenceDriver(mutant, { outage })),
+        eagerLiveSourceProperty(
+          referenceDriver(mutant, { outage }),
+          undefined,
+          law,
+        ),
         { seed: 2118, numRuns: runs },
       )
       expect(result.failed).toBe(true)
       expect(result.errorInstance).toBeInstanceOf(ConformanceViolation)
-      expect((result.errorInstance as ConformanceViolation).law).toContain(law)
+      expectNamedLaw((result.errorInstance as ConformanceViolation).law, law)
     },
     campaignTimeoutMs,
   )
@@ -493,6 +521,7 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it).each(witnesses)(
     `reconstructs %s`,
     async (_name, history) => {
+      oracleRoute(`fixed history`)
       expect(withinGrammar(history, withoutValues)).toBe(true)
       const { skipped } = await checkEagerLiveSourceHistory(
         withoutValues,
@@ -505,6 +534,7 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it).each(valueWitnesses)(
     `reconstructs %s`,
     async (_name, history) => {
+      oracleRoute(`fixed history`)
       expect(withinGrammar(history, withoutFields)).toBe(true)
       const { skipped } = await checkEagerLiveSourceHistory(
         withoutFields,
@@ -527,6 +557,7 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it)(
     `excludes a batch before the first ready without listen-before-fetch`,
     async () => {
+      oracleRoute(`fixed history`)
       const history = [{ kind: `changes` as const, changes: [] }]
       const { skipped } = await checkEagerLiveSourceHistory(
         lateListener,
@@ -558,6 +589,7 @@ describe(`eager live-source grammar controls`, () => {
     ],
   ]
   oracleReplayTest(it).each(invalid)(`excludes %s`, async (_name, history) => {
+    oracleRoute(`fixed history`)
     const { skipped } = await checkEagerLiveSourceHistory(
       withoutValues,
       history,
@@ -588,6 +620,8 @@ describe(`eager live-source grammar controls`, () => {
       const reach = createOracleReach(`${property}.ablation`, states, {
         replaying: false,
       })
+      const runParameters = oracleFixedSeed(2118, { numRuns: 100 })
+      oracleRoute(oracleRouteOf(runParameters))
       await fc.assert(
         fc.asyncProperty(
           historyArb.map((history) =>
@@ -600,7 +634,7 @@ describe(`eager live-source grammar controls`, () => {
             })
           },
         ),
-        { seed: 2118, numRuns: 100 },
+        runParameters,
       )
       expect(reach.counts().get(lost)).toBe(0)
     },
@@ -619,6 +653,8 @@ describe(`eager live-source grammar controls`, () => {
         id: row.id,
         title: row.title,
       })
+      const parameters = oracleFixedSeed(2118, { numRuns: 100 })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           historyArb.map((history) =>
@@ -644,7 +680,7 @@ describe(`eager live-source grammar controls`, () => {
             })
           },
         ),
-        { seed: 2118, numRuns: 100 },
+        parameters,
       )
       expect(reach.counts().get(`field-removed`)).toBe(0)
     },
@@ -663,6 +699,8 @@ describe(`eager live-source grammar controls`, () => {
         reachStatesFor(driver),
         { replaying: false },
       )
+      const parameters = oracleFixedSeed(2118, { numRuns: 100 })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           historyArb.map((history) =>
@@ -688,7 +726,7 @@ describe(`eager live-source grammar controls`, () => {
             })
           },
         ),
-        { seed: 2118, numRuns: 100 },
+        parameters,
       )
       expect(reach.counts().get(`value:date:change`)).toBe(0)
       expect(reach.counts().get(`value:date:load`)).toBeGreaterThan(0)
@@ -706,6 +744,8 @@ describe(`eager live-source grammar controls`, () => {
         reachStatesFor(driver),
         { replaying: false },
       )
+      const parameters = oracleFixedSeed(2118, { numRuns: 100 })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           historyArb.map((history) =>
@@ -722,7 +762,7 @@ describe(`eager live-source grammar controls`, () => {
             })
           },
         ),
-        { seed: 2118, numRuns: 100 },
+        parameters,
       )
       expect(reach.counts().get(`read-missed-change`)).toBe(0)
     },
@@ -730,6 +770,9 @@ describe(`eager live-source grammar controls`, () => {
   )
 })
 
+// Owns nothing: this package's src is the shared oracle itself, and the
+// reference adapter under test is a fixture in tests/. The published adapters'
+// receiving drivers own their adapters' entry points.
 declareOracle({
   check: [checkEagerLiveSourceHistory, eagerLiveSourceProperty],
   model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],

@@ -3,10 +3,14 @@ import { createCollection } from '@tanstack/db'
 import { describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
+import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createLiveQueryWindowController } from '../../db/src/live-query-window-controller.js'
 import { createCursorPager, queryCollectionOptions } from '../src/index.js'
 import {
@@ -58,6 +62,17 @@ const manualWriteCampaigns =
       ? ([`replay`] as const)
       : ([] as const)
 
+// What this oracle owns: the opaque pager through a real QueryCollection and
+// live-query window (createCursorPager, queryCollectionOptions). Its model is
+// the full-relation window in cursor-pagination/model-oracle.ts.
+declareOracle({
+  owns: [
+    `src/cursor-pagination.ts#createCursorPager`,
+    `src/query.ts#queryCollectionOptions`,
+  ],
+  model: [expectedWindow],
+})
+
 describe(`cursor adapter through production pagination`, () => {
   // A handler-free direct write surgically changes an eager Query Collection's
   // rows and compatible row-cache arrays. It must preserve an envelope's other
@@ -76,7 +91,7 @@ describe(`cursor adapter through production pagination`, () => {
   // cursor pager. Immediately after each direct write it compares public rows
   // and row-cache data with the fold, then checks that the page Query retains
   // its prior state and the pager retains its original rows. Fixed seed
-  // 20261012 and seedless campaigns use the same property and 50-run budget.
+  // 20261012 and random campaigns use the same property and 50-run budget.
   // Replay one shrink directly with TANSTACK_DB_ORACLE_SEED, _PATH, and
   // _PROPERTY=cursor-pagination.manual-write.
   it.each(
@@ -93,6 +108,11 @@ describe(`cursor adapter through production pagination`, () => {
       const cleanupFailures: Array<unknown> = []
       let lawFailure: unknown
       try {
+        const parameters =
+          campaign === `fixed`
+            ? oracleFixedSeed(20261012, { numRuns: oracleRuns(50) })
+            : oraclePropertyOptions(50, manualWriteProperty)
+        oracleRoute(oracleRouteOf(parameters))
         await fc.assert(
           fc.asyncProperty(
             fc.array(
@@ -210,9 +230,7 @@ describe(`cursor adapter through production pagination`, () => {
               }
             },
           ),
-          campaign === `fixed`
-            ? { seed: 20261012, numRuns: oracleRuns(50) }
-            : oraclePropertyOptions(50, manualWriteProperty),
+          parameters,
         )
       } catch (error) {
         lawFailure = error
@@ -242,6 +260,7 @@ describe(`cursor adapter through production pagination`, () => {
   )(
     `refreshes changed backend rows before growing the window $descending/$backendSize`,
     async ({ descending, backendSize }) => {
+      oracleRoute(`case`)
       const rows = Array.from({ length: 3 }, (_, id) => ({
         id,
         rank: 0,
@@ -303,6 +322,7 @@ describe(`cursor adapter through production pagination`, () => {
   it.each(matrix)(
     `publishes exact pages and exhaustion $count/$backendSize/$pageSize/$descending`,
     async ({ count, backendSize, pageSize, descending }) => {
+      oracleRoute(`case`)
       const rows = Array.from({ length: count }, (_, id) => ({
         id,
         rank: Math.floor(id / 6),

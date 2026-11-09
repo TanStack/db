@@ -10,6 +10,8 @@
  */
 import { expect, it } from 'vitest'
 import { createCollection, indexedDBCollectionOptions } from '../../src'
+import { oracleRoute } from '../oracle-config'
+import { declareOracle } from '../oracle-declaration'
 import { Channel, seed, withHarness } from './harness'
 import { holdStore, observeTransactions } from './idb-driver'
 import {
@@ -20,6 +22,14 @@ import {
 } from './cross-tab-oracle'
 import { recordCollection } from './recorder'
 import type { Row } from './harness'
+
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+  ],
+})
 
 async function omission(fault: 'none' | 'partial' | 'error') {
   await withHarness(async (h) => {
@@ -92,15 +102,19 @@ async function omission(fault: 'none' | 'partial' | 'error') {
   })
 }
 
-it('removes an omitted whole-row field after ordered delete and reinsert', () =>
-  omission('none'))
+it('removes an omitted whole-row field after ordered delete and reinsert', () => {
+  oracleRoute(`fixed history`)
+  return omission('none')
+})
 it('rejects partial-row application at the omission checkpoint', async () => {
+  oracleRoute(`calibration`)
   await expect(omission('partial')).rejects.toMatchObject({
     law: 'public rows',
     checkpoint: 'whole-row omission',
   })
 })
 it('rejects spurious Collection error despite correct rows and fulfilled receivers', async () => {
+  oracleRoute(`calibration`)
   await expect(omission('error')).rejects.toMatchObject({
     law: 'Collection status',
     checkpoint: 'receiver completion',
@@ -113,6 +127,7 @@ for (const serial of [false, true]) {
       ? 'the serial fixture fails the receiver-overlap reach control'
       : 'dispatch admits two real receiver reads while the first is pending',
     async () => {
+      oracleRoute(`case`)
       await withHarness(async (h) => {
         const writer = await h.open()
         const descriptor = await h.connect()
@@ -165,6 +180,7 @@ for (const serial of [false, true]) {
 
 for (const abort of [false, true]) {
   it(`an obsolete receiver ${abort ? 'failure' : 'success'} cannot affect a restarted sync run`, async () => {
+    oracleRoute(`case`)
     await withHarness(async (h) => {
       const writer = await h.open()
       const descriptor = await h.connect()
@@ -209,6 +225,7 @@ for (const abort of [false, true]) {
 }
 
 it('reports an active receiver abort as the Collection error while its callback fulfills', async () => {
+  oracleRoute(`fixed history`)
   await withHarness(async (h) => {
     const writer = await h.open()
     const descriptor = await h.connect()
@@ -246,6 +263,7 @@ it('reports an active receiver abort as the Collection error while its callback 
 })
 
 it('an imported replacement never publishes a union with the prior snapshot', async () => {
+  oracleRoute(`fixed history`)
   await withHarness(async (h) => {
     const before = [{ id: 'old', name: 'old' }]
     const after = [
@@ -277,6 +295,7 @@ it('an imported replacement never publishes a union with the prior snapshot', as
 
 for (const deliver of [false, true])
   it(`a stale peer ${deliver ? 'rejects an update after deletion publication' : 'can author an update before deletion publication'}`, async () => {
+    oracleRoute(`case`)
     await withHarness(async (h) => {
       const before = { id: 0, name: 'old' }
       await seed(h.db, 'items', [before])

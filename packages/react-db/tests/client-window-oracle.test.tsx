@@ -38,8 +38,11 @@ import { createOracleReach } from '../../db/tests/oracle-reach'
 import { createOracleFailureFidelity } from '../../db/tests/oracle-failure-fidelity'
 import {
   declareOracle,
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import {
@@ -403,17 +406,16 @@ describe(`client page identity`, () => {
                 },
               )
               try {
+                const parameters =
+                  campaign === `fixed`
+                    ? oracleFixedSeed(2345, {
+                        numRuns: oracleRuns(6) + examples.length,
+                        examples,
+                      })
+                    : oraclePropertyOptions(6, property, { examples })
+                oracleRoute(oracleRouteOf(parameters))
                 await fidelity.assert(() =>
-                  fc.assert(
-                    propertyUnderTest,
-                    campaign === `fixed`
-                      ? {
-                          numRuns: oracleRuns(6) + examples.length,
-                          seed: 2345,
-                          examples,
-                        }
-                      : oraclePropertyOptions(6, property, { examples }),
-                  ),
+                  fc.assert(propertyUnderTest, parameters),
                 )
               } finally {
                 console.info(
@@ -426,6 +428,11 @@ describe(`client page identity`, () => {
           }
 })
 declareOracle({
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   grammar: [clientWindowArbitrary],
   check: [checkClientWindowHistory, checkClientSwitch],
 })

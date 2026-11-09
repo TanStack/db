@@ -55,6 +55,11 @@
 import fc from 'fast-check'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  oracleFixedSeed,
+  oracleRoute,
+  oracleRouteOf,
+} from '../../db/tests/oracle-config'
+import {
   bindTransportControls,
   cleanupGlobals,
   createCoordinator,
@@ -123,6 +128,11 @@ describe(`BrowserCollectionCoordinator`, () => {
       vi.useFakeTimers()
       let run = 0
       try {
+        const parameters = oracleFixedSeed(1868, {
+          numRuns: 12,
+          endOnFailure: true,
+        })
+        oracleRoute(oracleRouteOf(parameters))
         await fc.assert(
           fc.asyncProperty(
             fc.record({
@@ -208,7 +218,7 @@ describe(`BrowserCollectionCoordinator`, () => {
               }
             },
           ),
-          { seed: 1868, numRuns: 12, endOnFailure: true },
+          parameters,
         )
       } finally {
         vi.useRealTimers()
@@ -219,6 +229,11 @@ describe(`BrowserCollectionCoordinator`, () => {
   describe(`RPC - ensurePersistedIndex`, () => {
     it(`routes generated collection and RPC histories through their owning adapter`, async () => {
       let run = 0
+      const parameters = oracleFixedSeed(1868, {
+        numRuns: 18,
+        endOnFailure: true,
+      })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.integer({ min: 2, max: 4 }).chain((collectionCount) =>
@@ -324,7 +339,7 @@ describe(`BrowserCollectionCoordinator`, () => {
             }
           },
         ),
-        { seed: 1868, numRuns: 18, endOnFailure: true },
+        parameters,
       )
     })
   })
@@ -334,6 +349,11 @@ describe(`BrowserCollectionCoordinator`, () => {
       vi.useFakeTimers()
       let run = 0
       try {
+        const campaignParameters = oracleFixedSeed(1868, {
+          numRuns: 18,
+          endOnFailure: true,
+        })
+        oracleRoute(oracleRouteOf(campaignParameters))
         await fc.assert(
           fc.asyncProperty(
             fc.record({
@@ -438,7 +458,7 @@ describe(`BrowserCollectionCoordinator`, () => {
               }
             },
           ),
-          { seed: 1868, numRuns: 18, endOnFailure: true },
+          campaignParameters,
         )
       } finally {
         vi.useRealTimers()
@@ -449,6 +469,11 @@ describe(`BrowserCollectionCoordinator`, () => {
   describe(`collection and retry-result retention`, () => {
     it(`releases generated collection-owned state after the last subscriber`, async () => {
       let run = 0
+      const campaignParameters = oracleFixedSeed(1868, {
+        numRuns: 12,
+        endOnFailure: true,
+      })
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(
           fc.integer({ min: 1, max: 4 }).chain((collectionCount) =>
@@ -522,7 +547,7 @@ describe(`BrowserCollectionCoordinator`, () => {
             }
           },
         ),
-        { seed: 1868, numRuns: 12, endOnFailure: true },
+        campaignParameters,
       )
     })
 
@@ -530,6 +555,11 @@ describe(`BrowserCollectionCoordinator`, () => {
       vi.useFakeTimers()
       let run = 0
       try {
+        const runParameters = oracleFixedSeed(1868, {
+          numRuns: 12,
+          endOnFailure: true,
+        })
+        oracleRoute(oracleRouteOf(runParameters))
         await fc.assert(
           fc.asyncProperty(
             fc.record({
@@ -593,7 +623,7 @@ describe(`BrowserCollectionCoordinator`, () => {
               }
             },
           ),
-          { seed: 1868, numRuns: 12, endOnFailure: true },
+          runParameters,
         )
       } finally {
         vi.useRealTimers()

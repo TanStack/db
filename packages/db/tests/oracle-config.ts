@@ -1,10 +1,18 @@
-import { oracleReplayReporter } from './oracle-replay-witness.js'
+// TanStack DB's oracle configuration. The oracle framework lives in
+// @tanstack/oracles. This module supplies what is specific to TanStack DB: its
+// registry of property ids, the replay variables that earlier versions read
+// and that now fail, and the TANSTACK_DB_ORACLE prefix of its environment
+// variables. Importing this module configures the framework, so every shim
+// that re-exports the framework imports it first.
+import {
+  configureOracles,
+  validateOraclePropertyRegistry,
+} from '@tanstack/oracles'
 
-export { recordOracleReplay } from './oracle-replay-witness.js'
-
-type OracleEnvironment = Record<string, string | undefined>
+export * from '@tanstack/oracles'
 
 const staticOracleProperties = [
+  `query.public-container-copy`,
   `pagination.limit-admission-replay-pending-negative`,
   `pagination.limit-admission-replay-pending-valid`,
   `pagination.limit-admission-builder-negative`,
@@ -27,6 +35,14 @@ const staticOracleProperties = [
   `ivm.topk-negative-window-array`,
   `ivm.topk-negative-window-grouped`,
   `ivm.topk-negative-window-orderBy`,
+  `ivm.topk-cyclic-payloads-array`,
+  `ivm.topk-cyclic-payloads-grouped`,
+  `ivm.topk-outer-join-replacements-array`,
+  `ivm.topk-outer-join-replacements-grouped`,
+  `notification-laws.query-publications`,
+  `notification-laws.publication-histories`,
+  `notification-laws.corrupt-prior-values`,
+  `proxy.json-data-keys`,
   `framework.react.window-history`,
   `framework.react.pending-window-history`,
   `framework.react.publication-window-history`,
@@ -94,10 +110,9 @@ const staticOracleProperties = [
   `react.window-render`,
   `react.window-retry-ownership`,
   `preact.window-render`,
-  `lint.part-reach`,
-  `oracle.declared-reach`,
   `scripts.lint-scope`,
   `scripts.run-budget`,
+  `scripts.strip-oracle-probes`,
   `scripts.release-version`,
   `scripts.release-seed-failure`,
   `react.ssr-effects-react18-ordinary-provider`,
@@ -253,6 +268,8 @@ const staticOracleProperties = [
   `sqlite-persistence.open-transaction-boundary`,
   `sqlite-persistence.request-local-failure-buffered-source`,
   `sqlite-persistence.optimistic-history`,
+  `sqlite-persistence.setup-reopen`,
+  `adapter.handler-types`,
   `adapter-conformance.eager-live-source.reference`,
   `adapter-conformance.eager-live-source.neon-realtime`,
   `adapter-conformance.eager-live-source.trailbase`,
@@ -276,6 +293,34 @@ const staticOracleProperties = [
   `electric.sdk-dnf-membership`,
   `electric.sdk-source-release`,
   `electric.sdk-rotation-release`,
+  `electric.sdk-resume-checkpoint.false.cursor.false.hold`,
+  `electric.sdk-resume-checkpoint.false.cursor.true.hold`,
+  `electric.sdk-resume-checkpoint.true.cursor.false.hold`,
+  `electric.sdk-resume-checkpoint.true.cursor.true.hold`,
+  `electric.sdk-resume-checkpoint.false.direct.false.apply`,
+  `electric.sdk-resume-checkpoint.false.direct.false.hold`,
+  `electric.sdk-resume-checkpoint.false.direct.false.reject`,
+  `electric.sdk-resume-checkpoint.false.direct.true.apply`,
+  `electric.sdk-resume-checkpoint.false.direct.true.hold`,
+  `electric.sdk-resume-checkpoint.false.direct.true.reject`,
+  `electric.sdk-resume-checkpoint.false.live-query.false.apply`,
+  `electric.sdk-resume-checkpoint.false.live-query.false.hold`,
+  `electric.sdk-resume-checkpoint.false.live-query.false.reject`,
+  `electric.sdk-resume-checkpoint.false.live-query.true.apply`,
+  `electric.sdk-resume-checkpoint.false.live-query.true.hold`,
+  `electric.sdk-resume-checkpoint.false.live-query.true.reject`,
+  `electric.sdk-resume-checkpoint.true.direct.false.apply`,
+  `electric.sdk-resume-checkpoint.true.direct.false.hold`,
+  `electric.sdk-resume-checkpoint.true.direct.false.reject`,
+  `electric.sdk-resume-checkpoint.true.direct.true.apply`,
+  `electric.sdk-resume-checkpoint.true.direct.true.hold`,
+  `electric.sdk-resume-checkpoint.true.direct.true.reject`,
+  `electric.sdk-resume-checkpoint.true.live-query.false.apply`,
+  `electric.sdk-resume-checkpoint.true.live-query.false.hold`,
+  `electric.sdk-resume-checkpoint.true.live-query.false.reject`,
+  `electric.sdk-resume-checkpoint.true.live-query.true.apply`,
+  `electric.sdk-resume-checkpoint.true.live-query.true.hold`,
+  `electric.sdk-resume-checkpoint.true.live-query.true.reject`,
   `electric-recovery.publication-stream-convergence`,
   `sqlite-resume.startup-generation`,
   `sqlite-resume.source-progress`,
@@ -322,10 +367,15 @@ const staticOracleProperties = [
   `query-identity.equality-partition`,
   `where-predicate.publication`,
   `join-result-key.pairs`,
+  `join-result-key.whole-source`,
   `group-result-key.groups`,
   `pooled-live-query.publication`,
   `flat-change-tracking.equivalence`,
   `local-storage.value-fidelity`,
+  `local-storage.peers`,
+  `local-storage.write-order`,
+  `live-query-observer.hydration-terminal`,
+  `optimistic-history.core`,
   `derived-publication.membership-work`,
   `collection-publication.metadata-cancellation`,
   `collection-publication.metadata-only`,
@@ -398,6 +448,7 @@ const staticOracleProperties = [
   `includes-query-shape.correlation`,
   `includes-query-shape.multiplicity`,
   `includes-query-shape.nullable`,
+  `includes-work.projection-payload`,
   `includes-work.correlated-links`,
   `includes-work.join-free`,
   `includes-work.join-targets`,
@@ -568,19 +619,6 @@ for (const depth of [1, 2, 3, 4]) {
   }
 }
 
-export function validateOraclePropertyRegistry(
-  properties: ReadonlyArray<string>,
-): ReadonlySet<string> {
-  const registry = new Set<string>()
-  for (const property of properties) {
-    if (registry.has(property)) {
-      throw new Error(`duplicate oracle property: ${property}`)
-    }
-    registry.add(property)
-  }
-  return registry
-}
-
 export const registeredOracleProperties = validateOraclePropertyRegistry([
   ...staticOracleProperties,
   ...publicationProperties,
@@ -589,18 +627,6 @@ export const registeredOracleProperties = validateOraclePropertyRegistry([
   ...paginationMatrixProperties,
   ...includesMatrixProperties,
 ])
-
-function assertRegisteredOracleProperty(property: string): void {
-  if (!registeredOracleProperties.has(property)) {
-    throw new Error(`unknown oracle property: ${property}`)
-  }
-}
-
-export type OracleReplayConfig = {
-  replaySeed: number | undefined
-  replayPath: string | undefined
-  replayProperty: string | undefined
-}
 
 /**
  * Replay variables that oracles read before they moved to the shared
@@ -703,281 +729,8 @@ const retiredReplayVariables = [
   `TANSTACK_DB_LIKE_ORACLE_RUNS`,
 ] as const
 
-export function readOracleRunConfig(
-  environment: OracleEnvironment = process.env,
-): OracleReplayConfig & { multiplier: number } {
-  const retired = retiredReplayVariables.filter(
-    (variable) => environment[variable] !== undefined,
-  )
-  if (retired.length > 0) {
-    throw new Error(
-      `Retired oracle replay variables are set: ${retired.join(`, `)}. ` +
-        `Use TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH, and ` +
-        `TANSTACK_DB_ORACLE_PROPERTY to select a replay, and ` +
-        `TANSTACK_DB_ORACLE_RUNS_MULTIPLIER to scale run counts.`,
-    )
-  }
-  const multiplierValue = environment.TANSTACK_DB_ORACLE_RUNS_MULTIPLIER ?? `1`
-  const multiplier = Number(multiplierValue)
-  if (
-    multiplierValue.trim() === `` ||
-    !Number.isSafeInteger(multiplier) ||
-    multiplier < 1
-  ) {
-    throw new Error(
-      `TANSTACK_DB_ORACLE_RUNS_MULTIPLIER must be a positive integer`,
-    )
-  }
-
-  const seedValue = environment.TANSTACK_DB_ORACLE_SEED
-  const replayPath = environment.TANSTACK_DB_ORACLE_PATH
-  const replayProperty = environment.TANSTACK_DB_ORACLE_PROPERTY
-  if (seedValue === undefined) {
-    if (replayPath !== undefined) {
-      throw new Error(
-        `TANSTACK_DB_ORACLE_PATH requires TANSTACK_DB_ORACLE_SEED`,
-      )
-    }
-    if (replayProperty !== undefined) {
-      throw new Error(
-        `TANSTACK_DB_ORACLE_PROPERTY requires TANSTACK_DB_ORACLE_PATH`,
-      )
-    }
-    return {
-      multiplier,
-      replaySeed: undefined,
-      replayPath: undefined,
-      replayProperty: undefined,
-    }
-  }
-
-  const replaySeed = Number(seedValue)
-  if (seedValue.trim() === `` || !Number.isSafeInteger(replaySeed)) {
-    throw new Error(`TANSTACK_DB_ORACLE_SEED must be an integer`)
-  }
-  if (replayPath === undefined) {
-    if (replayProperty !== undefined) {
-      throw new Error(
-        `TANSTACK_DB_ORACLE_PROPERTY requires TANSTACK_DB_ORACLE_PATH`,
-      )
-    }
-    return {
-      multiplier,
-      replaySeed,
-      replayPath: undefined,
-      replayProperty: undefined,
-    }
-  }
-  if (replayPath.trim() === ``) {
-    throw new Error(`TANSTACK_DB_ORACLE_PATH must be non-empty`)
-  }
-  if (!/^\d+(?::\d+)*$/.test(replayPath)) {
-    throw new Error(
-      `TANSTACK_DB_ORACLE_PATH must contain colon-separated nonnegative integers`,
-    )
-  }
-  if (replayProperty === undefined || replayProperty.trim() === ``) {
-    throw new Error(
-      `TANSTACK_DB_ORACLE_PATH requires TANSTACK_DB_ORACLE_PROPERTY`,
-    )
-  }
-  assertRegisteredOracleProperty(replayProperty)
-  return { multiplier, replaySeed, replayPath, replayProperty }
-}
-
-/**
- * Select a fresh campaign seed unless the caller supplied one. Report the
- * selection before fast-check runs: a later reach failure is outside its
- * reporter and must still be replayable. This line records selection, not
- * execution; guarded replay witnesses remain the execution evidence.
- */
-export function oracleCampaignSeed(
-  seed: number | undefined,
-  property: string | undefined,
-): number {
-  const selected = seed ?? Math.floor(Math.random() * 0x100000000) - 0x80000000
-  console.info(
-    `ORACLE_SEED ${JSON.stringify({ property: property ?? null, seed: selected })}`,
-  )
-  return selected
-}
-
-type OracleRunParameters = {
-  numRuns: number
-  seed?: number
-  path?: string
-} & ReturnType<typeof oracleReplayReporter>
-
-// fast-check infers a property's argument types from `examples` too, so only
-// a call with examples returns them. `ReturnType` reads the last overload,
-// the one without examples.
-export function oracleRandomParameters<TExample>(
-  numRuns: number,
-  replay: OracleReplayConfig | number | undefined,
-  property: string | undefined,
-  examples: ReadonlyArray<TExample>,
-): OracleRunParameters & { examples: Array<TExample> }
-export function oracleRandomParameters(
-  numRuns: number,
-  replay: OracleReplayConfig | number | undefined,
-  property?: string,
-): OracleRunParameters
-export function oracleRandomParameters<TExample>(
-  numRuns: number,
-  replay: OracleReplayConfig | number | undefined,
-  property?: string,
-  examples?: ReadonlyArray<TExample>,
-): OracleRunParameters & { examples?: Array<TExample> } {
-  return randomParameters(numRuns, replay, property, examples)
-}
-
-function randomParameters<TExample>(
-  numRuns: number,
-  replay: OracleReplayConfig | number | undefined,
-  property: string | undefined,
-  examples: ReadonlyArray<TExample> | undefined,
-): OracleRunParameters & { examples?: Array<TExample> } {
-  if (property !== undefined) assertRegisteredOracleProperty(property)
-  const { replaySeed, replayPath, replayProperty } =
-    typeof replay === `object`
-      ? replay
-      : {
-          replaySeed: replay,
-          replayPath: undefined,
-          replayProperty: undefined,
-        }
-  const selectedSeed = oracleCampaignSeed(replaySeed, property)
-  const parameters: OracleRunParameters =
-    replaySeed === undefined
-      ? { numRuns, seed: selectedSeed }
-      : {
-          numRuns,
-          seed: replaySeed,
-          // A path replays one recorded counterexample, so the replay runs
-          // once. From a path with one segment, fast-check would otherwise
-          // run `numRuns` histories that start at that index.
-          ...(property !== undefined &&
-          replayPath !== undefined &&
-          replayProperty === property
-            ? {
-                numRuns: 1,
-                path: replayPath,
-                ...oracleReplayReporter(property, replaySeed, replayPath),
-              }
-            : {}),
-        }
-  if (examples === undefined) return parameters
-  // fast-check runs the examples first and counts them in numRuns, so they
-  // come on top of the random runs: the examples never displace one. A path
-  // replay runs one recorded history, which can be an example.
-  return {
-    ...parameters,
-    examples: [...examples],
-    numRuns:
-      parameters.path === undefined
-        ? parameters.numRuns + examples.length
-        : parameters.numRuns,
-  }
-}
-
-const { multiplier, ...replay } = readOracleRunConfig()
-
-/**
- * Replay selection.
- *
- * A path replay runs one property's recorded history. Every other test
- * stands aside, so the replay reports only that history. A seed without a
- * path only reseeds the random campaigns, so every test still runs. These
- * helpers are the only replay conditions that the `oracle/no-disabled` lint
- * rule accepts. Each is false in an ordinary run, so no replay selection can
- * switch an oracle test off there.
- */
-
-/** Whether a path replay is selected. */
-export function oracleReplayRequested(): boolean {
-  return replay.replayPath !== undefined
-}
-
-/**
- * Whether a path replay of a property outside `properties` is selected. A
- * test that serves several properties' replays passes all of them.
- */
-export function oracleReplaySkips(
-  ...properties: ReadonlyArray<string>
-): boolean {
-  for (const property of properties) assertRegisteredOracleProperty(property)
-  return (
-    replay.replayPath !== undefined &&
-    (replay.replayProperty === undefined ||
-      !properties.includes(replay.replayProperty))
-  )
-}
-
-/**
- * The registration to use for a test that stands aside during another
- * test's replay: its `skip` form while that replay runs, and itself
- * otherwise. Without `properties`, the test stands aside during every path
- * replay. With them, it runs only when no path replay is selected or the
- * replay selects one of them.
- */
-export function oracleReplayTest<TRegistration extends { skip: unknown }>(
-  registration: TRegistration,
-  ...properties: ReadonlyArray<string>
-): TRegistration {
-  const standsAside =
-    properties.length === 0
-      ? oracleReplayRequested()
-      : oracleReplaySkips(...properties)
-  // `skip` registers through the same API, so it has the registration's type.
-  return standsAside ? (registration.skip as TRegistration) : registration
-}
-
-/**
- * The registration for a calibration witness. During a path replay of
- * `property`, TANSTACK_DB_ORACLE_CALIBRATION selects a hostile mutant that the
- * main property runs against, and the witness for that `fault` checks the
- * failure. The witness runs in ordinary runs and in that calibration replay.
- * It stands aside during every other path replay, where it has nothing to
- * check.
- */
-export function oracleCalibrationTest<TRegistration extends { skip: unknown }>(
-  registration: TRegistration,
-  property: string,
-  fault: string,
-): TRegistration {
-  const standsAside =
-    oracleReplaySkips(property) ||
-    (oracleReplayRequested() &&
-      process.env.TANSTACK_DB_ORACLE_CALIBRATION !== fault)
-  return standsAside ? (registration.skip as TRegistration) : registration
-}
-
-export { declareOracle } from './oracle-declaration.js'
-
-/** Keeps ordinary CI bounded while allowing long randomized oracle campaigns. */
-export function oracleRuns(baseRuns: number): number {
-  return baseRuns * multiplier
-}
-
-/**
- * Replays broad randomized properties when a campaign seed is supplied.
- * `examples` run first in every run, on top of the base runs. A site that
- * spreads these options and sets fast-check's `examples` itself runs them
- * inside the base runs instead, so they displace random histories.
- */
-export function oraclePropertyOptions<TExample>(
-  baseRuns: number,
-  property: string | undefined,
-  options: { examples: ReadonlyArray<TExample> },
-): OracleRunParameters & { examples: Array<TExample> }
-export function oraclePropertyOptions(
-  baseRuns: number,
-  property?: string,
-): OracleRunParameters
-export function oraclePropertyOptions<TExample>(
-  baseRuns: number,
-  property?: string,
-  { examples }: { examples?: ReadonlyArray<TExample> } = {},
-): OracleRunParameters & { examples?: Array<TExample> } {
-  return randomParameters(oracleRuns(baseRuns), replay, property, examples)
-}
+configureOracles({
+  envPrefix: `TANSTACK_DB_ORACLE`,
+  registry: registeredOracleProperties,
+  retiredVariables: retiredReplayVariables,
+})

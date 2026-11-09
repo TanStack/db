@@ -273,7 +273,7 @@ const preactInfiniteDriver: InfiniteQueryDriver = {
   mountCollectionControllable,
   mountConfigControllable,
   mountInputControllable,
-  knownGaps: [],
+  limits: [],
 }
 
 runInfiniteQuerySuite(preactInfiniteDriver, registerInfiniteQueryUnitScenarios)

@@ -33,9 +33,12 @@ import { SerializationError } from '../src/errors'
 import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -374,17 +377,21 @@ async function runHistory({ entry, handler, payload }: History) {
   )
 }
 
+// What this oracle owns: the gap report judges every function in
+// src/local-storage.ts by this file's JSON-fidelity histories and fixed
+// payload cases.
 declareOracle({
+  owns: [`src/local-storage.ts`],
   check: [runHistory],
   model: [restoredArray, restoredObject],
 })
 
 describe(`LocalStorage value fidelity oracle`, () => {
   if (!oracleReplayRequested()) {
-    // Pinned witnesses. The first is the reported case: a function property in
+    // Fixed histories. The first is the reported case: a function property in
     // an inserted row. The others place each lost kind under an array or an
     // object, and check each documented normalization on every entry path.
-    const pinned: Array<Described> = [
+    const fixedPayloads: Array<Described> = [
       ...lostLeaves.map((make) => make()),
       lost(`nested function`, { a: { b: () => 1 } }),
       lost(`function in array`, [1, () => 1]),
@@ -422,16 +429,19 @@ describe(`LocalStorage value fidelity oracle`, () => {
     ] as const
     for (const entry of entries) {
       for (const handler of [true, false]) {
-        for (const payload of pinned) {
+        for (const payload of fixedPayloads) {
           if (!isLegal({ entry, handler, payload })) continue
-          it(`${entry} ${handler ? `with` : `without`} a handler of ${payload.label} ${payload.restored === LOST ? `rejects` : `persists its JSON form`}`, () =>
-            runHistory({ entry, handler, payload }))
+          it(`${entry} ${handler ? `with` : `without`} a handler of ${payload.label} ${payload.restored === LOST ? `rejects` : `persists its JSON form`}`, () => {
+            oracleRoute(`fixed history`)
+            return runHistory({ entry, handler, payload })
+          })
         }
       }
       // Storage must hold the JSON the check accepted. This `toJSON` returns
       // the full value once and then a function, which JSON would drop, so a
       // second serialization before the write would store a different row.
       it(`${entry} stores the JSON that its check accepted`, () => {
+        oracleRoute(`fixed history`)
         let calls = 0
         const payload = {
           toJSON: () => (calls++ === 0 ? `checked` : () => `later`),
@@ -444,14 +454,24 @@ describe(`LocalStorage value fidelity oracle`, () => {
       })
     }
 
-    fcTest.prop([historyArbitrary], {
-      seed: 20_261_021,
+    const historyFixedSeed = oracleFixedSeed(20_261_021, {
       numRuns: oracleRuns(300),
-    })(`matches the JSON value model (fixed)`, runHistory)
+    })
+    fcTest.prop([historyArbitrary], historyFixedSeed)(
+      `matches the JSON value model (fixed)`,
+      (history) => {
+        oracleRoute(oracleRouteOf(historyFixedSeed))
+        return runHistory(history)
+      },
+    )
   }
   // A path replay of this property runs its one recorded history here.
-  oracleReplayTest(fcTest, property).prop(
-    [historyArbitrary],
-    oraclePropertyOptions(300, property),
-  )(`matches the JSON value model (random)`, runHistory)
+  const historyCampaign = oraclePropertyOptions(300, property)
+  oracleReplayTest(fcTest, property).prop([historyArbitrary], historyCampaign)(
+    `matches the JSON value model (random)`,
+    (history) => {
+      oracleRoute(oracleRouteOf(historyCampaign))
+      return runHistory(history)
+    },
+  )
 })

@@ -7,7 +7,13 @@ import { Func, PropRef, Value } from '../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../src/query/subset-dedupe.js'
 import { createTransaction } from '../src/transactions.js'
 import { valueOrderBy } from './collection-subscription-ordered-fixture.js'
-import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
+import {
+  oracleFixedSeed,
+  oracleRandomParameters,
+  oracleRoute,
+  oracleRouteOf,
+  readOracleRunConfig,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import { flushPromises } from './utils.js'
 import {
@@ -1522,7 +1528,10 @@ function predictFilteredReplay(
   return { nextOrdered, replacement }
 }
 
+// What this oracle owns: the gap report judges every function in
+// collection/subscription.ts by this file's replay histories.
 declareOracle({
+  owns: [`src/collection/subscription.ts`],
   check: [
     runReplayScenario,
     runSequentialReplayScenario,
@@ -1543,10 +1552,11 @@ declareOracle({
 
 describe(`CollectionSubscription replay oracle`, () => {
   it(`generates shared, failed, stale, released, and post-replay histories`, () => {
-    const scenarios = fc.sample(replayScenarioArbitrary, {
-      seed: 1755,
-      numRuns: 300,
-    })
+    oracleRoute(`fixed seed`)
+    const scenarios = fc.sample(
+      replayScenarioArbitrary,
+      oracleFixedSeed(1755, { numRuns: 300 }),
+    )
 
     expect(scenarios.some(({ demandIds }) => demandIds.length > 1)).toBe(true)
     expect(scenarios.some(({ attempts }) => attempts.length > 1)).toBe(true)
@@ -1590,6 +1600,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   // is a legal reentry cut: it can read the source replacement before this
   // subscriber receives the same source transaction.
   it(`continues after a privately selected filtered snapshot during callback reentry`, async () => {
+    oracleRoute(`fixed history`)
     type Row = { id: string; value: number }
     const rows: Array<Row> = [
       { id: `one`, value: 1 },
@@ -1732,6 +1743,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   })
 
   it(`keeps private row tracking through consecutive failed replays`, async () => {
+    oracleRoute(`fixed history`)
     await runReplayScenario({
       initialRows: [
         { id: `one`, value: -2 },
@@ -1777,6 +1789,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   })
 
   it(`retains a successful retry after retiring its failed peer`, async () => {
+    oracleRoute(`fixed history`)
     await runReplayScenario({
       initialRows: [{ id: `two`, value: 0 }],
       demandIds: [`one`, `two`],
@@ -1822,6 +1835,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   })
 
   it(`does not republish an identical snapshot after a synchronous replay failure`, async () => {
+    oracleRoute(`fixed history`)
     await runSequentialReplayScenario({
       initialRows: [{ id: `one`, value: 0 }],
       loads: [
@@ -1832,6 +1846,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   })
 
   it(`keeps a same-key source replacement private after a failed replay`, async () => {
+    oracleRoute(`fixed history`)
     await runReplayScenario({
       initialRows: [{ id: `one`, value: 1 }],
       demandIds: [`one`],
@@ -1847,6 +1862,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   })
 
   it(`does not let an unpublished truncate delete suppress a later insert`, async () => {
+    oracleRoute(`fixed history`)
     await runReplayScenario({
       initialRows: [],
       demandIds: [`two`, `one`],
@@ -1879,6 +1895,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   })
 
   it(`lets the newest successful replay replace an older failed replay`, async () => {
+    oracleRoute(`fixed history`)
     await runReplayScenario({
       initialRows: [{ id: `one`, value: 1 }],
       demandIds: [`one`],
@@ -1903,6 +1920,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   })
 
   it(`ignores an obsolete replay that settles after the newest replay`, async () => {
+    oracleRoute(`fixed history`)
     await runReplayScenario({
       initialRows: [{ id: `one`, value: 0 }],
       demandIds: [`one`],
@@ -1933,6 +1951,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   })
 
   it(`releases every successful overlapping replay acquisition`, async () => {
+    oracleRoute(`fixed history`)
     await runReplayScenario({
       initialRows: [],
       demandIds: [`one`],
@@ -1951,6 +1970,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   })
 
   it(`uses the newest complete multi-demand replay`, async () => {
+    oracleRoute(`fixed history`)
     await runReplayScenario({
       initialRows: [{ id: `one`, value: 1 }],
       demandIds: [`one`, `two`],
@@ -1987,6 +2007,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   })
 
   it(`retains applied rows after their replay demand is released`, async () => {
+    oracleRoute(`fixed history`)
     await runReplayScenario({
       initialRows: [{ id: `two`, value: 0 }],
       demandIds: [`one`, `two`],
@@ -2015,6 +2036,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   })
 
   it(`refreshes a retained row when its final released demand is reacquired`, async () => {
+    oracleRoute(`fixed history`)
     // Reduced from the fixed replay corpus after removing release-time pruning.
     await runReplayScenario({
       initialRows: [{ id: `one`, value: 0 }],
@@ -2039,6 +2061,7 @@ describe(`CollectionSubscription replay oracle`, () => {
   })
 
   it(`replaces a retained snapshot with a later empty replay`, async () => {
+    oracleRoute(`fixed history`)
     await runReplayScenario({
       initialRows: [{ id: `one`, value: 1 }],
       demandIds: [`one`],
@@ -2056,131 +2079,181 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
   })
 
-  fcTest.prop([replayScenarioArbitrary], {
+  const replayScenarioFixedSeed = oracleFixedSeed(1756, {
     numRuns: generatedRuns,
-    seed: 1756,
-  })(`matches replay and ownership laws for a fixed seed`, runReplayScenario)
+  })
+  fcTest.prop([replayScenarioArbitrary], replayScenarioFixedSeed)(
+    `matches replay and ownership laws for a fixed seed`,
+    (...args) => {
+      oracleRoute(oracleRouteOf(replayScenarioFixedSeed))
+      return runReplayScenario(...args)
+    },
+  )
 
   // The fixed campaign's histories reach a replacement that changes a row
   // only by a zero's sign, where a diff without signed zeros publishes
   // nothing.
   it(`reaches a zero-sign replacement in the fixed campaign`, async () => {
+    oracleRoute(`fixed seed`)
     zeroSignReplacements = 0
-    for (const scenario of fc.sample(replayScenarioArbitrary, {
-      seed: 1756,
-      numRuns: generatedRuns,
-    })) {
+    for (const scenario of fc.sample(
+      replayScenarioArbitrary,
+      oracleFixedSeed(1756, { numRuns: generatedRuns }),
+    )) {
       await runReplayScenario(scenario)
     }
     expect(zeroSignReplacements).toBeGreaterThan(0)
   })
 
-  fcTest.prop(
-    [replayScenarioArbitrary],
-    oracleRandomParameters(
-      generatedRuns,
-      replayConfig,
-      `subscription-replay.completion`,
-    ),
-  )(
+  const replayScenarioCampaign = oracleRandomParameters(
+    generatedRuns,
+    replayConfig,
+    `subscription-replay.completion`,
+  )
+  fcTest.prop([replayScenarioArbitrary], replayScenarioCampaign)(
     `matches replay and ownership laws for a random or replayed seed`,
-    runReplayScenario,
+    (...args) => {
+      oracleRoute(oracleRouteOf(replayScenarioCampaign))
+      return runReplayScenario(...args)
+    },
   )
 
-  fcTest.prop([sequentialReplayScenarioArbitrary], {
+  const sequentialReplayScenarioFixedSeed = oracleFixedSeed(1761, {
     numRuns: generatedRuns,
-    seed: 1761,
-  })(
-    `matches synchronous, asynchronous, and partial-failure replay laws for a fixed seed`,
-    runSequentialReplayScenario,
-  )
-
+  })
   fcTest.prop(
     [sequentialReplayScenarioArbitrary],
-    oracleRandomParameters(
-      generatedRuns,
-      replayConfig,
-      `subscription-replay.sequential`,
-    ),
+    sequentialReplayScenarioFixedSeed,
+  )(
+    `matches synchronous, asynchronous, and partial-failure replay laws for a fixed seed`,
+    (...args) => {
+      oracleRoute(oracleRouteOf(sequentialReplayScenarioFixedSeed))
+      return runSequentialReplayScenario(...args)
+    },
+  )
+
+  const sequentialReplayScenarioCampaign = oracleRandomParameters(
+    generatedRuns,
+    replayConfig,
+    `subscription-replay.sequential`,
+  )
+  fcTest.prop(
+    [sequentialReplayScenarioArbitrary],
+    sequentialReplayScenarioCampaign,
   )(
     `matches synchronous, asynchronous, and partial-failure replay laws for a random or replayed seed`,
-    runSequentialReplayScenario,
+    (...args) => {
+      oracleRoute(oracleRouteOf(sequentialReplayScenarioCampaign))
+      return runSequentialReplayScenario(...args)
+    },
   )
 
-  fcTest.prop([cleanupRestartScenarioArbitrary], {
+  const cleanupRestartScenarioFixedSeed = oracleFixedSeed(1757, {
     numRuns: generatedRuns,
-    seed: 1757,
-  })(
-    `isolates cleanup and restart sync runs for a fixed seed`,
-    runCleanupRestartScenario,
-  )
-
+  })
   fcTest.prop(
     [cleanupRestartScenarioArbitrary],
-    oracleRandomParameters(
-      generatedRuns,
-      replayConfig,
-      `subscription-replay.restart`,
-    ),
+    cleanupRestartScenarioFixedSeed,
+  )(`isolates cleanup and restart sync runs for a fixed seed`, (...args) => {
+    oracleRoute(oracleRouteOf(cleanupRestartScenarioFixedSeed))
+    return runCleanupRestartScenario(...args)
+  })
+
+  const cleanupRestartScenarioCampaign = oracleRandomParameters(
+    generatedRuns,
+    replayConfig,
+    `subscription-replay.restart`,
+  )
+  fcTest.prop(
+    [cleanupRestartScenarioArbitrary],
+    cleanupRestartScenarioCampaign,
   )(
     `isolates cleanup and restart sync runs for a random or replayed seed`,
-    runCleanupRestartScenario,
+    (...args) => {
+      oracleRoute(oracleRouteOf(cleanupRestartScenarioCampaign))
+      return runCleanupRestartScenario(...args)
+    },
   )
 
-  fcTest.prop([fc.scheduler()], { numRuns: generatedRuns, seed: 1760 })(
+  const fixedCampaign = oracleFixedSeed(1760, { numRuns: generatedRuns })
+  fcTest.prop([fc.scheduler()], fixedCampaign)(
     `keeps same-tick obsolete and current replay settlements generation-safe`,
-    expectScheduledReplaySettlementIsGenerationSafe,
+    (...args) => {
+      oracleRoute(oracleRouteOf(fixedCampaign))
+      return expectScheduledReplaySettlementIsGenerationSafe(...args)
+    },
   )
 
-  fcTest.prop(
-    [fc.scheduler()],
-    oracleRandomParameters(
-      generatedRuns,
-      replayConfig,
-      `subscription-replay.same-tick`,
-    ),
-  )(
+  const randomCampaign = oracleRandomParameters(
+    generatedRuns,
+    replayConfig,
+    `subscription-replay.same-tick`,
+  )
+  fcTest.prop([fc.scheduler()], randomCampaign)(
     `keeps same-tick replay settlements generation-safe for a random or replayed seed`,
-    expectScheduledReplaySettlementIsGenerationSafe,
+    (...args) => {
+      oracleRoute(oracleRouteOf(randomCampaign))
+      return expectScheduledReplaySettlementIsGenerationSafe(...args)
+    },
   )
 
-  fcTest.prop([sharedSubscriptionScenarioArbitrary], {
+  const sharedSubscriptionScenarioFixedSeed = oracleFixedSeed(1758, {
     numRuns: generatedRuns,
-    seed: 1758,
-  })(
-    `keeps independent transport and logical ownership aligned for a fixed seed`,
-    runSharedSubscriptionScenario,
-  )
-
+  })
   fcTest.prop(
     [sharedSubscriptionScenarioArbitrary],
-    oracleRandomParameters(
-      generatedRuns,
-      replayConfig,
-      `subscription-replay.shared`,
-    ),
+    sharedSubscriptionScenarioFixedSeed,
+  )(
+    `keeps independent transport and logical ownership aligned for a fixed seed`,
+    (...args) => {
+      oracleRoute(oracleRouteOf(sharedSubscriptionScenarioFixedSeed))
+      return runSharedSubscriptionScenario(...args)
+    },
+  )
+
+  const sharedSubscriptionScenarioCampaign = oracleRandomParameters(
+    generatedRuns,
+    replayConfig,
+    `subscription-replay.shared`,
+  )
+  fcTest.prop(
+    [sharedSubscriptionScenarioArbitrary],
+    sharedSubscriptionScenarioCampaign,
   )(
     `keeps independent transport and logical ownership aligned for a random or replayed seed`,
-    runSharedSubscriptionScenario,
+    (...args) => {
+      oracleRoute(oracleRouteOf(sharedSubscriptionScenarioCampaign))
+      return runSharedSubscriptionScenario(...args)
+    },
   )
 
-  fcTest.prop([optimisticReplayScenarioArbitrary], {
+  const optimisticReplayScenarioFixedSeed = oracleFixedSeed(1759, {
     numRuns: generatedRuns,
-    seed: 1759,
-  })(
-    `preserves optimistic overlays across replay outcomes for a fixed seed`,
-    runOptimisticReplayScenario,
-  )
-
+  })
   fcTest.prop(
     [optimisticReplayScenarioArbitrary],
-    oracleRandomParameters(
-      generatedRuns,
-      replayConfig,
-      `subscription-replay.optimistic`,
-    ),
+    optimisticReplayScenarioFixedSeed,
+  )(
+    `preserves optimistic overlays across replay outcomes for a fixed seed`,
+    (...args) => {
+      oracleRoute(oracleRouteOf(optimisticReplayScenarioFixedSeed))
+      return runOptimisticReplayScenario(...args)
+    },
+  )
+
+  const optimisticReplayScenarioCampaign = oracleRandomParameters(
+    generatedRuns,
+    replayConfig,
+    `subscription-replay.optimistic`,
+  )
+  fcTest.prop(
+    [optimisticReplayScenarioArbitrary],
+    optimisticReplayScenarioCampaign,
   )(
     `preserves optimistic overlays across replay outcomes for a random or replayed seed`,
-    runOptimisticReplayScenario,
+    (...args) => {
+      oracleRoute(oracleRouteOf(optimisticReplayScenarioCampaign))
+      return runOptimisticReplayScenario(...args)
+    },
   )
 })

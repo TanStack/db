@@ -2,8 +2,11 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it as vitestIt } from 'vitest'
 import { reconcileChangesForD2 } from '../src/query/live/utils.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -134,7 +137,7 @@ const reconciliationHistoryArbitrary = fc.array(reconciliationStepArbitrary, {
   maxLength: 30,
 })
 
-// Grammar controls: the pinned numeric/string key, unknown update/delete,
+// Grammar controls: the fixed numeric/string key, unknown update/delete,
 // stale previous-value, and changed-source restart histories below are all
 // reconstructible here. Upsert establishes or replaces authoritative source
 // rows; rawUpdate exercises an update without a prior sent row; replay checks
@@ -361,6 +364,7 @@ function upsert(
 }
 
 it(`keeps numeric and string source keys distinct across restart`, () => {
+  oracleRoute(`fixed history`)
   const model = createReconciliationModel()
   const row = { id: 1, revision: 1, value: 1 }
   const keys = [0, `0`] as const
@@ -406,6 +410,7 @@ it(`keeps numeric and string source keys distinct across restart`, () => {
 })
 
 it(`preserves external source rows across graph teardown and restart`, () => {
+  oracleRoute(`fixed history`)
   const model = createReconciliationModel()
   const row = { id: 1, revision: 1, value: 1 }
 
@@ -426,6 +431,7 @@ it(`preserves external source rows across graph teardown and restart`, () => {
 })
 
 it(`replays external source changes made while the graph is down`, () => {
+  oracleRoute(`fixed history`)
   const model = createReconciliationModel()
   const first = { id: 1, revision: 1, value: 1 }
   const replacement = { id: 1, revision: 2, value: 2 }
@@ -467,10 +473,11 @@ function executedReplayReach(steps: ReadonlyArray<ReconciliationStep>): number {
 }
 
 it(`executes changed down-state sources and checks their restart replay`, () => {
-  const histories = fc.sample(reconciliationHistoryArbitrary, {
-    seed: 1780,
-    numRuns: 500,
-  })
+  oracleRoute(`fixed seed`)
+  const histories = fc.sample(
+    reconciliationHistoryArbitrary,
+    oracleFixedSeed(1780, { numRuns: 500 }),
+  )
 
   // Run every history, not just the first syntax match. Each accepted restart
   // has already passed tracker and signed-relation assertions above.
@@ -485,6 +492,7 @@ it(`executes changed down-state sources and checks their restart replay`, () => 
 })
 
 it(`does not count absent replay or an unfinished downtime as replay coverage`, () => {
+  oracleRoute(`fixed history`)
   const absent: ReconciliationStep = {
     type: `batch`,
     operations: [{ type: `replay`, key: `missing` }],
@@ -519,25 +527,37 @@ const assertChangedSourceReplay = (row: SourceRow, key: SourceKey) => {
   ).toBe(1)
 }
 
-fixedCampaign.prop([sourceRowArbitrary, sourceKeyArbitrary], {
-  numRuns: oracleRuns(100),
-  seed: 1782,
-})(
+const sourceRowFixedSeed = oracleFixedSeed(1782, { numRuns: oracleRuns(100) })
+fixedCampaign.prop(
+  [sourceRowArbitrary, sourceKeyArbitrary],
+  sourceRowFixedSeed,
+)(
   `forces a changed source payload through every generated helper restart for a fixed seed`,
-  assertChangedSourceReplay,
+  (...args) => {
+    oracleRoute(oracleRouteOf(sourceRowFixedSeed))
+    return assertChangedSourceReplay(...args)
+  },
 )
 
+const sourceRowCampaign = oraclePropertyOptions(
+  100,
+  `d2-source.changed-restart`,
+)
 randomCampaign(`d2-source.changed-restart`).prop(
   [sourceRowArbitrary, sourceKeyArbitrary],
-  oraclePropertyOptions(100, `d2-source.changed-restart`),
+  sourceRowCampaign,
 )(
   `forces a changed source payload through every generated helper restart for a random or replayed seed`,
-  assertChangedSourceReplay,
+  (...args) => {
+    oracleRoute(oracleRouteOf(sourceRowCampaign))
+    return assertChangedSourceReplay(...args)
+  },
 )
 
 it.each([`upsert`, `rawUpdate`, `replay`, `restart`] as const)(
   `detects driver mutation at %s without changing expected source rows`,
   (entry) => {
+    oracleRoute(`calibration`)
     const model = createReconciliationModel()
     const row = { id: 1, revision: 1, value: 1 }
     const step: ReconciliationStep =
@@ -589,20 +609,33 @@ const assertExactSourceContributions = (
   }
 }
 
-fixedCampaign.prop([reconciliationHistoryArbitrary], {
+const reconciliationHistoryFixedSeed = oracleFixedSeed(1780, {
   numRuns: oracleRuns(200),
-  seed: 1780,
-})(
+})
+fixedCampaign.prop(
+  [reconciliationHistoryArbitrary],
+  reconciliationHistoryFixedSeed,
+)(
   `keeps one exact D2 contribution per source key for a fixed seed`,
-  assertExactSourceContributions,
+  (...args) => {
+    oracleRoute(oracleRouteOf(reconciliationHistoryFixedSeed))
+    return assertExactSourceContributions(...args)
+  },
 )
 
+const reconciliationHistoryCampaign = oraclePropertyOptions(
+  200,
+  `d2-source.exact-retractions`,
+)
 randomCampaign(`d2-source.exact-retractions`).prop(
   [reconciliationHistoryArbitrary],
-  oraclePropertyOptions(200, `d2-source.exact-retractions`),
+  reconciliationHistoryCampaign,
 )(
   `keeps one exact D2 contribution per source key for a random or replayed seed`,
-  assertExactSourceContributions,
+  (...args) => {
+    oracleRoute(oracleRouteOf(reconciliationHistoryCampaign))
+    return assertExactSourceContributions(...args)
+  },
 )
 
 const assertDisjointHistoriesCommute = ([left, right]: [
@@ -620,23 +653,36 @@ const assertDisjointHistoriesCommute = ([left, right]: [
   expect(snapshotModel(rightThenLeft)).toEqual(snapshotModel(leftThenRight))
 }
 
-fixedCampaign.prop([disjointHistoriesArbitrary], {
+const disjointHistoriesFixedSeed = oracleFixedSeed(1781, {
   numRuns: oracleRuns(100),
-  seed: 1781,
-})(
+})
+fixedCampaign.prop([disjointHistoriesArbitrary], disjointHistoriesFixedSeed)(
   `commutes independent source histories for a fixed seed`,
-  assertDisjointHistoriesCommute,
+  (...args) => {
+    oracleRoute(oracleRouteOf(disjointHistoriesFixedSeed))
+    return assertDisjointHistoriesCommute(...args)
+  },
 )
 
+const disjointHistoriesCampaign = oraclePropertyOptions(
+  100,
+  `d2-source.disjoint-commutation`,
+)
 randomCampaign(`d2-source.disjoint-commutation`).prop(
   [disjointHistoriesArbitrary],
-  oraclePropertyOptions(100, `d2-source.disjoint-commutation`),
+  disjointHistoriesCampaign,
 )(
   `commutes independent source histories for a random or replayed seed`,
-  assertDisjointHistoriesCommute,
+  (...args) => {
+    oracleRoute(oracleRouteOf(disjointHistoriesCampaign))
+    return assertDisjointHistoriesCommute(...args)
+  },
 )
 
+// What this oracle owns: the gap report judges reconcileChangesForD2 and its
+// static reference tree by this file's tests.
 declareOracle({
+  owns: [`src/query/live/utils.ts#reconcileChangesForD2`],
   check: [
     applyReconciliationStep,
     expectTrackerMatchesSource,

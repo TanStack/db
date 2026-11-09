@@ -26,12 +26,17 @@ import { createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRuns } from '../../db/tests/oracle-config'
+import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import { assertLazySourceFacts } from './lazy-paging-model-oracle'
 import { LazyVersionModel } from './lazy-paging-version-model-oracle'
 import type { LazyRow } from './lazy-paging-model-oracle'
+
+declareOracle({
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+})
 
 const history = fc.record({
   size: fc.integer({ min: 8, max: 14 }),
@@ -84,7 +89,7 @@ async function runVersions(h: History, fault: Fault = `none`) {
   const publish = () => {
     const rows = [...f.source.base.values()].map((row) => ({ ...row }))
     compare(rows)
-    // Hostile publication controls run at the same observation boundary, then
+    // Mutant publication controls run at the same observation boundary, then
     // restore the correct final value. They test trace comparison, not a claim
     // that production itself emitted these deliberately injected observations.
     if (!injected && fault !== `none` && rows[0]?.text.endsWith(`revision-2`)) {
@@ -210,6 +215,7 @@ it(`checks every native publication against coherent monotone authored revisions
 it.each([`rollback`, `mixed`] as const)(
   `rejects a transient %s publication even with the correct final revision`,
   async (fault) => {
+    oracleRoute(`calibration`)
     await expect(
       runVersions(
         {
@@ -229,6 +235,7 @@ it.each([`rollback`, `mixed`] as const)(
 )
 
 it(`allows stuttering, skipped and observationally identical revisions`, () => {
+  oracleRoute(`case`)
   const a = [{ id: `a`, rank: 0, text: `first` }]
   const b = [{ id: `a`, rank: 0, text: `middle` }]
   const c = [{ id: `a`, rank: 0, text: `last` }]

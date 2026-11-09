@@ -1,4 +1,4 @@
-// Hostile mutants for persisted demand coverage.
+// Mutants for persisted demand coverage.
 //
 // Each mutant replaces one exact piece of production code with a plausible
 // wrong design. The harness applies it in memory through
@@ -200,8 +200,8 @@ const MUTANTS = [
   {
     id: 'P22',
     file: 'packages/db-sqlite-persistence-core/src/persisted.ts',
-    find: '      options.signal?.addEventListener(`abort`, settle, { once: true })\n',
-    replace: '',
+    find: '      options.signal?.addEventListener(`abort`, settle, { once: true })\n      void upstream.catch(() => undefined).then(settle)',
+    replace: '      void upstream.catch(() => undefined).then(settle)',
     rationale: 'settleCoveredDemand: release does not end the covered wait',
   },
   {

@@ -21,7 +21,12 @@ import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
 import { oracleRuns } from '../../db/tests/oracle-config'
 import { convexCollectionOptions } from '../src/index'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { controlledClient, query, withTestCleanup } from './helpers'
+
+declareOracle({
+  owns: [`src/index.ts#convexCollectionOptions`],
+})
 
 const forms = [`direct`, `shallow`, `fresh`, `descriptor`] as const
 const checkpoints = [`idle`, `ready`, `cleaned-up`] as const

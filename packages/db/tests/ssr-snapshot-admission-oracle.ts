@@ -237,7 +237,7 @@ export function expectedSsrRuntimeErrorViews(history: SsrRuntimeErrorHistory) {
  * hydrated readers and authored browser rows. A mount follows at least one
  * authoritative reader. Same and different rows, including ready-empty and
  * loading-empty server views, distinguish row equality from readiness equality.
- * Server/browser writes remain in the adjacent handoff grammar: this lane
+ * Server/browser writes remain in the adjacent handoff grammar: this grammar
  * isolates a change of receiving reader after a completed handoff.
  *
  * Removing initialization kind loses the mount/hydrate distinction. Removing

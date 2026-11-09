@@ -20,6 +20,7 @@ import {
   checkBoundOptions,
 } from '../../db/tests/live-query-bound-options-oracle'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { renderHook, settle } from './render-probe'
 import type { InitialQueryBuilder } from '@tanstack/db'
@@ -43,10 +44,15 @@ afterAll(() => {
       Object.fromEntries(reach.counts()),
     )
 })
-declareOracle({ check: [checkBoundOptions], grammar: [boundOptionHistories] })
+declareOracle({
+  owns: [`src/useLiveQuery.ts#useLiveQuery`],
+  check: [checkBoundOptions],
+  grammar: [boundOptionHistories],
+})
 test.each(boundOptionHistories)(
   `Preact retains bound options %j`,
   async ({ option, identity }) => {
+    oracleRoute(`case`)
     reach.beginHistory()
     const source = createCollection(
       mockSyncCollectionOptions<Row>({
@@ -146,6 +152,7 @@ test.each(boundOptionHistories)(
 test.each(boundOptionHistories)(
   `bound-option checker rejects in-place replacement %j`,
   ({ option }) => {
+    oracleRoute(`calibration`)
     const collection = { config: { getKey: () => `initial`, schema: {} } }
     const initial = captureBoundOptions(collection)
     if (option !== `schema`) collection.config.getKey = () => `replacement`

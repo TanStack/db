@@ -6,10 +6,42 @@ title: lte
 ## Call Signature
 
 ```ts
+function lte<L, R>(left, right): WithAggregate<BasicExpression<boolean>, [L, R]>;
+```
+
+Defined in: [packages/db/src/query/builder/functions.ts:254](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L254)
+
+### Type Parameters
+
+#### L
+
+`L` *extends* `ExpressionLike`
+
+#### R
+
+`R` *extends* `ExpressionLike`
+
+### Parameters
+
+#### left
+
+`L` & `true` *extends* `ContainsAggregate`\<`L` \| `R`, \[\[`L`, `R`\]\]\> ? `unknown` : `never`
+
+#### right
+
+`R`
+
+### Returns
+
+`WithAggregate`\<[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>, \[`L`, `R`\]\>
+
+## Call Signature
+
+```ts
 function lte<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:193](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L193)
+Defined in: [packages/db/src/query/builder/functions.ts:258](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L258)
 
 ### Type Parameters
 
@@ -37,7 +69,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:193](https://github.com/
 function lte<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:197](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L197)
+Defined in: [packages/db/src/query/builder/functions.ts:262](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L262)
 
 ### Type Parameters
 
@@ -65,7 +97,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:197](https://github.com/
 function lte<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:201](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L201)
+Defined in: [packages/db/src/query/builder/functions.ts:266](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L266)
 
 ### Type Parameters
 

@@ -6,7 +6,10 @@ import {
   expectNotificationHistory,
   expectNotificationsStopped,
 } from '../utils/notification-laws-oracle'
-import { declareOracle } from '../../../db/tests/oracle-declaration.js'
+import {
+  declareOracle,
+  oracleRoute,
+} from '../../../db/tests/oracle-declaration.js'
 import {
   captureUserRows,
   userFixture,
@@ -21,6 +24,7 @@ export function createLiveUpdatesTestSuite(
   describe('Live Updates Suite', () => {
     describe('Subscription Lifecycle', () => {
       it('should receive updates when subscribed', async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         await withOwnedUsers(config, async (owned) => {
           const query = owned.track(
@@ -128,6 +132,12 @@ export function createLiveUpdatesTestSuite(
   })
 }
 
+// Owns no production entry. The suite judges the collection adapter that a
+// consuming package runs it against (electric.e2e.test.ts, query.e2e.test.ts,
+// trailbase.e2e.test.ts, or the persisted-collection conformance contract),
+// but no consumer declares `owns` either, so the gap report counts none of
+// this suite's kills. The coverage map records this as a follow-up under
+// "Shared e2e suites".
 declareOracle({
   check: [expectNotificationHistory, expectNotificationsStopped],
 })

@@ -21,15 +21,25 @@ import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { createOracleReach } from '../oracle-reach.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import type { DistinctValue } from '../../../db-ivm/tests/distinct-incrementalization-oracle.js'
 
 const PROPERTY = `query.distinct-collisions`
 const values = distinctCollisionValues(hash)
-declareOracle({ check: [checkDistinctSnapshot], grammar: [distinctHistory] })
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  check: [checkDistinctSnapshot],
+  grammar: [distinctHistory],
+})
 
 for (const ordered of [false, true])
   for (const campaign of [`fixed`, `random`] as const)
@@ -37,6 +47,11 @@ for (const ordered of [false, true])
       `preserves public distinct collision rows, ordered=${ordered} (${campaign})`,
       async () => {
         const reach = createOracleReach(PROPERTY, DISTINCT_REACH_STATES)
+        const parameters =
+          campaign === `fixed`
+            ? oracleFixedSeed(2306, { numRuns: oracleRuns(100) })
+            : oraclePropertyOptions(100, PROPERTY)
+        oracleRoute(oracleRouteOf(parameters))
         await fc.assert(
           fc.asyncProperty(distinctHistory, async (worlds) => {
             reach.beginHistory()
@@ -105,9 +120,7 @@ for (const ordered of [false, true])
               () => source.cleanup(),
             ])
           }),
-          campaign === `fixed`
-            ? { numRuns: oracleRuns(100), seed: 2306 }
-            : oraclePropertyOptions(100, PROPERTY),
+          parameters,
         )
         reach.assertReached()
         process.stdout.write(

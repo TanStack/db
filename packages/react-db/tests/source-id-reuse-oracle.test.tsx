@@ -64,6 +64,7 @@ import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   boundOptionHistories,
@@ -95,6 +96,7 @@ it.each(
 )(
   `retains inline options until identity changes: %j`,
   async ({ hook, option, identity }) => {
+    oracleRoute(`case`)
     const rows = source(
       `inline-options-${hook}-${option}-${identity}`,
       `before`,
@@ -222,6 +224,12 @@ function checkRerender(
 }
 
 declareOracle({
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveQuery.ts#useLiveQuery`,
+    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   check: [checkRerender, checkReleaseHistory, checkBoundOptions],
   model: [expectedCollision],
   grammar: [boundOptionHistories],
@@ -742,8 +750,10 @@ describe(`React source ID reuse: rejected renders release deferred sync starts`,
         for (const atMount of probe.requiresPriorClaim
           ? [false]
           : [false, true])
-          it(`after ${causeName} in ${hookName}, ${readerName} starts the shared source (${atMount ? `mount` : `rerender`})`, () =>
-            checkReleaseHistory(makeCause, hook, read, atMount))
+          it(`after ${causeName} in ${hookName}, ${readerName} starts the shared source (${atMount ? `mount` : `rerender`})`, () => {
+            oracleRoute(`case`)
+            return checkReleaseHistory(makeCause, hook, read, atMount)
+          })
     }
 })
 it.each([
@@ -752,6 +762,7 @@ it.each([
   `wrong-row`,
   `duplicate-row`,
 ] as const)(`rejects wrong descriptor release observation: %s`, (fault) => {
+  oracleRoute(`calibration`)
   const expected = expectedReleaseObservation({
     id: `one`,
     value: `authored`,
@@ -774,6 +785,7 @@ declareOracle({
 
 describe(`React source ID reuse`, () => {
   it(`rejects a different active source with the same ID before exposing stale rows`, async () => {
+    oracleRoute(`fixed history`)
     const first = source(`settings`, `first`)
     const second = source(`settings`, `second`)
     const hook = renderHook(
@@ -791,6 +803,7 @@ describe(`React source ID reuse`, () => {
   })
 
   it(`rejects a previously used ID after another source and a query change`, async () => {
+    oracleRoute(`fixed history`)
     const first = source(`settings`, `first`)
     const other = source(`other`, `other`)
     const second = source(`settings`, `second`)
@@ -820,6 +833,7 @@ describe(`React source ID reuse`, () => {
   })
 
   it(`accepts the same source object and a different source ID`, async () => {
+    oracleRoute(`fixed history`)
     const first = source(`settings`, `first`)
     const other = source(`other`, `other`)
     const hook = renderHook(
@@ -844,6 +858,7 @@ describe(`React source ID reuse`, () => {
   })
 
   it(`keeps a mounted hook's ID binding after source cleanup`, async () => {
+    oracleRoute(`fixed history`)
     const first = source(`settings`, `first`)
     const second = source(`settings`, `second`)
     const hook = renderHook(
@@ -861,6 +876,7 @@ describe(`React source ID reuse`, () => {
   })
 
   it(`remembers each client scope when one mounted hook switches clients`, async () => {
+    oracleRoute(`fixed history`)
     const firstClient = new DbClient()
     const secondClient = new DbClient()
     const first = source(`settings`, `first`)
@@ -893,6 +909,7 @@ describe(`React source ID reuse`, () => {
   })
 
   it(`rejects same-ID reuse after a suspended render starts a source query`, async () => {
+    oracleRoute(`fixed history`)
     const first = source(`first`, `first`)
     const abandoned = source(`candidate`, `abandoned`)
     const replacement = source(`candidate`, `replacement`)
@@ -955,6 +972,7 @@ describe(`React source ID reuse: useLiveInfiniteQuery`, () => {
     )
 
   it(`rejects a different active source with the same ID before exposing stale rows`, async () => {
+    oracleRoute(`fixed history`)
     const first = source(`settings`, `first`)
     const second = source(`settings`, `second`)
     const hook = renderHook(({ current }) => useInfinite(current), {
@@ -969,6 +987,7 @@ describe(`React source ID reuse: useLiveInfiniteQuery`, () => {
   })
 
   it(`rejects a previously used ID after another source`, async () => {
+    oracleRoute(`fixed history`)
     const first = source(`settings`, `first`)
     const other = source(`other`, `other`)
     const second = source(`settings`, `second`)
@@ -990,6 +1009,7 @@ describe(`React source ID reuse: useLiveInfiniteQuery`, () => {
   })
 
   it(`accepts the same source object and a different source ID`, async () => {
+    oracleRoute(`fixed history`)
     const first = source(`settings`, `first`)
     const other = source(`other`, `other`)
     const hook = renderHook(({ current }) => useInfinite(current), {
@@ -1010,6 +1030,7 @@ describe(`React source ID reuse: useLiveInfiniteQuery`, () => {
   })
 
   it(`rejects same-ID reuse after a suspended render starts a source query`, async () => {
+    oracleRoute(`fixed history`)
     const first = source(`first`, `first`)
     const abandoned = source(`candidate`, `abandoned`)
     const replacement = source(`candidate`, `replacement`)

@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 1.0.0-rc.1.4
+
+### Patch Changes
+
+- Restore nested-row query performance by keeping source payloads opaque during metadata cleanup and resolving includes along compiled paths. Intermediate projections, functional callback inputs, inline results and Effect outputs retain authored fields, while published Collection rows receive genuine computed metadata. ([#2356](https://github.com/TanStack/db/pull/2356))
+
+  Preserve child identities through outer joins and fan-out, and retain aggregate result types through expression wrappers.
+
 ## 1.0.0-rc.1.3
 
 ### Patch Changes

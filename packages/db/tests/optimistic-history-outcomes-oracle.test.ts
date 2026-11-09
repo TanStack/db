@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { createDeferred } from '../src/deferred.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import { createOracleReach } from './oracle-reach.js'
 import {
@@ -31,7 +37,13 @@ import type {
 
 // The outcome checker is imported from the companion, which does not declare
 // it. This file's calibrations reach it through the same check.
-declareOracle({ check: [expectHistoryOutcome] })
+// What this oracle owns: the gap report judges the request-outcome paths of
+// transactions (src/transactions.ts) by this file's outcome matrix, its
+// generated failed-request histories, and its completion histories.
+declareOracle({
+  owns: [`src/transactions.ts`],
+  check: [expectHistoryOutcome],
+})
 
 type Scenario = {
   existing: boolean
@@ -86,6 +98,7 @@ describe(`Optimistic request outcome histories`, () => {
     ),
   )
   it.each(cells)(`observes exact request outcomes: %j`, async (cell) => {
+    oracleRoute(`case`)
     for (const queued of [false, true]) {
       for (const settlePeer of [false, true]) {
         await runOutcomeScenario({ ...cell, queued, settlePeer, a: 2, b: 3 })
@@ -95,6 +108,11 @@ describe(`Optimistic request outcome histories`, () => {
   it.each([851203, undefined])(
     `varies failed request and surviving peer histories, seed=%s`,
     async (seed) => {
+      const parameters =
+        seed === undefined
+          ? oraclePropertyOptions(100, `collection-state.optimistic-outcomes`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.record({
@@ -108,9 +126,7 @@ describe(`Optimistic request outcome histories`, () => {
           }),
           runOutcomeScenario,
         ),
-        seed === undefined
-          ? oraclePropertyOptions(100, `collection-state.optimistic-outcomes`)
-          : { seed, numRuns: oracleRuns(100) },
+        parameters,
       )
     },
   )
@@ -129,6 +145,7 @@ const pendingPeerCases = [true, false].flatMap((sameKey) =>
 it.each(pendingPeerCases)(
   `settles a pending manual peer after failure, sameKey=$sameKey failure=$failure cascade=$cascade`,
   async ({ sameKey, failure, cascade }) => {
+    oracleRoute(`case`)
     const peerSurvives = !sameKey || (failure === `rollback` && !cascade)
     const counts = await runOptimisticHistory(
       [],
@@ -177,6 +194,7 @@ describe(`Outcome observer calibration`, () => {
   ] as const)(
     `rejects %s through the actual outcome checker`,
     async (fault) => {
+      oracleRoute(`calibration`)
       const value = { id: 1 }
       const error = new Error(`original`)
       let expected: HistoryOutcome<unknown>
@@ -221,6 +239,7 @@ describe(`Outcome observer calibration`, () => {
     },
   )
   it(`shrinks and replays a premature success counterexample`, () => {
+    oracleRoute(`calibration`)
     const property = fc.property(fc.integer({ min: 1, max: 100 }), (value) => {
       expectHistoryOutcome(
         { status: `pending` },
@@ -317,6 +336,7 @@ describe(`external completion with peers and source work`, () => {
   it.each(completionHistories)(
     `preserves completion admission and independent work: %j`,
     async ({ state, peer, source, attempts }) => {
+      oracleRoute(`case`)
       const reach = createOracleReach(
         `external completion ${state}/${peer}/${source}/${attempts}`,
         [`attempts-compared`, `later-source-compared`],

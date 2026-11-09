@@ -4,7 +4,13 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
-import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   SQLiteCorePersistenceAdapter,
@@ -762,6 +768,7 @@ declareOracle({
     expectedReplacementRows,
   ],
   grammar: [publicationHistoryArbitrary],
+  owns: [`src/electric.ts#electricCollectionOptions`],
 })
 
 describe(`persisted Electric recovery laws`, () => {
@@ -771,6 +778,7 @@ describe(`persisted Electric recovery laws`, () => {
   it.each([`insert`, `update`] as const)(
     `models a same-key %s against the durable row operation`,
     async (operation) => {
+      oracleRoute(`case`)
       const f = fixture(`on-demand`)
       await withFixtureCleanup(f, async () => {
         const old = { ...freshRow, obsolete: `old field` }
@@ -820,6 +828,7 @@ describe(`persisted Electric recovery laws`, () => {
   it.each(persistedRestartScenarios)(
     `couples $resumeKind state to $transition with $rowState rows and $sourceHistory source history`,
     async (scenario) => {
+      oracleRoute(`case`)
       const { cleanupEvidence } = await observePersistedRestart(scenario)
       expect(cleanupEvidence).toContain(`passed: committed retired-stream`)
     },
@@ -870,13 +879,20 @@ describe(`persisted Electric recovery laws`, () => {
 
   it.each(publicationHistoryExamples)(
     `reconstructs the authored persistence publication history`,
-    assertPublicationHistory,
+    (commands) => {
+      oracleRoute(`fixed history`)
+      return assertPublicationHistory(commands)
+    },
   )
 
   it(`fixed recovery corpus reaches every deletion and reload combination`, () => {
+    oracleRoute(`fixed seed`)
     const combinations = new Set(
       fc
-        .sample(publicationHistoryArbitrary, { seed: 1659, numRuns: 20 })
+        .sample(
+          publicationHistoryArbitrary,
+          oracleFixedSeed(1659, { numRuns: 20 }),
+        )
         .flat()
         .map(({ deleted, fullReload }) => `${deleted}:${fullReload}`),
     )
@@ -885,28 +901,33 @@ describe(`persisted Electric recovery laws`, () => {
     )
   })
 
-  fcTest.prop([publicationHistoryArbitrary], {
-    seed: 1659,
+  const publicationHistoryFixedSeed = oracleFixedSeed(1659, {
     numRuns: oracleRuns(20),
-  })(
+  })
+  fcTest.prop([publicationHistoryArbitrary], publicationHistoryFixedSeed)(
     `independent persistence publications and stream deltas agree with complete-row state (fixed)`,
-    assertPublicationHistory,
+    (commands) => {
+      oracleRoute(oracleRouteOf(publicationHistoryFixedSeed))
+      return assertPublicationHistory(commands)
+    },
   )
 
-  fcTest.prop(
-    [publicationHistoryArbitrary],
-    oraclePropertyOptions(
-      20,
-      `electric-recovery.publication-stream-convergence`,
-    ),
-  )(
+  const publicationHistoryCampaign = oraclePropertyOptions(
+    20,
+    `electric-recovery.publication-stream-convergence`,
+  )
+  fcTest.prop([publicationHistoryArbitrary], publicationHistoryCampaign)(
     `independent persistence publications and stream deltas agree with complete-row state (random or replayed)`,
-    assertPublicationHistory,
+    (commands) => {
+      oracleRoute(oracleRouteOf(publicationHistoryCampaign))
+      return assertPublicationHistory(commands)
+    },
   )
 
   it.each(scenarios)(
     `$syncMode invalid resume replaces omitted cached rows: empty=$empty, hydration=$hydration callback`,
     async ({ syncMode, empty, hydration }) => {
+      oracleRoute(`case`)
       const f = fixture(syncMode)
       const gate = deferred()
       await withFixtureCleanup(

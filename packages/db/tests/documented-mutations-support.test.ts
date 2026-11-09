@@ -87,7 +87,7 @@ test(`finite replay selects the exact authored history and rejects an unknown id
 })
 
 test.each([undefined, `42`])(
-  `an irrelevant shared seed %s changes neither complete nor missing-lane reach`,
+  `an irrelevant shared seed %s changes neither complete nor missing-case reach`,
   (seed) => {
     vi.stubEnv(`TANSTACK_DB_ORACLE_SEED`, seed)
     vi.spyOn(console, `info`).mockImplementation(() => {})

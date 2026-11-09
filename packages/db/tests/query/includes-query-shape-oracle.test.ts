@@ -7,7 +7,13 @@ import {
 } from '../../src/query/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { runTrace } from '../trace-runner.js'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import { cleanupQuery } from './includes-query-shape-support.js'
@@ -30,7 +36,7 @@ import type { TraceDriver, TraceProjection } from '../trace-runner.js'
  * law stronger.
  *
  * Stable campaigns preserve the histories that exposed these distinctions.
- * Fresh random campaigns vary their value domains. Pinned examples cover route
+ * Fresh random campaigns vary their value domains. Fixed histories cover route
  * movement and repeated retirement because those laws need ordered histories,
  * not more random scalar values.
  *
@@ -447,6 +453,11 @@ const nullableProjection: TraceProjection<
  * each computed from the driver's own Maps.
  */
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/basic-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   model: [
     expectedMultiplicityRows,
     expectedCorrelationRows,
@@ -455,7 +466,7 @@ declareOracle({
 })
 
 function campaigns(fixedSeed: number, property: string) {
-  // Grammar controls: the pinned 1-child case reconstructs final retirement,
+  // Grammar controls: the fixed 1-child history reconstructs final retirement,
   // while counts 2–5 keep a surviving contributor. Equal route keys are the
   // control; distinct order and part IDs expose the wrong-alias result.
   // Removing null or route updates loses empty-value or reactivation behavior.
@@ -464,7 +475,7 @@ function campaigns(fixedSeed: number, property: string) {
   return [
     {
       name: `fixed`,
-      options: { numRuns: oracleRuns(12), seed: fixedSeed },
+      options: oracleFixedSeed(fixedSeed, { numRuns: oracleRuns(12) }),
     },
     {
       name: `random or replayed`,
@@ -478,6 +489,7 @@ describe(`includes query-shape recompute oracle`, () => {
     fcTest.prop([fc.integer({ min: 2, max: 5 })], campaign.options)(
       `deleting one joined contributor preserves remaining multiplicity (${campaign.name})`,
       async (childCount) => {
+        oracleRoute(oracleRouteOf(campaign.options))
         await runTrace({
           steps: [1],
           driver: createMultiplicityDriver(childCount),
@@ -489,17 +501,20 @@ describe(`includes query-shape recompute oracle`, () => {
 
   fcTest(
     `matches recomputation when the final joined contributor is deleted`,
-    () =>
-      runTrace({
+    () => {
+      oracleRoute(`fixed history`)
+      return runTrace({
         steps: [1],
         driver: createMultiplicityDriver(1),
         projection: multiplicityProjection,
-      }),
+      })
+    },
   )
 
   fcTest(
     `rejects a premature parent removal after one contributor leaves`,
     async () => {
+      oracleRoute(`calibration`)
       await expect(
         runTrace({
           steps: [1],
@@ -528,6 +543,7 @@ describe(`includes query-shape recompute oracle`, () => {
     )(
       `materialization follows correlation through a joined alias (${campaign.name})`,
       async ({ correlationId, productionId }) => {
+        oracleRoute(oracleRouteOf(campaign.options))
         await runTrace({
           steps: [],
           driver: createCorrelationDriver(
@@ -544,18 +560,21 @@ describe(`includes query-shape recompute oracle`, () => {
 
   fcTest(
     `matches recomputation when materialization correlates through its source alias`,
-    () =>
-      runTrace({
+    () => {
+      oracleRoute(`fixed history`)
+      return runTrace({
         steps: [],
         driver: createCorrelationDriver(`source`, 1, 101),
         projection: correlationProjection,
-      }),
+      })
+    },
   )
 
   fcTest.each([`source`, `joined`] as const)(
     `keeps %s correlation distinct from join identity through route moves`,
-    (target) =>
-      runTrace({
+    (target) => {
+      oracleRoute(`case`)
+      return runTrace({
         // Part 1 is the joined correlation. Part 7 is the source correlation.
         // Moving order.partId changes only the joined query, then restores it.
         steps: [
@@ -564,12 +583,14 @@ describe(`includes query-shape recompute oracle`, () => {
         ],
         driver: createCorrelationDriver(target, 1, 101, 7),
         projection: correlationProjection,
-      }),
+      })
+    },
   )
 
   fcTest(
     `rejects the wrong correlation alias at the initial checkpoint`,
     async () => {
+      oracleRoute(`calibration`)
       await expect(
         runTrace({
           steps: [],
@@ -588,6 +609,7 @@ describe(`includes query-shape recompute oracle`, () => {
     fcTest.prop([fc.integer({ min: 1, max: 100 })], campaign.options)(
       `findOne maps a null correlation key to undefined (${campaign.name})`,
       async (postId) => {
+        oracleRoute(oracleRouteOf(campaign.options))
         await runTrace({
           steps: [],
           driver: createNullableDriver([], [{ id: postId, authorId: null }]),
@@ -599,31 +621,36 @@ describe(`includes query-shape recompute oracle`, () => {
 
   fcTest(
     `matches recomputation for an unmatched non-null correlation key`,
-    () =>
-      runTrace({
+    () => {
+      oracleRoute(`fixed history`)
+      return runTrace({
         steps: [],
         driver: createNullableDriver([], [{ id: 1, authorId: 999 }]),
         projection: nullableProjection,
-      }),
+      })
+    },
   )
 
   fcTest(
     `matches recomputation when an existing correlation key becomes null`,
-    () =>
-      runTrace({
+    () => {
+      oracleRoute(`fixed history`)
+      return runTrace({
         steps: [{ id: 1, authorId: null }],
         driver: createNullableDriver(
           [{ id: 1, name: `Ada` }],
           [{ id: 1, authorId: 1 }],
         ),
         projection: nullableProjection,
-      }),
+      })
+    },
   )
 
   fcTest(
     `reactivates a singleton after null and repeated route retirement`,
-    () =>
-      runTrace({
+    () => {
+      oracleRoute(`fixed history`)
+      return runTrace({
         steps: [
           { id: 1, authorId: 1 },
           { id: 1, authorId: null },
@@ -634,12 +661,14 @@ describe(`includes query-shape recompute oracle`, () => {
           [{ id: 1, authorId: null }],
         ),
         projection: nullableProjection,
-      }),
+      })
+    },
   )
 
   fcTest(
     `rejects a stale empty singleton at its reactivation checkpoint`,
     async () => {
+      oracleRoute(`calibration`)
       await expect(
         runTrace({
           steps: [{ id: 1, authorId: 1 }],

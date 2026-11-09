@@ -1,8 +1,11 @@
 import { fc } from '@fast-check/vitest'
 import { describe, it } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -48,6 +51,7 @@ async function campaign(options: fc.Parameters<[unknown]>) {
   const reach = createOracleReach(property, reachStatesFor(driver), {
     minimum: 5,
   })
+  oracleRoute(oracleRouteOf(options))
   await fc.assert(eagerLiveSourceProperty(driver, reach), options)
   return reach
 }
@@ -56,7 +60,9 @@ describe(`eager live-source conformance: TrailBase`, () => {
   oracleReplayTest(it)(
     `conforms on a fixed-seed campaign`,
     async () => {
-      const reach = await campaign({ seed: 2118, numRuns: oracleRuns(runs) })
+      const reach = await campaign(
+        oracleFixedSeed(2118, { numRuns: oracleRuns(runs) }),
+      )
       reach.assertReached()
     },
     campaignTimeoutMs,
@@ -73,6 +79,7 @@ describe(`eager live-source conformance: TrailBase`, () => {
 })
 
 declareOracle({
+  owns: [`src/trailbase.ts#trailBaseCollectionOptions`],
   check: [checkEagerLiveSourceHistory, eagerLiveSourceProperty],
   model: [eagerLiveSourceModel.step, eagerLiveSourceModel.expected],
   grammar: [historyArb],

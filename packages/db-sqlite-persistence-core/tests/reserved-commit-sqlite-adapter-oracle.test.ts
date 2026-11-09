@@ -50,6 +50,7 @@ import {
   eagerStorageTarget,
   persistedCollectionOptions,
 } from '../src'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import type { ProtocolEnvelope, SQLiteDriver, TxCommitted } from '../src'
 import type { SyncConfig } from '@tanstack/db'
 import type { SQLInputValue } from 'node:sqlite'
@@ -483,12 +484,16 @@ describe('reserved commits across real-adapter hydrations', () => {
     }).toEqual(expected.observation)
   }
   declareOracle({
+    owns: [`src/sqlite-core-adapter.ts`, `src/persisted.ts`],
     check: [runAdapterHistory],
     model: [expectedAdapterOutcome],
     grammar: [adapterHistories],
   })
   it.each(adapterHistories)(
     'keeps a reserved commit lawful across a real-adapter hydration ($route, $timing, $nesting, $ending)',
-    runAdapterHistory,
+    (...args: Parameters<typeof runAdapterHistory>) => {
+      oracleRoute(`case`)
+      return runAdapterHistory(...args)
+    },
   )
 })

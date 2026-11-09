@@ -3,6 +3,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { persistedCollectionOptions } from '../src/index.js'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import type { PersistenceAdapter } from '../src/index.js'
 import type { SyncConfig } from '@tanstack/db'
 
@@ -222,6 +223,7 @@ describe(`persisted reload replacement oracle`, () => {
         [`${history.phase}: ${steps(history).join(` > `)}`, history] as const,
     ),
   )(`%s`, async (name, history) => {
+    oracleRoute(`case`)
     const store = storingAdapter()
     const runs: Array<Params> = []
     const collection = createCollection(
@@ -305,4 +307,8 @@ describe(`persisted reload replacement oracle`, () => {
   })
 })
 
-declareOracle({ model: [expected], grammar: [histories] })
+declareOracle({
+  owns: [`src/persisted.ts`, `src/sqlite-core-adapter.ts`],
+  model: [expected],
+  grammar: [histories],
+})

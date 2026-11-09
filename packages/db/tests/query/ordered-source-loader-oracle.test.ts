@@ -5,6 +5,7 @@
 // this area are fixed histories, owned by ordered-source-loader.test.ts.
 import { describe, expect, it, vi } from 'vitest'
 import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.js'
+import { oracleRoute } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import {
   createDeferred,
@@ -37,12 +38,14 @@ const expectedStagedWindowTrace = (
 ]
 
 declareOracle({
+  owns: ['src/query/live/ordered-source-loader.ts'],
   model: [expectedStagedWindowTrace],
   grammar: [stagedWindowCases],
 })
 
 describe(`OrderedSourceLoader`, () => {
   it(`enumerates every staged-boundary explicit-window cell exactly once`, () => {
+    oracleRoute(`case`)
     const keys = stagedWindowCases.map(
       ({ boundary, demand }) => `${boundary}:${demand}`,
     )
@@ -54,6 +57,7 @@ describe(`OrderedSourceLoader`, () => {
   it.each(stagedWindowCases)(
     `refines staged boundary $boundary with $demand explicit-window demand`,
     async ({ boundary, demand }) => {
+      oracleRoute(`case`)
       type ObservedRequest = {
         kind: `page` | `boundary`
         options: RequestOptions

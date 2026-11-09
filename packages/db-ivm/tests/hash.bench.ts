@@ -1,4 +1,4 @@
-import { bench, describe } from 'vitest'
+import { describe, test } from 'vitest'
 import { hash } from '../src/hashing/hash'
 
 const cached = { id: 1, title: `row`, active: true }
@@ -6,14 +6,20 @@ hash(cached)
 let result = 0
 
 describe(`hash input paths`, () => {
-  bench(`primitive`, () => {
-    result ^= hash(42)
-  })
-  bench(`cached row`, () => {
-    result ^= hash(cached)
-  })
-  bench(`fresh row`, () => {
-    result ^= hash({ id: 1, title: `row`, active: true })
+  // Vitest 5 benchmarks register when they are awaited; bench.compare runs
+  // the three registrations and prints their comparison table.
+  test(`hash input paths`, async ({ bench }) => {
+    await bench.compare(
+      bench(`primitive`, () => {
+        result ^= hash(42)
+      }),
+      bench(`cached row`, () => {
+        result ^= hash(cached)
+      }),
+      bench(`fresh row`, () => {
+        result ^= hash({ id: 1, title: `row`, active: true })
+      }),
+    )
   })
 })
 

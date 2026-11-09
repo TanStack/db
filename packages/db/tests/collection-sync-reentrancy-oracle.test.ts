@@ -24,7 +24,7 @@
  * outcomes. It compares them after the outer commit returns and after the
  * receipts settle.
  *
- * Limits: the pinned tests cover layout marks, truncates, listener errors, and
+ * Limits: the fixed examples cover layout marks, truncates, listener errors, and
  * subset release. The generated grammar covers only listener commits, aborts,
  * and one open transaction. Optimistic settlement belongs to
  * `optimistic-history-oracle.ts`.
@@ -34,7 +34,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { createDeferred } from '../src/deferred.js'
-import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
+import {
+  oracleFixedSeed,
+  oracleRandomParameters,
+  oracleRoute,
+  oracleRouteOf,
+  readOracleRunConfig,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import { flushPromises } from './utils.js'
 import {
@@ -192,7 +198,10 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
   }
 }
 
+// What this oracle owns: the gap report judges every function in
+// collection/sync.ts by this file's publication histories.
 declareOracle({
+  owns: [`src/collection/sync.ts`],
   check: [runListenerScenario],
   grammar: [listenerScenarioArbitrary, exhaustiveListenerScenarios],
 })
@@ -282,6 +291,7 @@ describe(`sync publication reentrancy`, () => {
   })
 
   it(`enumerates prior requests and legal ready-callback writes`, () => {
+    oracleRoute(`case`)
     // none and update 1 allow 6 writes, delete 1 allows 5, insert 3 allows 7.
     expect(readyCases).toHaveLength(2 * 24 * 3)
     const labels = new Set(
@@ -306,6 +316,7 @@ describe(`sync publication reentrancy`, () => {
   it.each(readyCases)(
     `publishes valid truncate messages when a $hook callback runs $callbackName after prior $priorName ($subscriber subscriber)`,
     async ({ hook, prior, callback, subscriber }) => {
+      oracleRoute(`case`)
       const persistence = createDeferred<void>()
       let sync!: SyncOps
       const collection = createCollection<Row, number>({
@@ -459,25 +470,33 @@ describe(`sync publication reentrancy`, () => {
   )
 
   it(`matches every bounded reentrant listener history`, async () => {
+    oracleRoute(`case`)
     for (const scenario of exhaustiveListenerScenarios) {
       await runListenerScenario(scenario)
     }
   })
 
-  fcTest.prop([listenerScenarioArbitrary], {
+  const listenerScenarioFixedSeed = oracleFixedSeed(1774, {
     numRuns: generatedRuns,
-    seed: 1774,
-  })(`matches the reentrant drain laws for a fixed seed`, runListenerScenario)
+  })
+  fcTest.prop([listenerScenarioArbitrary], listenerScenarioFixedSeed)(
+    `matches the reentrant drain laws for a fixed seed`,
+    (...args) => {
+      oracleRoute(oracleRouteOf(listenerScenarioFixedSeed))
+      return runListenerScenario(...args)
+    },
+  )
 
-  fcTest.prop(
-    [listenerScenarioArbitrary],
-    oracleRandomParameters(
-      generatedRuns,
-      replay,
-      `collection-sync.reentrant-drain`,
-    ),
-  )(
+  const listenerScenarioCampaign = oracleRandomParameters(
+    generatedRuns,
+    replay,
+    `collection-sync.reentrant-drain`,
+  )
+  fcTest.prop([listenerScenarioArbitrary], listenerScenarioCampaign)(
     `matches the reentrant drain laws for a random or replayed seed`,
-    runListenerScenario,
+    (...args) => {
+      oracleRoute(oracleRouteOf(listenerScenarioCampaign))
+      return runListenerScenario(...args)
+    },
   )
 })

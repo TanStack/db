@@ -113,7 +113,7 @@ it('keeps large string-ID OR scopes selective at the SQLite boundary', async () 
 // per value; exact result and binding checks retain the receiving contract.
 // A sequential index-expression control proves the sensor still sees quoting
 // before the bound-path counter resets; changing the primitive cannot pass silently.
-it.sequential.each([0, 1, 32, 1_025])(
+it.each([0, 1, 32, 1_025])(
   'avoids discarded literal quoting for bound string membership / %i',
   async (size) => {
     const driver = new CountingDriver()

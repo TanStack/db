@@ -148,7 +148,7 @@ export async function runCampaign<T>(
   )
   if (result.failed)
     throw new Error(
-      `${name} failed: seed=${result.seed} path=${selectedPath}; replay=${JSON.stringify(reproduction)}\n${result.error}`,
+      `${name} failed: seed=${result.seed} path=${selectedPath}; replay=${JSON.stringify(reproduction)}\n${String(result.errorInstance)}`,
     )
   if (result.numRuns !== (options.path === undefined ? options.runs : 1))
     throw new Error('Campaign did not execute its declared budget')

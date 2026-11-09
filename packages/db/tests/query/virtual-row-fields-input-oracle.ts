@@ -1,13 +1,13 @@
 /**
  * # What may user JavaScript learn from a query input?
  *
- * Authority: the maintainer's O12 decision, recorded in the RC challenge on
- * 2026-10-28, extended by the maintainer on 2026-10-30 to fn.select, fn.where
- * and fn.having, and ARCHITECTURE.md's functional-input boundary. Direct source
- * returns and structured source spreads expose genuine source metadata.
- * Own-shape projections (including functional spreads) expose no reserved
- * fields before a downstream callback. Inline include values keep authored
- * shape. Collection-valued compiled inputs remain inadmissible.
+ * Authority: the maintainer's 2026-11-05 boundary-only decision supersedes
+ * the October 28/30 callback-normalization rules. Reserved fields are computed
+ * at published Collection row roots. Intermediate projections, functional
+ * callback inputs and inline include values all keep their authored shape.
+ * Direct source rows already come from a Collection and carry genuine metadata;
+ * copying them copies those fields, and an explicit projection override is data.
+ * Collection-valued compiled inputs remain inadmissible.
  *
  * This small model uses authored source facts and syntax descriptions, not
  * compiler provenance or observed values. Callback input is a model observation
@@ -124,6 +124,8 @@ export const metadataCompilerCacheHistories = metadataInputDescriptions.flatMap(
     ),
 )
 export type MetadataInputSnapshot = {
+  // These fixtures author no symbols; any observed symbol is leaked state.
+  symbols: Array<symbol>
   present: boolean
   ordinary: Record<string, unknown>
   fields: Record<string, { present: boolean; own: boolean; value: unknown }>
@@ -178,22 +180,16 @@ function ordinaryProjection(
 export function expectedMetadataInput(
   fact: MetadataSourceFact,
   description: MetadataInputDescription,
-  inline = false,
 ): MetadataInputSnapshot {
   const ordinary = ordinaryProjection(fact, description.shape)
-  const sourceOwned =
-    description.shape === `structured-spread` ||
-    description.shape === `functional-direct`
-  const fields = inline
-    ? {
-        ...(description.shape.endsWith(`projection`)
-          ? {}
-          : expectedSourceVirtualFields(fact)),
-        ...authoredMetadataCollision(description),
-      }
-    : sourceOwned
-      ? expectedSourceVirtualFields(fact)
-      : {}
+  // There is one authored value before publication. A spread copies source
+  // fields, then authored overrides win, just as they do for ordinary fields.
+  const fields = {
+    ...(description.shape.endsWith(`projection`)
+      ? {}
+      : expectedSourceVirtualFields(fact)),
+    ...authoredMetadataCollision(description),
+  }
   return expectedMetadataRecord({ ...ordinary, ...fields })
 }
 // A record snapshot is also the common judgment for inline parents. It keeps
@@ -202,6 +198,7 @@ export function expectedMetadataRecord(
   record: Record<string, unknown> | undefined,
 ): MetadataInputSnapshot {
   return {
+    symbols: [],
     present: record !== undefined,
     ordinary: Object.fromEntries(
       Object.entries(record ?? {}).filter(

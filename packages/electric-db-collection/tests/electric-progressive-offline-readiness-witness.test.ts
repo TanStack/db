@@ -237,7 +237,7 @@ afterEach(() => {
 })
 
 describe(`persisted progressive Electric query while offline (current behavior)`, () => {
-  // Observed on main at 31dad2dd3; these pin current behavior, not a law.
+  // Observed on main at 31dad2dd3; these fix current behavior, not a law.
   it.each([
     [`full-sync`, { resumed: true, ready: true, rows: [1, 2] }],
     [`subset-only`, { resumed: false, ready: false, rows: [1, 2] }],

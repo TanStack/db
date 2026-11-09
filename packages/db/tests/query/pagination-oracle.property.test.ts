@@ -8,7 +8,10 @@ import { and, eq } from '../../src/query/builder/functions.js'
 import { PropRef } from '../../src/query/ir.js'
 import { makeComparator } from '../../src/utils/comparison.js'
 import {
+  oracleFixedSeed,
   oracleRandomParameters,
+  oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -53,19 +56,19 @@ import type {
  * acquisition releases, visible rows, readiness, errors, and every
  * publication cut.
  *
- * Finite products pin boundary cells; fixed and random fast-check histories
+ * Finite products cover boundary cells; fixed and random fast-check histories
  * explore adjacent legal actions. Fault probes establish that wrong order,
  * false coverage, duplicate work, partial publication, and bad delete payloads
  * are observable. The model does not infer rows beyond provider evidence.
  *
- * The fixed C-01 through C-09 custom-collation lane declares an independent
+ * The fixed C-01 through C-09 custom-collation histories declare an independent
  * rank relation and literal public-key sequences. It crosses ascending and
  * descending order, scan and auto-index execution, inherited and per-order
  * configuration, bounded and unbounded queries, a later ordered source that
  * inherits the leading source's default, an output Collection with a different
  * downstream default, comparator-equal keys, and hostile provider order. It
- * also requires exactly one initial filtered full-source acquisition. This
- * lane establishes local custom ordering only; it does not authorize custom
+ * also requires exactly one initial filtered full-source acquisition. These
+ * histories establish local custom ordering only; it does not authorize custom
  * cursor pagination, comparator-aware range predicates, or backend collation
  * parity.
  */
@@ -833,6 +836,12 @@ async function runPaginationScenario(
  * one history, and `referenceWindowRows` predicts each window from the rows.
  */
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/utils/comparison.ts#makeComparator',
+  ],
   check: [runPaginationScenario, runMultiOrderScenario],
   model: [referenceWindowRows, referenceMultiOrder],
 })
@@ -2849,6 +2858,7 @@ registerLimitAdmissionOracle()
 
 describe(`pagination recomputation oracle`, () => {
   it(`refills a joined result window through a contract-compliant source`, async () => {
+    oracleRoute(`fixed history`)
     type ParentRow = { id: number; rank: number; groupId: number }
     type ChildRow = { id: number; groupId: number }
     const parents = [
@@ -2897,6 +2907,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`loads the full ordered source when no continuation index exists`, async () => {
+    oracleRoute(`fixed history`)
     type ParentRow = { id: number; rank: number; groupId: number }
     type ChildRow = { id: number; groupId: number }
     const parents = [
@@ -2946,6 +2957,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`refines a joined foreign order term through the source tie class`, async () => {
+    oracleRoute(`fixed history`)
     type ParentRow = { id: number; sourceRank: number; childId: number }
     type ChildRow = { id: number; score: number }
     const parents = [
@@ -2996,6 +3008,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`materializes an empty source window`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationScenario({
       ranks: [],
       direction: `asc`,
@@ -3004,6 +3017,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`materializes an offset past the final row`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationScenario({
       ranks: [0, 1],
       direction: `asc`,
@@ -3012,6 +3026,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`materializes an initially empty zero-limit window`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationScenario({
       ranks: [0, 1, 2],
       direction: `asc`,
@@ -3020,6 +3035,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`rejects the right NaN window members in the wrong order`, () => {
+    oracleRoute(`calibration`)
     const rows = [
       { id: 1, rank: 10 },
       { id: 2, rank: 20 },
@@ -3068,6 +3084,7 @@ describe(`pagination recomputation oracle`, () => {
   ])(
     `orders a $direction eager window with a NaN or finite middle rank`,
     async ({ direction, ranks, expectedIds, limit }) => {
+      oracleRoute(`case`)
       const rows = ranks.map((rank, index) => ({ id: index + 1, rank }))
       const modeled = referenceWindow(rows, direction, { offset: 0, limit })
       expect(modeled).toEqual(expectedIds)
@@ -3084,6 +3101,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`keeps a NaN window coherent through equal and changed source ranks`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationStateScenario({
       ranks: [10, 20, NaN, 30, 40],
       direction: `desc`,
@@ -3099,6 +3117,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`clears and restores a nonempty window across a zero limit`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationScenario({
       ranks: [0, 1, 2],
       direction: `asc`,
@@ -3111,6 +3130,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`advances past an implicit public-key tie class`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationScenario({
       ranks: [1, 2, 3, 4, 5, 5, 5, 5, 5, 5, 11, 12, 13, 14, 15, 16],
       direction: `asc`,
@@ -3126,6 +3146,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`keeps implicit ties stable across filtered source mutations`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationStateScenario({
       ranks: [0, 0, 0, 1, 1, 1],
       direction: `asc`,
@@ -3155,6 +3176,7 @@ describe(`pagination recomputation oracle`, () => {
       expected: [2],
     },
   ])(`updates a row that $name`, async ({ keeps, action, expected }) => {
+    oracleRoute(`case`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 1],
       keeps,
@@ -3182,6 +3204,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`discovered trace: loads an on-demand window after a zero limit`, async () => {
+    oracleRoute(`fixed history`)
     await runOnDemandPaginationScenario({
       ranks: [0, 0],
       direction: `asc`,
@@ -3193,6 +3216,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`widens an offset on-demand window after starting at zero limit`, async () => {
+    oracleRoute(`fixed history`)
     await runOnDemandPaginationScenario({
       ranks: [-1, 0, 0, 0, -1, 0],
       direction: `asc`,
@@ -3206,6 +3230,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`starts an on-demand source prefix after opening a zero window with a local row`, async () => {
+    oracleRoute(`fixed history`)
     await runOnDemandPaginationScenario(
       {
         ranks: [0, 1],
@@ -3235,6 +3260,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `keeps a failed $direction window private after $replayDelivery source replay until explicit retry`,
     async ({ direction, replayDelivery }) => {
+      oracleRoute(`case`)
       const rows: Array<PageRow> = [
         { id: 1, rank: 1 },
         { id: 2, rank: 2 },
@@ -3330,6 +3356,7 @@ describe(`pagination recomputation oracle`, () => {
   ])(
     `recovers the first $failureKind-rejected ordered request for window $offset:$limit from the full source`,
     async ({ failureKind, ...window }) => {
+      oracleRoute(`case`)
       const authoritativeRows: Array<PageRow> = [
         { id: 1, rank: 0 },
         { id: 2, rank: 1 },
@@ -3423,6 +3450,7 @@ describe(`pagination recomputation oracle`, () => {
   it.each([`error`, `AbortError`] as const)(
     `does not derive a retry cursor from rows written by a %s request`,
     async (failureKind) => {
+      oracleRoute(`case`)
       const authoritativeRows: Array<PageRow> = [
         { id: 1, rank: 0 },
         { id: 2, rank: 1 },
@@ -3566,6 +3594,7 @@ describe(`pagination recomputation oracle`, () => {
   ] satisfies ReadonlyArray<readonly [string, PendingMutation]>)(
     `%s repairs an expressible order with a bounded prefix request`,
     async (_name, mutation) => {
+      oracleRoute(`case`)
       const result = await runPendingMutationScenario(
         {
           ranks: [0, 1, 2, 3],
@@ -3583,6 +3612,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`finishes bounded repair when a visible delete leaves the source underfilled`, async () => {
+    oracleRoute(`fixed history`)
     const result = await runPendingMutationScenario(
       {
         ranks: [0, 1, 2],
@@ -3611,6 +3641,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`rejects a malformed bounded-repair request trace`, () => {
+    oracleRoute(`calibration`)
     const malformed: PendingMutationResult = {
       mutationRepairRequests: [
         {
@@ -3639,6 +3670,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`distinguishes a filtered full-source fallback from a repair tie predicate`, () => {
+    oracleRoute(`fixed history`)
     const filter = eq(new PropRef([`keep`]), true)
     const scenario: PendingMutationScenario = {
       ranks: [0, 1, 2],
@@ -3665,6 +3697,7 @@ describe(`pagination recomputation oracle`, () => {
   it.each([false, true])(
     `repairs a capped prefix through its first-column tie and cursor refill (explicit key=%s)`,
     async (explicitPublicKeyOrder) => {
+      oracleRoute(`case`)
       const result = await runPendingMutationScenario(
         {
           ranks: [0, 1, 1, 2],
@@ -3736,6 +3769,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `holds a $direction page and concurrent live insert when its boundary refinement fails by $delivery`,
     async ({ direction, delivery }) => {
+      oracleRoute(`case`)
       const sign = direction === `asc` ? 1 : -1
       const rows: Array<PageRow> = [
         { id: 1, rank: sign },
@@ -3833,6 +3867,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`recovers a failed tie boundary from the authoritative full source`, async () => {
+    oracleRoute(`fixed history`)
     const authoritativeRows: Array<PageRow> = [
       { id: 1, rank: -1 },
       // A provider may return equal-order rows in any order. The local public
@@ -3932,6 +3967,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`rejects a reentrant window move when an ordered request writes and then throws`, async () => {
+    oracleRoute(`fixed history`)
     const authoritativeRows: Array<PageRow> = [
       { id: 1, rank: 0 },
       { id: 2, rank: 1 },
@@ -4024,6 +4060,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `rejects a window move reentered from startup request $requestNumber after $delivery delivery`,
     async ({ delivery, requestNumber }) => {
+      oracleRoute(`case`)
       const authoritativeRows: Array<PageRow> = [
         { id: 1, rank: 0 },
         { id: 2, rank: 1 },
@@ -4104,6 +4141,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`rejects a window move reentered from a public change callback`, async () => {
+    oracleRoute(`fixed history`)
     const authoritativeRows: Array<PageRow> = [
       { id: 1, rank: 0, keep: true },
       { id: 2, rank: 1, keep: true },
@@ -4185,6 +4223,7 @@ describe(`pagination recomputation oracle`, () => {
   it.each([`return-only`, `write-after-cleanup`])(
     `rejects a window move when its sync run is cleaned up: %s`,
     async (delivery) => {
+      oracleRoute(`case`)
       const authoritativeRows: Array<PageRow> = [
         { id: 1, rank: 0 },
         { id: 2, rank: 1 },
@@ -4254,6 +4293,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`tracks an asynchronous cursor continuation after synchronous satisfaction`, async () => {
+    oracleRoute(`fixed history`)
     const rows: Array<PageRow> = [
       { id: 1, rank: 1 },
       { id: 2, rank: 2 },
@@ -4344,6 +4384,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`refines locale-ordered continuations locally when predicate IR cannot express the collation`, async () => {
+    oracleRoute(`fixed history`)
     const rows: Array<LocaleCursorRow> = [
       { id: 1, label: `item2` },
       { id: 2, label: `item10` },
@@ -4521,30 +4562,38 @@ describe(`pagination recomputation oracle`, () => {
     ],
   ] satisfies ReadonlyArray<readonly [string, MultiOrderScenario]>)(
     `%s`,
-    async (_name, scenario) => runMultiOrderScenario(scenario),
+    async (_name, scenario) => {
+      oracleRoute(`case`)
+      return runMultiOrderScenario(scenario)
+    },
   )
 
-  fcTest.prop([multiOrderScenarioArbitrary], {
+  const multiOrderScenarioFixedSeed = oracleFixedSeed(1663, {
     numRuns: orderedScenarioRuns,
-    seed: 1663,
-  })(
+  })
+  fcTest.prop([multiOrderScenarioArbitrary], multiOrderScenarioFixedSeed)(
     `matches multi-column nullable ordering for a fixed seed`,
-    runMultiOrderScenario,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(multiOrderScenarioFixedSeed))
+      await runMultiOrderScenario(scenario)
+    },
   )
 
-  fcTest.prop(
-    [multiOrderScenarioArbitrary],
-    oracleRandomParameters(
-      orderedScenarioRuns,
-      replay,
-      `pagination.multi-order`,
-    ),
-  )(
+  const multiOrderScenarioCampaign = oracleRandomParameters(
+    orderedScenarioRuns,
+    replay,
+    `pagination.multi-order`,
+  )
+  fcTest.prop([multiOrderScenarioArbitrary], multiOrderScenarioCampaign)(
     `matches multi-column nullable ordering for a random or replayed seed`,
-    runMultiOrderScenario,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(multiOrderScenarioCampaign))
+      await runMultiOrderScenario(scenario)
+    },
   )
 
   it(`continues an indexed multi-column window from its leading boundary`, async () => {
+    oracleRoute(`fixed history`)
     const rows: Array<MultiOrderRow> = [
       { id: 3, primary: 0, secondary: 2 },
       { id: 2, primary: 0, secondary: 1 },
@@ -4591,24 +4640,34 @@ describe(`pagination recomputation oracle`, () => {
     }
   })
 
-  fcTest.prop([nullableCursorScenarioArbitrary], {
+  const nullableCursorScenarioFixedSeed = oracleFixedSeed(1665, {
     numRuns: transitionScenarioRuns,
-    seed: 1665,
-  })(
-    `matches nullable cursor ordering while an async response is pending for a fixed seed`,
-    runNullableCursorScenario,
-  )
-
+  })
   fcTest.prop(
     [nullableCursorScenarioArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.nullable-cursor`,
-    ),
+    nullableCursorScenarioFixedSeed,
+  )(
+    `matches nullable cursor ordering while an async response is pending for a fixed seed`,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(nullableCursorScenarioFixedSeed))
+      await runNullableCursorScenario(scenario)
+    },
+  )
+
+  const nullableCursorScenarioCampaign = oracleRandomParameters(
+    transitionScenarioRuns,
+    replay,
+    `pagination.nullable-cursor`,
+  )
+  fcTest.prop(
+    [nullableCursorScenarioArbitrary],
+    nullableCursorScenarioCampaign,
   )(
     `matches nullable cursor ordering while an async response is pending for a random or replayed seed`,
-    runNullableCursorScenario,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(nullableCursorScenarioCampaign))
+      await runNullableCursorScenario(scenario)
+    },
   )
 
   it.each([
@@ -4621,6 +4680,7 @@ describe(`pagination recomputation oracle`, () => {
   ] satisfies ReadonlyArray<readonly [string, PendingMutation]>)(
     `%s converges before and after a pending response`,
     async (_name, mutation) => {
+      oracleRoute(`case`)
       const scenario: PendingMutationScenario = {
         ranks: [0, 1, 2, 3],
         direction: `asc`,
@@ -4663,6 +4723,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `rejects a reached $fault in a $responseOutcome mutation history`,
     async ({ responseOutcome, fault, message }) => {
+      oracleRoute(`case`)
       const scenario: PendingMutationScenario = {
         ranks: [0, 1, 2, 3],
         direction: `asc`,
@@ -4685,6 +4746,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`rejects a wrong deleted payload before removing its replica row`, async () => {
+    oracleRoute(`calibration`)
     const scenario: PendingMutationScenario = {
       ranks: [0, 1, 2, 3],
       direction: `asc`,
@@ -4712,6 +4774,7 @@ describe(`pagination recomputation oracle`, () => {
   ] satisfies ReadonlyArray<readonly [string, PendingMutation]>)(
     `revalidates a finite ordered prefix after a settled SSE %s`,
     async (_name, mutation) => {
+      oracleRoute(`case`)
       await runPendingMutationScenario(
         {
           ranks: [0, 1, 2, 3, 4, 5, 6, 7],
@@ -4726,6 +4789,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`retains a finite inactive prefix across shrink, SSE, and re-expansion`, async () => {
+    oracleRoute(`fixed history`)
     const rows = new Map<number, PageRow>(
       Array.from({ length: 5 }, (_, index) => [
         index + 1,
@@ -4799,6 +4863,7 @@ describe(`pagination recomputation oracle`, () => {
   it.each([`asc`, `desc`] as const)(
     `refreshes from the start when one SSE batch moves the retained prefix (%s)`,
     async (direction) => {
+      oracleRoute(`case`)
       const rows = new Map<number, PageRow>(
         Array.from({ length: 6 }, (_, index) => [
           index + 1,
@@ -4907,6 +4972,7 @@ describe(`pagination recomputation oracle`, () => {
   >)(
     `keeps an SSE %s that arrives during boundary refinement`,
     async (_name, mutation, expectedIds, expectedWideIds) => {
+      oracleRoute(`case`)
       const rows = new Map<number, PageRow>(
         Array.from({ length: 6 }, (_, index) => [
           index + 1,
@@ -5055,6 +5121,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`does not use a new row beyond finite coverage as a widening boundary`, async () => {
+    oracleRoute(`fixed history`)
     await runPendingMutationScenario(
       {
         ranks: [0, 1, 2, 3, 4, 5, 6, 7],
@@ -5069,6 +5136,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`discovered trace: a settled rank update refreshes top-k membership`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PendingMutationScenario = {
       ranks: [0, 0, 1],
       direction: `desc`,
@@ -5080,6 +5148,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`a rejected cursor does not treat a live insert as remote coverage`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PendingMutationScenario = {
       ranks: [0, -1, 0],
       direction: `asc`,
@@ -5091,12 +5160,16 @@ describe(`pagination recomputation oracle`, () => {
     await runPendingMutationScenario(scenario, `before-response`)
   })
 
-  fcTest.prop([pendingMutationScenarioArbitrary, responseTimingArbitrary], {
+  const pendingMutationScenarioFixedSeed = oracleFixedSeed(1660, {
     numRuns: transitionScenarioRuns,
-    seed: 1660,
-  })(
+  })
+  fcTest.prop(
+    [pendingMutationScenarioArbitrary, responseTimingArbitrary],
+    pendingMutationScenarioFixedSeed,
+  )(
     `matches recomputation when source mutations cross a pending cursor response for a fixed seed`,
     async (scenario, timing) => {
+      oracleRoute(oracleRouteOf(pendingMutationScenarioFixedSeed))
       const result = await runPendingMutationScenario(scenario, timing)
       expectPendingMutationRequestWork(result, scenario)
     },
@@ -5113,6 +5186,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `covers pending %s with a %s response %s deterministically`,
     async (mutationKind, responseOutcome, timing) => {
+      oracleRoute(`case`)
       const mutation: PendingMutation =
         mutationKind === `insert`
           ? { type: `insert`, row: { id: 5, rank: -1 } }
@@ -5132,32 +5206,40 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
+  const pendingMutationScenarioCampaign = oracleRandomParameters(
+    transitionScenarioRuns,
+    replay,
+    `pagination.pending-mutation`,
+  )
   fcTest.prop(
     [pendingMutationScenarioArbitrary, responseTimingArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.pending-mutation`,
-    ),
+    pendingMutationScenarioCampaign,
   )(
     `matches recomputation when source mutations cross a pending cursor response for a random or replayed seed`,
     async (scenario, timing) => {
+      oracleRoute(oracleRouteOf(pendingMutationScenarioCampaign))
       const result = await runPendingMutationScenario(scenario, timing)
       expectPendingMutationRequestWork(result, scenario)
     },
   )
 
-  it(
-    `discovered trace: retries a rejected cursor after a source and window transition`,
-    runRejectedCursorRetryAfterMutation,
-  )
+  it(`discovered trace: retries a rejected cursor after a source and window transition`, async () => {
+    oracleRoute(`fixed history`)
+    await runRejectedCursorRetryAfterMutation()
+  })
 
-  fcTest.prop([pendingHistoryScenarioArbitrary], {
+  const pendingHistoryScenarioFixedSeed = oracleFixedSeed(1664, {
     numRuns: transitionScenarioRuns,
-    seed: 1664,
-  })(
+  })
+  fcTest.prop(
+    [pendingHistoryScenarioArbitrary],
+    pendingHistoryScenarioFixedSeed,
+  )(
     `matches recomputation across multi-action pending histories for a fixed seed`,
-    runPendingHistoryScenario,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(pendingHistoryScenarioFixedSeed))
+      await runPendingHistoryScenario(scenario)
+    },
   )
 
   it.each([
@@ -5171,6 +5253,7 @@ describe(`pagination recomputation oracle`, () => {
   ] as const)(
     `rejects %s in a captured pending history`,
     async (fault, message) => {
+      oracleRoute(`calibration`)
       const scenario: PendingHistoryScenario = {
         ranks: [0, 0, 1, 2],
         direction: `asc`,
@@ -5187,24 +5270,29 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
+  const pendingHistoryScenarioCampaign = oracleRandomParameters(
+    transitionScenarioRuns,
+    replay,
+    `pagination.pending-history`,
+  )
   fcTest.prop(
     [pendingHistoryScenarioArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.pending-history`,
-    ),
+    pendingHistoryScenarioCampaign,
   )(
     `matches recomputation across multi-action pending histories for a random or replayed seed`,
-    runPendingHistoryScenario,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(pendingHistoryScenarioCampaign))
+      await runPendingHistoryScenario(scenario)
+    },
   )
 
-  it(
-    `discovered trace: an in-flight request does not underfill a new window`,
-    expectInflightRequestFillsNewWindow,
-  )
+  it(`discovered trace: an in-flight request does not underfill a new window`, async () => {
+    oracleRoute(`fixed history`)
+    await expectInflightRequestFillsNewWindow()
+  })
 
   it(`discovered trace: a row moving across an offset window must refill its boundary`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0, 0],
       direction: `desc`,
@@ -5215,6 +5303,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`retains authoritative rows when a later window admits a prior insert`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0],
       direction: `asc`,
@@ -5228,6 +5317,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`restores an out-of-window insert when a later offset selects it`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0],
       direction: `asc`,
@@ -5241,6 +5331,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`restores an out-of-window rank update when a later offset selects it`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0, 0],
       direction: `asc`,
@@ -5254,6 +5345,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`discovered trace: inserting at an empty offset boundary refills the window`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0],
       direction: `asc`,
@@ -5268,6 +5360,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`discovered trace: an insert before a later offset does not skip its new boundary`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [-1, -1, 0, -1, 0, -1, 0, 1, 1],
       direction: `asc`,
@@ -5282,6 +5375,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`discovered trace: an async cursor loads the full offset window`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationScenario = {
       ranks: [0, 0, 0, 0, 0, 0, 1],
       direction: `asc`,
@@ -5294,6 +5388,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`discovered trace: an async cursor crosses an offset before filling one row`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationScenario = {
       ranks: [0, 0, -1],
       direction: `asc`,
@@ -5318,6 +5413,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `bounds requests for an underfilled source: $direction, explicit key=$explicitPublicKeyOrder, filter=$includeFilter`,
     async (structure) => {
+      oracleRoute(`case`)
       await runOnDemandPaginationScenario({
         ...structure,
         ranks: [0, 0],
@@ -5339,77 +5435,93 @@ describe(`pagination recomputation oracle`, () => {
       await runPaginationStateScenario({ ...scenario, ...structure })
     }
 
-    fcTest.prop([scenarioPayloadArbitrary], {
-      numRuns: cellRuns,
-      seed: 16_570 + index,
-    })(`covers ${name} window paths for a fixed seed`, runWindowCell)
     fcTest.prop(
       [scenarioPayloadArbitrary],
-      oracleRandomParameters(
-        cellRuns,
-        replay,
-        `pagination.matrix.window-${index}`,
-      ),
-    )(
+      oracleFixedSeed(16_570 + index, { numRuns: cellRuns }),
+    )(`covers ${name} window paths for a fixed seed`, async (scenario) => {
+      oracleRoute(`fixed seed`)
+      await runWindowCell(scenario)
+    })
+    const scenarioPayloadCampaign = oracleRandomParameters(
+      cellRuns,
+      replay,
+      `pagination.matrix.window-${index}`,
+    )
+    fcTest.prop([scenarioPayloadArbitrary], scenarioPayloadCampaign)(
       `covers ${name} window paths for a random or replayed seed [pagination.matrix.window-${index}]`,
-      runWindowCell,
+      async (scenario) => {
+        oracleRoute(oracleRouteOf(scenarioPayloadCampaign))
+        await runWindowCell(scenario)
+      },
     )
 
-    fcTest.prop([stateScenarioPayloadArbitrary], {
-      numRuns: cellRuns,
-      seed: 16_580 + index,
-    })(`covers ${name} state paths for a fixed seed`, runStateCell)
     fcTest.prop(
       [stateScenarioPayloadArbitrary],
-      oracleRandomParameters(
-        cellRuns,
-        replay,
-        `pagination.matrix.state-${index}`,
-      ),
-    )(
+      oracleFixedSeed(16_580 + index, { numRuns: cellRuns }),
+    )(`covers ${name} state paths for a fixed seed`, async (scenario) => {
+      oracleRoute(`fixed seed`)
+      await runStateCell(scenario)
+    })
+    const stateScenarioPayloadCampaign = oracleRandomParameters(
+      cellRuns,
+      replay,
+      `pagination.matrix.state-${index}`,
+    )
+    fcTest.prop([stateScenarioPayloadArbitrary], stateScenarioPayloadCampaign)(
       `covers ${name} state paths for a random or replayed seed [pagination.matrix.state-${index}]`,
-      runStateCell,
+      async (scenario) => {
+        oracleRoute(oracleRouteOf(stateScenarioPayloadCampaign))
+        await runStateCell(scenario)
+      },
     )
   }
 
-  fcTest.prop([scenarioArbitrary], {
+  const scenarioFixedSeed = oracleFixedSeed(1657, {
     numRuns: orderedScenarioRuns,
-    seed: 1657,
-  })(
+  })
+  fcTest.prop([scenarioArbitrary], scenarioFixedSeed)(
     `matches full recomputation across ordered windows for a fixed seed`,
-    runPaginationScenario,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(scenarioFixedSeed))
+      await runPaginationScenario(scenario)
+    },
   )
 
-  fcTest.prop(
-    [scenarioArbitrary],
-    oracleRandomParameters(
-      orderedScenarioRuns,
-      replay,
-      `pagination.ordered-window`,
-    ),
-  )(
+  const scenarioCampaign = oracleRandomParameters(
+    orderedScenarioRuns,
+    replay,
+    `pagination.ordered-window`,
+  )
+  fcTest.prop([scenarioArbitrary], scenarioCampaign)(
     `matches full recomputation across ordered windows for a random or replayed seed`,
-    runPaginationScenario,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(scenarioCampaign))
+      await runPaginationScenario(scenario)
+    },
   )
 
-  fcTest.prop([stateScenarioArbitrary], {
+  const stateScenarioFixedSeed = oracleFixedSeed(1658, {
     numRuns: transitionScenarioRuns,
-    seed: 1658,
-  })(
+  })
+  fcTest.prop([stateScenarioArbitrary], stateScenarioFixedSeed)(
     `matches full recomputation across source and window transitions for a fixed seed`,
-    runPaginationStateScenario,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(stateScenarioFixedSeed))
+      await runPaginationStateScenario(scenario)
+    },
   )
 
-  fcTest.prop(
-    [stateScenarioArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.window-transition`,
-    ),
-  )(
+  const stateScenarioCampaign = oracleRandomParameters(
+    transitionScenarioRuns,
+    replay,
+    `pagination.window-transition`,
+  )
+  fcTest.prop([stateScenarioArbitrary], stateScenarioCampaign)(
     `matches full recomputation across source and window transitions for a random or replayed seed`,
-    runPaginationStateScenario,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(stateScenarioCampaign))
+      await runPaginationStateScenario(scenario)
+    },
   )
 
   it.each(
@@ -5428,6 +5540,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `fetches linear row volume while traversing settled pages: %j`,
     async ({ direction, mode, explicitPublicKeyOrder, pageSize }) => {
+      oracleRoute(`case`)
       const pageCount = 10
       const rows = Array.from({ length: pageCount * pageSize }, (_, rank) => ({
         id: rank + 1,
@@ -5494,6 +5607,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `refills an ordered window past $count pending optimistic $mutation row(s)`,
     async ({ mutation, count }) => {
+      oracleRoute(`case`)
       const remote = [1, 2, 3, 4, 5].map((id) => ({ id, rank: id }))
       const delivered = new Set<number>()
       const requests: Array<LoadSubsetOptions> = []
@@ -5628,6 +5742,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `does not count $count optimistic $mutation row(s) as $transport provider coverage after a $initialLimit-row window`,
     async ({ mutation, count, initialLimit, transport }) => {
+      oracleRoute(`case`)
       const remote = [1, 2, 3, 4, 5, 6, 7].map((id) => ({ id, rank: id }))
       const finalLimit = mutation === `insert-before` ? count + 2 : count + 1
       const delivered = new Set<number>()
@@ -5780,6 +5895,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `keeps eager window membership when moving past an intervening insert: %j`,
     async ({ direction, explicitPublicKeyOrder, tied, limit }) => {
+      oracleRoute(`case`)
       const sign = direction === `asc` ? 1 : -1
       await runPaginationStateScenario({
         direction,
@@ -5814,6 +5930,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `keeps live observations separate from a settled acquisition: %j`,
     async ({ direction, timing, rank, transport }) => {
+      oracleRoute(`case`)
       const sign = direction === `asc` ? 1 : -1
       await runPendingMutationScenario(
         {
@@ -5832,6 +5949,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`discovered trace: a rank update must refill a top-1 window`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0],
       direction: `asc`,
@@ -5842,6 +5960,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`refills an implicit tie window when a visible row moves below it`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationStateScenario({
       ranks: [0, 0, 0, -1, 0],
       direction: `desc`,
@@ -5856,6 +5975,7 @@ describe(`pagination recomputation oracle`, () => {
   it.each([`resolve`, `reject`] as const)(
     `keeps the last complete implicit window while background recovery %ss`,
     async (settlement) => {
+      oracleRoute(`case`)
       const authoritativeRows = new Map<number, PageRow>([
         [1, { id: 1, rank: 0, keep: true }],
         [2, { id: 2, rank: 1, keep: true }],
@@ -5991,6 +6111,7 @@ describe(`pagination recomputation oracle`, () => {
   ] as const)(
     `refills an implicit %s tie window after a rank update`,
     async (_name, ranks, initialWindow, id, rank) => {
+      oracleRoute(`case`)
       await runPaginationStateScenario({
         ranks: [...ranks],
         direction: `asc`,
@@ -6004,6 +6125,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`opens an implicit tie window from zero at the lowest public key`, async () => {
+    oracleRoute(`fixed history`)
     await runPaginationStateScenario({
       ranks: [0],
       direction: `asc`,
@@ -6020,6 +6142,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`ignores an out-of-window insert when refilling after a delete`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [100, 90, 80, 70],
       direction: `desc`,
@@ -6033,6 +6156,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`ignores an out-of-window rank update when refilling after a delete`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0, 0],
       direction: `asc`,
@@ -6047,6 +6171,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`ignores an out-of-window rank update when the visible row leaves`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0, 0],
       direction: `asc`,
@@ -6061,6 +6186,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`refills untouched rows when widening after an out-of-window rank update`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0, 0],
       direction: `desc`,
@@ -6075,6 +6201,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`rebuilds the full boundary when widening after an out-of-window rank update`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [1, 0, 1, 0, 1],
       direction: `desc`,
@@ -6089,6 +6216,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`ignores an out-of-window insert when widening a tied window`, async () => {
+    oracleRoute(`fixed history`)
     const scenario: PaginationStateScenario = {
       ranks: [0, 0],
       direction: `asc`,
@@ -6102,10 +6230,12 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`expands a multi-column boundary before choosing top-K`, async () => {
+    oracleRoute(`fixed history`)
     await expectMultiOrderBoundaryMatches()
   })
 
   it(`rejects a real provider entry hidden by a copied pre-cleanup trace`, async () => {
+    oracleRoute(`calibration`)
     const scenario = {
       providerRows: [
         { id: 1, rank: 1, label: `first` },
@@ -6124,6 +6254,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`expands a provider tie before applying the public-key tie-breaker`, async () => {
+    oracleRoute(`fixed history`)
     const loads = await runAdversarialOrderedProviderScenario({
       providerRows: [
         { id: 2, rank: 0, label: `second` },
@@ -6141,6 +6272,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`does not derive an ordered boundary from another demand's local row`, async () => {
+    oracleRoute(`fixed history`)
     const unrelated = { id: 100, rank: 100, label: `unrelated` }
     const loads = await runAdversarialOrderedProviderScenario({
       providerRows: [
@@ -6159,6 +6291,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`refines an initial locale window without trusting provider collation`, async () => {
+    oracleRoute(`fixed history`)
     const loads = await runAdversarialOrderedProviderScenario({
       // Lexical provider order disagrees with locale numeric order.
       providerRows: [
@@ -6238,6 +6371,7 @@ describe(`pagination recomputation oracle`, () => {
   ] as const)(
     `uses one filtered full-source acquisition for custom collation ($cell)`,
     async ({ direction, autoIndex, sourceDefault, bounded, outputDefault }) => {
+      oracleRoute(`case`)
       await runCustomCollationScenario({
         direction,
         autoIndex,
@@ -6249,6 +6383,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`uses the leading source custom collation when ordering a later source (C-08 multi-source inheritance)`, async () => {
+    oracleRoute(`fixed history`)
     type ScopeRow = { id: number; groupId: number }
     const scope = createCollection(
       mockSyncCollectionOptions({
@@ -6323,6 +6458,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`inherits collection locale options through scan and auto-index ordering`, async () => {
+    oracleRoute(`fixed history`)
     const defaultOnly = createCollection<{ id: number }>({
       getKey: (row) => row.id,
       defaultStringCollation: { stringSort: `locale` },
@@ -6376,6 +6512,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`refines an initial reference-ordered window locally`, async () => {
+    oracleRoute(`fixed history`)
     const first = { value: `first` }
     const second = { value: `second` }
     // Fix their runtime reference order before the provider returns the
@@ -6405,6 +6542,7 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `refines invalid Date ties with an unbounded local-order request ($direction, nulls $nulls)`,
     async ({ direction, nulls }) => {
+      oracleRoute(`case`)
       const invalid = new Date(Number.NaN)
       const loads = await runAdversarialOrderedProviderScenario({
         providerRows: [
@@ -6424,6 +6562,7 @@ describe(`pagination recomputation oracle`, () => {
   )
 
   it(`uses an ascending index for a bounded descending demand`, async () => {
+    oracleRoute(`fixed history`)
     const rows: Array<PageRow> = [
       { id: 3, rank: 1 },
       { id: 1, rank: 0 },
@@ -6502,6 +6641,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it(`stabilizes an on-demand window with a NaN public-key tie`, async () => {
+    oracleRoute(`fixed history`)
     const loads = await runAdversarialOrderedProviderScenario({
       providerRows: [
         { id: 1, rank: 0, label: `finite` },
@@ -6523,6 +6663,7 @@ describe(`pagination recomputation oracle`, () => {
   ] as const)(
     `keeps null placement and $direction across source refinement ($nulls)`,
     async ({ direction, nulls, expectedIds }) => {
+      oracleRoute(`case`)
       const providerRows = [
         { id: 1, rank: null, label: `null` },
         { id: 2, rank: 0, label: `zero` },
@@ -6541,28 +6682,35 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
-  fcTest.prop([scenarioArbitrary], {
+  const scenarioFixedSeed2 = oracleFixedSeed(1659, {
     numRuns: transitionScenarioRuns,
-    seed: 1659,
-  })(
+  })
+  fcTest.prop([scenarioArbitrary], scenarioFixedSeed2)(
     `matches full recomputation when exact async cursor loads widen ordered coverage for a fixed seed`,
-    runOnDemandPaginationScenario,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(scenarioFixedSeed2))
+      await runOnDemandPaginationScenario(scenario)
+    },
   )
 
-  fcTest.prop(
-    [scenarioArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.async-cursor`,
-    ),
-  )(
+  const scenarioCampaign2 = oracleRandomParameters(
+    transitionScenarioRuns,
+    replay,
+    `pagination.async-cursor`,
+  )
+  fcTest.prop([scenarioArbitrary], scenarioCampaign2)(
     `matches full recomputation when exact async cursor loads widen ordered coverage for a random or replayed seed`,
-    runOnDemandPaginationScenario,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(scenarioCampaign2))
+      await runOnDemandPaginationScenario(scenario)
+    },
   )
 
   it.each([`forward`, `reverse`] as const)(
     `keeps concurrent on-demand windows correct under %s completion`,
-    expectOnDemandWindowsAreCompletionOrderIndependent,
+    async (scenario) => {
+      oracleRoute(`case`)
+      await expectOnDemandWindowsAreCompletionOrderIndependent(scenario)
+    },
   )
 })

@@ -23,14 +23,38 @@ import {
   expectNotificationsStopped,
 } from '../../db-collection-e2e/src/utils/notification-laws-oracle'
 import { ScenarioLifetime } from './conformance/scenario-lifetime'
-import { oracleRuns } from './oracle-config'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from './oracle-config'
+import { declareOracle } from './oracle-declaration'
 import type { Notification } from '../../db-collection-e2e/src/utils/notification-laws-oracle'
 
 type Row = { id: string; count: number }
 
+// What this oracle owns: the gap report judges every function in the
+// Collection change-message path (subscribeChanges) by this file's generated
+// publication histories and the calibration of its Map checker.
+declareOracle({
+  owns: [`src/collection/changes.ts#CollectionChangesManager.subscribeChanges`],
+})
+
 it.each([20260913, undefined])(
   `checks real query publications against generated worlds seed=%s`,
   async (seed) => {
+    const parameters = {
+      ...(seed === undefined
+        ? oraclePropertyOptions(30, `notification-laws.query-publications`)
+        : oracleFixedSeed(seed, { numRuns: oracleRuns(30) })),
+      examples: [
+        [1, [2, null]],
+        [1, [null]],
+      ],
+    }
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(
         fc.option(fc.integer(), { nil: null }),
@@ -109,14 +133,7 @@ it.each([20260913, undefined])(
           })
         },
       ),
-      {
-        seed,
-        numRuns: oracleRuns(30),
-        examples: [
-          [1, [2, null]],
-          [1, [null]],
-        ],
-      },
+      parameters,
     )
   },
 )
@@ -124,6 +141,12 @@ it.each([20260913, undefined])(
 it.each([20260913, undefined])(
   `reconstructs generated publication histories seed=%s`,
   (seed) => {
+    const campaignParameters = {
+      ...(seed === undefined
+        ? oraclePropertyOptions(100, `notification-laws.publication-histories`)
+        : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
+    }
+    oracleRoute(oracleRouteOf(campaignParameters))
     fc.assert(
       fc.property(
         fc.array(fc.dictionary(fc.constantFrom('a', 'b', 'c'), fc.integer()), {
@@ -177,7 +200,7 @@ it.each([20260913, undefined])(
           ).toThrow()
         },
       ),
-      { seed, numRuns: oracleRuns(100) },
+      campaignParameters,
     )
   },
 )
@@ -192,6 +215,7 @@ it.each([
   'absent-delete',
   'unknown-type',
 ])(`rejects the %s publication mutant`, (fault) => {
+  oracleRoute(`calibration`)
   const peer = { id: 'peer', count: 2 }
   const row = { id: 'owned', count: 1 }
   const insert = { type: 'insert', key: row.id, value: row }
@@ -219,6 +243,7 @@ it.each([
 it.each([20260913, undefined])(
   `rejects corrupt prior values and repeated updates seed=%s`,
   (seed) => {
+    oracleRoute(`calibration`)
     fc.assert(
       fc.property(fc.integer({ min: -1000, max: 1000 }), (count) => {
         const old = { id: 'owned', count }
@@ -251,7 +276,11 @@ it.each([20260913, undefined])(
           expectNotificationHistory([], [...callbacks, callbacks[1]!], [next]),
         ).toThrow()
       }),
-      { seed, numRuns: oracleRuns(50) },
+      {
+        ...(seed === undefined
+          ? oraclePropertyOptions(50, `notification-laws.corrupt-prior-values`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(50) })),
+      },
     )
   },
 )

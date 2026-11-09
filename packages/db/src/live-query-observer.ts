@@ -616,7 +616,12 @@ class LiveQueryObserverImpl<
     }
     const subscription = collection.subscribeChanges(
       (changes) => notify(changes as Array<ChangeMessage<T, TKey>>),
-      { includeInitialState: !this.wholesale && !attachedWithHydrationSeed },
+      {
+        includeInitialState: !this.wholesale && !attachedWithHydrationSeed,
+        // The `cleaned-up` snapshot shows no rows, so the observer keeps none
+        // of the last sync run's rows for the next one.
+        discardsRowsOnCleanup: true,
+      },
     )
     ownRelease(() => subscription.unsubscribe())
     this.blockDelivery = false

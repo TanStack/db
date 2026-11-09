@@ -10,7 +10,13 @@ import {
 } from '../src/index'
 import { localOnlyCollectionOptions } from '../src/local-only'
 import { PropRef } from '../src/query/ir'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from './oracle-config'
 import { declareOracle } from './oracle-declaration'
 import { captureCreatedTransactions } from './utils'
 import {
@@ -49,7 +55,7 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  * through a local-only Collection, either in one same-turn batch or
  * sequentially. After all batched writes settle, or after each sequential
  * write settles, public rows and a change-message mirror must equal the
- * reference rows. An eager-index lane also builds an index before the history
+ * reference rows. An eager-index grammar also builds an index before the history
  * and compares both equality buckets after each settled prefix in sequential
  * histories. In batched histories it compares them after each synchronous
  * operation before settlement, then once after all writes settle. At the
@@ -583,7 +589,11 @@ function expectDurationFieldPublication(
   expect(fields(mirror.get(1))).toEqual(expectedFields)
 }
 
+// What this oracle owns: the gap report judges the change-message publication
+// in collection/changes.ts, and the direct writes of a local-only Collection in
+// local-only.ts, by this file's tests.
 declareOracle({
+  owns: [`src/collection/changes.ts`, `src/local-only.ts`],
   check: [
     assertFinalAgreement,
     assertIndexAgreement,
@@ -604,6 +614,7 @@ describe(`change-event history oracle`, () => {
   // This witness covers ordinary same-realm Durations, not altered objects or
   // a requirement to suppress events for a separately allocated equal copy.
   it(`publishes a Duration field change to the Collection and change-message consumer`, async () => {
+    oracleRoute(`fixed history`)
     let sync!: Parameters<SyncConfig<DurationRow, number>[`sync`]>[0]
     const collection = createCollection<DurationRow, number>({
       id: `duration-field-change-history`,
@@ -669,6 +680,7 @@ describe(`change-event history oracle`, () => {
   })
 
   it(`preserves each key's causal messages within a deferred callback`, async () => {
+    oracleRoute(`fixed history`)
     const rounds: ReadonlyArray<ReadonlyArray<Op>> = [
       [
         { kind: `insert`, key: 1, step: 1 },
@@ -804,6 +816,7 @@ describe(`change-event history oracle`, () => {
     })
 
   it(`rejects a deferred message with the right name but wrong row fields`, () => {
+    oracleRoute(`calibration`)
     const sequence: Array<Op> = [
       { kind: `insert`, key: 1, step: 1 },
       { kind: `update`, key: 1, step: 2 },
@@ -827,6 +840,7 @@ describe(`change-event history oracle`, () => {
   })
 
   it(`rejects a missing live key in the index checker`, () => {
+    oracleRoute(`calibration`)
     expect(replacement.map(({ kind, key }) => [kind, key])).toEqual([
       [`delete`, 1],
       [`delete`, 2],
@@ -845,6 +859,7 @@ describe(`change-event history oracle`, () => {
     it.each([`batched`, `sequential`] as const)(
       `keeps ${name} and indexed queries aligned after %s replacement`,
       async (mode) => {
+        oracleRoute(`fixed history`)
         await runHistory(
           replacement,
           [1, 2],
@@ -872,21 +887,32 @@ describe(`change-event history oracle`, () => {
     }
   }
 
-  fcTest.prop([indexedHistory], { numRuns: oracleRuns(35), seed: 1_912 })(
+  const indexedHistoryFixedSeed = oracleFixedSeed(1_912, {
+    numRuns: oracleRuns(35),
+  })
+  fcTest.prop([indexedHistory], indexedHistoryFixedSeed)(
     `keeps eager indexes and indexed queries aligned across fixed-seed histories`,
-    verifyIndexedHistory,
+    async (history) => {
+      oracleRoute(oracleRouteOf(indexedHistoryFixedSeed))
+      await verifyIndexedHistory(history)
+    },
   )
-  fcTest.prop(
-    [indexedHistory],
-    oraclePropertyOptions(35, `collection-state.eager-index-history`),
-  )(
+  const indexedHistoryCampaign = oraclePropertyOptions(
+    35,
+    `collection-state.eager-index-history`,
+  )
+  fcTest.prop([indexedHistory], indexedHistoryCampaign)(
     `keeps eager indexes and indexed queries aligned across random histories`,
-    verifyIndexedHistory,
+    async (history) => {
+      oracleRoute(oracleRouteOf(indexedHistoryCampaign))
+      await verifyIndexedHistory(history)
+    },
   )
 
   it.each(cases)(
     `$id: $label reconstructs every public row`,
     async ({ mode, sequence, initialKeys, id }) => {
+      oracleRoute(`case`)
       await runHistory(sequence, initialKeys, mode, `history-oracle-${id}`)
     },
   )
@@ -896,6 +922,7 @@ describe(`change-event history oracle`, () => {
   it.each(cases)(
     `$id: $label then reload reconstructs every public row`,
     async ({ mode, sequence, initialKeys, id }) => {
+      oracleRoute(`case`)
       await runHistory(
         sequence,
         initialKeys,
@@ -908,16 +935,26 @@ describe(`change-event history oracle`, () => {
     },
   )
 
-  fcTest.prop([generatedHistory], { numRuns: oracleRuns(100), seed: 1_902 })(
+  const generatedHistoryFixedSeed = oracleFixedSeed(1_902, {
+    numRuns: oracleRuns(100),
+  })
+  fcTest.prop([generatedHistory], generatedHistoryFixedSeed)(
     `keeps change messages and public rows aligned with a fixed seed`,
-    verifyGeneratedHistory,
+    async (history) => {
+      oracleRoute(oracleRouteOf(generatedHistoryFixedSeed))
+      await verifyGeneratedHistory(history)
+    },
   )
 
-  fcTest.prop(
-    [generatedHistory],
-    oraclePropertyOptions(100, `collection-state.change-event-history`),
-  )(
+  const generatedHistoryCampaign = oraclePropertyOptions(
+    100,
+    `collection-state.change-event-history`,
+  )
+  fcTest.prop([generatedHistory], generatedHistoryCampaign)(
     `keeps change messages and public rows aligned with a random or replayed seed`,
-    verifyGeneratedHistory,
+    async (history) => {
+      oracleRoute(oracleRouteOf(generatedHistoryCampaign))
+      await verifyGeneratedHistory(history)
+    },
   )
 })

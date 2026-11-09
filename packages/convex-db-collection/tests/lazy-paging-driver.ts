@@ -425,7 +425,7 @@ export function lazyFixture(
           }
           batches.push(batch)
           for (const listener of batchListeners) listener(batch)
-          // Hostile receiver controls may lie to the adapter while the observer
+          // Mutant receiver controls may lie to the adapter while the observer
           // retains the actual core receipt and its true application boundary.
           return adapterReceipt ? adapterReceipt(receipt) : receipt
         },

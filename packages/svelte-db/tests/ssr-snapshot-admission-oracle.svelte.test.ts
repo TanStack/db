@@ -3,7 +3,14 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { render } from 'svelte/server'
 import { BTreeIndex, DbClient, Query, collectionOptions } from '@tanstack/db'
-import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
   expectedSsrSnapshot,
@@ -131,22 +138,25 @@ describe(`Svelte SSR snapshot admission`, () => {
   }
   for (const history of ssrSnapshotExamples) {
     it(`replays SSR ${history.preparation}/${history.sourceState}/${history.rows.length}`, async () => {
+      oracleRoute(`case`)
       await checkHistory(history, makeReach())
     })
   }
   for (const campaign of [`fixed`, `random`] as const) {
     it(`admits reproducible SSR snapshots (${campaign})`, async () => {
       const reach = makeReach()
+      const parameters = {
+        ...(campaign === `fixed`
+          ? oracleFixedSeed(2229, { numRuns: oracleRuns(120) })
+          : oraclePropertyOptions(120, `svelte.ssr-snapshot`)),
+        examples: ssrSnapshotExamples.map((history) => [history]),
+      }
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(ssrSnapshotHistoryArbitrary, (history) =>
           checkHistory(history, reach),
         ),
-        {
-          ...(campaign === `fixed`
-            ? { numRuns: oracleRuns(120), seed: 2229 }
-            : oraclePropertyOptions(120, `svelte.ssr-snapshot`)),
-          examples: ssrSnapshotExamples.map((history) => [history]),
-        },
+        parameters,
       )
       reach.assertReached()
       console.info(
@@ -155,4 +165,10 @@ describe(`Svelte SSR snapshot admission`, () => {
       )
     })
   }
+})
+
+declareOracle({
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
+  model: [expectedSsrSnapshot],
+  grammar: [ssrSnapshotHistoryArbitrary],
 })

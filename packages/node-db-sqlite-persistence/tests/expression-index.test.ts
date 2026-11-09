@@ -80,7 +80,7 @@ describe(`SQLite expression-index oracle`, () => {
     expect(readOracleRunConfig({ TANSTACK_DB_ORACLE_SEED: `1659005` })).toEqual(
       {
         multiplier: 1,
-        replaySeed: 1659005,
+        campaignSeed: 1659005,
         replayPath: undefined,
         replayProperty: undefined,
       },
@@ -93,7 +93,7 @@ describe(`SQLite expression-index oracle`, () => {
       }),
     ).toEqual({
       multiplier: 1,
-      replaySeed: -1659005,
+      campaignSeed: -1659005,
       replayPath: `0:1:2`,
       replayProperty: `sqlite-persistence.expression-index`,
     })
@@ -1763,7 +1763,7 @@ describe(`SQLite expression-index oracle`, () => {
         .all(jsonPath, target) as Array<QueryPlanRow>
 
       // Same correct rows, different plan: a row-only assertion is
-      // false-green. This predicate-plan mismatch kills the hostile mutant.
+      // false-green. This predicate-plan mismatch kills the mutant.
       expect(boundRows).toEqual(literalRows)
       expect(planUsesNamedIndex(literalPlan, `rows`, `literal_ddl`)).toBe(true)
       expect(planScansTable(literalPlan, `rows`)).toBe(false)
