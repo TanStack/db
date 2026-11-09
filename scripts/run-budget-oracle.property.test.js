@@ -84,6 +84,11 @@ const BASE_RUNS = 20
 const repoRoot = fileURLToPath(new URL(`../`, import.meta.url))
 const OTHER_ORACLE = `tests/other-oracle.test.ts`
 const ORDINARY = `tests/ordinary.test.ts`
+// An oracle file that is the same at base and at head. It imports a support
+// module that receives a moved budget, so the budget reaches it at head only
+// through its import: a holder that the changed-file set does not contain.
+const UNCHANGED_ORACLE = `tests/unchanged-oracle.test.ts`
+const RECEIVER = `tests/support-c.ts`
 // A base oracle file above the default 1 MiB child-process buffer. Reading it
 // at the base commit must not be mistaken for a missing file.
 const LARGE_PADDING = 1_100_000
@@ -132,6 +137,7 @@ const budgetSkeleton = fc.record({
     { weight: 2, arbitrary: fc.constant(`remove`) },
     { weight: 2, arbitrary: fc.constant(`ordinary`) },
     { weight: 2, arbitrary: fc.constant(`other-oracle`) },
+    { weight: 2, arbitrary: fc.constant(`imported-by-unchanged`) },
   ),
   sharedSeed: fc.boolean(),
   // Whether a fixed seed is declared with oracleFixedSeed at base and at head.
@@ -242,6 +248,7 @@ function resolveBudget(skeleton, index, sources, files) {
       skeleton.form === `seed` &&
       skeleton.sharedSeed &&
       skeleton.fate !== `other-oracle` &&
+      skeleton.fate !== `imported-by-unchanged` &&
       !files.otherNew,
     key:
       skeleton.form !== `seed`
@@ -257,9 +264,11 @@ function resolveBudget(skeleton, index, sources, files) {
 // oracle file imports. A budget that is deleted, or moved into the ordinary
 // file, leaves every tracked oracle file, so it is reported as removed, unless
 // its fixed seed is still written in the second oracle file. A budget that
-// stays, moves between the oracle file and its support module, or moves to the
-// second oracle file is still tracked, and it is reported when its count went
-// down. Each line names the oracle file that used the budget at base.
+// stays, moves between the oracle file and its support module, moves to the
+// second oracle file, or moves into a support module that the unchanged oracle
+// file imports is still tracked, and it is reported when its count went down.
+// That unchanged file is not in the branch's changed set, so a holder found
+// only through it is found only by a check of every oracle file. Each line names the oracle file that used the budget at base.
 
 /** The reported budgets, as sorted `file|key|before|after-or-removed` strings. */
 function predictReport(program) {
@@ -303,6 +312,8 @@ function campaignFile(program, budget, revision) {
       return ORDINARY
     case `other-oracle`:
       return OTHER_ORACLE
+    case `imported-by-unchanged`:
+      return RECEIVER
     default:
       return undefined
   }
@@ -345,6 +356,12 @@ function renderFiles(program, revision) {
   )
   const otherPresent = !files.otherNew || isHead
   if (otherPresent) modules.set(OTHER_ORACLE, new ModuleText())
+  modules.set(RECEIVER, new ModuleText())
+  modules.set(UNCHANGED_ORACLE, new ModuleText())
+  modules.get(UNCHANGED_ORACLE).line(`import './support-c'`)
+  // The case oracle keeps its import of the support module at both revisions,
+  // so a campaign removed from the module is a removal from an imported module.
+  modules.get(files.oracle).line(`import '${supportSpecifier}'`)
   const support = modules.get(files.support)
   const reexported = []
 
@@ -587,6 +604,8 @@ const STATES = [
   `removed-budget`,
   `moved-to-ordinary`,
   `moved-to-oracle`,
+  `moved-to-unchanged-oracle`,
+  `removed-from-imported-module`,
   `moved-to-untracked-oracle`,
   `shared-seed-kept`,
   `declared-seed`,
@@ -626,6 +645,12 @@ function recordStates(program) {
     }
     if (budget.fate === `remove`) states.add(`removed-budget`)
     if (budget.fate === `ordinary`) states.add(`moved-to-ordinary`)
+    if (budget.fate === `imported-by-unchanged`) {
+      states.add(`moved-to-unchanged-oracle`)
+    }
+    if (budget.callAt === `support` && budget.fate === `remove`) {
+      states.add(`removed-from-imported-module`)
+    }
     if (budget.fate === `other-oracle`) {
       states.add(
         files.otherNew ? `moved-to-untracked-oracle` : `moved-to-oracle`,

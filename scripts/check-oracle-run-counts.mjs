@@ -105,6 +105,41 @@ class SourceReader {
     return this.#baseFiles
   }
 
+  /** Whether a file exists at a revision, without reading it. */
+  exists(file, revision) {
+    return revision === `head`
+      ? existsSync(join(this.#repo, file))
+      : this.baseFiles().has(file)
+  }
+
+  /**
+   * Reads the base texts of the files that exist at base, in one
+   * `git cat-file` process. A file that is not prefetched costs one `git show`.
+   */
+  prefetch(files) {
+    const wanted = [...new Set(files)].filter(
+      (file) => this.baseFiles().has(file) && !this.#texts.has(`base\0${file}`),
+    )
+    if (wanted.length === 0) return
+    const output = execFileSync(`git`, [`cat-file`, `--batch`], {
+      cwd: this.#repo,
+      input: wanted.map((file) => `${this.#base}:${file}\n`).join(``),
+      maxBuffer: Infinity,
+    })
+    let position = 0
+    for (const file of wanted) {
+      const end = output.indexOf(10, position)
+      const [, type, size] = output.toString(`utf8`, position, end).split(` `)
+      if (type !== `blob`) throw new Error(`cannot read ${file} at base`)
+      const start = end + 1
+      this.#texts.set(
+        `base\0${file}`,
+        output.toString(`utf8`, start, start + Number(size)),
+      )
+      position = start + Number(size) + 1
+    }
+  }
+
   text(file, revision) {
     const key = `${revision}\0${file}`
     if (!this.#texts.has(key)) {
@@ -162,7 +197,7 @@ function resolveModule(fromFile, source, reader, revision) {
     `${stem}.jsx`,
     `${stem}/index.ts`,
     `${stem}/index.js`,
-  ].find((candidate) => reader.text(candidate, revision) !== undefined)
+  ].find((candidate) => reader.exists(candidate, revision))
 }
 
 function nameOf(node) {
@@ -439,6 +474,61 @@ function scopeBudgets(file, revision, reader) {
   return budgets
 }
 
+// A string literal that names a relative path. Every relative import, export,
+// and re-export source is one, so the literals contain each module that the
+// AST walk reaches.
+const relativeLiteral = /(['"`])(\.[^'"`\n]*)\1/g
+
+/**
+ * The files that a file reaches at head through relative literals, transitively.
+ * It reads the working tree, and it is a superset of `dependencies`: a literal
+ * in a comment can add a file, which the exact scope then computes and finds
+ * unchanged. It selects which oracle files are computed, and reports nothing.
+ */
+class HeadReach {
+  #reader
+  #direct = new Map()
+  #closure = new Map()
+
+  constructor(reader) {
+    this.#reader = reader
+  }
+
+  #targets(file) {
+    if (!this.#direct.has(file)) {
+      const text = this.#reader.text(file, `head`)
+      this.#direct.set(
+        file,
+        text === undefined
+          ? []
+          : [...text.matchAll(relativeLiteral)]
+              .map(([, , source]) =>
+                resolveModule(file, source, this.#reader, `head`),
+              )
+              .filter((target) => target !== undefined),
+      )
+    }
+    return this.#direct.get(file)
+  }
+
+  of(file) {
+    if (!this.#closure.has(file)) {
+      const found = new Set()
+      const pending = [file]
+      while (pending.length > 0) {
+        for (const target of this.#targets(pending.pop())) {
+          if (!found.has(target)) {
+            found.add(target)
+            pending.push(target)
+          }
+        }
+      }
+      this.#closure.set(file, found)
+    }
+    return this.#closure.get(file)
+  }
+}
+
 /**
  * Every keyed run budget that the branch lowered or removed, by the oracle
  * file that used it at base. A removed budget has no `now`. The head side is
@@ -454,33 +544,41 @@ export function loweredRunBudgetsBetween(repo, base) {
       .flatMap((output) => output.split(`\n`))
       .filter(Boolean),
   )
-  const oracles = [
-    ...new Set(
-      [...reader.baseFiles(), ...changed].filter((file) => isOracleFile(file)),
-    ),
-  ]
+  const reach = new HeadReach(reader)
+  // An oracle file's budgets can change only when it, or a module that it
+  // reaches at head, changed. Its base budgets are computed for those files
+  // alone. The head reach over-approximates the import graph, so no affected
+  // file is missed; an extra file is computed exactly and reports nothing.
+  const candidates = [...reader.baseFiles()]
+    .filter((file) => isOracleFile(file))
+    .filter(
+      (file) =>
+        changed.has(file) ||
+        [...reach.of(file)].some((module) => changed.has(module)),
+    )
+  reader.prefetch(candidates.flatMap((file) => [file, ...reach.of(file)]))
   const scopes = { base: new Map(), head: new Map() }
   const scope = (file, revision) => {
     if (!scopes[revision].has(file))
       scopes[revision].set(file, scopeBudgets(file, revision, reader))
     return scopes[revision].get(file)
   }
-  const atHead = oracles.filter(
-    (file) => reader.text(file, `head`) !== undefined,
-  )
-  const lowered = []
-  for (const file of oracles) {
-    if (reader.text(file, `base`) === undefined) continue
-    const affected = [file, ...dependencies(file, reader, `head`)].some(
-      (candidate) => changed.has(candidate),
+  // Every oracle file that exists at head. Only a removed key consults it.
+  let atHead
+  const holdersOf = (file, key) => {
+    atHead ??= [...new Set([...reader.baseFiles(), ...changed])]
+      .filter((other) => isOracleFile(other))
+      .filter((other) => reader.exists(other, `head`))
+    return atHead.filter(
+      (other) => other !== file && scope(other, `head`).has(key),
     )
-    if (!affected) continue
+  }
+  const lowered = []
+  for (const file of candidates) {
     for (const [key, was] of scope(file, `base`)) {
       let now = scope(file, `head`).get(key)
       if (now === undefined) {
-        const holders = atHead.filter(
-          (other) => other !== file && scope(other, `head`).has(key),
-        )
+        const holders = holdersOf(file, key)
         if (holders.length === 0) {
           lowered.push({ file, key, was })
           continue
