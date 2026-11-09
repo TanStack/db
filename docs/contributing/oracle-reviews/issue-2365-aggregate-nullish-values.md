@@ -158,3 +158,15 @@ Correction to the ORC-004 row: the rejected nearby input is `min` and `max` of
 Dates, strings and bigints, which the grammar neither adds nor orders. The
 reason given in that row is wrong for strings: the oracle orders string fields
 under `en-US`.
+
+## Follow-up: reach tied to compared aggregates
+
+CodeRabbit noted that the nullish reach states read only the source rows, so a
+history selecting `count(c.id)` could satisfy them. Each state now requires a
+successfully compared query that selects the aggregate it is about, over that
+query's own groups. That left the Date states unreached, because a Date
+aggregate is rare in generated shapes, so a constructive family now walks a
+grouped query through the states. Generated reach at seed 2094: mixed 30, only
+nullish 22, maximum below zero 7, minimum above zero 6, Date mixed 1, Date only
+nullish 1, value replaced by nullish 7, nullish replaced by value 6. Production
+code is unchanged.

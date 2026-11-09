@@ -1031,11 +1031,20 @@ const step: fc.Arbitrary<Step> = fc.oneof(
 const isValue = <T>(value: T | null | undefined): value is T =>
   value !== null && value !== undefined
 
-/** Records which nullish states the source rows' groups are in. */
+const readsNullableNumber = (shape: Shape): boolean =>
+  Object.values(shape.fields)
+    .flatMap(aggregatesOf)
+    .some((fn) => fn.startsWith(`n:`))
+
+/** Records the nullish states of the groups a compared query aggregates. */
 function reachNullishStates(
   rows: ReadonlyArray<Comment>,
   grouping: Grouping,
+  shape: Shape,
 ): void {
+  const read = new Set(Object.values(shape.fields).flatMap(aggregatesOf))
+  const readsNumbers = readsNullableNumber(shape)
+  const readsDates = read.has(`at:min`) || read.has(`at:max`)
   const groups = new Map<string, Array<Comment>>()
   for (const row of rows) {
     const id = grouping === `none` ? `` : groupIdOf(row, grouping)
@@ -1044,17 +1053,18 @@ function reachNullishStates(
   for (const members of groups.values()) {
     const numbers = members.map((row) => row.n).filter(isValue)
     const dates = members.map((row) => row.at).filter(isValue)
-    if (numbers.length === 0) reach?.reach(`a group holds only nullish entries`)
-    else if (numbers.length < members.length) {
+    if (readsNumbers && numbers.length === 0)
+      reach?.reach(`a group holds only nullish entries`)
+    else if (readsNumbers && numbers.length < members.length) {
       reach?.reach(`a group mixes values with nullish entries`)
-      if (Math.max(...numbers) < 0)
+      if (read.has(`n:max`) && Math.max(...numbers) < 0)
         reach?.reach(`a maximum below zero sits beside a nullish entry`)
-      if (Math.min(...numbers) > 0)
+      if (read.has(`n:min`) && Math.min(...numbers) > 0)
         reach?.reach(`a minimum above zero sits beside a nullish entry`)
     }
-    if (dates.length === 0)
+    if (readsDates && dates.length === 0)
       reach?.reach(`a Date column holds only nullish entries`)
-    else if (dates.length < members.length)
+    else if (readsDates && dates.length < members.length)
       reach?.reach(`a Date column mixes values with nullish entries`)
   }
 }
@@ -1623,6 +1633,7 @@ async function runHistory({
     if (union && topQuery.ok) reach?.reach(`a union source publishes rows`)
     for (const [index, s] of steps.entries()) {
       let routeMoved = false
+      let nullishChange: (typeof generatedCheckpoints)[number] | undefined
       if (s.t === `parent`) {
         const next = { ...issues.find((i) => i.id === s.id)!, x: s.x }
         issues = issues.map((i) => (i.id === s.id ? next : i))
@@ -1657,9 +1668,9 @@ async function runHistory({
             k: s.k ?? target.k,
           }
           if (isValue(target.n) && !isValue(s.n))
-            reach?.reach(`a value is replaced by a nullish one`)
+            nullishChange = `a value is replaced by a nullish one`
           if (!isValue(target.n) && isValue(s.n))
-            reach?.reach(`a nullish value is replaced by a value`)
+            nullishChange = `a nullish value is replaced by a value`
           routeMoved = row.k !== target.k
           comments = comments.map((c) => (c.id === target.id ? row : c))
           commentSource.utils.begin()
@@ -1675,7 +1686,20 @@ async function runHistory({
       await new Promise((resolve) => setTimeout(resolve, 0))
       check(`step ${index} ${fc.stringify(s)}`)
       if (topQuery.ok || includeQuery.ok) {
-        reachNullishStates(comments, grouping)
+        if (topQuery.ok) reachNullishStates(comments, grouping, top)
+        if (includeQuery.ok)
+          for (const issue of issues)
+            reachNullishStates(
+              comments.filter((comment) => comment.k === issue.k),
+              grouping,
+              nested,
+            )
+        if (
+          nullishChange &&
+          ((topQuery.ok && readsNullableNumber(top)) ||
+            (includeQuery.ok && readsNullableNumber(nested)))
+        )
+          reach?.reach(nullishChange)
         const checkpoint = {
           parent: `published after a parent update`,
           insert: `published after a source insert`,
@@ -1838,10 +1862,27 @@ const structuralHistories = [
 const examples = structuralHistories.map((entry) => [entry] as [History])
 const structuralInputs = new Set(structuralHistories)
 
+/** Selects every aggregate that the nullish states below are about. */
+const nullableAggregatesShape: Shape = {
+  fields: {
+    f0: { k: `agg`, fn: `n:max` },
+    f1: { k: `agg`, fn: `n:min` },
+    f2: { k: `agg`, fn: `n:avg` },
+    f3: { k: `agg`, fn: `at:min` },
+    f4: { k: `agg`, fn: `at:max` },
+    f5: { k: `agg`, fn: `s:min` },
+    f6: { k: `agg`, fn: `b:max` },
+    fk: { k: `key` },
+  },
+}
+
 /**
  * Required premises are constructive, rather than a lottery at campaign end.
  * Each family varies its authored literal, ordering direction and source/parent
- * writes. The final family also crosses union and shadowed-alias boundaries.
+ * writes. The final structural family also crosses union and shadowed-alias
+ * boundaries, and one last family walks a grouped query through the nullish
+ * states: a maximum below zero beside a nullish entry once `A` gains one, then
+ * a value replaced by a nullish one and a nullish value replaced by a value.
  * These generated examples use the campaign seed and the ordinary comparison;
  * they add to the broad run budget and remain available to seed/path replay.
  */
@@ -1880,6 +1921,16 @@ const requiredHistories = fc.tuple(
         }
       }),
   ),
+  fc
+    .record({ value: literal, nullish: fc.constantFrom(null, undefined) })
+    .map(({ value, nullish }): History => ({
+      ...fixedHistory(nullableAggregatesShape, nullableAggregatesShape, `key`),
+      steps: [
+        { t: `insert`, k: `A`, v: value, n: nullish },
+        { t: `update`, pick: 0, v: value, n: nullish },
+        { t: `update`, pick: 1, v: value, n: 2 },
+      ],
+    })),
 )
 
 /** The states the operator laws need; each campaign must reach all of them. */
