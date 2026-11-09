@@ -57,6 +57,14 @@ import type {
  *    and a cleaned-up Collection restarts on demand. While the seed is active,
  *    cleanup and a restart are part of "not produced yet": the snapshot keeps
  *    showing the seed as `ready`, and the next sync run's readiness hands off.
+ *    Once the seed has ended, the observer shows the live Collection through
+ *    cleanup and restart too: `cleaned-up` with no rows (cleanup discards all
+ *    of the Collection's state, glossary "crash"), then each row the new sync
+ *    run writes. That includes a row equal to one shown before cleanup: the
+ *    observer let that row go at cleanup, so a Collection subscription that
+ *    reconciles later writes against the rows it published before cleanup
+ *    (ARCHITECTURE "Cleanup, restart, and detached waiters") must not count
+ *    it as already shown ([#2334](https://github.com/TanStack/db/issues/2334)).
  * 4. **Every visible change is announced.** Wholesale consumers re-read
  *    `getSnapshot()` only when notified (`useSyncExternalStore` does one
  *    consistency read right after subscribing). So, while attached, the
@@ -80,6 +88,7 @@ import type {
 | failure shown under a seed | seed of 0..3 rows; live writes; `fail()`, `crash()`, cleanup, restart, `markReady()`, attach, in any legal order | DbClient hydrate -> getSnapshot status mapping; status listener -> notify | snapshot `status` and flags after each step and a macrotask | this generated oracle |
 | failure ends the seed | the same, with cleanup after the failure | notify/attach -> seed handoff | `cleaned-up` and live rows after cleanup | this generated oracle |
 | cleanup keeps the seed | cleanup and restart while the seed is active | notify early return under the seed | `ready` and seed rows | this generated oracle; recorded decision, not a law-16 claim |
+| restart after the seed ended | cleanup and restart after readiness or a failure ended the seed; the new sync run rewrites a row equal to one shown before cleanup | notify `cleaned-up` reset -> Collection subscription reconciliation | live rows after each later step | this generated oracle |
 | announced changes | every step while attached | emit -> flushPublications | last-read snapshot and granular rebuilt rows equal the current snapshot | this generated oracle |
 | already-ready subset handoff | held subset at attach, then settlement without row/status change; both modes | seeded observer -> subset settlement | seed while held, live snapshot and announced granular/wholesale rows after settlement | generated ready-subset lane below; Svelte page receiver |
 | other handoff timing, streamed errors, consumption | | | | focused `live-query-observer.test.ts` hydration tests |
@@ -148,16 +157,36 @@ const history: fc.Arbitrary<History> = fc.record({
   events: fc.array(event, { minLength: 1, maxLength: MAX_EVENTS }),
 })
 
+/** A step written as its type alone, or as a whole event (a write). */
+type StepSpec = Event[`type`] | Event
+const toEvent = (spec: StepSpec): Event =>
+  typeof spec === `string` ? ({ type: spec } as Event) : spec
+
 /** Starts a generated history with `prefix`, keeping it inside the grammar. */
 const startWith =
-  (...prefix: Array<Event[`type`]>) =>
+  (...prefix: Array<StepSpec>) =>
   (generated: History): History => ({
     ...generated,
-    events: [
-      ...prefix.map((type) => ({ type }) as Event),
-      ...generated.events,
-    ].slice(0, MAX_EVENTS),
+    events: [...prefix.map(toEvent), ...generated.events].slice(0, MAX_EVENTS),
   })
+
+/**
+ * Starts a generated history by ending the seed with `end`, writing a row,
+ * cleaning up, restarting, and writing the same row again. The row is the
+ * generated history's first upsert, so the repeated key and version vary.
+ */
+const rewriteAfterRestart =
+  (end: `ready` | `fail`) =>
+  (generated: History): History => {
+    const row = generated.events.find(
+      (next) => next.type === `write` && next.version !== null,
+    ) ?? { type: `write`, key: `a`, version: 0 }
+    const prefix: Array<StepSpec> =
+      end === `ready`
+        ? [`attach`, `ready`, row, `cleanup`, `restart`, row]
+        : [`attach`, row, `fail`, `cleanup`, `restart`, row]
+    return startWith(...prefix)(generated)
+  }
 
 // ---------------------------------------------------------------------------
 // Trace
@@ -205,6 +234,7 @@ const reachStates = [
   `attach-to-failure-under-seed`,
   `cleanup-after-failure-ended-seed`,
   `restart-under-seed`,
+  `restart-rewrites-row-from-before-cleanup`,
 ] as const
 type ReachState = (typeof reachStates)[number]
 
@@ -276,6 +306,13 @@ function hydrationModel(
   }
   const owed = new Map<string, Expectation>()
   const reached = new Set<ReachState>()
+  // The rows the Collection held right before the latest cleanup, and
+  // whether a sync run has restarted since. A write of the new run that
+  // brings one of those rows back is where law 3's restart claim matters
+  // after the seed ended. Rows are compared by value as JSON.
+  let previousLive: Array<VisibleRow> = []
+  let heldBeforeCleanup = new Set<string>()
+  let restarted = false
   for (const { checkpoint, value } of trace) {
     const record = value as StepRecord
     if (`skipped` in record) continue
@@ -284,6 +321,22 @@ function hydrationModel(
       reached.add(`cleanup-after-failure-ended-seed`)
     if (action === `restart` && seedActive(model))
       reached.add(`restart-under-seed`)
+    if (action === `cleanup`) {
+      heldBeforeCleanup = new Set(
+        previousLive.map((row) => JSON.stringify(row)),
+      )
+      restarted = false
+    }
+    if (action === `restart`) restarted = true
+    if (
+      action === `write` &&
+      restarted &&
+      model.attached &&
+      !seedActive(model) &&
+      live.some((row) => heldBeforeCleanup.has(JSON.stringify(row)))
+    )
+      reached.add(`restart-rewrites-row-from-before-cleanup`)
+    previousLive = live
     if (action === `attach`) {
       if (seedActive(model) && failures.has(before))
         reached.add(`attach-to-failure-under-seed`)
@@ -583,7 +636,8 @@ function checkHistory(
 
 // Replays of the reported trace and its neighbors, in both modes. Each one
 // failed before the fix (see the coverage map entry for this owner).
-const replays: ReadonlyArray<[string, Array<Event[`type`]>]> = [
+const rowA: Event = { type: `write`, key: `a`, version: 1 }
+const replays: ReadonlyArray<[string, Array<StepSpec>]> = [
   [
     `shows and announces a crash under an active seed`,
     [`attach`, `crash`, `cleanup`],
@@ -595,6 +649,17 @@ const replays: ReadonlyArray<[string, Array<Event[`type`]>]> = [
   [
     `shows a crash that happened before it attached`,
     [`crash`, `attach`, `cleanup`],
+  ],
+  // #2334 and the random campaign's seed 1779366423: the restarted sync run
+  // writes the row the observer showed before cleanup. The trailing `ready`
+  // judges the same rows again at a ready checkpoint.
+  [
+    `shows a row the restarted sync run rewrites after readiness ended the seed`,
+    [`attach`, `ready`, rowA, `cleanup`, `restart`, rowA, `ready`],
+  ],
+  [
+    `shows a row the restarted sync run rewrites after a failure ended the seed`,
+    [`attach`, rowA, `fail`, `cleanup`, `restart`, rowA, `ready`],
   ],
 ]
 
@@ -609,7 +674,7 @@ declareOracle({
 oracleProperty({
   id: `live-query-observer.hydration-terminal`,
   law: {
-    statement: `While a hydration seed is active, the observer shows a Collection error or crashed status, attached or detached; an attached observer that sees a failure ends the seed, so a later cleanup shows the live Collection; cleanup and restart alone keep the seed as ready; and every change visible to an attached observer is announced.`,
+    statement: `While a hydration seed is active, the observer shows a Collection error or crashed status, attached or detached; an attached observer that sees a failure ends the seed, so a later cleanup shows the live Collection; cleanup and restart alone keep the seed as ready; after the seed ends, cleanup and restart show the live Collection, including a row the new sync run writes again; and every change visible to an attached observer is announced.`,
     authority: `packages/db/src/query/live/ARCHITECTURE.md law 16; glossary "crash" and "cleanup"; the coverage-map decision that cleanup under a seed keeps the seed`,
     limits: `A plain controlled Collection, not a live-query Collection; keys a..c, versions 0..3, up to ${MAX_EVENTS} steps; rows compared as sets; handoff timing, on-demand subsets, streamed errors, and consumption belong to the focused tests in live-query-observer.test.ts.`,
     owner: `Observer hydration under terminal statuses`,
@@ -666,6 +731,16 @@ oracleProperty({
         enters: [`ready-under-seed:attached`],
         build: startWith(`attach`, `ready`),
       },
+      {
+        name: `rewrite a row after readiness, cleanup, and restart`,
+        enters: [`restart-rewrites-row-from-before-cleanup`],
+        build: rewriteAfterRestart(`ready`),
+      },
+      {
+        name: `rewrite a row after a failure, cleanup, and restart`,
+        enters: [`restart-rewrites-row-from-before-cleanup`],
+        build: rewriteAfterRestart(`fail`),
+      },
     ],
     fixed: [`granular`, `wholesale`].flatMap((mode) =>
       replays.map(([name, events]) => ({
@@ -673,7 +748,7 @@ oracleProperty({
         history: {
           mode: mode as Mode,
           seed: [[`a`, 1]] as Array<[Key, number]>,
-          events: events.map((type) => ({ type }) as Event),
+          events: events.map(toEvent),
         },
       })),
     ),
