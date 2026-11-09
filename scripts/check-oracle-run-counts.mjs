@@ -16,7 +16,8 @@
  * (`oraclePropertyOptions(n, 'p')`, `oracleRandomParameters(n, _, 'p')`,
  * `{ property: 'p', defaultRuns: n }`, or the framework definition
  * `oracleProperty({ id: 'p', histories: { runs: n } })`), and otherwise by its
- * fixed seed (`{ seed: s, numRuns: oracleRuns(n) }`, or a seed `s` in that
+ * fixed seed (`{ seed: s, numRuns: oracleRuns(n) }`, its declared form
+ * `oracleFixedSeed(s, { numRuns: oracleRuns(n) })`, or a seed `s` in that
  * definition's `fixedSeeds`, whose campaign runs the same `n`). A key or count is a literal, a
  * constant in the same file, or a constant that the file imports. An import
  * follows relative re-exports (`export { x } from`, `export * from`), so a
@@ -347,6 +348,18 @@ function runBudgets(file, revision, reader) {
               if (typeof seed === `number`) record(`fixed seed ${seed}`, runs)
             }
         }
+      }
+      // A declared fixed seed: `oracleFixedSeed(s, { numRuns: n })`.
+      if (
+        node.callee.name === `oracleFixedSeed` &&
+        second?.type === `ObjectExpression`
+      ) {
+        const seed = value(first)
+        if (typeof seed === `number`)
+          record(
+            `fixed seed ${seed}`,
+            propertyValue(second, `numRuns`, file, reader, revision),
+          )
       }
       if (node.callee.name === `oracleRandomParameters`) {
         const property = value(third)
