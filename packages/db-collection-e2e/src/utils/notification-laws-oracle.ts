@@ -54,9 +54,12 @@ export function expectNotificationsStopped<Row>(
   expect(callbacks).toStrictEqual(archived)
 }
 
-// Owns no production entry in this package: the suite judges the collection
-// adapter that the consuming package runs it against, and that package owns
-// those entries. This package has no production code of its own to own.
+// Owns no production entry. These checks are shared: the db oracle
+// tests/notification-laws-oracle.test.ts owns the change-message path it
+// judges with them, but the shared e2e suites that also use them, and the
+// packages that run those suites, declare no `owns`, so the gap report counts
+// none of their kills. The coverage map records this as a follow-up under
+// "Shared e2e suites".
 declareOracle({
   check: [expectNotificationHistory, expectNotificationsStopped],
 })

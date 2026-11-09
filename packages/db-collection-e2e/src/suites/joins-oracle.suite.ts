@@ -967,7 +967,10 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
   })
 }
 
-// Owns no production entry in this package: the suite judges the collection
-// adapter that the consuming package runs it against, and that package owns
-// those entries. This package has no production code of its own to own.
+// Owns no production entry. The suite judges the collection adapter that a
+// consuming package runs it against (electric.e2e.test.ts, query.e2e.test.ts,
+// trailbase.e2e.test.ts, or the persisted-collection conformance contract),
+// but no consumer declares `owns` either, so the gap report counts none of
+// this suite's kills. The coverage map records this as a follow-up under
+// "Shared e2e suites".
 declareOracle({ check: [withJoinHistory], model: [createJoinOracle] })
