@@ -12,6 +12,14 @@ const config = defineConfig({
     typecheck: {
       enabled: true,
       include: [`tests/**/*.test.ts`, `tests/**/*.test-d.ts`],
+      // These oracles register their tests at run time through
+      // oracleProperty, so the typecheck collector finds no suite in them.
+      // Vitest still type-checks them through the project's tsc run.
+      exclude: [
+        `**/node_modules/**`,
+        `tests/collection-setup-reopen-oracle.test.ts`,
+        `tests/persisted-optimistic-history-oracle.property.test.ts`,
+      ],
     },
   },
 })
