@@ -296,7 +296,10 @@ function applyModel(model: Model, action: Action): Array<ReachState> {
         model.now - expected.unsubscribedAt >= GC_TIME_MS
       )
         reached.push(`gc-due-while-persisting`)
-      if (expected.deadline !== undefined && expected.deadline - model.now === 1)
+      if (
+        expected.deadline !== undefined &&
+        expected.deadline - model.now === 1
+      )
         reached.push(`one-millisecond-before-deadline`)
       const after = expected.deadlineAfter
       if (before[index] || !expected.retired || !after) continue
