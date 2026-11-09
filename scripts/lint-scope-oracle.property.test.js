@@ -1192,28 +1192,36 @@ function campaign(name) {
   }
   // The constructed histories run first, on top of the random ones, as the
   // framework adds examples; a path replay runs only its one history.
-  oracleReplayTest(it)(`${name}: fixed-seed campaign`, async () => {
-    const parameters = oracleFixedSeed(FIXED_SEED, {
-      numRuns: oracleRuns(BASE_RUNS),
-    })
-    const options = withOracleFixedHistories(
-      parameters,
-      constructedPrograms(FIXED_SEED),
-    )
-    oracleRoute(oracleRouteOf(options))
-    await fc.assert(fc.asyncProperty(programArbitrary, predicate), options)
-  }, 1_200_000)
-  oracleReplayTest(it, PROPERTY)(`${name}: random-seed campaign`, async () => {
-    // The constructed histories are drawn from the campaign's seed, so the
-    // options come first.
-    const parameters = oraclePropertyOptions(BASE_RUNS, PROPERTY)
-    const options = withOracleFixedHistories(
-      parameters,
-      constructedPrograms(parameters.seed),
-    )
-    oracleRoute(oracleRouteOf(options))
-    await fc.assert(fc.asyncProperty(programArbitrary, predicate), options)
-  }, 1_200_000)
+  oracleReplayTest(it)(
+    `${name}: fixed-seed campaign`,
+    async () => {
+      const parameters = oracleFixedSeed(FIXED_SEED, {
+        numRuns: oracleRuns(BASE_RUNS),
+      })
+      const options = withOracleFixedHistories(
+        parameters,
+        constructedPrograms(FIXED_SEED),
+      )
+      oracleRoute(oracleRouteOf(options))
+      await fc.assert(fc.asyncProperty(programArbitrary, predicate), options)
+    },
+    1_200_000,
+  )
+  oracleReplayTest(it, PROPERTY)(
+    `${name}: random-seed campaign`,
+    async () => {
+      // The constructed histories are drawn from the campaign's seed, so the
+      // options come first.
+      const parameters = oraclePropertyOptions(BASE_RUNS, PROPERTY)
+      const options = withOracleFixedHistories(
+        parameters,
+        constructedPrograms(parameters.seed),
+      )
+      oracleRoute(oracleRouteOf(options))
+      await fc.assert(fc.asyncProperty(programArbitrary, predicate), options)
+    },
+    1_200_000,
+  )
 }
 
 describe(`lint selection after an edit`, () => {
