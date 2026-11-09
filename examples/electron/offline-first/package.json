@@ -8,9 +8,9 @@
     "dev": "concurrently \"pnpm dev:renderer\" \"pnpm dev:server\" \"pnpm dev:electron\"",
     "dev:renderer": "vite",
     "dev:server": "tsx server/index.ts",
-    "dev:electron": "wait-on http://localhost:5173 && electron .",
+    "dev:electron": "wait-on http://localhost:5173 && pnpm rebuild:electron && electron .",
     "server": "tsx server/index.ts",
-    "postinstall": "prebuild-install --runtime electron --target 41.0.0 --arch arm64 || echo 'prebuild-install failed, try: npx @electron/rebuild'"
+    "rebuild:electron": "electron-rebuild --force --only better-sqlite3 --module-dir ."
   },
   "dependencies": {
     "@tanstack/electron-db-sqlite-persistence": "^1.0.0-rc.1.4",

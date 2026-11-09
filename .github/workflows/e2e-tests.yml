@@ -192,7 +192,9 @@ jobs:
         working-directory: examples/electron/offline-first
         env:
           ELECTRON_RUN_AS_NODE: '1'
-        run: pnpm exec electron -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close()"
+        run: |
+          pnpm rebuild:electron
+          pnpm exec electron -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close()"
 
       - name: Run Cloudflare Durable Object persisted collection E2E tests
         if: matrix.group == 'cloud-mobile'

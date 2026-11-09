@@ -18,6 +18,8 @@ export default mergeConfig(
   tanstackViteConfig({
     entry: `./src/index.ts`,
     srcDir: `./src`,
+    // CommonJS consumers must not require this ESM-only dependency.
+    bundledDeps: [`fractional-indexing`],
     beforeWriteDeclarationFile: commonJsDeclarations,
   }),
 )
