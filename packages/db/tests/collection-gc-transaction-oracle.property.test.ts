@@ -19,8 +19,12 @@ import type { Deferred } from '../src/deferred.js'
  * the `gcTime` delay starts again when the last such transaction settles,
  * whether it completes or fails. A transaction that touches several
  * Collections holds each of them. An explicit `cleanup()` retires the
- * Collection despite persisting transactions. This synchronous adapter fixture
- * collapses cleanup start and adapter settlement into one observation.
+ * Collection despite persisting transactions, and discards the rows they show.
+ * Until the next subscribe, an explicitly cleaned-up Collection stays cleaned
+ * up, and its subscriber count keeps counting. A transaction that is still
+ * persisting after the cleanup and the restart keeps its hold, but its rows
+ * stay cleared. This synchronous adapter fixture collapses cleanup start and
+ * adapter settlement into one observation.
  *
  * Authority: `gcTime` is the time a Collection with no subscribers waits
  * before it is collected (`BaseCollectionConfig.gcTime`), and collecting it
@@ -30,6 +34,16 @@ import type { Deferred } from '../src/deferred.js'
  * Collection (Electric's `awaitTxId`, for example). Collecting the Collection
  * in that window drops rows the user just wrote and fails the handler's wait.
  * Explicit cleanup is a caller's decision, so it keeps its current contract.
+ * The post-cleanup rules have these sources. The glossary's `cleanup` entry
+ * says a direct subscription survives cleanup, so the count is not reset. Its
+ * `cleanup` and `cleanup start` entries say restart then starts a new sync run,
+ * so in this grammar only a subscribe restarts a cleaned-up Collection. The
+ * review record `oracle-reviews/pr-2258-gc-retention-round3.md` says cleanup
+ * starts by discarding public rows and that explicit cleanup overrides
+ * retention. `oracle-reviews/pr-2258-gc-retention.md` records the repair of
+ * sibling-row resurrection during and after explicit cleanup (commit 3e4052e65,
+ * "keep discarded transaction rows cleared after cleanup"). So a restart does
+ * not show a row that cleanup discarded.
  *
  * The model keeps an elapsed clock and, for each of two Collections, the
  * subscriber count, the set of persisting transactions that touch it, and
@@ -46,8 +60,10 @@ import type { Deferred } from '../src/deferred.js'
  * stays pending, complete or fail the oldest pending handler, and advance the
  * clock by 20, 60, or 120 ms. An insert writes to one Collection through its
  * `onInsert` handler, or to both through `createTransaction` with a manual
- * commit. A subscribe after retirement restarts that Collection. A history
- * ends in one of two ways. It cleans up both Collections explicitly, or it
+ * commit. A `cleanup` step calls `cleanup()` on one Collection or on both at
+ * any point, so a settlement or an unsubscribe can follow it. A subscribe
+ * after retirement or cleanup restarts that Collection. A history ends in one
+ * of two ways. It cleans up both Collections explicitly, or it
  * drains: it unsubscribes everyone, settles every pending handler with one
  * outcome, and advances past the deadlines, so each drained history ends
  * with retirements that follow its last settlement. Inserting into a retired
@@ -77,7 +93,11 @@ import type { Deferred } from '../src/deferred.js'
  *
  * Limits: paced mutations, offline transactions, live-query Collections, and
  * wall-clock corrections are not generated. A transaction that never settles
- * holds its Collections for as long as it persists.
+ * holds its Collections for as long as it persists. Writes into a cleaned-up
+ * Collection, which restart it, are not generated, and this oracle claims no
+ * owner for that restart. A settlement on a cleaned-up Collection starts no
+ * `gcTime` delay, but no public fact shows that delay, so the model states no
+ * rule for it, and no observation checks it.
  *
  * Retirement latency. The law makes a Collection eligible at `gcTime`, and
  * exact cleanup latency is not promised. So at the checkpoint that lands
@@ -104,6 +124,7 @@ type Step =
   | { kind: `insert`; into: Side | `both` }
   | { kind: `settle`; outcome: `complete` | `fail` }
   | { kind: `advance`; elapsedMs: 20 | 60 | 120 }
+  | { kind: `cleanup`; side: Side | `both` }
 type History = {
   steps: Array<Step>
   end: `cleanup` | `drain-complete` | `drain-fail`
@@ -127,6 +148,10 @@ const reachStates = [
   `settled-while-subscribed`,
   `cleanup-while-persisting`,
   `restarted-after-retirement`,
+  `settle-after-cleanup`,
+  `unsubscribe-after-cleanup`,
+  `restart-after-cleanup`,
+  `write-while-discarded`,
 ] as const
 type ReachState = (typeof reachStates)[number]
 
@@ -137,6 +162,11 @@ type CollectionModel = {
   // Which hold's end set the deadline, for reach only.
   deadlineAfter: { outcome: `complete` | `fail`; shared: boolean } | undefined
   retired: boolean
+  // Set by an explicit cleanup and cleared by a subscribe, for reach only.
+  cleaned: boolean
+  // Persisting transactions whose rows cleanup discarded. They keep their hold
+  // and stay cleared after a restart. A settlement removes them.
+  discarded: Array<number>
   // When the Collection last lost its last subscriber, for reach only.
   unsubscribedAt: number | undefined
 }
@@ -166,6 +196,8 @@ const startModel = (): CollectionModel => ({
   deadline: GC_TIME_MS,
   deadlineAfter: undefined,
   retired: false,
+  cleaned: false,
+  discarded: [],
   unsubscribedAt: 0,
 })
 const freshModel = (): Model => ({
@@ -206,17 +238,25 @@ function applyModel(model: Model, action: Action): Array<ReachState> {
   if (action.kind === `subscribe`) {
     const expected = model.collections[action.side]
     if (expected.retired) reached.push(`restarted-after-retirement`)
+    if (expected.cleaned) reached.push(`restart-after-cleanup`)
     expected.subscribers++
     expected.retired = false
+    expected.cleaned = false
     expected.deadline = undefined
     expected.unsubscribedAt = undefined
   } else if (action.kind === `unsubscribe`) {
     const expected = model.collections[action.side]
+    if (expected.cleaned) reached.push(`unsubscribe-after-cleanup`)
+    // Cleanup does not reset the count: a direct subscription survives it.
     expected.subscribers--
     if (expected.subscribers === 0) expected.unsubscribedAt = model.now
     release(model, action.side)
   } else if (action.kind === `insert`) {
     const into = action.into === `both` ? sides : [action.into]
+    for (const side of into) {
+      if (model.collections[side].discarded.length > 0)
+        reached.push(`write-while-discarded`)
+    }
     model.pendingHandlers.push({ id: action.id, sides: into })
     for (const side of into) {
       model.collections[side].persisting.push(action.id)
@@ -227,9 +267,11 @@ function applyModel(model: Model, action: Action): Array<ReachState> {
     for (const side of settled.sides) {
       const expected = model.collections[side]
       if (expected.subscribers > 0) reached.push(`settled-while-subscribed`)
+      if (expected.cleaned) reached.push(`settle-after-cleanup`)
       expected.persisting = expected.persisting.filter(
         (id) => id !== settled.id,
       )
+      expected.discarded = expected.discarded.filter((id) => id !== settled.id)
       release(model, side, {
         outcome: action.outcome,
         shared: settled.sides.length > 1,
@@ -256,11 +298,14 @@ function applyModel(model: Model, action: Action): Array<ReachState> {
       if (after.shared) reached.push(`retired-after-shared-settlement`)
     }
   } else {
-    // An explicit cleanup retires the Collection whatever persists in it.
-    if (model.pendingHandlers.length > 0)
-      reached.push(`cleanup-while-persisting`)
-    model.collections[action.side].retired = true
-    model.collections[action.side].deadline = undefined
+    // An explicit cleanup retires the Collection whatever persists in it, and
+    // stays in effect until the next subscribe.
+    const expected = model.collections[action.side]
+    if (expected.persisting.length > 0) reached.push(`cleanup-while-persisting`)
+    expected.retired = true
+    expected.cleaned = true
+    expected.discarded = [...expected.persisting]
+    expected.deadline = undefined
   }
   return reached
 }
@@ -278,7 +323,11 @@ function owedSnapshot(model: Model): Snapshot {
         : false
     return {
       cleanedUp,
-      keys: collection.retired ? [] : [...collection.persisting].sort(byId),
+      keys: collection.retired
+        ? []
+        : collection.persisting
+            .filter((id) => !collection.discarded.includes(id))
+            .sort(byId),
     }
   }
   return { a: view(`a`), b: view(`b`) }
@@ -308,6 +357,9 @@ function resolve(history: History): Array<Action> {
     } else if (step.kind === `settle`) {
       const first = model.pendingHandlers[0]
       if (first) take({ kind: `settle`, id: first.id, outcome: step.outcome })
+    } else if (step.kind === `cleanup`) {
+      for (const side of step.side === `both` ? sides : [step.side])
+        take({ kind: `cleanup`, side })
     } else {
       take({ kind: `advance`, elapsedMs: step.elapsedMs })
     }
@@ -530,6 +582,13 @@ const stepArbitrary: fc.Arbitrary<Step> = fc.oneof(
     }),
     weight: 3,
   },
+  {
+    arbitrary: fc.record({
+      kind: fc.constant(`cleanup` as const),
+      side: fc.constantFrom(`a` as const, `b` as const, `both` as const),
+    }),
+    weight: 1,
+  },
 )
 
 const historyArbitrary: fc.Arbitrary<History> = fc.record({
@@ -555,6 +614,7 @@ const settleStep = (outcome: `complete` | `fail`): Step => ({
   outcome,
 })
 const advanceStep = (elapsedMs: 120): Step => ({ kind: `advance`, elapsedMs })
+const cleanupStep = (side: Side): Step => ({ kind: `cleanup`, side })
 
 // What this oracle owns: the garbage-collection hold that a persisting
 // transaction places on each Collection it touches, in lifecycle.ts, and the
@@ -584,7 +644,7 @@ oracleProperty({
   law: {
     statement: `Automatic garbage collection retires a Collection only after gcTime with no subscriber and no persisting transaction; a persisting transaction holds each Collection it touches, and the delay restarts when the last such transaction completes or fails; explicit cleanup() retires a Collection while a transaction persists.`,
     authority: `BaseCollectionConfig.gcTime; the persisting-transaction hold in packages/db/src/collection/lifecycle.ts (optimistic rows and adapter awaitTxId waits); explicit cleanup keeps its current contract`,
-    limits: `Two Collections with a synchronous ready sync and empty source; keys as numbers, up to ${MAX_STEPS} steps; clock steps of 20, 60, and 120 ms with gcTime 100; paced mutations, offline transactions, live-query Collections, and wall-clock corrections are not generated.`,
+    limits: `Two Collections with a synchronous ready sync and empty source; keys as numbers, up to ${MAX_STEPS} steps; clock steps of 20, 60, and 120 ms with gcTime 100; paced mutations, offline transactions, live-query Collections, writes into a cleaned-up Collection, and wall-clock corrections are not generated. The delay after a settlement on a cleaned-up Collection is not observable.`,
     owner: `Collection garbage collection under persisting transactions`,
   },
   histories: {
@@ -639,6 +699,43 @@ oracleProperty({
           settleStep(`complete`),
           advanceStep(120),
           { kind: `subscribe`, side: `a` },
+        ),
+      },
+      {
+        name: `settle after cleanup`,
+        enters: [`settle-after-cleanup`],
+        build: openWith(
+          insertStep(`a`),
+          cleanupStep(`a`),
+          settleStep(`complete`),
+          advanceStep(120),
+        ),
+      },
+      {
+        name: `unsubscribe after cleanup`,
+        enters: [`unsubscribe-after-cleanup`],
+        build: openWith(
+          { kind: `subscribe`, side: `a` },
+          cleanupStep(`a`),
+          { kind: `unsubscribe`, side: `a` },
+          advanceStep(120),
+        ),
+      },
+      {
+        name: `subscribe again after cleanup`,
+        enters: [`restart-after-cleanup`],
+        build: openWith(cleanupStep(`a`), { kind: `subscribe`, side: `a` }),
+      },
+      {
+        // A write after the restart must not bring back the discarded row.
+        name: `write after restart while a discarded row persists`,
+        enters: [`write-while-discarded`],
+        build: openWith(
+          insertStep(`b`),
+          cleanupStep(`a`),
+          cleanupStep(`b`),
+          { kind: `subscribe`, side: `b` },
+          insertStep(`b`),
         ),
       },
       {
