@@ -232,7 +232,7 @@ describe(`persistedCollectionOptions`, () => {
   // This extends the persisted owner with construction work, not elapsed time.
   // The controlled coordinator calls the real wire encoder; browser/Electron
   // owners separately establish actual transport and local lifecycle delivery.
-  it.sequential.each(
+  it.each(
     [
       `follower`,
       `leader-to-follower`,

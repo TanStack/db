@@ -3,8 +3,10 @@
  *
  * `openBrowserWASQLiteOPFSDatabase` runs up to four steps in order:
  *
- * 1. Asset lookup. Only a pre-bundled copy under a Vite dev server asks the dev
- *    server for its asset URLs; elsewhere this step is not needed.
+ * 1. Asset lookup. Under a Vite 7 dev server, only a pre-bundled copy asks the
+ *    dev server for its asset URLs by package name. Under Vite 8 development the
+ *    copy's asset URLs point at the original install, so the step is not needed
+ *    (decision on TanStack/db#2371, 2026-11-08); elsewhere it is not needed.
  * 2. Worker start. The page constructs the dedicated worker, and the browser
  *    loads its script. Construction can throw, or the script can fail to load
  *    after construction, which the worker reports with an `error` event.
@@ -45,7 +47,7 @@ import { declareOracle } from '../../db/tests/oracle-declaration'
  */
 export type AssetLookup = `not needed` | `resolves` | `held` | `fails`
 export type WorkerStart = `starts` | `throws` | `fails to load`
-export type WasmLoad = `loads` | `fails`
+export type WasmLoad = `loads` | `fails` | `held`
 export type Initialization = `answers` | `silent`
 export type Interruption = `none` | `deadline` | `abort`
 
@@ -93,6 +95,16 @@ export function openHistories(
       }
       return reach.wasm.flatMap((wasm): Array<OpenHistory> => {
         if (wasm === `fails`) return [{ ...settledEarly, lookup, wasm }]
+        // A held WASM fetch leaves the open pending, so it is paired with an
+        // interruption, as a held lookup or a silent initialization is.
+        if (wasm === `held`) {
+          return interrupts.map((interrupt) => ({
+            ...settledEarly,
+            lookup,
+            wasm,
+            interrupt,
+          }))
+        }
         return reach.init.flatMap((init): Array<OpenHistory> =>
           init === `silent`
             ? interrupts.map((interrupt) => ({
@@ -154,7 +166,7 @@ export type DecidingStep =
 export function decidingStep(history: OpenHistory): DecidingStep {
   if (history.lookup === `fails` || history.lookup === `held`) return `lookup`
   if (history.workerStart !== `starts`) return `worker start`
-  if (history.wasm === `fails`) return `wasm`
+  if (history.wasm === `fails` || history.wasm === `held`) return `wasm`
   if (history.init === `silent`) return `initialization`
   return `none`
 }
@@ -210,11 +222,20 @@ function expectedSettlement(
             terminatedWorkers: 1,
           }
     case `wasm`:
-      return {
-        settlement: `PersistenceUnavailableError`,
-        startedWorkers: 1,
-        terminatedWorkers: 1,
-      }
+      // A held fetch is interrupted like a silent initialization: the started
+      // worker is terminated and a later open succeeds.
+      return history.wasm === `held`
+        ? {
+            settlement: interrupted,
+            startedWorkers: 1,
+            terminatedWorkers: 1,
+            laterOpen: `opened`,
+          }
+        : {
+            settlement: `PersistenceUnavailableError`,
+            startedWorkers: 1,
+            terminatedWorkers: 1,
+          }
     case `initialization`:
       return {
         settlement: interrupted,

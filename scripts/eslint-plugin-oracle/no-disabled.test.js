@@ -1,6 +1,8 @@
 import { describe, it } from 'vitest'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { RuleTester } from 'eslint'
@@ -16,31 +18,40 @@ const ruleTester = new RuleTester({
 
 it(`permits selecting only the replay observation checker controls`, () => {
   const root = fileURLToPath(new URL('../../', import.meta.url))
-  const result = spawnSync(
-    process.execPath,
-    [
-      join(root, 'node_modules/vitest/vitest.mjs'),
-      'run',
-      '--config',
-      'scripts/eslint-plugin-oracle/vitest.config.mjs',
-      'scripts/eslint-plugin-oracle/replay-observation-oracle.test.js',
-      '-t',
-      'rejects wrong report observation',
-      '--reporter=json',
-    ],
-    {
-      cwd: root,
-      encoding: 'utf8',
-      timeout: 10_000,
-      maxBuffer: 16 * 1024 * 1024,
-    },
-  )
-  assert.equal(result.error, undefined)
-  assert.equal(result.status, 0, result.stdout + result.stderr)
-  const report = JSON.parse(result.stdout)
-  assert.equal(report.numPassedTests, 2)
-  assert.equal(report.numFailedTests, 0)
-  assert.equal(report.numPendingTests, 3848)
+  // Vitest 5 writes the JSON report to a file and prints a status line, so
+  // the report is read from an output file rather than stdout.
+  const directory = mkdtempSync(join(tmpdir(), `oracle-json-report-`))
+  const outputFile = join(directory, `report.json`)
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(root, 'node_modules/vitest/vitest.mjs'),
+        'run',
+        '--config',
+        'scripts/eslint-plugin-oracle/vitest.config.mjs',
+        'scripts/eslint-plugin-oracle/replay-observation-oracle.test.js',
+        '-t',
+        'rejects wrong report observation',
+        '--reporter=json',
+        `--outputFile=${outputFile}`,
+      ],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: 10_000,
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    )
+    assert.equal(result.error, undefined)
+    assert.equal(result.status, 0, result.stdout + result.stderr)
+    const report = JSON.parse(readFileSync(outputFile, 'utf8'))
+    assert.equal(report.numPassedTests, 2)
+    assert.equal(report.numFailedTests, 0)
+    assert.equal(report.numPendingTests, 3848)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })
 
 ruleTester.run(`oracle/no-disabled`, noDisabled, {

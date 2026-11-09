@@ -149,63 +149,82 @@ type ControlledStream = {
 
 const streams: Array<ControlledStream> = []
 
-vi.mock(
-  `../../electric-db-collection/node_modules/@electric-sql/client`,
-  async (importOriginal) => {
-    const actual = await importOriginal<Record<string, unknown>>()
-    return {
-      ...actual,
-      ShapeStream: vi.fn(function (options: {
-        headers?: Record<string, string>
-        offset?: string
-        handle?: string
-        onError?: (error: unknown) => unknown
-      }) {
-        const stream: ControlledStream = {
-          tab: options.headers?.[`x-tab`] ?? `unknown`,
-          startedAt: {
-            handle: options.handle,
-            offset: options.offset ?? `-1`,
-          },
-          stopped: false,
-          shapeHandle: options.handle,
-          lastOffset: options.offset ?? `-1`,
-          send: () => {
-            throw new Error(`stream for tab ${stream.tab} is not subscribed`)
-          },
-          onError: (error) => options.onError?.(error),
-          giveUp: () => {
-            throw new Error(`stream for tab ${stream.tab} is not subscribed`)
-          },
-        }
-        streams.push(stream)
-        return {
-          subscribe: (
-            send: ControlledStream[`send`],
-            giveUp: ControlledStream[`giveUp`],
-          ) => {
-            stream.send = send
-            stream.giveUp = giveUp
-            return () => undefined
-          },
-          unsubscribeAll: () => {
-            stream.stopped = true
-          },
-          requestSnapshot: vi.fn().mockResolvedValue(undefined),
-          fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
-          forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
-          isUpToDate: false,
-          get shapeHandle() {
-            return stream.shapeHandle
-          },
-          get lastOffset() {
-            return stream.lastOffset
-          },
-        }
-      }),
-    }
-  },
-)
+// The module the Electric collection imports, found through the client's
+// `import` export from the electric package, which is where the collection
+// resolves it. Vite's module id is the file this resolves to.
+const electricClientModule = await vi.hoisted(async () => {
+  const { readFileSync } = await import(`node:fs`)
+  const { dirname, join: joinPath } = await import(`node:path`)
+  const { fileURLToPath } = await import(`node:url`)
+  const manifestPath = fileURLToPath(
+    new URL(
+      `../../electric-db-collection/node_modules/@electric-sql/client/package.json`,
+      import.meta.url,
+    ),
+  )
+  const manifest = JSON.parse(readFileSync(manifestPath, `utf8`))
+  // The `import` condition, as the collection's ESM import resolves it. A
+  // string export and a condition object with `default` are both accepted.
+  const importExport = manifest.exports[`.`].import
+  const entry =
+    typeof importExport === `string` ? importExport : importExport.default
+  return joinPath(dirname(manifestPath), entry)
+})
+
+vi.mock(electricClientModule, async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  return {
+    ...actual,
+    ShapeStream: vi.fn(function (options: {
+      headers?: Record<string, string>
+      offset?: string
+      handle?: string
+      onError?: (error: unknown) => unknown
+    }) {
+      const stream: ControlledStream = {
+        tab: options.headers?.[`x-tab`] ?? `unknown`,
+        startedAt: {
+          handle: options.handle,
+          offset: options.offset ?? `-1`,
+        },
+        stopped: false,
+        shapeHandle: options.handle,
+        lastOffset: options.offset ?? `-1`,
+        send: () => {
+          throw new Error(`stream for tab ${stream.tab} is not subscribed`)
+        },
+        onError: (error) => options.onError?.(error),
+        giveUp: () => {
+          throw new Error(`stream for tab ${stream.tab} is not subscribed`)
+        },
+      }
+      streams.push(stream)
+      return {
+        subscribe: (
+          send: ControlledStream[`send`],
+          giveUp: ControlledStream[`giveUp`],
+        ) => {
+          stream.send = send
+          stream.giveUp = giveUp
+          return () => undefined
+        },
+        unsubscribeAll: () => {
+          stream.stopped = true
+        },
+        requestSnapshot: vi.fn().mockResolvedValue(undefined),
+        fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
+        forceDisconnectAndRefresh: vi.fn().mockResolvedValue(undefined),
+        isUpToDate: false,
+        get shapeHandle() {
+          return stream.shapeHandle
+        },
+        get lastOffset() {
+          return stream.lastOffset
+        },
+      }
+    }),
+  }
+})
 
 const upToDate: Message<Item> = { headers: { control: `up-to-date` } }
 const mustRefetch: Message<Item> = { headers: { control: `must-refetch` } }

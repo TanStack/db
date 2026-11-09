@@ -4,11 +4,16 @@
  *
  * The built package finds its worker and WASM file through URLs relative to its
  * own code. A Vite production build and a Vite dev server that serves the
- * package in place both resolve those URLs. Vite's dependency optimizer moves
+ * package in place both resolve those URLs. Vite 7's dependency optimizer moves
  * pre-bundled code into its cache and leaves the assets behind, so a moved copy
  * asks the dev server for the assets by package name, from the app root.
+ * Under Vite 8 the moved copy's asset URLs point at the original install
+ * instead, so the copy loads its own worker and WASM in every layout. The
+ * driver observes this as a worker URL that contains the imported copy's path.
+ * The authority for the Vite 8 rule is the maintainer decision on
+ * TanStack/db#2371 (2026-11-08).
  *
- * The README promises this behavior:
+ * The README promises the Vite 7 behavior:
  *
  * - Production builds open in every install layout.
  * - In development, a copy served in place opens with its own assets. A copy is
@@ -47,10 +52,9 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import { createServer, preview } from 'vite'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { oracleRoute } from '../../db/tests/oracle-config'
-import { buildForProduction } from './packaged-consumer'
+import { buildForProduction, consumerVite } from './packaged-consumer'
 import type { Browser } from '@playwright/test'
 import type { BrowserWASQLiteDatabase } from '../src'
 
@@ -69,11 +73,15 @@ type Layout =
 type Cache = `default` | `custom` | `dist`
 type Exclusion = `none` | `import name` | `package name`
 type Server = `development` | `production`
+// The major of the consumer's Vite: the dev server and the build that the
+// consumer runs.
+type ConsumerVite = 7 | 8
 type LayoutCase = {
   layout: Layout
   cache: Cache
   exclusion: Exclusion
   server: Server
+  vite: ConsumerVite
 }
 type LayoutOutcome =
   | { opens: false; workers: 0 | 1 }
@@ -107,6 +115,14 @@ function expectedOutcome(
   install: InstallFacts,
 ): LayoutOutcome {
   if (layoutCase.server === `production`) return { opens: true, workers: 1 }
+  // Authority: maintainer decision on TanStack/db#2371 (2026-11-08). Under Vite
+  // 8 the moved copy's asset URLs point at the original install, so the copy
+  // loads its own worker and WASM and the dev server is not asked for the
+  // package by name. Every development layout therefore opens with the imported
+  // copy, whatever the cache directory or exclusion.
+  if (layoutCase.vite === 8) {
+    return { opens: true, workers: 1, worker: `imported copy` }
+  }
   const excludedName =
     layoutCase.exclusion === `import name`
       ? install.importSpecifier
@@ -142,7 +158,7 @@ const layouts: Array<Layout> = [
   `two copies`,
   `two versions`,
 ]
-const layoutCases: Array<LayoutCase> = [
+const layoutCasesForOneVite: Array<Omit<LayoutCase, `vite`>> = [
   ...layouts.flatMap((layout) =>
     ([`default`, `custom`, `dist`] as const).map((cache) => ({
       layout,
@@ -170,12 +186,44 @@ const layoutCases: Array<LayoutCase> = [
     server: `production` as const,
   })),
 ]
+// Every history runs against a consumer on each Vite major. The Vite 8 model
+// says the cache directory and the exclusion do not change a development
+// install's outcome. The development rows for each cache and exclusion are the
+// witnesses for that claim. Production rows use the default cache and no
+// exclusion, because a production build does not pre-bundle; they witness that
+// each layout builds and opens.
+const layoutCases: Array<LayoutCase> = [
+  ...layoutCasesForOneVite.map((layoutCase) => ({
+    ...layoutCase,
+    vite: 7 as const,
+  })),
+  ...layoutCasesForOneVite.map((layoutCase) => ({
+    ...layoutCase,
+    vite: 8 as const,
+  })),
+]
+
+// The outcomes each Vite major's rows promise to reach. Declared with the
+// grammar, so the coverage tests below read a declared part.
+const promisedOutcomes: Record<ConsumerVite, ReadonlyArray<LayoutOutcome>> = {
+  7: [
+    { opens: false, workers: 0 },
+    { opens: false, workers: 1 },
+    { opens: true, workers: 1 },
+    { opens: true, workers: 1, worker: `imported copy` },
+    { opens: true, workers: 1, worker: `other copy` },
+  ],
+  8: [
+    { opens: true, workers: 1 },
+    { opens: true, workers: 1, worker: `imported copy` },
+  ],
+}
 
 // Owns nothing: this file checks the installed package layout (build outputs), not a src function.
 declareOracle({
   check: [expectLayoutOutcome],
   model: [expectedOutcome],
-  grammar: [layoutCases],
+  grammar: [layoutCases, promisedOutcomes],
 })
 
 // The check: the installed copy's observed outcome equals the layout model's
@@ -190,7 +238,10 @@ async function expectLayoutOutcome(
 }
 
 let browser: Browser
-const coveredOutcomes = new Set<string>()
+const coveredOutcomes: Record<ConsumerVite, Set<string>> = {
+  7: new Set<string>(),
+  8: new Set<string>(),
+}
 beforeAll(async () => {
   browser = await chromium.launch({ headless: true })
 })
@@ -199,7 +250,7 @@ afterAll(async () => {
 })
 
 it.each(layoutCases)(
-  `$server $layout install (cache $cache, excluded by $exclusion) matches the layout model`,
+  `vite $vite $server $layout install (cache $cache, excluded by $exclusion) matches the layout model`,
   async (layoutCase) => {
     oracleRoute(`case`)
     const temporaryDirectory = realpathSync(
@@ -208,7 +259,7 @@ it.each(layoutCases)(
     try {
       const install = installLayout(temporaryDirectory, layoutCase.layout)
       const expected = expectedOutcome(layoutCase, install)
-      coveredOutcomes.add(JSON.stringify(expected))
+      coveredOutcomes[layoutCase.vite].add(JSON.stringify(expected))
       await expectLayoutOutcome(layoutCase, install)
     } finally {
       rmSync(temporaryDirectory, { recursive: true, force: true })
@@ -217,22 +268,17 @@ it.each(layoutCases)(
   120_000,
 )
 
-// Grammar coverage: the cases above must reach every outcome the model can
-// predict. Runs after them, because the predictions read installed trees.
-it(`covers every promised layout outcome`, () => {
-  oracleRoute(`case`)
-  expect([...coveredOutcomes].sort()).toEqual(
-    [
-      { opens: false, workers: 0 },
-      { opens: false, workers: 1 },
-      { opens: true, workers: 1 },
-      { opens: true, workers: 1, worker: `imported copy` },
-      { opens: true, workers: 1, worker: `other copy` },
-    ]
-      .map((outcome) => JSON.stringify(outcome))
-      .sort(),
-  )
-})
+// Grammar coverage: each Vite major's rows must reach the outcomes its own
+// model predicts. Runs after the cases, because the predictions read installed
+// trees.
+for (const vite of [7, 8] as const) {
+  it(`covers every promised layout outcome under Vite ${vite}`, () => {
+    oracleRoute(`case`)
+    expect([...coveredOutcomes[vite]].sort()).toEqual(
+      promisedOutcomes[vite].map((outcome) => JSON.stringify(outcome)).sort(),
+    )
+  })
+}
 
 /**
  * Copies the built package to a directory, as an install would. With
@@ -410,19 +456,25 @@ async function openInLayout(
             ],
           },
   }
-  let developmentServer: Awaited<ReturnType<typeof createServer>> | undefined
-  let productionServer: Awaited<ReturnType<typeof preview>> | undefined
+  // The consumer runs the Vite major that the case names.
+  const vite = consumerVite(layoutCase.vite)
+  let developmentServer:
+    Awaited<ReturnType<typeof vite.createServer>> | undefined
+  let productionServer: Awaited<ReturnType<typeof vite.preview>> | undefined
   if (layoutCase.server === `production`) {
-    await buildForProduction({
-      ...config,
-      build: { outDir: join(appDirectory, `dist`) },
-    })
-    productionServer = await preview({
+    await buildForProduction(
+      {
+        ...config,
+        build: { outDir: join(appDirectory, `dist`) },
+      },
+      vite.build,
+    )
+    productionServer = await vite.preview({
       ...config,
       preview: { host: `127.0.0.1`, port: 0 },
     })
   } else {
-    developmentServer = await createServer({
+    developmentServer = await vite.createServer({
       ...config,
       // Files are written just before the server starts. A late watcher event
       // would reload the page during the open, so these servers do not watch.
