@@ -4278,7 +4278,10 @@ The rule decides admission, and the model must agree with it on every draw. The 
 with `process.env.NODE_ENV` defined as production. The production path is the plugin's transform, then
 esbuild's type stripping. Both outputs run with a recording probe that must never be called. Owner:
 `scripts.strip-oracle-probes`. Limits: one exported function per program, no imports, JSX, or bundler;
-the host `process` is a stub with one environment value.
+the host `process` is a stub with one environment value. The stripper refuses a value read, a binding, a
+`for`-head guard, or a non-guard `probing` declaration, and every `__oracleProbe` that is left; a property name,
+label, or type position named `probing` is accepted. `scripts/check-dist-probes.mjs` also rejects a surviving
+`process.env.NODE_ENV` in a built package that wires the plugin; it is not an oracle.
 
 The gap report (`pnpm gap-report`) is the `oracle-gaps` CLI of
 `@tanstack/oracles`. Its own oracles (`oracle-gaps.report`, and the static and
