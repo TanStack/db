@@ -155,21 +155,19 @@ const electricClientModule = await vi.hoisted(async () => {
   const { readFileSync } = await import(`node:fs`)
   const { dirname, join } = await import(`node:path`)
   const { fileURLToPath } = await import(`node:url`)
-  const clientDirectory = join(
-    dirname(
-      fileURLToPath(
-        new URL(
-          `../../electric-db-collection/node_modules/@electric-sql/client/package.json`,
-          import.meta.url,
-        ),
-      ),
+  const manifestPath = fileURLToPath(
+    new URL(
+      `../../electric-db-collection/node_modules/@electric-sql/client/package.json`,
+      import.meta.url,
     ),
   )
-  const manifest = JSON.parse(
-    readFileSync(join(clientDirectory, `package.json`), `utf8`),
-  )
-  const entry = manifest.exports[`.`].import.default
-  return join(clientDirectory, entry)
+  const manifest = JSON.parse(readFileSync(manifestPath, `utf8`))
+  // The `import` condition, as the collection's ESM import resolves it. A
+  // string export and a condition object with `default` are both accepted.
+  const importExport = manifest.exports[`.`].import
+  const entry =
+    typeof importExport === `string` ? importExport : importExport.default
+  return join(dirname(manifestPath), entry)
 })
 
 vi.mock(electricClientModule, async (importOriginal) => {
