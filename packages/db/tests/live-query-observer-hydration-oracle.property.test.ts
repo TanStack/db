@@ -63,8 +63,16 @@ import type {
  *    run writes. That includes a row equal to one shown before cleanup: the
  *    observer let that row go at cleanup, so a Collection subscription that
  *    reconciles later writes against the rows it published before cleanup
- *    (ARCHITECTURE "Cleanup, restart, and detached waiters") must not count
- *    it as already shown ([#2334](https://github.com/TanStack/db/issues/2334)).
+ *    must not count it as already shown ([#2334](https://github.com/TanStack/db/issues/2334)).
+ *    This claim adds no rule of its own. Its authority is law 2 (an observer
+ *    whose seed ended behaves like one without a seed, which shows the live
+ *    Collection) and the glossary: "cleanup" ends the sync run and leaves the
+ *    Collection available for restart, and "crash" says that cleanup discards
+ *    all of the Collection's state, so a later start is a fresh start. A row
+ *    the new sync run writes is a row the live Collection holds, whether or
+ *    not an equal row was shown before. ARCHITECTURE "Cleanup, restart, and
+ *    detached waiters" documents the mechanism that keeps it: the observer's
+ *    Collection subscription retains no rows across cleanup.
  * 4. **Every visible change is announced.** Wholesale consumers re-read
  *    `getSnapshot()` only when notified (`useSyncExternalStore` does one
  *    consistency read right after subscribing). So, while attached, the
@@ -341,6 +349,10 @@ function hydrationModel(
   // after the seed ended. On an on-demand source, an unseeded granular
   // observer's own subset demand brings it back when the restart reacquires
   // that demand. Rows are compared by value as JSON.
+  // The two restart states owe nothing new: `expectedView` already owes the
+  // live rows once the seed ended (law 2), and the glossary's "cleanup" and
+  // "crash" make the restarted run a fresh start. The states only mark the
+  // histories where that law meets a row equal to one from before cleanup.
   let previousLive: Array<VisibleRow> = []
   let heldBeforeCleanup = new Set<string>()
   let restarted = false
@@ -719,10 +731,20 @@ const replays: ReadonlyArray<
 
 // What this oracle owns: the gap report judges every function in
 // src/live-query-observer.ts and DbClient.hydrate by this file's generated
-// hydration-terminal histories, which end a seed's sync run in every way.
+// hydration-terminal histories, which end a seed's sync run in every way. It
+// also judges the cleanup of the observer's Collection subscription
+// (CollectionSubscription.handleCollectionCleanup and the functions it calls),
+// where the observer's `discardsRowsOnCleanup` drops the rows it showed before
+// cleanup (law 3's restart claim, #2334). A whole-file entry does not follow
+// calls into another file, and no Collection subscription owner subscribes
+// with that option.
 
 declareOracle({
-  owns: [`src/live-query-observer.ts`, `src/client.ts#DbClient.hydrate`],
+  owns: [
+    `src/live-query-observer.ts`,
+    `src/client.ts#DbClient.hydrate`,
+    `src/collection/subscription.ts#CollectionSubscription.handleCollectionCleanup`,
+  ],
 })
 
 oracleProperty({
