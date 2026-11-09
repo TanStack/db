@@ -79,6 +79,6 @@
     "eslint": "^9.39.2",
     "react-native": "0.79.6",
     "typescript": "^5.9.2",
-    "vitest": "^4.1.12"
+    "vitest": "^5.0.5"
   }
 }

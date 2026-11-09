@@ -3218,9 +3218,20 @@ and a later open after an interruption. The
 reaches worker start, initialization, and the worker's WASM failure response.
 The [Chromium driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-open-outcome-oracle.e2e.test.ts)
 reaches the lookup, the real worker's WASM fetch, and worker start against a
-Vite dev server that pre-bundles the built package. It holds back only the
+Vite dev server that pre-bundles the built package, for Vite 7 and Vite 8
+consumers. Under Vite 8 the copy's asset URLs point at the original install, so
+the lookup never reaches the dev server; the lookup states are declared for
+Vite 7 only (decision on TanStack/db#2371, 2026-11-08). Vite 8 histories still
+interrupt a held WASM fetch, which is the step a Vite 8 copy reaches. A held
+step that never reaches the dev server fails its history after a fixed 10 s bound,
+below the 120 s test timeout (liveness only; no observation depends on it). The
+srcdoc and cross-origin page shapes run under both Vite majors in
+wasm-package-consumer.e2e.test.ts. Mutant (production): clearing the open's
+deadline and abort wiring from the worker phase (the worker-phase openFailure
+replaced by a promise that never settles) fails the four held-WASM interrupt
+histories, two per major, and passes the other 13; the build was restored after. It holds back only the
 opener's deadline timer and fires it explicitly, interrupts only after the
-server holds the lookup, and reads the settlement and worker counts one task
+server holds a lookup or a WASM fetch, releases every held step, and reads the settlement and worker counts one task
 after each event, so no observation depends on elapsed time. Each driver checks that its
 history product covers the outcomes it declares; the `reached` observation is
 the production reach witness. Mutants that leave the lookup outside
@@ -3235,7 +3246,16 @@ The
 [install-layout oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/install-layout-oracle.e2e.test.ts)
 models which installs open in Vite development and production: direct,
 hoisted, pnpm, transitive, npm-alias, and two-copy installs, three cache
-directories, and exclusion by import name or package name. It reads the
+directories, and exclusion by import name or package name. Vite 7 and Vite 8 each run all
+36 rows. The Vite 8 model says the cache and the exclusion do not change a
+development install's outcome; the development rows for each cache and exclusion
+are the witnesses for that claim. Production rows use the default cache and no
+exclusion, because a production build does not pre-bundle, and they witness that
+each layout builds and opens (74 rows with the two coverage tests). Each major's coverage test reads
+its promised outcomes from the declared grammar. The Vite 8 rule has the maintainer
+decision on TanStack/db#2371 (2026-11-08) as its authority: under Vite 8
+development, the pre-bundled copy loads its own worker and WASM and opens with
+the imported copy in every layout. Under Vite 7 the rules below apply. It reads the
 importer's specifier and the Node resolution of the package name from each
 installed tree rather than from a table per layout. A pre-bundled copy
 opens when the app root resolves the package name and otherwise reports
@@ -3251,7 +3271,9 @@ reloaded pages during an open.
 
 The packaged-consumer
 [checks](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/wasm-package-consumer.e2e.test.ts)
-cover the build output and export map, a classic worker in development and
+run the consumer production build, the nested-base development and production
+preview, and the `about:srcdoc` and cross-origin page shapes under both Vite 7
+and Vite 8, each with its own build output. They also cover the build output and export map, a classic worker in development and
 production, an `about:srcdoc` frame, and a page on another origin than the
 Vite server, where the Worker constructor throws `SecurityError` and the open
 reports `PersistenceUnavailableError`. The
