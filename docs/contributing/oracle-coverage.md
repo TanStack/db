@@ -1609,7 +1609,7 @@ scheduler.
 
 The [React SSR diagnostic receiver](../../packages/react-db/tests/ssr-effects-oracle.test.ts)
 extends that preparation grammar and judgment with real matched React/ReactDOM
-18.3.1 and 19.2.4 development server renderers. Separate paths cover provider
+18.3.1 and 19.3.1 development server renderers. Separate paths cover provider
 and explicit-client ordinary hooks, completed non-streaming Suspense through
 both client forms, standalone builders and supplied Collections. A disabled
 input replays the same diagnostic comparison. Each checks return and the raw
