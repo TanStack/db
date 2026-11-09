@@ -191,6 +191,9 @@ function consolidateKeyed<T>(inner: MultiSetArray<T>): MultiSet<T> {
       if (!bySecond) byFirst.set(value[0], (bySecond = new Map()))
       entry = bySecond.get(value[1])
       // Development-only oracle probes; a production build removes them.
+      // They mark two declared states of the consolidation oracle: a merge on
+      // any path (`records merged`) and a merge of join tuples (`join tuples
+      // merged`), so a merge of join tuples enters both.
       probing &&
         (
           globalThis as {
