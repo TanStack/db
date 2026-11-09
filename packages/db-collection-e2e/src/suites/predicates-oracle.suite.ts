@@ -22,8 +22,10 @@ import {
   not,
   or,
 } from '@tanstack/db'
-import { declareOracle } from '../../../db/tests/oracle-declaration.js'
-import { oracleRoute } from '../../../db/tests/oracle-config.js'
+import {
+  declareOracle,
+  oracleRoute,
+} from '../../../db/tests/oracle-declaration.js'
 import { assertAllItemsMatch, assertCollectionSize } from '../utils/assertions'
 import { waitForQueryData } from '../utils/helpers'
 import type { E2ETestConfig, Post, User } from '../types'

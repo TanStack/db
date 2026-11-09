@@ -6,8 +6,10 @@ import {
   expectNotificationHistory,
   expectNotificationsStopped,
 } from '../utils/notification-laws-oracle'
-import { declareOracle } from '../../../db/tests/oracle-declaration.js'
-import { oracleRoute } from '../../../db/tests/oracle-config.js'
+import {
+  declareOracle,
+  oracleRoute,
+} from '../../../db/tests/oracle-declaration.js'
 import {
   captureUserRows,
   userFixture,

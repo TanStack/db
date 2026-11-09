@@ -6,8 +6,10 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { createLiveQueryCollection, eq } from '@tanstack/db'
-import { declareOracle } from '../../../db/tests/oracle-declaration.js'
-import { oracleRoute } from '../../../db/tests/oracle-config.js'
+import {
+  declareOracle,
+  oracleRoute,
+} from '../../../db/tests/oracle-declaration.js'
 import {
   assertAllItemsMatch,
   assertCollectionSize,
