@@ -3,7 +3,7 @@
 // the first statement of each module, so a dropped or moved directive breaks
 // server-component imports without a type or unit-test failure.
 import { readdirSync, readFileSync } from 'node:fs'
-import { join, parse } from 'node:path'
+import { dirname, join, parse } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const packageDirectory = fileURLToPath(new URL(`../`, import.meta.url))
@@ -37,10 +37,10 @@ for (const file of readdirSync(sourceDirectory, { recursive: true })) {
   if (!/\.tsx?$/.test(file) || file.endsWith(`.d.ts`)) continue
   const source = readFileSync(join(sourceDirectory, file), `utf8`)
   if (!directive.test(firstStatement(source))) continue
-  const name = parse(file).name
+  const outputStem = join(dirname(file), parse(file).name)
   for (const output of [
-    join(packageDirectory, `dist/esm`, `${name}.js`),
-    join(packageDirectory, `dist/cjs`, `${name}.cjs`),
+    join(packageDirectory, `dist/esm`, `${outputStem}.js`),
+    join(packageDirectory, `dist/cjs`, `${outputStem}.cjs`),
   ]) {
     checked++
     const built = readFileSync(output, `utf8`)
