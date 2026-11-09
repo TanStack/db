@@ -8573,79 +8573,71 @@ describe(`include() argument`, () => {
 })
 
 describe(`distinct in child queries`, () => {
-  type Task = { id: number; boardId: number; title: string }
-  type Tagging = { id: number; taskId: number; tagId: number }
-  type Tag = { id: number; name: string }
+  type User = { id: number; name: string }
+  type TodoList = { id: number; ownerId: number; name: string }
+  type Todo = { id: number; listId: number; assigneeId: number; title: string }
 
-  // Task 1 reaches Delivery twice (a direct and a cascaded tagging) and also
-  // has Needs Crane; task 2 reaches Delivery once; task 3 has no taggings.
+  // Home has "Buy milk" twice and "Call mom"; Work has "Buy milk" once;
+  // Errands has no todos. Ana is assigned both of Home's "Buy milk" todos and
+  // Work's; Ben is assigned "Call mom".
   function createSources() {
-    const tasks = createCollection(
-      localOnlyCollectionOptions<Task>({
-        getKey: (task) => task.id,
+    const users = createCollection(
+      localOnlyCollectionOptions<User>({
+        getKey: (user) => user.id,
         initialData: [
-          { id: 1, boardId: 1, title: `Pour slab` },
-          { id: 2, boardId: 1, title: `Frame walls` },
-          { id: 3, boardId: 2, title: `Paint` },
+          { id: 10, name: `Ana` },
+          { id: 20, name: `Ben` },
         ],
       }),
     )
-    const taggings = createCollection(
-      localOnlyCollectionOptions<Tagging>({
-        getKey: (tagging) => tagging.id,
+    const todoLists = createCollection(
+      localOnlyCollectionOptions<TodoList>({
+        getKey: (list) => list.id,
         initialData: [
-          { id: 1, taskId: 1, tagId: 10 },
-          { id: 2, taskId: 1, tagId: 10 },
-          { id: 3, taskId: 1, tagId: 20 },
-          { id: 4, taskId: 2, tagId: 10 },
+          { id: 1, ownerId: 10, name: `Home` },
+          { id: 2, ownerId: 10, name: `Work` },
+          { id: 3, ownerId: 20, name: `Errands` },
         ],
       }),
     )
-    const tags = createCollection(
-      localOnlyCollectionOptions<Tag>({
-        getKey: (tag) => tag.id,
+    const todos = createCollection(
+      localOnlyCollectionOptions<Todo>({
+        getKey: (todo) => todo.id,
         initialData: [
-          { id: 10, name: `Delivery` },
-          { id: 20, name: `Needs Crane` },
+          { id: 1, listId: 1, assigneeId: 10, title: `Buy milk` },
+          { id: 2, listId: 1, assigneeId: 10, title: `Buy milk` },
+          { id: 3, listId: 1, assigneeId: 20, title: `Call mom` },
+          { id: 4, listId: 2, assigneeId: 10, title: `Buy milk` },
         ],
       }),
     )
-    return { tasks, taggings, tags }
+    return { users, todoLists, todos }
   }
 
   type Sources = ReturnType<typeof createSources>
 
-  function taskTags(
-    q: any,
-    { taggings, tags }: Sources,
-    task: any,
-    limit?: number,
-  ) {
-    let child = q
-      .from({ tagging: taggings })
-      .where(({ tagging }: any) => eq(tagging.taskId, task.id))
-      .innerJoin({ tag: tags }, ({ tagging, tag }: any) =>
-        eq(tagging.tagId, tag.id),
-      )
-      .select(({ tag }: any) => ({ id: tag.id, name: tag.name }))
+  function distinctTitles(q: any, { todos }: Sources, list: any) {
+    return q
+      .from({ todo: todos })
+      .where(({ todo }: any) => eq(todo.listId, list.id))
+      .select(({ todo }: any) => ({ title: todo.title }))
       .distinct()
-    if (limit !== undefined)
-      child = child.orderBy(({ tag }: any) => tag.id).limit(limit)
-    return child
   }
 
-  const expectedTags = {
-    1: [
-      { id: 10, name: `Delivery` },
-      { id: 20, name: `Needs Crane` },
-    ],
-    2: [{ id: 10, name: `Delivery` }],
+  const expectedTitles = {
+    1: [{ title: `Buy milk` }, { title: `Call mom` }],
+    2: [{ title: `Buy milk` }],
     3: [],
   }
 
-  function tagsByTask(rows: Array<any>) {
+  function titlesByList(rows: Array<any>) {
     return Object.fromEntries(
-      rows.map((row) => [row.id, sortedPlainRows(row.tags)]),
+      rows.map((row) => [
+        row.id,
+        plainRows(row.titles).sort((a: any, b: any) =>
+          a.title.localeCompare(b.title),
+        ),
+      ]),
     )
   }
 
@@ -8654,35 +8646,40 @@ describe(`distinct in child queries`, () => {
       const sources = createSources()
       const wrap = { toArray, materialize, include }[form] as any
       const collection = createLiveQueryCollection((q) =>
-        q.from({ task: sources.tasks }).select(({ task }) => ({
-          id: task.id,
-          tags: wrap(taskTags(q, sources, task)),
+        q.from({ list: sources.todoLists }).select(({ list }) => ({
+          id: list.id,
+          titles: wrap(distinctTitles(q, sources, list)),
         })),
       )
       await collection.preload()
 
-      expect(tagsByTask(collection.toArray)).toEqual(expectedTags)
+      expect(titlesByList(collection.toArray)).toEqual(expectedTitles)
 
-      // One of task 1's two Delivery taggings leaves; the other still holds it.
-      sources.taggings.delete(1)
+      // One of Home's two "Buy milk" todos leaves; the other still holds it.
+      sources.todos.delete(1)
       await flushPromises()
-      expect(tagsByTask(collection.toArray)).toEqual(expectedTags)
+      expect(titlesByList(collection.toArray)).toEqual(expectedTitles)
 
-      // Task 2's only Delivery tagging leaves; task 1 keeps Delivery.
-      sources.taggings.delete(4)
+      // Work's only "Buy milk" leaves; Home keeps "Buy milk".
+      sources.todos.delete(4)
       await flushPromises()
-      expect(tagsByTask(collection.toArray)).toEqual({
-        ...expectedTags,
+      expect(titlesByList(collection.toArray)).toEqual({
+        ...expectedTitles,
         2: [],
       })
 
-      // Task 3 gains Delivery while task 1 already shows it.
-      sources.taggings.insert({ id: 5, taskId: 3, tagId: 10 })
+      // Errands gains "Buy milk" while Home already shows it.
+      sources.todos.insert({
+        id: 5,
+        listId: 3,
+        assigneeId: 10,
+        title: `Buy milk`,
+      })
       await flushPromises()
-      expect(tagsByTask(collection.toArray)).toEqual({
-        ...expectedTags,
+      expect(titlesByList(collection.toArray)).toEqual({
+        ...expectedTitles,
         2: [],
-        3: [{ id: 10, name: `Delivery` }],
+        3: [{ title: `Buy milk` }],
       })
     })
   }
@@ -8690,39 +8687,50 @@ describe(`distinct in child queries`, () => {
   it(`limits each parent's distinct child rows separately`, async () => {
     const sources = createSources()
     const collection = createLiveQueryCollection((q) =>
-      q.from({ task: sources.tasks }).select(({ task }) => ({
-        id: task.id,
-        tags: toArray(taskTags(q, sources, task, 1)),
+      q.from({ list: sources.todoLists }).select(({ list }) => ({
+        id: list.id,
+        assignees: toArray(
+          q
+            .from({ todo: sources.todos })
+            .where(({ todo }) => eq(todo.listId, list.id))
+            .innerJoin({ user: sources.users }, ({ todo, user }) =>
+              eq(todo.assigneeId, user.id),
+            )
+            .select(({ user }) => ({ id: user.id, name: user.name }))
+            .distinct()
+            .orderBy(({ user }) => user.id)
+            .limit(1),
+        ),
       })),
     )
     await collection.preload()
 
-    expect(tagsByTask(collection.toArray)).toEqual({
-      1: [{ id: 10, name: `Delivery` }],
-      2: [{ id: 10, name: `Delivery` }],
+    expect(
+      Object.fromEntries(
+        collection.toArray.map((row) => [
+          row.id,
+          sortedPlainRows(row.assignees),
+        ]),
+      ),
+    ).toEqual({
+      1: [{ id: 10, name: `Ana` }],
+      2: [{ id: 10, name: `Ana` }],
       3: [],
     })
   })
 
   it(`keeps each nested parent's distinct child rows`, async () => {
-    type Board = { id: number }
     const sources = createSources()
-    const boards = createCollection(
-      localOnlyCollectionOptions<Board>({
-        getKey: (board) => board.id,
-        initialData: [{ id: 1 }, { id: 2 }],
-      }),
-    )
     const collection = createLiveQueryCollection((q) =>
-      q.from({ board: boards }).select(({ board }) => ({
-        id: board.id,
-        tasks: toArray(
+      q.from({ owner: sources.users }).select(({ owner }) => ({
+        id: owner.id,
+        lists: toArray(
           q
-            .from({ task: sources.tasks })
-            .where(({ task }) => eq(task.boardId, board.id))
-            .select(({ task }) => ({
-              id: task.id,
-              tags: toArray(taskTags(q, sources, task)),
+            .from({ list: sources.todoLists })
+            .where(({ list }) => eq(list.ownerId, owner.id))
+            .select(({ list }) => ({
+              id: list.id,
+              titles: toArray(distinctTitles(q, sources, list)),
             })),
         ),
       })),
@@ -8730,7 +8738,7 @@ describe(`distinct in child queries`, () => {
     await collection.preload()
 
     expect(
-      tagsByTask(collection.toArray.flatMap((board) => board.tasks)),
-    ).toEqual(expectedTags)
+      titlesByList(collection.toArray.flatMap((owner) => owner.lists)),
+    ).toEqual(expectedTitles)
   })
 })
