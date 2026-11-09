@@ -126,6 +126,11 @@ const ownerGroups: ReadonlyArray<
   [`../scripts/run-budget-oracle.property.test.js`, `scripts`, `run-budget`],
   [`../scripts/lint-scope-oracle.property.test.js`, `scripts`, `lint-scope`],
   [
+    `../scripts/strip-oracle-probes-oracle.property.test.js`,
+    `scripts`,
+    `strip-oracle-probes`,
+  ],
+  [
     `../scripts/release-history-oracle.property.test.js`,
     `scripts`,
     `release-version release-seed-failure`,
