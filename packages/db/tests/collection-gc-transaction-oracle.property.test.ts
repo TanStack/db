@@ -1,18 +1,12 @@
 import fc from 'fast-check'
-import { expect, it, vi } from 'vitest'
+import { vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleRoute,
-  oracleRouteOf,
-  readOracleRunConfig,
-} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
-import { createOracleReach } from './oracle-reach.js'
+import { differs, oracleProperty, pass, violation } from './oracle-property.js'
 import { resetCleanupQueue, withOracleCleanup } from './utils.js'
+import type { Verdict } from './oracle-property.js'
 import type { Deferred } from '../src/deferred.js'
 
 /**
@@ -59,14 +53,27 @@ import type { Deferred } from '../src/deferred.js'
  * with retirements that follow its last settlement. Inserting into a retired
  * Collection is not generated: it would restart the sync, which is the
  * subscribe step's job. Unsubscribing more subscribers than exist is not
- * legal.
+ * legal. `resolve` drops those steps, so the plan the driver runs is legal.
+ *
+ * Constructed histories make each reach state happen in every campaign. A
+ * constructed history opens with the steps that enter its states, then keeps
+ * the generated steps, so the steps after each state stay random. Its
+ * builder never changes the end of a generated history, except that the
+ * explicit-cleanup state needs a `cleanup` end. The opening steps come first,
+ * so the state is entered whatever the generated steps are. The one state that
+ * is entered at the end, a cleanup while a transaction persists, also drops
+ * the generated settlements, so the opening insert is still pending at the
+ * cleanup. Every builder's output stays inside the grammar, so its failures
+ * shrink like generated ones. Half of a campaign's histories are constructed.
  *
  * The production driver uses two real Collections with a synchronous ready
  * sync, public `subscribeChanges`, `insert`, `createTransaction`, and
  * `cleanup()`, and controls each handler through a deferred. After each
- * step, on a fake clock whose pending timers and microtasks have run, the
- * comparison checks two public facts for each Collection: whether it is
- * `cleaned-up`, and the exact persisting rows in this empty-source fixture.
+ * action, on a fake clock whose pending timers and microtasks have run, it
+ * records two public facts for each Collection: whether it is `cleaned-up`,
+ * and the exact persisting rows in this empty-source fixture. The model
+ * computes the same facts for each checkpoint from the plan alone, and the
+ * check compares them, so the driver decides nothing.
  *
  * Limits: paced mutations, offline transactions, live-query Collections, and
  * wall-clock corrections are not generated. A transaction that never settles
@@ -74,8 +81,12 @@ import type { Deferred } from '../src/deferred.js'
  */
 
 const GC_TIME_MS = 100
+const MAX_STEPS = 14
 type Row = { id: number }
 type Side = `a` | `b`
+const sides: Array<Side> = [`a`, `b`]
+
+// The history as the grammar generates it.
 type Step =
   | { kind: `subscribe`; side: Side }
   | { kind: `unsubscribe`; side: Side }
@@ -86,6 +97,17 @@ type History = {
   steps: Array<Step>
   end: `cleanup` | `drain-complete` | `drain-fail`
 }
+
+// The plan `resolve` produces: legal actions that name their handlers by id.
+// It holds no expected observations.
+type Action =
+  | { kind: `subscribe`; side: Side }
+  | { kind: `unsubscribe`; side: Side }
+  | { kind: `insert`; into: Side | `both`; id: number }
+  | { kind: `settle`; id: number; outcome: `complete` | `fail` }
+  | { kind: `advance`; elapsedMs: number }
+  | { kind: `cleanup`; side: Side }
+
 const reachStates = [
   `gc-due-while-persisting`,
   `retired-after-completion`,
@@ -114,10 +136,31 @@ type Model = {
   pendingHandlers: Array<{ id: number; sides: Array<Side> }>
 }
 
-const sides: Array<Side> = [`a`, `b`]
+// What the two Collections show after an action: cleaned up, and the rows
+// they hold. Both the model and the driver produce this shape.
+type Visible = { cleanedUp: boolean; keys: Array<number> }
+type Snapshot = Record<Side, Visible>
+type Checkpoint = { checkpoint: string; value: Snapshot }
+type Expected = { checkpoints: Array<Checkpoint>; reached: Array<ReachState> }
+
+const byId = (a: number, b: number) => a - b
 
 const held = (collection: CollectionModel) =>
   collection.subscribers > 0 || collection.persisting.length > 0
+
+const startModel = (): CollectionModel => ({
+  subscribers: 0,
+  persisting: [],
+  deadline: GC_TIME_MS,
+  deadlineAfter: undefined,
+  retired: false,
+  unsubscribedAt: 0,
+})
+const freshModel = (): Model => ({
+  now: 0,
+  collections: { a: startModel(), b: startModel() },
+  pendingHandlers: [],
+})
 
 // A hold just ended: the Collection becomes due `gcTime` from now.
 function release(
@@ -144,74 +187,185 @@ function advanceModel(model: Model, elapsedMs: number): void {
   }
 }
 
-// Fixed histories run first in every campaign, so every declared state is
-// reached whatever the seed. The reach declares them, so its check also fails
-// when no fixed history enters a declared state. They are inputs to the same
-// model, production driver, and comparison as the generated histories, and
-// carry no expected answer of their own. With `gcTime` 100, each enters the
-// states named beside it:
-// 1. subscribe a, insert a, settle complete, advance 120, cleanup:
-//    settled-while-subscribed. The advance checks that the subscriber still
-//    holds the Collection once the settlement ends the transaction's hold.
-// 2. insert a, advance 120, settle complete, advance 120, subscribe a,
-//    drain-complete: gc-due-while-persisting (gcTime has passed since the
-//    last unsubscribe while the row persists), retired-after-completion, and
-//    restarted-after-retirement.
-// 3. insert both, settle fail, advance 120, drain-fail: retired-after-failure
-//    and retired-after-shared-settlement.
-// 4. insert b, cleanup: cleanup-while-persisting.
-const fixedHistories: ReadonlyArray<[History]> = [
-  [
-    {
-      steps: [
-        { kind: `subscribe`, side: `a` },
-        { kind: `insert`, into: `a` },
-        { kind: `settle`, outcome: `complete` },
-        { kind: `advance`, elapsedMs: 120 },
-      ],
-      end: `cleanup`,
-    },
-  ],
-  [
-    {
-      steps: [
-        { kind: `insert`, into: `a` },
-        { kind: `advance`, elapsedMs: 120 },
-        { kind: `settle`, outcome: `complete` },
-        { kind: `advance`, elapsedMs: 120 },
-        { kind: `subscribe`, side: `a` },
-      ],
-      end: `drain-complete`,
-    },
-  ],
-  [
-    {
-      steps: [
-        { kind: `insert`, into: `both` },
-        { kind: `settle`, outcome: `fail` },
-        { kind: `advance`, elapsedMs: 120 },
-      ],
-      end: `drain-fail`,
-    },
-  ],
-  [{ steps: [{ kind: `insert`, into: `b` }], end: `cleanup` }],
-]
-
-const runConfig = readOracleRunConfig()
-let reach = createReach()
-function createReach() {
-  return createOracleReach<ReachState>(
-    `collection-lifecycle.gc-persisting-transaction`,
-    reachStates,
-    { fixedHistories: fixedHistories.length },
-  )
+// Applies one legal action to the model and returns the reach states it
+// enters. The model's rules are the ones the oracle has always enforced.
+function applyModel(model: Model, action: Action): Array<ReachState> {
+  const reached: Array<ReachState> = []
+  if (action.kind === `subscribe`) {
+    const expected = model.collections[action.side]
+    if (expected.retired) reached.push(`restarted-after-retirement`)
+    expected.subscribers++
+    expected.retired = false
+    expected.deadline = undefined
+    expected.unsubscribedAt = undefined
+  } else if (action.kind === `unsubscribe`) {
+    const expected = model.collections[action.side]
+    expected.subscribers--
+    if (expected.subscribers === 0) expected.unsubscribedAt = model.now
+    release(model, action.side)
+  } else if (action.kind === `insert`) {
+    const into = action.into === `both` ? sides : [action.into]
+    model.pendingHandlers.push({ id: action.id, sides: into })
+    for (const side of into) {
+      model.collections[side].persisting.push(action.id)
+      model.collections[side].deadline = undefined
+    }
+  } else if (action.kind === `settle`) {
+    const settled = model.pendingHandlers.shift()!
+    for (const side of settled.sides) {
+      const expected = model.collections[side]
+      if (expected.subscribers > 0) reached.push(`settled-while-subscribed`)
+      expected.persisting = expected.persisting.filter(
+        (id) => id !== settled.id,
+      )
+      release(model, side, {
+        outcome: action.outcome,
+        shared: settled.sides.length > 1,
+      })
+    }
+  } else if (action.kind === `advance`) {
+    const before = sides.map((side) => model.collections[side].retired)
+    advanceModel(model, action.elapsedMs)
+    for (const [index, side] of sides.entries()) {
+      const expected = model.collections[side]
+      if (
+        expected.persisting.length > 0 &&
+        expected.unsubscribedAt !== undefined &&
+        model.now - expected.unsubscribedAt >= GC_TIME_MS
+      )
+        reached.push(`gc-due-while-persisting`)
+      const after = expected.deadlineAfter
+      if (before[index] || !expected.retired || !after) continue
+      reached.push(
+        after.outcome === `complete`
+          ? `retired-after-completion`
+          : `retired-after-failure`,
+      )
+      if (after.shared) reached.push(`retired-after-shared-settlement`)
+    }
+  } else {
+    // An explicit cleanup retires the Collection whatever persists in it.
+    if (model.pendingHandlers.length > 0)
+      reached.push(`cleanup-while-persisting`)
+    model.collections[action.side].retired = true
+    model.collections[action.side].deadline = undefined
+  }
+  return reached
 }
 
-async function runHistory(history: History): Promise<void> {
-  // fast-check passes each example by reference.
-  reach.beginHistory({
-    fixed: fixedHistories.some(([fixed]) => fixed === history),
-  })
+function owedSnapshot(model: Model): Snapshot {
+  const view = (side: Side): Visible => {
+    const collection = model.collections[side]
+    return {
+      cleanedUp: collection.retired,
+      keys: collection.retired ? [] : [...collection.persisting].sort(byId),
+    }
+  }
+  return { a: view(`a`), b: view(`b`) }
+}
+
+// The plan: each step that the grammar allows, with its handler named by id,
+// then the history's end. A drain unsubscribes everyone, settles every pending
+// handler with one outcome, and advances past the deadlines.
+function resolve(history: History): Array<Action> {
+  const model = freshModel()
+  const plan: Array<Action> = []
+  let nextId = 1
+  const take = (action: Action) => {
+    applyModel(model, action)
+    plan.push(action)
+  }
+  for (const step of history.steps) {
+    if (step.kind === `subscribe`) {
+      take({ kind: `subscribe`, side: step.side })
+    } else if (step.kind === `unsubscribe`) {
+      if (model.collections[step.side].subscribers > 0)
+        take({ kind: `unsubscribe`, side: step.side })
+    } else if (step.kind === `insert`) {
+      const into = step.into === `both` ? sides : [step.into]
+      if (into.every((side) => !model.collections[side].retired))
+        take({ kind: `insert`, into: step.into, id: nextId++ })
+    } else if (step.kind === `settle`) {
+      const first = model.pendingHandlers[0]
+      if (first) take({ kind: `settle`, id: first.id, outcome: step.outcome })
+    } else {
+      take({ kind: `advance`, elapsedMs: step.elapsedMs })
+    }
+  }
+  if (history.end === `cleanup`) {
+    for (const side of sides) take({ kind: `cleanup`, side })
+    return plan
+  }
+  for (const side of sides)
+    while (model.collections[side].subscribers > 0)
+      take({ kind: `unsubscribe`, side })
+  const outcome = history.end === `drain-complete` ? `complete` : `fail`
+  while (model.pendingHandlers.length > 0)
+    take({ kind: `settle`, id: model.pendingHandlers[0]!.id, outcome })
+  take({ kind: `advance`, elapsedMs: 120 })
+  return plan
+}
+
+// Each action is one checkpoint, after the action and its macrotask.
+const checkpointOf = (index: number, action: Action) =>
+  `step ${index} ${action.kind}`
+
+const expectedOf = (plan: ReadonlyArray<Action>): Expected => {
+  const state = freshModel()
+  const checkpoints: Array<Checkpoint> = [
+    { checkpoint: `start`, value: owedSnapshot(state) },
+  ]
+  const reached = new Set<ReachState>()
+  for (const [index, action] of plan.entries()) {
+    for (const entered of applyModel(state, action)) reached.add(entered)
+    checkpoints.push({
+      checkpoint: checkpointOf(index, action),
+      value: owedSnapshot(state),
+    })
+  }
+  return { checkpoints, reached: [...reached] }
+}
+
+const LAW = `retirement`
+const DIFFERENCE = `the Collection's cleaned-up status or visible rows differ from the owed retirement and visibility`
+
+// Judges the recorded checkpoints in order, then whether the trace is complete.
+const check = (
+  _plan: ReadonlyArray<Action>,
+  observations: ReadonlyArray<{ checkpoint: string; value: unknown }>,
+  expected: Expected,
+): Verdict => {
+  for (const [index, owed] of expected.checkpoints.entries()) {
+    const observed = observations[index]
+    if (observed === undefined) break
+    if (observed.checkpoint !== owed.checkpoint)
+      return violation(
+        owed.checkpoint,
+        `the driver recorded ${observed.checkpoint} where the plan owes ${owed.checkpoint}`,
+        LAW,
+      )
+    const verdict = differs(
+      owed.checkpoint,
+      LAW,
+      observed.value,
+      owed.value,
+      DIFFERENCE,
+    )
+    if (verdict) return verdict
+  }
+  return observations.length === expected.checkpoints.length
+    ? pass
+    : violation(
+        `trace`,
+        `the driver recorded ${observations.length} of ${expected.checkpoints.length} checkpoints`,
+        LAW,
+      )
+}
+
+async function driver(
+  plan: ReadonlyArray<Action>,
+  observe: (checkpoint: string, value: unknown) => void,
+): Promise<void> {
   vi.useFakeTimers()
   vi.setSystemTime(0)
   resetCleanupQueue()
@@ -236,157 +390,60 @@ async function runHistory(history: History): Promise<void> {
     a: [],
     b: [],
   }
-  const startModel = (): CollectionModel => ({
-    subscribers: 0,
-    persisting: [],
-    deadline: GC_TIME_MS,
-    deadlineAfter: undefined,
-    retired: false,
-    unsubscribedAt: 0,
-  })
-  const model: Model = {
-    now: 0,
-    collections: { a: startModel(), b: startModel() },
-    pendingHandlers: [],
-  }
-  let nextId = 1
 
   // Run every timer due by now, and the microtasks they start.
   const settle = () => vi.advanceTimersByTimeAsync(0)
-  const check = (label: string) => {
-    for (const side of sides) {
-      const expected = model.collections[side]
-      const collection = collections[side]
-      expect(
-        collection.status === `cleaned-up`,
-        `${label}: ${side} cleaned up at ${model.now} ms`,
-      ).toBe(expected.retired)
-      expect(
-        [...collection.keys()].sort((a, b) => a - b),
-        `${label}: ${side} visible keys`,
-      ).toEqual(
-        expected.retired ? [] : [...expected.persisting].sort((a, b) => a - b),
-      )
-    }
-  }
+  const visible = (side: Side): Visible => ({
+    cleanedUp: collections[side].status === `cleaned-up`,
+    keys: [...collections[side].keys()].sort(byId),
+  })
+  const record = (checkpoint: string) =>
+    observe(checkpoint, { a: visible(`a`), b: visible(`b`) })
 
-  const apply = async (step: Step, label: string) => {
-    if (step.kind === `subscribe`) {
-      const expected = model.collections[step.side]
-      if (expected.retired) reach.reach(`restarted-after-retirement`)
-      subscriptions[step.side].push(
-        collections[step.side].subscribeChanges(() => {}),
+  const run = async (action: Action) => {
+    if (action.kind === `subscribe`) {
+      subscriptions[action.side].push(
+        collections[action.side].subscribeChanges(() => {}),
       )
-      expected.subscribers++
-      expected.retired = false
-      expected.deadline = undefined
-      expected.unsubscribedAt = undefined
-    } else if (step.kind === `unsubscribe`) {
-      const subscription = subscriptions[step.side].pop()
-      if (!subscription) return
-      subscription.unsubscribe()
-      const expected = model.collections[step.side]
-      expected.subscribers--
-      if (expected.subscribers === 0) expected.unsubscribedAt = model.now
-      release(model, step.side)
-    } else if (step.kind === `insert`) {
-      const into = step.into === `both` ? sides : [step.into]
-      if (into.some((side) => model.collections[side].retired)) return
-      const id = nextId++
+    } else if (action.kind === `unsubscribe`) {
+      subscriptions[action.side].pop()!.unsubscribe()
+    } else if (action.kind === `insert`) {
       const handler = createDeferred<void>()
-      handlers.set(id, handler)
-      if (step.into === `both`) {
+      handlers.set(action.id, handler)
+      if (action.into === `both`) {
         const transaction = createTransaction({
           autoCommit: false,
           mutationFn: () => handler.promise,
         })
         transaction.mutate(() => {
-          collections.a.insert({ id })
-          collections.b.insert({ id })
+          collections.a.insert({ id: action.id })
+          collections.b.insert({ id: action.id })
         })
         transaction.commit().catch(() => {})
       } else {
-        collections[step.into]
-          .insert({ id })
-          .when('settled')
+        collections[action.into]
+          .insert({ id: action.id })
+          .when(`settled`)
           .catch(() => {})
       }
-      model.pendingHandlers.push({ id, sides: into })
-      for (const side of into) {
-        model.collections[side].persisting.push(id)
-        model.collections[side].deadline = undefined
-      }
-    } else if (step.kind === `settle`) {
-      const settled = model.pendingHandlers.shift()
-      if (!settled) return
-      const handler = handlers.get(settled.id)!
-      if (step.outcome === `complete`) handler.resolve()
-      else handler.reject(new Error(`handler ${settled.id} failed`))
-      for (const side of settled.sides) {
-        const expected = model.collections[side]
-        if (expected.subscribers > 0) reach.reach(`settled-while-subscribed`)
-        expected.persisting = expected.persisting.filter(
-          (id) => id !== settled.id,
-        )
-        release(model, side, {
-          outcome: step.outcome,
-          shared: settled.sides.length > 1,
-        })
-      }
+    } else if (action.kind === `settle`) {
+      const handler = handlers.get(action.id)!
+      if (action.outcome === `complete`) handler.resolve()
+      else handler.reject(new Error(`handler ${action.id} failed`))
+    } else if (action.kind === `advance`) {
+      await vi.advanceTimersByTimeAsync(action.elapsedMs)
     } else {
-      const before = sides.map((side) => model.collections[side].retired)
-      advanceModel(model, step.elapsedMs)
-      await vi.advanceTimersByTimeAsync(step.elapsedMs)
-      for (const [index, side] of sides.entries()) {
-        const expected = model.collections[side]
-        if (
-          expected.persisting.length > 0 &&
-          expected.unsubscribedAt !== undefined &&
-          model.now - expected.unsubscribedAt >= GC_TIME_MS
-        )
-          reach.reach(`gc-due-while-persisting`)
-        const after = expected.deadlineAfter
-        if (before[index] || !expected.retired || !after) continue
-        reach.reach(
-          after.outcome === `complete`
-            ? `retired-after-completion`
-            : `retired-after-failure`,
-        )
-        if (after.shared) reach.reach(`retired-after-shared-settlement`)
-      }
+      await collections[action.side].cleanup()
     }
-    await settle()
-    check(label)
   }
 
   await withOracleCleanup(async () => {
     await settle()
-    check(`start`)
-    for (const [index, step] of history.steps.entries())
-      await apply(step, `step ${index} ${step.kind}`)
-    if (history.end === `cleanup`) {
-      if (model.pendingHandlers.length > 0)
-        reach.reach(`cleanup-while-persisting`)
-      for (const side of sides) {
-        await collections[side].cleanup()
-        expect(collections[side].status, `explicit cleanup of ${side}`).toBe(
-          `cleaned-up`,
-        )
-        expect(
-          [...collections[side].keys()],
-          `explicit cleanup rows of ${side}`,
-        ).toEqual([])
-      }
-    } else {
-      const outcome = history.end === `drain-complete` ? `complete` : `fail`
-      const drain: Array<Step> = [
-        ...sides.flatMap((side) =>
-          subscriptions[side].map((): Step => ({ kind: `unsubscribe`, side })),
-        ),
-        ...model.pendingHandlers.map((): Step => ({ kind: `settle`, outcome })),
-        { kind: `advance`, elapsedMs: 120 },
-      ]
-      for (const step of drain) await apply(step, `drain ${step.kind}`)
+    record(`start`)
+    for (const [index, action] of plan.entries()) {
+      await run(action)
+      await settle()
+      record(checkpointOf(index, action))
     }
   }, [
     async () => {
@@ -444,17 +501,29 @@ const stepArbitrary: fc.Arbitrary<Step> = fc.oneof(
   },
 )
 
-const property = fc.asyncProperty(
-  fc.record({
-    steps: fc.array(stepArbitrary, { minLength: 1, maxLength: 14 }),
-    end: fc.constantFrom(
-      `cleanup` as const,
-      `drain-complete` as const,
-      `drain-fail` as const,
-    ),
-  }),
-  (history) => runHistory(history),
-)
+const historyArbitrary: fc.Arbitrary<History> = fc.record({
+  steps: fc.array(stepArbitrary, { minLength: 1, maxLength: MAX_STEPS }),
+  end: fc.constantFrom(
+    `cleanup` as const,
+    `drain-complete` as const,
+    `drain-fail` as const,
+  ),
+})
+
+// A constructed history opens with `prefix`, then keeps the generated steps.
+const openWith =
+  (...prefix: Array<Step>) =>
+  (generated: History): History => ({
+    steps: [...prefix, ...generated.steps].slice(0, MAX_STEPS),
+    end: generated.end,
+  })
+
+const insertStep = (into: Side | `both`): Step => ({ kind: `insert`, into })
+const settleStep = (outcome: `complete` | `fail`): Step => ({
+  kind: `settle`,
+  outcome,
+})
+const advanceStep = (elapsedMs: 120): Step => ({ kind: `advance`, elapsedMs })
 
 // What this oracle owns: the garbage-collection hold that a persisting
 // transaction places on each Collection it touches, in lifecycle.ts. The
@@ -466,29 +535,90 @@ declareOracle({
 
 // Replay one history with TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH,
 // and TANSTACK_DB_ORACLE_PROPERTY=collection-lifecycle.gc-persisting-transaction.
-// The fixed histories take the first path indexes, so a path recorded before
-// they were added selects a different history.
-it.each(
-  runConfig.campaignSeed === undefined ? [20261024, undefined] : [undefined],
-)(
-  `retires a Collection only after gcTime with no subscriber and no persisting transaction (seed %s)`,
-  async (seed) => {
-    reach = createReach()
-    const parameters = {
-      ...oraclePropertyOptions(
-        100,
-        `collection-lifecycle.gc-persisting-transaction`,
-        { examples: fixedHistories },
-      ),
-      ...(seed === undefined || runConfig.replayPath !== undefined
-        ? {}
-        : oracleFixedSeed(seed)),
-    }
-    oracleRoute(oracleRouteOf(parameters))
-    await fc.assert(property, parameters)
-    reach.assertReached()
-    console.info(
-      `GC transaction reach: ${JSON.stringify(Object.fromEntries(reach.counts()))}`,
-    )
+// Each constructed history names the states it enters, with the steps that
+// enter it, and every declared state has at least one. The constructed
+// histories run beside the generated ones in each campaign, so a path recorded
+// before they were added may select a different history.
+oracleProperty({
+  id: `collection-lifecycle.gc-persisting-transaction`,
+  law: {
+    statement: `Automatic garbage collection retires a Collection only after gcTime with no subscriber and no persisting transaction; a persisting transaction holds each Collection it touches, and the delay restarts when the last such transaction completes or fails; explicit cleanup() retires a Collection while a transaction persists.`,
+    authority: `BaseCollectionConfig.gcTime; the persisting-transaction hold in packages/db/src/collection/lifecycle.ts (optimistic rows and adapter awaitTxId waits); explicit cleanup keeps its current contract`,
+    limits: `Two Collections with a synchronous ready sync and empty source; keys as numbers, up to ${MAX_STEPS} steps; clock steps of 20, 60, and 120 ms with gcTime 100; paced mutations, offline transactions, live-query Collections, and wall-clock corrections are not generated.`,
+    owner: `Collection garbage collection under persisting transactions`,
   },
-)
+  histories: {
+    arbitrary: historyArbitrary,
+    states: reachStates,
+    runs: 100,
+    fixedSeeds: [20261024],
+    constructed: [
+      {
+        name: `gc due while a transaction persists`,
+        enters: [`gc-due-while-persisting`],
+        build: openWith(insertStep(`a`), advanceStep(120)),
+      },
+      {
+        name: `retired after completion`,
+        enters: [`retired-after-completion`],
+        build: openWith(
+          insertStep(`a`),
+          settleStep(`complete`),
+          advanceStep(120),
+        ),
+      },
+      {
+        name: `retired after failure`,
+        enters: [`retired-after-failure`],
+        build: openWith(insertStep(`a`), settleStep(`fail`), advanceStep(120)),
+      },
+      {
+        name: `retired after a shared settlement`,
+        enters: [`retired-after-shared-settlement`, `retired-after-failure`],
+        build: openWith(
+          insertStep(`both`),
+          settleStep(`fail`),
+          advanceStep(120),
+        ),
+      },
+      {
+        name: `settled while subscribed`,
+        enters: [`settled-while-subscribed`],
+        build: openWith(
+          { kind: `subscribe`, side: `a` },
+          insertStep(`a`),
+          settleStep(`complete`),
+          advanceStep(120),
+        ),
+      },
+      {
+        name: `subscribe again after retirement`,
+        enters: [`restarted-after-retirement`],
+        build: openWith(
+          insertStep(`a`),
+          settleStep(`complete`),
+          advanceStep(120),
+          { kind: `subscribe`, side: `a` },
+        ),
+      },
+      {
+        // The opening insert must still be pending at the cleanup, so the
+        // generated settlements are dropped. Its end becomes cleanup.
+        name: `explicit cleanup while a transaction persists`,
+        enters: [`cleanup-while-persisting`],
+        build: (generated) => ({
+          steps: [
+            insertStep(`b`),
+            ...generated.steps.filter((step) => step.kind !== `settle`),
+          ].slice(0, MAX_STEPS),
+          end: `cleanup`,
+        }),
+      },
+    ],
+  },
+  resolve,
+  model: expectedOf,
+  reached: (_plan, _trace, expected) => expected.reached,
+  driver,
+  check,
+})
