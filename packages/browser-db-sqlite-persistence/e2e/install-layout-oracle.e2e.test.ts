@@ -4,11 +4,16 @@
  *
  * The built package finds its worker and WASM file through URLs relative to its
  * own code. A Vite production build and a Vite dev server that serves the
- * package in place both resolve those URLs. Vite's dependency optimizer moves
+ * package in place both resolve those URLs. Vite 7's dependency optimizer moves
  * pre-bundled code into its cache and leaves the assets behind, so a moved copy
  * asks the dev server for the assets by package name, from the app root.
+ * Under Vite 8 the moved copy's asset URLs point at the original install
+ * instead, so the copy loads its own worker and WASM in every layout. The
+ * driver observes this as a worker URL that contains the imported copy's path.
+ * The authority for the Vite 8 rule is the maintainer decision on
+ * TanStack/db#2371 (2026-11-08).
  *
- * The README promises this behavior:
+ * The README promises the Vite 7 behavior:
  *
  * - Production builds open in every install layout.
  * - In development, a copy served in place opens with its own assets. A copy is
@@ -181,15 +186,40 @@ const layoutCasesForOneVite: Array<Omit<LayoutCase, `vite`>> = [
     server: `production` as const,
   })),
 ]
-// Every history runs against a consumer on each Vite major.
-const layoutCases: Array<LayoutCase> = ([7, 8] as const).flatMap((vite) =>
-  layoutCasesForOneVite.map((layoutCase) => ({ ...layoutCase, vite })),
-)
+// Every history runs against a Vite 7 consumer. Under Vite 8 the model ignores
+// the cache directory and the exclusion, so the Vite 8 rows keep only the
+// layouts without them: development and production, which still tell the Vite
+// 8 rule and the production build apart from a mutant.
+const layoutCases: Array<LayoutCase> = [
+  ...layoutCasesForOneVite.map((layoutCase) => ({ ...layoutCase, vite: 7 as const })),
+  ...layoutCasesForOneVite
+    .filter(
+      (layoutCase) =>
+        layoutCase.cache === `default` && layoutCase.exclusion === `none`,
+    )
+    .map((layoutCase) => ({ ...layoutCase, vite: 8 as const })),
+]
+
+// The outcomes each Vite major's rows promise to reach. Declared with the
+// grammar, so the coverage tests below read a declared part.
+const promisedOutcomes: Record<ConsumerVite, ReadonlyArray<LayoutOutcome>> = {
+  7: [
+    { opens: false, workers: 0 },
+    { opens: false, workers: 1 },
+    { opens: true, workers: 1 },
+    { opens: true, workers: 1, worker: `imported copy` },
+    { opens: true, workers: 1, worker: `other copy` },
+  ],
+  8: [
+    { opens: true, workers: 1 },
+    { opens: true, workers: 1, worker: `imported copy` },
+  ],
+}
 
 declareOracle({
   check: [expectLayoutOutcome],
   model: [expectedOutcome],
-  grammar: [layoutCases],
+  grammar: [layoutCases, promisedOutcomes],
 })
 
 // The check: the installed copy's observed outcome equals the layout model's
@@ -204,7 +234,10 @@ async function expectLayoutOutcome(
 }
 
 let browser: Browser
-const coveredOutcomes = new Set<string>()
+const coveredOutcomes: Record<ConsumerVite, Set<string>> = {
+  7: new Set<string>(),
+  8: new Set<string>(),
+}
 beforeAll(async () => {
   browser = await chromium.launch({ headless: true })
 })
@@ -221,7 +254,7 @@ it.each(layoutCases)(
     try {
       const install = installLayout(temporaryDirectory, layoutCase.layout)
       const expected = expectedOutcome(layoutCase, install)
-      coveredOutcomes.add(JSON.stringify(expected))
+      coveredOutcomes[layoutCase.vite].add(JSON.stringify(expected))
       await expectLayoutOutcome(layoutCase, install)
     } finally {
       rmSync(temporaryDirectory, { recursive: true, force: true })
@@ -230,21 +263,18 @@ it.each(layoutCases)(
   120_000,
 )
 
-// Grammar coverage: the cases above must reach every outcome the model can
-// predict. Runs after them, because the predictions read installed trees.
-it(`covers every promised layout outcome`, () => {
-  expect([...coveredOutcomes].sort()).toEqual(
-    [
-      { opens: false, workers: 0 },
-      { opens: false, workers: 1 },
-      { opens: true, workers: 1 },
-      { opens: true, workers: 1, worker: `imported copy` },
-      { opens: true, workers: 1, worker: `other copy` },
-    ]
-      .map((outcome) => JSON.stringify(outcome))
-      .sort(),
-  )
-})
+// Grammar coverage: each Vite major's rows must reach the outcomes its own
+// model predicts. Runs after the cases, because the predictions read installed
+// trees.
+for (const vite of [7, 8] as const) {
+  it(`covers every promised layout outcome under Vite ${vite}`, () => {
+    expect([...coveredOutcomes[vite]].sort()).toEqual(
+      promisedOutcomes[vite]
+        .map((outcome) => JSON.stringify(outcome))
+        .sort(),
+    )
+  })
+}
 
 /**
  * Copies the built package to a directory, as an install would. With
