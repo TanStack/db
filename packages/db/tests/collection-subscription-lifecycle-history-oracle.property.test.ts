@@ -15,6 +15,8 @@ import {
   expectedParkedReloadDemand,
   greenLifecycleHistories,
   greenLifecycleHistoryArbitrary,
+  lifecycleCommandArbitrary,
+  lifecycleRowLabels,
   mixedAbortedRestartHistory,
   parkedReloadDemandCases,
   pendingSupersessionHistory,
@@ -454,6 +456,8 @@ function updateCallerOutcomes(
   }
 }
 
+const replacementPendingReachLabel = `replacement-load-replaces-pending-attempt`
+
 async function runHistory(
   history: ReadonlyArray<LifecycleCommand>,
   runOptions: {
@@ -474,6 +478,12 @@ async function runHistory(
   const check = runOptions.continueAfterMismatch ? expect.soft : expect
   const failures = new Map<number, Error>()
   const abortFailures = new Map<number, Error>()
+  // Judged at each checkpoint, not inside the adapter: a throw from
+  // loadSubset would reject the acquisition instead of failing the oracle.
+  const replacementAbortViolations: Array<string> = []
+  const driverReach = new Set<string>()
+  // Attempts the model had already aborted before the current command.
+  let abortedBeforeStep = new Set<number>()
   const abortFailureForAttempt = (attemptId: number): Error => {
     let failure = abortFailures.get(attemptId)
     if (!failure) {
@@ -641,6 +651,26 @@ async function runHistory(
               )
             }
             watchCoreAbortListeners(observed.id, options.signal)
+            // Law (header: "A replay that replaces an attempt aborts it
+            // too"): every attempt that this command's replay replaces, one
+            // the model aborts in this step, is aborted before its
+            // replacement loads. Attempts aborted in earlier steps were
+            // judged in those steps. The model has already reduced this
+            // command, so the check reads the aborts it recorded.
+            for (const earlier of runtimeAttempts.values()) {
+              if (earlier.id === observed.id) continue
+              const replaced = model.attempts[earlier.id]
+              if (!replaced?.aborted || abortedBeforeStep.has(earlier.id))
+                continue
+              // Reach: the replaced attempt had no settled outcome in the
+              // model when its replacement loaded.
+              if (replaced.outcome === undefined)
+                driverReach.add(replacementPendingReachLabel)
+              if (!earlier.options.signal?.aborted)
+                replacementAbortViolations.push(
+                  `replaced attempt ${earlier.id} is not aborted before replacement ${observed.id} loads`,
+                )
+            }
             owner.attemptId = observed.id
             attemptByOptions.set(options, observed.id)
             observedLoads.push(observed)
@@ -738,6 +768,10 @@ async function runHistory(
       Array.from({ length: model.publications }, () => []),
     )
     check(observedTrace, context).toEqual(model.trace)
+    check(
+      replacementAbortViolations,
+      `replaced attempts are aborted before their replacements load (header: "A replay that replaces an attempt aborts it too"): ${context}`,
+    ).toEqual([])
     for (const attempt of model.attempts)
       if (attempt.outcome !== undefined && !attempt.aborted)
         check(
@@ -801,6 +835,9 @@ async function runHistory(
       }
       const runtimeAttempt =
         command.type === `settle` ? selectRuntimeAttempt(command) : undefined
+      abortedBeforeStep = new Set(
+        model.attempts.flatMap(({ id, aborted }) => (aborted ? [id] : [])),
+      )
       const effect = reduceLifecycle(model, command)
       if (command.type === `request` && effect.ownerId !== undefined) {
         const result = model.results.at(-1)!
@@ -1053,7 +1090,7 @@ async function runHistory(
     )
   }
   if (primaryFailed) throw primaryFailure
-  return new Set([...model.reach, ...terminalReach])
+  return new Set([...model.reach, ...terminalReach, ...driverReach])
 }
 
 if (
@@ -1673,7 +1710,9 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     cancellation: `manual` | `reject` = `manual`,
   ) => {
     demandChangeReach.beginHistory()
+    lifecycleRowReach.beginHistory()
     const reached = await runHistory(history, { cancellation })
+    markLifecycleRows(reached)
     for (const [label, state] of Object.entries(demandChangeReachStates))
       if (reached.has(label)) demandChangeReach.reach(state)
   }
@@ -1683,6 +1722,37 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     const reached = await runHistory(changeRetiresReplacementHistory)
     expect(reached).toContain(`change:between-releases-would-publish`)
   })
+
+  // Two owners across a truncate: each replacement load judges the attempts
+  // this command's replay replaces. These replay the shared driver and model.
+  it.each([
+    {
+      name: `an aborted peer and a pending owner`,
+      history: [
+        { type: `request`, demand: `a` },
+        { type: `request`, demand: `b` },
+        { type: `abort`, demand: `a` },
+        { type: `truncate` },
+      ],
+    },
+    {
+      name: `an abort after the first replay`,
+      history: [
+        { type: `request`, demand: `a` },
+        { type: `request`, demand: `b` },
+        { type: `truncate` },
+        { type: `abort`, demand: `a` },
+        { type: `truncate` },
+      ],
+    },
+  ] satisfies Array<{ name: string; history: Array<LifecycleCommand> }>)(
+    `replaces each owner's pending attempt before its replacement loads for $name`,
+    async ({ history }) => {
+      oracleRoute(`fixed history`)
+      await runHistory(history)
+      await runHistory(history, { cancellation: `reject` })
+    },
+  )
 
   // Prompt cancellation of the replaced owner's replay load is a settlement:
   // the held replacement covers it, so the replay publishes.
@@ -1753,6 +1823,86 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     `reject` as const,
   )
 
+  // A replacement load that replaces a pending attempt is the state the
+  // replacement-abort law judges. The campaigns must reach it.
+  const replacementReachStates = {
+    [replacementPendingReachLabel]: `a replacement load while its replaced attempt is pending`,
+  } as const
+  const replacementReach = createOracleReach(
+    `subscription-lifecycle.replacement-abort`,
+    Object.values(replacementReachStates),
+  )
+  // Every row of the lifecycle transition table must fire somewhere in the
+  // green and demand-change campaigns, so the table's rows are declared here.
+  const lifecycleRowReach = createOracleReach(
+    `subscription-lifecycle.rows`,
+    lifecycleRowLabels,
+  )
+  const markLifecycleRows = (reached: ReadonlySet<string>) => {
+    for (const row of lifecycleRowLabels)
+      if (reached.has(row)) lifecycleRowReach.reach(row)
+  }
+  let greenHistoriesRan = false
+  afterAll(() => {
+    if (greenHistoriesRan) replacementReach.assertReached()
+    if (greenHistoriesRan || demandChangeHistoriesRan)
+      lifecycleRowReach.assertReached()
+  })
+  const runGreenHistory = async (
+    history: ReadonlyArray<LifecycleCommand>,
+    cancellation: `manual` | `reject`,
+  ) => {
+    greenHistoriesRan = true
+    replacementReach.beginHistory()
+    lifecycleRowReach.beginHistory()
+    const reached = await runHistory(history, { cancellation })
+    if (reached.has(replacementPendingReachLabel))
+      replacementReach.reach(
+        replacementReachStates[replacementPendingReachLabel],
+      )
+    markLifecycleRows(reached)
+  }
+
+  // Constructed prefixes reach the two pairs that no generated history
+  // produced: a replacement followed by a change that names no owned demand,
+  // and a replacement after a restart. Each prefix is the shortest legal path
+  // the lifecycle table search found, followed by a random tail.
+  const constructedPrefixes: ReadonlyArray<ReadonlyArray<LifecycleCommand>> = [
+    [
+      { type: `request`, demand: `a` },
+      { type: `request`, demand: `b` },
+      { type: `replace`, demand: `a`, replaced: `b` },
+      { type: `change`, release: [`c`] },
+    ],
+    [
+      { type: `request`, demand: `a` },
+      { type: `request`, demand: `b` },
+      { type: `cleanup` },
+      { type: `restart` },
+      { type: `replace`, demand: `a`, replaced: `b` },
+    ],
+  ]
+  const constructedPrefixArbitrary = fc
+    .tuple(
+      fc.constantFrom(...constructedPrefixes),
+      fc.array(lifecycleCommandArbitrary, { maxLength: 8 }),
+    )
+    .map(([prefix, tail]) => [...prefix, ...tail])
+  const constructedPrefixSeed = oracleFixedSeed(1_657_011, {
+    numRuns: runs,
+  })
+  fixedCampaign.prop(
+    [constructedPrefixArbitrary, cancellationArbitrary],
+    constructedPrefixSeed,
+  )(
+    `matches the pure lifecycle model after a constructed prefix`,
+    async (history, cancellation) => {
+      oracleRoute(oracleRouteOf(constructedPrefixSeed))
+      await runGreenHistory(history, cancellation)
+    },
+    120_000,
+  )
+
   const greenLifecycleHistoryFixedSeed = oracleFixedSeed(1_657_003, {
     numRuns: runs,
   })
@@ -1763,7 +1913,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     `matches the pure lifecycle model for a fixed seed`,
     async (history, cancellation) => {
       oracleRoute(oracleRouteOf(greenLifecycleHistoryFixedSeed))
-      await runHistory(history, { cancellation })
+      await runGreenHistory(history, cancellation)
     },
     120_000,
   )
@@ -1779,7 +1929,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     `matches the pure lifecycle model for a random or replayed seed`,
     async (history, cancellation) => {
       oracleRoute(oracleRouteOf(greenLifecycleHistoryCampaign))
-      await runHistory(history, { cancellation })
+      await runGreenHistory(history, cancellation)
     },
     120_000,
   )
