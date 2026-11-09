@@ -229,9 +229,10 @@ type OpenOutcome =
  * own URL cannot resolve a path. Vite returns asset paths for the dev server,
  * so the package must resolve them against that server rather than the page.
  */
-it(`opens packaged SQLite from an about:srcdoc frame under Vite 7 development`, async () => {
+for (const major of [7, 8] as const) {
+  it(`opens packaged SQLite from an about:srcdoc frame under Vite ${major} development`, async () => {
   const browser = await chromium.launch({ headless: true })
-  const developmentServer = await createVite7Server({
+  const developmentServer = await (major === 7 ? createVite7Server : createServer)({
     configFile: false,
     root: consumerDirectory,
     base: consumerBase,
@@ -281,7 +282,8 @@ it(`opens packaged SQLite from an about:srcdoc frame under Vite 7 development`, 
     await developmentServer.close()
     await browser.close()
   }
-}, 120_000)
+  }, 120_000)
+}
 
 /*
  * In a backend integration, the page comes from the application server and
@@ -289,9 +291,10 @@ it(`opens packaged SQLite from an about:srcdoc frame under Vite 7 development`, 
  * another origin, so this open cannot succeed. It must still report
  * unavailable persistence rather than the Worker constructor's SecurityError.
  */
-it(`reports unavailable persistence when the page and Vite 7 server origins differ`, async () => {
+for (const major of [7, 8] as const) {
+  it(`reports unavailable persistence when the page and Vite ${major} server origins differ`, async () => {
   const browser = await chromium.launch({ headless: true })
-  const developmentServer = await createVite7Server({
+  const developmentServer = await (major === 7 ? createVite7Server : createServer)({
     configFile: false,
     root: consumerDirectory,
     base: consumerBase,
@@ -339,4 +342,5 @@ it(`reports unavailable persistence when the page and Vite 7 server origins diff
     await developmentServer.close()
     await browser.close()
   }
-}, 120_000)
+  }, 120_000)
+}
