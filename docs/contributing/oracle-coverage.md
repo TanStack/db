@@ -4255,6 +4255,17 @@ seed is not unique, so the script cannot attribute it, and neither removal nor
 lowering is reported there. A budget moved into an ordinary test file whose
 seed another oracle file shares is therefore not reported.
 
+The script is incremental. It computes an oracle file's budgets only when the
+file, or a module that it reaches at head through a string literal naming a
+relative path, changed. That reach is a superset of the AST imports, so no
+affected file is skipped; an escaped specifier such as `'\x2e/m'` is not
+reached. A removed key is confirmed against every oracle file at head, so a
+budget moved into an unchanged oracle file that imports the receiving module is
+found, not reported as removed. The grammar draws that move (`imported-by-unchanged`,
+state `moved-to-unchanged-oracle`) and a campaign removed from a module that the
+case oracle keeps importing (`removed-from-imported-module`). A hostile version
+that confirms removals only among the changed files fails it.
+
 A budget that a helper computes at run time is not tracked either: the script
 reads the counts and keys written at a campaign's call, or in constants that the
 oracle file declares or imports. The op-sqlite alias campaigns in
@@ -4315,6 +4326,22 @@ real-path spelling: a name given through a symlinked path is not covered. It
 does not generate a hook input without `cwd`, a worktree outside the launch
 checkout, or a worktree branch that has no copy of the script. In that last
 case the launch checkout's rule lints the worktree.
+
+The lint cache (`ORACLE_LINT_CACHE_DIR`, default `node_modules/.cache/oracle-lint`)
+is law L4c, owned by the cache campaign in the same file. A cached run reports
+what an uncached run reports at the same state. The cache key of an oracle file
+covers the file, the test modules that it reaches, their manifests, and the
+lint configuration (the scripts, the settings, the installed plugin's sources,
+and ESLint's version). A stop report is repeated only while the merge-base, the
+changed files, and the selected files' keys are unchanged. The campaign warms the
+cache at base, then edits a companion module that the rule reads: the companion's
+declaration flips the case file's report (the rule's contract for companion
+declarations; `no-unit-test`), while the case file's own content does not change.
+A cache keyed on the own content fails it. Limits: the campaign runs one case
+file, one companion, and the session in the launch checkout only; a worktree
+session, a module reached by an escaped specifier, and an ignored module that an
+oracle file imports are not drawn. An ignored import is not part of the branch
+that CI lints, so the stop report does not track it.
 
 The oracle lint rules (`oracle/no-disabled`, `oracle/no-unit-test`,
 `oracle/pure-model`, `oracle/replayable-seed`, and `oracle/probe-form`) are

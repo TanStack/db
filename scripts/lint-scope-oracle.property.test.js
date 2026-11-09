@@ -904,11 +904,20 @@ function reportedOracles(lines) {
  * Claude hook it exits 0 with no output, or 2 with a report on stderr.
  * Anything else, such as a crash, which exits 1 with a stack trace, fails.
  */
-function runCli(cwd, script, args, input) {
+function runCli(
+  cwd,
+  script,
+  args,
+  input,
+  // The cache is off unless a run names its directory, so an uncached run
+  // never writes into a checkout's node_modules.
+  environment = { ORACLE_LINT_CACHE_DIR: `` },
+) {
   const result = spawnSync(process.execPath, [script, ...args], {
     cwd,
     encoding: `utf8`,
     input,
+    env: { ...process.env, ...environment },
   })
   const lines = result.stderr.split(`\n`).filter(Boolean)
   const hook = args.includes(`--format=claude`)
@@ -1042,6 +1051,8 @@ const STATES = [
   `large-lockfile-same-plugin`,
   `missing-base-lockfile`,
   `untracked-dependent`,
+  `cache-invalidated`,
+  `companion-declares`,
   `js-oracle`,
   `hook-oracle`,
   `hook-support`,
@@ -1226,6 +1237,7 @@ function campaign(name) {
 
 describe(`lint selection after an edit`, () => {
   campaign(`changed, named, edit-hook, and stop-hook scopes`)
+  cacheCampaign(`cached runs repeat the uncached report`)
   // Every declared state must be entered by the campaigns above.
   afterAll(() => {
     if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
@@ -1234,9 +1246,182 @@ describe(`lint selection after an edit`, () => {
   })
 })
 
+// -- 6. Lint cache -------------------------------------------------------------
+//
+// Law L4c (lint cache): a cached run reports exactly what an uncached run
+// reports at the same state. The hooks keep each oracle file's messages under a
+// key of the file, the test modules that it reaches (the rule reads them), and
+// the lint configuration, and a stop report under the branch's changes. A
+// key that a change alters must be recomputed, so an edit to an imported module
+// reaches the report of the file that imports it. Authority: the rule's own
+// contract (TanStack/oracles, `no-unit-test`): a file that relies on a
+// companion module's declaration declares nothing itself, and it is undeclared
+// only when no test reaches a part. So the case file below is reported exactly
+// when its companion does not declare the check, and its own content never
+// changes.
+//
+// The grammar draws whether the companion declares at base and at head. The
+// driver warms the cache at base with the edit hook, which lints the case file
+// under the base key. It then writes the head companion, and runs the changed
+// scope uncached and cached, the edit hook, the stop hook, and the stop hook
+// again, which must repeat the same report. A cache keyed only on the case
+// file's own content keeps the base message at head, and fails.
+
+const CACHE_CASE = `cache.oracle.test.ts`
+const COMPANION = `companion.ts`
+const CASE_TEST = `import { check } from './companion'\nit('reads one value', () => { check(1) })`
+
+/** The companion module at a state: it declares the check, or it only exports it. */
+function companionText(declares) {
+  return declares
+    ? `import { declareOracle } from '@tanstack/oracles'\nexport function check(x: number) { return x }\ndeclareOracle({ check: [check], model: [] })\n`
+    : `export function check(x: number) { return x }\n`
+}
+
+const cacheArbitrary = fc.record({
+  declaresAtBase: fc.boolean(),
+  declaresAtHead: fc.boolean(),
+})
+
+/**
+ * The oracle files a report names, as sorted basenames: the case file, unless
+ * its companion declares. A scope that selects from the branch's changes names
+ * the case file only when the companion changed, because it is the case file's
+ * only import. The edit hook names it for the companion, whether or not the
+ * companion changed.
+ */
+function predictCachedReport(declares, selected = true) {
+  return selected && !declares ? [CACHE_CASE] : []
+}
+
+/**
+ * A launch checkout whose base commit holds the case file and the companion at
+ * base, with the lint script and its settings, and the installed dependencies.
+ */
+function cacheRepositoryOf(program) {
+  const launch = mkdtempSync(join(work, `c`))
+  gitIn(launch, `init`, `-q`, `-b`, `main`)
+  writeFileSync(
+    join(launch, `package.json`),
+    JSON.stringify({ name: `root`, type: `module` }),
+  )
+  writeFileSync(join(launch, `.gitignore`), readFileSync(gitignoreFile, `utf8`))
+  mkdirSync(join(launch, APP, `tests`), { recursive: true })
+  mkdirSync(join(launch, APP, `src`), { recursive: true })
+  writeFileSync(
+    join(launch, APP, `package.json`),
+    JSON.stringify({ name: `app` }),
+  )
+  mkdirSync(join(launch, `scripts`), { recursive: true })
+  writeFileSync(join(launch, SETTINGS), readFileSync(settingsFile, `utf8`))
+  writeFileSync(
+    join(launch, `scripts`, `agent-lint-feedback.mjs`),
+    readFileSync(feedbackScript, `utf8`),
+  )
+  writeFileSync(
+    join(launch, `scripts`, `check-oracle-run-counts.mjs`),
+    readFileSync(runCountScript, `utf8`),
+  )
+  writeFileSync(join(launch, APP, `tests`, CACHE_CASE), `${CASE_TEST}\n`)
+  writeFileSync(
+    join(launch, APP, `tests`, COMPANION),
+    companionText(program.declaresAtBase),
+  )
+  gitIn(launch, `add`, `-A`)
+  gitIn(launch, `commit`, `-q`, `-m`, `base`)
+  installDependencies(launch)
+  return launch
+}
+
+/**
+ * Runs the cache campaign's observations for one program: the warm-up at base,
+ * then the head observations. Each cached run uses one cache directory, and the
+ * uncached run disables the cache.
+ */
+function observedCache(program) {
+  const launch = cacheRepositoryOf(program)
+  try {
+    const script = join(launch, `scripts`, `agent-lint-feedback.mjs`)
+    const cache = { ORACLE_LINT_CACHE_DIR: mkdtempSync(join(work, `cache-`)) }
+    const uncached = { ORACLE_LINT_CACHE_DIR: `` }
+    const companion = join(launch, APP, `tests`, COMPANION)
+    const editHook = (env) =>
+      runCli(
+        launch,
+        script,
+        [`--format=claude`, `--event=edit`],
+        JSON.stringify({ cwd: launch, tool_input: { file_path: companion } }),
+        env,
+      )
+    const stopHook = (env) =>
+      runCli(
+        launch,
+        script,
+        [`--format=claude`, `--event=stop`],
+        JSON.stringify({ cwd: launch }),
+        env,
+      )
+    const warmed = editHook(cache)
+    writeFileSync(companion, companionText(program.declaresAtHead))
+    const changed = runCli(
+      launch,
+      script,
+      [`--format=text`],
+      undefined,
+      uncached,
+    )
+    const changedCached = runCli(
+      launch,
+      script,
+      [`--format=text`],
+      undefined,
+      cache,
+    )
+    const hook = editHook(cache)
+    const stop = stopHook(cache)
+    const stopAgain = stopHook(cache)
+    return { warmed, changed, changedCached, hook, stop, stopAgain }
+  } finally {
+    rmSync(launch, { recursive: true, force: true })
+  }
+}
+
+// The cache campaign owns the environment of its runs, so it passes the cache
+// directory through `runCli` rather than the process environment.
+function cacheCampaign(name) {
+  const predicate = async (program) => {
+    await setImmediate()
+    reach.beginHistory()
+    if (program.declaresAtBase !== program.declaresAtHead) {
+      reach.reach(`cache-invalidated`)
+    }
+    if (program.declaresAtHead) reach.reach(`companion-declares`)
+    const observed = observedCache(program)
+    const edited = program.declaresAtBase !== program.declaresAtHead
+    const expected = {
+      warmed: predictCachedReport(program.declaresAtBase),
+      hook: predictCachedReport(program.declaresAtHead),
+      changed: predictCachedReport(program.declaresAtHead, edited),
+      changedCached: predictCachedReport(program.declaresAtHead, edited),
+      stop: predictCachedReport(program.declaresAtHead, edited),
+      stopAgain: predictCachedReport(program.declaresAtHead, edited),
+    }
+    for (const scope of Object.keys(expected)) {
+      compareSelected(observed[scope].oracles, expected[scope])
+    }
+  }
+  it(`${name}: fixed-seed campaign`, async () => {
+    const parameters = oracleFixedSeed(2238, {
+      numRuns: oracleRuns(BASE_RUNS),
+    })
+    oracleRoute(oracleRouteOf(parameters))
+    await fc.assert(fc.asyncProperty(cacheArbitrary, predicate), parameters)
+  }, 1_200_000)
+}
+
 // The declaration names the parts above. It runs nothing, so it follows them.
 declareOracle({
-  model: [predictSelected, predictRuleMarked],
+  model: [predictSelected, predictRuleMarked, predictCachedReport],
   check: [compareSelected, compareRuleSource],
-  grammar: [programArbitrary, constructedPrograms],
+  grammar: [programArbitrary, constructedPrograms, cacheArbitrary],
 })

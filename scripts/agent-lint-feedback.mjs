@@ -41,8 +41,18 @@
  * Without `cwd`, the checkout is the one that holds this script.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { createHash } from 'node:crypto'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import tsParser from '@typescript-eslint/parser'
@@ -298,8 +308,135 @@ function createLinter() {
   })
 }
 
-/** Lints the oracle files among `files`. */
-async function lint(eslint, files) {
+// The lint cache holds each oracle file's messages under a key of its content,
+// the test modules that it reaches (the rule reads them), the manifests that the
+// rule reads, and the lint configuration. An entry is reused only while every
+// part of its key is unchanged. ORACLE_LINT_CACHE_DIR overrides the directory,
+// and an empty value turns the cache off.
+const cacheDirectory =
+  process.env.ORACLE_LINT_CACHE_DIR ??
+  join(root, `node_modules`, `.cache`, `oracle-lint`)
+const requireFromRoot = createRequire(join(root, `package.json`))
+// A string literal that names a relative path: every import, export, and
+// re-export source of a module is one, so this reaches each module the rule can.
+const literalSpecifier = /(['"`])(\.[^'"`\n]*)\1/g
+
+function digest(...parts) {
+  const hash = createHash(`sha256`)
+  for (const part of parts) hash.update(`${part.length}:${part}`)
+  return hash.digest(`hex`)
+}
+
+/** The digest of a file's content, or of nothing when the file does not exist. */
+function fileDigest(file) {
+  return existsSync(file) ? digest(readFileSync(file, `utf8`)) : ``
+}
+
+/** The digest of the nearest package.json, which the rule reads for privacy. */
+function manifestDigest(file) {
+  for (let directory = dirname(file); ; directory = dirname(directory)) {
+    const manifest = join(directory, `package.json`)
+    if (existsSync(manifest)) return fileDigest(manifest)
+    if (dirname(directory) === directory) return ``
+  }
+}
+
+/** The installed plugin's manifest and rule sources. */
+function pluginDigest() {
+  const manifest = requireFromRoot.resolve(`${pluginName}/package.json`)
+  const sources = join(dirname(manifest), `src`)
+  return digest(
+    fileDigest(manifest),
+    ...readdirSync(sources, { recursive: true })
+      .filter((entry) => entry.endsWith(`.js`))
+      .sort()
+      .map((entry) => fileDigest(join(sources, entry))),
+  )
+}
+
+let lintConfiguration
+/**
+ * The lint configuration: this script, the check that it reports with, the
+ * settings module, ESLint's version, and the installed plugin's sources.
+ */
+function configuration() {
+  lintConfiguration ??= digest(
+    fileDigest(fileURLToPath(import.meta.url)),
+    fileDigest(
+      fileURLToPath(new URL(`./check-oracle-run-counts.mjs`, import.meta.url)),
+    ),
+    fileDigest(
+      fileURLToPath(new URL(`./oracle-lint-settings.mjs`, import.meta.url)),
+    ),
+    ESLint.version,
+    pluginDigest(),
+  )
+  return lintConfiguration
+}
+
+/** The test modules that a file reaches through imports, transitively, as the rule resolves them. */
+function reachedModules(file) {
+  const found = new Set()
+  const pending = [file]
+  while (pending.length > 0) {
+    const current = pending.pop()
+    for (const [, , specifier] of readFileSync(current, `utf8`).matchAll(
+      literalSpecifier,
+    )) {
+      const module = resolveImportedTestModule(current, specifier)
+      if (module !== undefined && !found.has(module)) {
+        found.add(module)
+        pending.push(module)
+      }
+    }
+  }
+  return [...found].sort()
+}
+
+/** The cache key of an oracle file's lint messages. */
+function lintKey(file) {
+  return digest(
+    configuration(),
+    relative(root, file),
+    ...[file, ...reachedModules(file)].flatMap((module) => [
+      relative(root, module),
+      fileDigest(module),
+      manifestDigest(module),
+    ]),
+  )
+}
+
+/** A cached value, or undefined when there is none or it cannot be read. */
+function readCache(name) {
+  if (cacheDirectory === ``) return undefined
+  try {
+    return JSON.parse(
+      readFileSync(join(cacheDirectory, `${name}.json`), `utf8`),
+    )
+  } catch {
+    return undefined
+  }
+}
+
+/** Stores a value. The cache is optional, so a failed write only costs a later lint. */
+function writeCache(name, value) {
+  if (cacheDirectory === ``) return
+  try {
+    mkdirSync(cacheDirectory, { recursive: true })
+    const path = join(cacheDirectory, `${name}.json`)
+    writeFileSync(`${path}.${process.pid}.tmp`, JSON.stringify(value))
+    renameSync(`${path}.${process.pid}.tmp`, path)
+  } catch {
+    // Without a stored value, the next run lints the file again.
+  }
+}
+
+/**
+ * Lints the oracle files among `files`. A file whose key is cached keeps its
+ * stored messages, and ESLint runs only on the others.
+ */
+async function lint(files) {
+  const eslint = createLinter()
   const lintable = []
   for (const file of new Set(files)) {
     if (!existsSync(file) || relative(root, file).startsWith(`..`)) continue
@@ -308,15 +445,44 @@ async function lint(eslint, files) {
     lintable.push(file)
   }
   if (lintable.length === 0) return []
-  const results = await eslint.lintFiles(lintable)
-  // Keep oracle reports and files that cannot be parsed. This drops the
-  // notices that the ignored directives have no effect.
-  return results.map((result) => ({
-    ...result,
-    messages: result.messages.filter(
-      (message) => message.fatal || message.ruleId?.startsWith(`oracle/`),
-    ),
-  }))
+  const keys = cacheDirectory === `` ? undefined : lintable.map(lintKey)
+  const stored = keys?.map((key) => readCache(key)) ?? []
+  const missing = lintable.filter((_, index) => stored[index] === undefined)
+  const linted = new Map()
+  if (missing.length > 0) {
+    // Keep oracle reports and files that cannot be parsed. This drops the
+    // notices that the ignored directives have no effect.
+    for (const result of await eslint.lintFiles(missing)) {
+      linted.set(
+        result.filePath,
+        result.messages.filter(
+          (message) => message.fatal || message.ruleId?.startsWith(`oracle/`),
+        ),
+      )
+    }
+  }
+  return lintable.map((file, index) => {
+    if (stored[index] !== undefined) {
+      return { filePath: file, messages: stored[index] }
+    }
+    const messages = linted.get(file) ?? []
+    if (keys !== undefined && linted.has(file))
+      writeCache(keys[index], messages)
+    return { filePath: file, messages }
+  })
+}
+
+/**
+ * The key of a stop report: the merge-base, the branch's changed files, the
+ * configuration, and the lint keys of the selected oracle files.
+ */
+function stopKey(files, changed) {
+  return digest(
+    mergeBase(root),
+    configuration(),
+    ...changed.flatMap((file) => [relative(root, file), fileDigest(file)]),
+    ...files.map(lintKey),
+  )
 }
 
 function reportText(results) {
@@ -399,9 +565,11 @@ function selectFiles(input) {
     }
   }
   const edited = options.event === `edit` && isHook ? editedFiles(input) : []
-  return edited.length > 0
-    ? { scope: `edited`, files: affectedOracleFiles(edited) }
-    : { scope: `changed`, files: affectedOracleFiles(changedFiles()) }
+  if (edited.length > 0) {
+    return { scope: `edited`, files: affectedOracleFiles(edited) }
+  }
+  const changed = changedFiles()
+  return { scope: `changed`, files: affectedOracleFiles(changed), changed }
 }
 
 /**
@@ -428,12 +596,19 @@ if (delegate) {
   )
   process.exitCode = result.status ?? 1
 } else {
-  const { scope, files } = selectFiles(input)
-  const report = [
-    reportText(await lint(createLinter(), files)),
-    runBudgetReport(scope),
-  ]
-    .filter(Boolean)
-    .join(`\n`)
+  const { scope, files, changed } = selectFiles(input)
+  // A stop report depends only on the branch's changes and the oracle files it
+  // selects. When their keys are unchanged, the last stop report is repeated.
+  const stopCache =
+    options.event === `stop` && scope === `changed` && cacheDirectory !== ``
+  const key = stopCache ? stopKey(files, changed) : undefined
+  const stored = stopCache ? readCache(`stop`) : undefined
+  const hit = stopCache && stored?.key === key
+  const report = hit
+    ? stored.report
+    : [reportText(await lint(files)), runBudgetReport(scope)]
+        .filter(Boolean)
+        .join(`\n`)
+  if (stopCache && !hit) writeCache(`stop`, { key, report })
   respond(report, input, scope)
 }
