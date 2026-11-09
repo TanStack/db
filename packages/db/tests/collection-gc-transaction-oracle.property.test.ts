@@ -606,7 +606,7 @@ oracleProperty({
         // generated settlements are dropped. Its end becomes cleanup.
         name: `explicit cleanup while a transaction persists`,
         enters: [`cleanup-while-persisting`],
-        build: (generated) => ({
+        build: (generated): History => ({
           steps: [
             insertStep(`b`),
             ...generated.steps.filter((step) => step.kind !== `settle`),
