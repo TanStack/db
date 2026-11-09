@@ -737,11 +737,14 @@ const replays: ReadonlyArray<
 // (law 3's restart claim, #2334). The two kinds of entry differ. A whole-file
 // entry owns the functions defined in that file and nothing it refers to in
 // another file, so `src/live-query-observer.ts` alone never reached the
-// subscription. A `#function` entry owns that function's text and, by the
-// gap report's ownership rule (owners.mjs in @tanstack/oracles, maintainer
-// decision 2026-11-08), every package function its text refers to, so this
-// entry also owns discardTruncateReplay, setReadyIfIdle, and
-// cancelAcquisition, which its ownership analysis lists. No Collection
+// subscription. A `#function` entry owns that function's text, every function
+// defined inside it, and its static reference tree within the package: each
+// package function, method, or class its text refers to, then what those refer
+// to in turn, stopping at the package boundary (owners.mjs in @tanstack/oracles,
+// maintainer decisions 2026-11-05 and 2026-11-08). So this entry owns, through
+// that walk, the functions it reaches, including
+// CollectionSubscription.discardTruncateReplay,
+// CollectionSubscription.setReadyIfIdle, and cancelAcquisition. No Collection
 // subscription owner subscribes with the option.
 
 declareOracle({
