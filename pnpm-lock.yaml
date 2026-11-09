@@ -5,6 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  '@fast-check/vitest>fast-check': ^4.10.2
   chokidar@^4.0.0: 4.0.1
   trailbase>uuid: 13.0.2
   metro: 0.82.5
@@ -6568,7 +6569,7 @@ packages:
       eslint: ^8.0.0 || ^9.0.0
 
   '@tanstack/eslint-plugin-oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@c090f43':
-    resolution: {integrity: sha512-XUiQPqnbh8mypr1KRHgA+yqQ32hs/LO6tnTG/oqsKQyiM4zSM/F/yGZ29w79a+nPG+1ObyevEAPDHzafxms5uA==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@c090f43}
+    resolution: {tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/eslint-plugin-oracles@c090f43}
     version: 0.0.0
     engines: {node: '>=20'}
     peerDependencies:
@@ -6579,7 +6580,7 @@ packages:
     engines: {node: '>=20.19'}
 
   '@tanstack/oracles@https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@c090f43':
-    resolution: {integrity: sha512-tGso9uSaSo/NPKUkie5Ov1TJFdw7aFVyuAmAP0iuSFuTIP2r+tG+y9tizXnkJ2L6o1dluhKA7dNgIyzufoX5tA==, tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@c090f43}
+    resolution: {tarball: https://pkg.pr.new/TanStack/oracles/@tanstack/oracles@c090f43}
     version: 0.0.0
     engines: {node: '>=20'}
     hasBin: true
@@ -9363,10 +9364,6 @@ packages:
     resolution: {integrity: sha512-CGnyrvbhPlWYMngksqrSSUT1BAVP49dZocrHuK0SvtR0D5TMs5wP0o3j7jexDJW01KSadjBp1M/71o/KR3nD1w==}
     engines: {node: '>=18'}
 
-  fast-check@3.23.2:
-    resolution: {integrity: sha512-h5+1OzzfCC3Ef7VbtKdcv7zsstUQwUDlYpUTvjeUsJAssPgLn7QzbboPtL5ro04Mq0rPOsMzl7q5hIbRs2wD1A==}
-    engines: {node: '>=8.0.0'}
-
   fast-check@4.10.2:
     resolution: {integrity: sha512-iK2f+YrcmoeGqk6fA0ea2bptcu/itMIm4NfEozq6N25+aG6h7s5HZbB/k1aV7b5w5sFLMCbbtRUsTVR+BgC3xw==}
     engines: {node: '>=12.17.0'}
@@ -11757,9 +11754,6 @@ packages:
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
-
-  pure-rand@6.1.0:
-    resolution: {integrity: sha512-bVWawvoZoBYpp6yIoQtQXHZjmz35RSVHnUOTefl8Vcjr8snTPY1wnpSPMWekcFwbxI6gtmT7rSYPFvz71ldiOA==}
 
   pure-rand@8.4.2:
     resolution: {integrity: sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng==}
@@ -16949,7 +16943,7 @@ snapshots:
 
   '@fast-check/vitest@0.5.0(vitest@5.0.5)':
     dependencies:
-      fast-check: 3.23.2
+      fast-check: 4.10.2
       vitest: 5.0.5(@types/node@25.2.2)(@vitest/coverage-istanbul@5.0.5)(@vitest/ui@5.0.5)(jsdom@27.4.0)(vite@8.3.5(@types/node@25.2.2)(esbuild@0.28.1)(jiti@2.7.0)(sass@1.90.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.1))
 
   '@gar/promise-retry@1.0.3': {}
@@ -23400,10 +23394,6 @@ snapshots:
 
   fake-indexeddb@6.2.5: {}
 
-  fast-check@3.23.2:
-    dependencies:
-      pure-rand: 6.1.0
-
   fast-check@4.10.2:
     dependencies:
       pure-rand: 8.4.2
@@ -25895,8 +25885,6 @@ snapshots:
   punycode.js@2.3.1: {}
 
   punycode@2.3.1: {}
-
-  pure-rand@6.1.0: {}
 
   pure-rand@8.4.2: {}
 
