@@ -447,6 +447,10 @@ export interface SyncConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 > {
+  /** Prepare source acknowledgement before dispatch; the guard must still hold at dispatch. */
+  beforeMutation?: (
+    collection: Collection<T, TKey, any, any, any>,
+  ) => Promise<() => boolean>
   sync: (params: {
     collection: Collection<T, TKey, any, any, any>
     /**
