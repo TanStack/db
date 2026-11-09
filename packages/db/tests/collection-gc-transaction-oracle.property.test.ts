@@ -78,6 +78,17 @@ import type { Deferred } from '../src/deferred.js'
  * Limits: paced mutations, offline transactions, live-query Collections, and
  * wall-clock corrections are not generated. A transaction that never settles
  * holds its Collections for as long as it persists.
+ *
+ * Retirement latency. Retirement before `gcTime` is a violation. After the
+ * deadline, the grid accepts a retirement only when the next checkpoint shows
+ * it, so the 20/60/120 ms grid checks retirement by the next step. Exact
+ * wall-clock cleanup latency is not promised (coverage map, GC retention
+ * boundaries entry). A retirement at `gcTime` + 1 ms therefore cannot be told
+ * apart from one at `gcTime` + 19 ms on this grid, and a mutant with that
+ * delay is indistinguishable here. The model compares strictly at the
+ * deadline, so a checkpoint at exactly `gcTime` owes no retirement. The law
+ * forbids only retirement before `gcTime`. Whether a retirement exactly at
+ * `gcTime` is legal is a maintainer decision that this oracle does not settle.
  */
 
 const GC_TIME_MS = 100
