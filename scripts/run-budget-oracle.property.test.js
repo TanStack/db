@@ -143,7 +143,21 @@ const budgetSkeleton = fc.record({
   // Whether a fixed seed is declared with oracleFixedSeed at base and at head.
   declaredAtBase: fc.boolean(),
   declaredAtHead: fc.boolean(),
+  // How a seed's literal is spelled. The script finds a seed by its value, so a
+  // seed in hexadecimal or with an exponent is a holder as a decimal one is.
+  spelling: fc.oneof(
+    { weight: 2, arbitrary: fc.constant(`decimal`) },
+    { weight: 1, arbitrary: fc.constant(`hex`) },
+    { weight: 1, arbitrary: fc.constant(`exponent`) },
+  ),
 })
+
+/** A seed's source spelling: decimal, hexadecimal, or with an exponent. */
+function spelledSeed(seed, spelling) {
+  if (spelling === `hex`) return `0x${seed.toString(16)}`
+  if (spelling === `exponent`) return `${seed / 1000}e3`
+  return `${seed}`
+}
 
 const fileForms = fc.record({
   oracleExtension: fc.oneof(
@@ -233,6 +247,7 @@ function resolveBudget(skeleton, index, sources, files) {
     wrapped: skeleton.form !== `framework` && skeleton.wrapped,
     declaredAtBase: skeleton.form === `seed` && skeleton.declaredAtBase,
     declaredAtHead: skeleton.form === `seed` && skeleton.declaredAtHead,
+    spelling: skeleton.spelling,
     before: skeleton.base,
     after: headValue,
     changed: headValue !== skeleton.base,
@@ -382,7 +397,7 @@ function renderFiles(program, revision) {
       support.line(
         budget.form !== `seed`
           ? `export const PROP_${i} = 'budget.q${i}'`
-          : `export const SEED_${i} = ${seed}`,
+          : `export const SEED_${i} = ${spelledSeed(seed, budget.spelling)}`,
       )
     }
     const literalAtCall =
@@ -429,7 +444,7 @@ function renderFiles(program, revision) {
         ? use(budget.form !== `seed` ? `PROP_${i}` : `SEED_${i}`, files.support)
         : budget.form !== `seed`
           ? `'budget.p${i}'`
-          : `${seed}`
+          : spelledSeed(seed, budget.spelling)
     const call =
       form === `property`
         ? `export const opts${i} = oraclePropertyOptions(${runs}, ${keyText})`
@@ -596,6 +611,7 @@ const STATES = [
   `framework-definition`,
   `migrated-to-framework`,
   `seed-migrated-to-framework`,
+  `seed-spelled-in-hex-or-exponent`,
   `support-only-change`,
   `oracle-and-support-change`,
   `lowered-budget`,
@@ -638,6 +654,9 @@ function recordStates(program) {
         states.add(`declared-seed`)
       if (!budget.declaredAtBase && budget.declaredAtHead)
         states.add(`seed-declared-at-head`)
+    }
+    if (budget.form === `seed` && budget.spelling !== `decimal`) {
+      states.add(`seed-spelled-in-hex-or-exponent`)
     }
     if (budget.callAt === `support`) states.add(`campaign-in-support`)
     if (budget.callAt === `oracle` && budget.fate === `swap`) {

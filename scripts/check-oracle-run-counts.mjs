@@ -478,6 +478,11 @@ function scopeBudgets(file, revision, reader) {
 // and re-export source is one, so the literals contain each module that the
 // AST walk reaches.
 const relativeLiteral = /(['"`])(\.[^'"`\n]*)\1/g
+// A numeric literal in any spelling: a decimal with an optional fraction and
+// exponent, or a hexadecimal, octal, or binary integer. Separators are removed
+// before the value is read. The lookbehind keeps an identifier's digits out.
+const numericLiteral =
+  /(?<![\w$.])(?:0[xob][\da-f_]+|\d[\d_]*(?:\.[\d_]*)?(?:e[+-]?\d[\d_]*)?|\.\d[\d_]*(?:e[+-]?\d[\d_]*)?)/gi
 
 /**
  * The files that a file reaches at head through relative literals, transitively.
@@ -489,9 +494,30 @@ class HeadReach {
   #reader
   #direct = new Map()
   #closure = new Map()
+  #numbers = new Map()
 
   constructor(reader) {
     this.#reader = reader
+  }
+
+  /**
+   * The values of the numeric literals in a file at head, in any spelling. A
+   * seed written as a literal, in decimal, hexadecimal, octal, binary, or with
+   * an exponent or separators, is one of them. Other tokens only add values.
+   */
+  numbers(file) {
+    if (!this.#numbers.has(file)) {
+      const text = this.#reader.text(file, `head`) ?? ``
+      this.#numbers.set(
+        file,
+        new Set(
+          [...text.matchAll(numericLiteral)].map(([literal]) =>
+            Number(literal.replaceAll(`_`, ``)),
+          ),
+        ),
+      )
+    }
+    return this.#numbers.get(file)
   }
 
   #targets(file) {
@@ -569,8 +595,18 @@ export function loweredRunBudgetsBetween(repo, base) {
     atHead ??= [...new Set([...reader.baseFiles(), ...changed])]
       .filter((other) => isOracleFile(other))
       .filter((other) => reader.exists(other, `head`))
+    // A fixed seed is a numeric literal, or a constant that a module in the
+    // reach declares, so a holder's reach must contain that value. Only the
+    // files that pass that test are computed exactly.
+    const seed = /^fixed seed (.+)$/.exec(key)
+    const mayHold = (other) =>
+      seed === null ||
+      [other, ...reach.of(other)].some((module) =>
+        reach.numbers(module).has(Number(seed[1])),
+      )
     return atHead.filter(
-      (other) => other !== file && scope(other, `head`).has(key),
+      (other) =>
+        other !== file && mayHold(other) && scope(other, `head`).has(key),
     )
   }
   const lowered = []
