@@ -49,13 +49,13 @@
   ],
   "dependencies": {
     "@tanstack/db-sqlite-persistence-core": "workspace:*",
-    "better-sqlite3": "^12.6.2"
+    "better-sqlite3": "^12.11.1"
   },
   "peerDependencies": {
     "typescript": ">=4.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@vitest/coverage-istanbul": "^5.0.5"
+    "@vitest/coverage-istanbul": "^5.1.0"
   }
 }
