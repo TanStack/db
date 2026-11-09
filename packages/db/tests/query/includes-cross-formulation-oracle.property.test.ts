@@ -1471,7 +1471,7 @@ describe(`includes cross-formulation oracle`, () => {
 
   // Checked direct replay witness:
   // TANSTACK_DB_ORACLE_SEED=1658004
-  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
+  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0
   // TANSTACK_DB_ORACLE_PROPERTY=includes-cross-formulation.equivalence
   // TANSTACK_DB_ORACLE_CALIBRATION=missing-parent
   // pnpm --filter @tanstack/db exec vitest --run --coverage.enabled=false
@@ -1508,7 +1508,7 @@ describe(`includes cross-formulation oracle`, () => {
       if (directReplay) {
         expect(failure.seed).toBe(replay.campaignSeed)
         expect(replay.replayPath).toBe(
-          `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
+          `0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
         )
         return
       }
@@ -1516,7 +1516,7 @@ describe(`includes cross-formulation oracle`, () => {
       if (failure.counterexamplePath === null)
         throw new Error(`missing-parent mutant did not produce a replay path`)
       expect(failure.counterexamplePath).toBe(
-        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
+        `0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
       )
       const replayResult = await fc.check(property, {
         seed: failure.seed,
@@ -1535,7 +1535,7 @@ describe(`includes cross-formulation oracle`, () => {
 
   // Checked direct replay witness:
   // TANSTACK_DB_ORACLE_SEED=1658005
-  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
+  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
   // TANSTACK_DB_ORACLE_PROPERTY=includes-cross-formulation.ordered-window
   // TANSTACK_DB_ORACLE_CALIBRATION=extra-child
   // pnpm --filter @tanstack/db exec vitest --run --coverage.enabled=false
@@ -1581,14 +1581,14 @@ describe(`includes cross-formulation oracle`, () => {
       expect(String(failure.errorInstance)).toContain(`checkpoint":0`)
       if (directReplay) {
         expect(failure.seed).toBe(replay.campaignSeed)
-        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
+        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
         return
       }
       expect(failure.numShrinks).toBeGreaterThan(0)
       if (failure.counterexamplePath === null)
         throw new Error(`extra-child mutant did not produce a replay path`)
       expect(failure.counterexamplePath).toBe(
-        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
+        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
       )
       const replayResult = await fc.check(property, {
         seed: failure.seed,
