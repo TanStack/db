@@ -2873,11 +2873,18 @@ export function eagerLiveSourceProperty(
 
 /**
  * Whether a calibration's `law` names the violated law: the same string, or a
- * pattern that matches the whole of it.
+ * pattern that matches the whole of it. The pattern is anchored at both ends,
+ * so an alternative that matches only a prefix of the law, as `EVID-2` does in
+ * `/EVID-2|EVID-2 \(awaitTxId \d+\)/`, cannot hide one that matches all of
+ * it. The `g`, `y`, and `m` flags are dropped: they would make the answer
+ * depend on the pattern's `lastIndex` or on one line of the law.
  */
-function namesLaw(law: string | RegExp, violated: string): boolean {
+export function namesLaw(law: string | RegExp, violated: string): boolean {
   if (typeof law === `string`) return violated === law
-  return violated.match(law)?.[0] === violated
+  return new RegExp(
+    `^(?:${law.source})$`,
+    law.flags.replace(/[gmy]/g, ``),
+  ).test(violated)
 }
 
 // Exported for calibration tests: the model's prediction for a history.

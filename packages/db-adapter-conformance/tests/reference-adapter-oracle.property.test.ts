@@ -16,6 +16,7 @@ import {
   eagerLiveSourceHistoryArb,
   eagerLiveSourceModel,
   eagerLiveSourceProperty,
+  namesLaw,
   reachStatesFor,
 } from '../src'
 import { referenceDriver } from './reference-adapter'
@@ -67,10 +68,10 @@ const campaignTimeoutMs = 120_000
 // A calibration names the whole law that its violation carries, such as
 // `FID-1 (values)`, or a pattern that matches the whole law where the table
 // accepts several. A part of a law, such as `FID-1`, names none, so a
-// calibration cannot pass on a broader law than it names.
+// calibration cannot pass on a broader law than it names. The property's
+// calibration mode and this check judge the name with the same `namesLaw`.
 function expectNamedLaw(violated: string, law: string | RegExp) {
-  if (typeof law === `string`) expect(violated).toBe(law)
-  else expect(violated).toMatch(new RegExp(`^(?:${law.source})$`))
+  expect(namesLaw(law, violated), `${violated} is named by ${law}`).toBe(true)
 }
 
 async function campaign(options: fc.Parameters<[unknown]>) {
@@ -132,7 +133,10 @@ describe(`eager live-source conformance: reference adapter`, () => {
     [`wait-off-by-one`, /EVID-1 \(awaitTxId \d+\)|EVID-2 \(awaitTxId \d+\)/],
     [`retired-evidence-before-ready`, `EVID-2 (awaitTxId 0)`],
     [`forgets-retired-evidence`, /EVID-2 \(awaitTxId \d+\)/],
-    [`leaks-waits-after-fail`, /EVID-2 \(awaitTxId \d+\)/],
+    // The pattern's first alternative is only a prefix of the law, so this
+    // calibration also checks that a pattern names a law only when it matches
+    // all of it: a leftmost match would find `EVID-2` and name nothing.
+    [`leaks-waits-after-fail`, /EVID-2|EVID-2 \(awaitTxId \d+\)/],
     [`wait-ignores-timeout`, /EVID-3 \(awaitTxId \d+\)/],
     [`disconnect-fails`, `RECON-1 (health error)`],
     [`renew-resubscribes`, `RENEW-1 (open provider subscriptions)`],

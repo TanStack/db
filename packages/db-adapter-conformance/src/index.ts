@@ -7,6 +7,7 @@ export {
   eagerLiveSourceProperty,
   eagerLiveSourceReachStates,
   jsonValueKinds,
+  namesLaw,
   reachStatesFor,
 } from './eager-live-source-oracle'
 export type {
