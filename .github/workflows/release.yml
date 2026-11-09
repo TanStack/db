@@ -118,6 +118,8 @@ jobs:
         run: pnpm --dir packages/db exec vitest --mergeReports .vitest-reports
       - name: Build packages
         run: pnpm run build
+      - name: Check that no build carries an oracle probe
+        run: node scripts/check-dist-probes.mjs
       - name: Run Changesets (version or publish)
         id: changesets
         uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0

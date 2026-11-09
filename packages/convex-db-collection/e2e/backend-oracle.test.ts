@@ -382,9 +382,7 @@ it.each([`insert`, `update`, `delete`] as const)(
             draft(fc.bigInt({ min: -(2n ** 63n), max: 2n ** 63n - 1n })),
             draft(fc.constantFrom(NaN, Infinity, -Infinity, -0)),
             draft(
-              fc
-                .uint8Array({ maxLength: 12 })
-                .map((bytes) => bytes.buffer as ArrayBuffer),
+              fc.uint8Array({ maxLength: 12 }).map((bytes) => bytes.buffer),
             ),
           )
     const histories = fc.record({
@@ -407,7 +405,7 @@ it.each([`insert`, `update`, `delete`] as const)(
     ]
     // Each operation owns its replay grammar. One insert/update bundle contains
     // six process histories; three delete bundles contain six too. Fixed and
-    // random lanes therefore retain the same six-history budget per operation.
+    // random campaigns therefore retain the same six-history budget per operation.
     const replayPrefix = `CONVEX_BACKEND_${operation.toUpperCase()}_ORACLE`
     await runOracleCampaign(
       replayPrefix,
@@ -420,9 +418,11 @@ it.each([`insert`, `update`, `delete`] as const)(
               uncertainFirst,
               !uncertainFirst,
             ]) {
-              for (const { text, rank, payload } of lostAcknowledgement
-                ? uncertain
-                : known) {
+              // The two payload tuples have different lengths, so the loop
+              // reads either one as an array of its drafts.
+              const drafts: ReadonlyArray<(typeof known)[number]> =
+                lostAcknowledgement ? uncertain : known
+              for (const { text, rank, payload } of drafts) {
                 reach.beginHistory()
                 await durableHistory(
                   {

@@ -20,8 +20,11 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   recordOracleReplay,
 } from '../../db/tests/oracle-config.js'
@@ -50,6 +53,7 @@ import type {
 } from './sqlite-core-adapter-support'
 
 declareOracle({
+  owns: [`src/sqlite-core-adapter.ts`],
   check: [expectResetResumeLaw, violation],
   model: [expectedResetResumeMetadata, expectedBindingRows],
 })
@@ -527,7 +531,7 @@ export function runSQLiteResetResumeOracleTests(
    *
    * Observed result and known omissions: exact settled rows, exact metadata
    * keys, and whether the durable Electric state is absent/reset/resume. The
-   * external-loss lane proves the generic adapter leaves metadata reachable;
+   * external-loss grammar proves the generic adapter leaves metadata reachable;
    * only the persisted+Electric suite judges whether that cursor is safe to
    * consume. The injected loss is not a claim that arbitrary SQL is a
    * supported public API. Partial resumed updates and SDK framing retain
@@ -542,6 +546,7 @@ export function runSQLiteResetResumeOracleTests(
   oracleReplayTest(it, `sqlite-resume.baseline-lineage`)(
     `resets collection metadata with its persisted baseline across generated adapter reopen histories`,
     async () => {
+      oracleRoute(`fixed seed`)
       const historyArbitrary = fc
         .constantFrom<ResetResumeHistory[`transition`]>(
           `compatible-reopen`,
@@ -583,7 +588,7 @@ export function runSQLiteResetResumeOracleTests(
           }),
         )
 
-      // A seed-only shared run reseeds this campaign. Ordinary runs keep the
+      // A shared run with only a seed is a reseeded campaign of this property. Ordinary runs keep the
       // fixed seed 1659, and a path replay runs once from its recorded path.
       const parameters = oraclePropertyOptions(
         24,
@@ -666,6 +671,7 @@ export function runSQLiteResetResumeOracleTests(
   )
 
   it(`leaves externally inconsistent metadata reachable for consumer validation`, async () => {
+    oracleRoute(`fixed history`)
     const observation = await observeResetResumeHistory(
       {
         fromSchemaVersion: 1,
@@ -700,6 +706,7 @@ export function runSQLiteResetResumeOracleTests(
   }, 30_000)
 
   it(`requires complete metadata reset while preserving non-reset metadata`, () => {
+    oracleRoute(`fixed history`)
     const compatibleEmpty: ResetResumeHistory = {
       fromSchemaVersion: 1,
       rows: [],
@@ -808,7 +815,7 @@ export function runSQLiteResetResumeOracleTests(
  *
  * Refinement: require the exact rows, reached predicate SELECTs, no
  * SQLite error, and no statement above its declared binding cap. The original 900-item
- * OR-chunk lowering is the hostile design: it reaches the intended SELECT and
+ * OR-chunk lowering is the mutant design: it reaches the intended SELECT and
  * fails the public result/binding comparison. The legacy CLI test interpolates
  * literals, so it cannot exercise this boundary.
  *
@@ -900,6 +907,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
     bindingFixedIt(
       `returns exact rows at single-list, statement-total, and typed boundaries`,
       async () => {
+        oracleRoute(`case`)
         const failures: Array<string> = []
         for (const spec of fixed) {
           const observation = await observe(spec)
@@ -916,6 +924,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
     bindingFixedIt(
       `honors total capacity through transactionWithDriver`,
       async () => {
+        oracleRoute(`fixed history`)
         const failures: Array<string> = []
         for (const spec of [
           single(`string`, 999),
@@ -937,6 +946,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
     bindingFixedIt(
       `honors the root connection limit when a distinct transaction driver omits it`,
       async () => {
+        oracleRoute(`fixed history`)
         for (const count of [100, 101]) {
           const spec: Spec = {
             label: `${count}-scalar-conjunction`,
@@ -962,6 +972,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
     bindingFixedIt(
       `never submits an over-capacity statement with many scalar predicates`,
       async () => {
+        oracleRoute(`fixed history`)
         const scalarStress: Spec = {
           label: `1000-scalar-conjunction`,
           valueKind: `string`,
@@ -998,6 +1009,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
           )
         }
       })
+      oracleRoute(oracleRouteOf(parameters))
       const details = await fc.check(property, parameters)
       recordOracleReplay(BINDING_PROPERTY, details)
       const reduced = details.counterexample?.[0]
@@ -1014,20 +1026,22 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
         )
       expect(
         details.failed,
-        `${label}: seed=${details.seed} path=${details.counterexamplePath ?? ``} first=${firstFailure?.kind ?? ``}@${firstFailure?.checkpoint ?? ``} reduced=${reducedProblem?.kind ?? ``}@${reducedProblem?.checkpoint ?? ``} sameViolation=${sameViolation}; ${details.error ?? ``}`,
+        `${label}: seed=${details.seed} path=${details.counterexamplePath ?? ``} first=${firstFailure?.kind ?? ``}@${firstFailure?.checkpoint ?? ``} reduced=${reducedProblem?.kind ?? ``}@${reducedProblem?.checkpoint ?? ``} sameViolation=${sameViolation}; ${String(details.errorInstance ?? ``)}`,
       ).toBe(false)
     }
 
     bindingFixedIt(
       `preserves exact rows across fixed-seed binding histories`,
       async () => {
-        await campaign(`fixed seed`, {
-          numRuns: oracleRuns(BINDING_RUNS),
-          seed: BINDING_FIXED_SEED,
-        })
+        await campaign(
+          `fixed seed`,
+          oracleFixedSeed(BINDING_FIXED_SEED, {
+            numRuns: oracleRuns(BINDING_RUNS),
+          }),
+        )
       },
     )
-    // Runs in ordinary and seed-only runs, and as the replay of its property.
+    // Runs in ordinary and reseeded campaigns, and as the replay of its property.
     oracleReplayTest(it, BINDING_PROPERTY)(
       `preserves exact rows across random-seed binding histories`,
       async () => {

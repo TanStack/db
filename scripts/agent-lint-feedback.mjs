@@ -42,19 +42,20 @@
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import tsParser from '@typescript-eslint/parser'
 import { ESLint } from 'eslint'
-import oraclePlugin from './eslint-plugin-oracle/index.js'
-import { resolveImportedTestModule } from './eslint-plugin-oracle/rules/no-unit-test.js'
+import oraclePlugin from '@tanstack/eslint-plugin-oracles'
+import { resolveImportedTestModule } from '@tanstack/eslint-plugin-oracles/rules/no-unit-test'
 import {
   describeLoweredRunBudget,
   isOracleFile,
   loweredRunBudgetsBetween,
   mergeBase,
 } from './check-oracle-run-counts.mjs'
+import { oracleLintSettings } from './oracle-lint-settings.mjs'
 
 const { values: options, positionals } = parseArgs({
   options: {
@@ -158,21 +159,69 @@ function reachesEdited(oracle, edited) {
   return false
 }
 
-const pluginSources = join(root, `scripts`, `eslint-plugin-oracle`) + sep
+// The lint configuration: the settings module configures the plugin for this
+// repository, and the lockfile pins @tanstack/eslint-plugin-oracles.
+const lintSettings = join(root, `scripts`, `oracle-lint-settings.mjs`)
+const lockfile = join(root, `pnpm-lock.yaml`)
+const pluginName = `@tanstack/eslint-plugin-oracles`
+
+/**
+ * The lockfile's entries for the plugin: each line that names it, with the
+ * lines indented under it. They are its importer entry, its resolution, and
+ * its snapshot with its resolved dependencies, so they change exactly when an
+ * install would put another copy of the plugin or of its direct dependencies
+ * in place.
+ */
+function pluginEntries(text) {
+  const lines = text.split(`\n`)
+  const entries = []
+  for (let index = 0; index < lines.length; index++) {
+    if (!lines[index].includes(pluginName)) continue
+    const indent = lines[index].search(/\S/)
+    entries.push(lines[index])
+    while (lines[index + 1]?.search(/\S/) > indent) entries.push(lines[++index])
+  }
+  return entries.join(`\n`)
+}
+
+/**
+ * Whether the plugin's lockfile entries differ from the merge-base's.
+ * `mergeBase` fails without a main branch, as `changedFiles` does. A merge-base
+ * without a lockfile has no plugin entries; any other git failure throws. The
+ * lockfile is larger than a child process's default 1 MiB output buffer, so
+ * its text is read with no limit.
+ */
+function pluginChanged() {
+  const base = mergeBase(root)
+  const tracked = git(`ls-tree`, `--name-only`, base, `--`, `pnpm-lock.yaml`)
+  const before =
+    tracked === ``
+      ? ``
+      : execFileSync(`git`, [`show`, `${base}:pnpm-lock.yaml`], {
+          cwd: root,
+          encoding: `utf8`,
+          maxBuffer: Infinity,
+        })
+  const current = existsSync(lockfile) ? readFileSync(lockfile, `utf8`) : ``
+  return pluginEntries(before) !== pluginEntries(current)
+}
 
 /**
  * The oracle files that a lint of `files` must cover. The rule reads relative
  * imports of test modules, so an oracle file is covered when it is named, or
  * when it reaches a named file through test modules. Production files select
- * nothing, because the rule does not follow them. A change to the rule's own
- * sources changes every oracle result, so it selects every oracle file.
+ * nothing, because the rule does not follow them. A change to the lint
+ * configuration changes every oracle result, so it selects every oracle file:
+ * an edit to the settings, or a lockfile whose plugin entries differ from the
+ * merge-base's. Another lockfile edit, such as an unrelated dependency bump,
+ * installs the same rule, so it selects nothing.
  */
 function affectedOracleFiles(files) {
   const edited = new Set(files)
   const oracles = new Set(
     [...oracleFilesInTree(), ...files].filter((file) => isOracleFile(file)),
   )
-  if ([...edited].some((file) => file.startsWith(pluginSources)))
+  if (edited.has(lintSettings) || (edited.has(lockfile) && pluginChanged()))
     return [...oracles]
   return [...oracles].filter((oracle) => reachesEdited(oracle, edited))
 }
@@ -238,6 +287,7 @@ function createLinter() {
         languageOptions: { parser: tsParser },
       },
       { linterOptions: { noInlineConfig: true } },
+      { settings: oracleLintSettings },
       // `lint` passes only oracle files, chosen by `isOracleFile`, so the rules
       // apply to every file that it passes.
       {

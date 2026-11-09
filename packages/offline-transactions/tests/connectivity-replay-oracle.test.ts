@@ -1,8 +1,13 @@
-import { expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
-import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
+import {
+  atOracleCheckpoint,
+  cleanupOfflineOracle,
+  useControlledClock,
+} from './oracle-lifecycle'
 
 /**
  * # May a false browser online hint strand a visible tab's durable work?
@@ -29,6 +34,9 @@ import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
  * transaction path; public outbox, provider calls, and commit settlement are
  * compared before and after notification. Baseline main fails at the visible
  * checkpoint with zero provider calls; the fixture uses no elapsed-time retry.
+ * Each history runs on a controlled clock (timers and `Date` virtual,
+ * macrotask turns real), so a checkpoint that a retry backoff would end
+ * fails at its virtual bound at once.
  */
 function expectedAt(phase: `hidden` | `visible`): {
   providerCalls: number
@@ -40,11 +48,29 @@ function expectedAt(phase: `hidden` | `visible`): {
     : { providerCalls: 1, outboxEntries: 0, callerState: `fulfilled` }
 }
 
-declareOracle({ model: [expectedAt] })
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [
+    `src/OfflineExecutor.ts#OfflineExecutor.getOnlineDetector`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.peekOutbox`,
+  ],
+  model: [expectedAt],
+})
+
+let releaseClock: (() => void) | undefined
+beforeEach(() => {
+  releaseClock = useControlledClock()
+})
+afterEach(() => {
+  releaseClock?.()
+})
 
 it.each([`visibilitychange`, `explicit retry`] as const)(
   `replays a committed outbox write on %s in a visible tab with a false online hint`,
   async (signal) => {
+    oracleRoute(`case`)
     const visibilityListeners = new Set<() => void>()
     vi.stubGlobal(`navigator`, { ...navigator, onLine: false })
     vi.stubGlobal(`document`, {

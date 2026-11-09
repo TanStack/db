@@ -47,7 +47,7 @@
  * first subscriber. The separate sibling-resumption grammar below uses
  * controlled asynchronous loads. The broad grammar does not generate source
  * failure, asynchronous loads, or several live-query consumers. The
- * subscription lifecycle oracle owns those once acquisition has resumed. Pinned blocks cover pooled views,
+ * subscription lifecycle oracle owns those once acquisition has resumed. Fixed blocks cover pooled views,
  * `DbClient` stream preloads, a subscriber that outlives cleanup, and reads
  * that wait for readiness.
  */
@@ -64,7 +64,13 @@ import { resumeDeferredLiveQueryCollections } from '../src/live-query-options.js
 import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
 import { expectedStartHandoff } from './collection-subscription-lifecycle-grammar-oracle.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from './oracle-config.js'
 import { createOracleReach } from './oracle-reach.js'
 import { declareOracle } from './oracle-declaration.js'
 import {
@@ -418,6 +424,7 @@ describe(`live-query deferred acquisition`, () => {
       for (const depth of [1, 2] as const) {
         for (const [name, commands] of Object.entries(HISTORIES)) {
           it(`${state}, ${shape}, depth ${depth}: ${name}`, async () => {
+            oracleRoute(`case`)
             return runAcquisitionHistory(state, shape, depth, commands)
           })
         }
@@ -441,7 +448,15 @@ describe(`live-query deferred acquisition`, () => {
  * client, which must not mistake the absent config for a live-query builder.
  */
 // The pooled entry point takes the internal builder, as its own oracle does.
+// What this oracle owns: the gap report judges the deferred sync-start and resumption
+// entry points and pooled live-query creation by this file's histories.
 declareOracle({
+  owns: [
+    `src/live-query-options.ts#resumeDeferredLiveQueryCollections`,
+    `src/query/pooled-live-query.ts#createPooledLiveQuery`,
+    `src/collection/index.ts#CollectionImpl._deferSyncStart`,
+    `src/collection/index.ts#CollectionImpl._resumeSyncStart`,
+  ],
   check: [runAcquisitionHistory, runPooledHistory, runDeferredSiblingHistory],
   model: [
     initialModel,
@@ -518,6 +533,7 @@ describe(`pooled live-query deferred acquisition`, () => {
   for (const state of [`eager-idle`, `eager-running`] as const) {
     for (const [name, commands] of Object.entries(pooledHistories)) {
       it(`${state}: ${name}`, async () => {
+        oracleRoute(`case`)
         return runPooledHistory(state, commands)
       })
     }
@@ -583,6 +599,7 @@ describe(`a subscriber that outlives cleanup`, () => {
       cleanupAt,
       restartFromCleanup,
     }) => {
+      oracleRoute(`case`)
       const expected = expectedReplacementRun(state, reader)
       const { collection: source, counts } = makeSource(state)
       const { outer, collections } = makeLiveQuery(source, shape, depth)
@@ -675,6 +692,11 @@ describe(`render sync-start handoff error provenance`, () => {
         `undefined-cause`,
         `healthy`,
       ])
+      const parameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(2229, { numRuns: oracleRuns(100) })
+          : oraclePropertyOptions(100, `live-query.start-handoff`)
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.record({
@@ -747,9 +769,7 @@ describe(`render sync-start handoff error provenance`, () => {
             }
           },
         ),
-        campaign === `fixed`
-          ? { numRuns: oracleRuns(100), seed: 2229 }
-          : oraclePropertyOptions(100, `live-query.start-handoff`),
+        parameters,
       )
       reach.assertReached()
       console.info(
@@ -921,6 +941,8 @@ async function runDeferredSiblingHistory(history: DeferredSiblingHistory) {
 }
 describe(`deferred demand joining a sibling replay`, () => {
   for (const history of deferredSiblingHistories)
-    it(`finishes after resumption: ${JSON.stringify(history)}`, () =>
-      runDeferredSiblingHistory(history))
+    it(`finishes after resumption: ${JSON.stringify(history)}`, () => {
+      oracleRoute(`case`)
+      return runDeferredSiblingHistory(history)
+    })
 })

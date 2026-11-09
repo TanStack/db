@@ -440,8 +440,8 @@ produce. The exported `compileQuery` receiver checks both compilation orders
 through FROM, JOIN and union placement at initial graph drain. Its raw output
 comparison is differential and supplies no independent Effect-root attribution
 policy. Optimizer cloning can prevent an original raw-key cache hit in union
-placement; that path checks propagation and transparency instead.
-Separate static receiving-type gaps remain in the
+placement; that path checks propagation and transparency instead. Separate
+static receiving-type limits remain in the
 [deferred oracle record](../../../../../docs/contributing/oracle-reviews/2026-10-29-pr-2171-deferred-oracles.md).
 
 D2 hashes enumerable symbol keys and uses exact local-symbol identity plus
@@ -946,6 +946,9 @@ next public batch reconciles retained subscriber rows against the installed
 state, including deletions for keys that do not return. An empty ready batch
 also reconciles an empty replacement. On-demand sources cannot infer absence
 from their partial installed state; their replay barrier owns replacement.
+A live-query observer's subscription retains no rows across cleanup: the
+observer's `cleaned-up` snapshot shows none, so every row of the next sync
+run, including one equal to a row it showed before, reaches it as new.
 
 ### Source cancellation and applied settlement
 
@@ -2095,10 +2098,10 @@ expected-failure guard for a planner or ownership defect that this graph does
 not own.
 
 Run the DB oracle set with `pnpm test:oracles` from `packages/db`. Broad
-properties use FastCheck's random seed, while structural matrices keep fixed
-seeds so each run covers the same named cells. Increase both corpora with
-`TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10 pnpm test:oracles`. Preserve FastCheck's
-reported seed and shrink path while reducing a failure. Replay a broad
+properties draw a random campaign seed, while structural matrices use fixed-seed
+campaigns so each run covers the same named cells. Increase both corpora with
+`TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10 pnpm test:oracles`. Preserve the reported
+campaign seed and shrink path while reducing a failure. Reseed a broad
 campaign with `TANSTACK_DB_ORACLE_SEED=<seed> pnpm test:oracles`, then add the
 smallest case as a deterministic regression trace.
 

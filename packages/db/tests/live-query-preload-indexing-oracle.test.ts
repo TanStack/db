@@ -22,6 +22,7 @@ import {
   expectedIndexing,
   indexConfigurations,
 } from './conformance/indexing-config-oracle'
+import { oracleRoute } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
 import { createOracleReach } from './oracle-reach'
 import { withOracleCleanup } from './utils'
@@ -48,7 +49,10 @@ function preloadIndexHistories() {
     ),
   )
 }
+// What this oracle owns: the gap report judges DbClient.preloadLiveQuery,
+// the explicit preload admission path, by this file's finite declaration grammar.
 declareOracle({
+  owns: [`src/client.ts#DbClient.preloadLiveQuery`],
   grammar: [preloadIndexHistories],
   model: [expectedIndexing],
   check: [expectIndexingAdmission],
@@ -57,6 +61,7 @@ declareOracle({
 test.each(preloadIndexHistories())(
   `preload indexing admission: %j`,
   async ({ first, second, phase, identity }) => {
+    oracleRoute(`case`)
     const reach = createOracleReach(`preload indexing/${phase}/${identity}`, [
       `admission`,
       ...(first ? [`original-reuse`] : []),

@@ -1,5 +1,7 @@
 import { expect, it } from 'vitest'
 import { runOptimisticHistory } from './optimistic-history-oracle.js'
+import { oracleRoute } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { HistoryRow, OptimisticStep } from './optimistic-history-oracle.js'
 
 /**
@@ -13,6 +15,18 @@ import type { HistoryRow, OptimisticStep } from './optimistic-history-oracle.js'
  * cuts, stale previous values, and updates mislabeled as inserts.
  */
 
+// What this oracle owns: the gap report judges how optimistic publication
+// reaches the Collection's state, its source sync, and its transactions, by
+// this file's tests. The history model and driver live in
+// optimistic-history-oracle.ts, which declares its own parts.
+declareOracle({
+  owns: [
+    `src/collection/state.ts`,
+    `src/collection/sync.ts`,
+    `src/transactions.ts`,
+  ],
+})
+
 const initial: Array<HistoryRow> = [
   { id: 1, a: 0, b: 0, c: 0 },
   { id: 2, a: 0, b: 0, c: 0 },
@@ -21,6 +35,7 @@ const initial: Array<HistoryRow> = [
 it.each([false, true])(
   `deletes the prior published row, queued insert=%s`,
   async (insert) => {
+    oracleRoute(`case`)
     await runOptimisticHistory(insert ? [] : [{ id: 2, a: 0, b: 0, c: 0 }], [
       { type: `edit`, key: 1, fields: { b: 0 }, optimistic: false },
       {
@@ -48,6 +63,7 @@ const history = (success: boolean): Array<OptimisticStep> => [
 it.each([false, true])(
   `preserves old origin through truncate, replacement=%s`,
   async (replace) => {
+    oracleRoute(`case`)
     await runOptimisticHistory(initial, [
       { type: `edit`, key: 1, fields: { c: 1 }, optimistic: false },
       {
@@ -63,6 +79,7 @@ it.each([false, true])(
 it.each([true, false])(
   `checks every complete publication through settlement %s`,
   async (success) => {
+    oracleRoute(`case`)
     await runOptimisticHistory(initial, history(success))
   },
 )
@@ -75,6 +92,7 @@ it.each([true, false])(
 it.each([1, 2] as const)(
   `attributes only the first of %i queued same-key source transactions locally`,
   async (sourceTransactions) => {
+    oracleRoute(`case`)
     const steps: Array<OptimisticStep> = [
       { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
       {
@@ -108,6 +126,7 @@ it.each([1, 2] as const)(
 // Attribution belongs to one atomic source transaction, even when it writes
 // the same key twice. Its final row keeps the attribution of its first write.
 it(`keeps local attribution through repeated same-key writes in one source transaction`, async () => {
+  oracleRoute(`fixed history`)
   const counts = await runOptimisticHistory(
     [{ id: 1, a: 0, b: 0, c: 0 }],
     [
@@ -138,6 +157,7 @@ it(`keeps local attribution through repeated same-key writes in one source trans
 it.each([false, true])(
   `attributes a delete and reinsert in one source transaction, later=%s`,
   async (later) => {
+    oracleRoute(`case`)
     const counts = await runOptimisticHistory(
       [{ id: 1, a: 0, b: 0, c: 0 }],
       [
@@ -176,6 +196,7 @@ it.each([false, true])(
 // A source delete also touches the key even when that source held no row.
 // It consumes the one local attribution, so a later source insert is remote.
 it(`consumes local attribution with an absent-key source delete`, async () => {
+  oracleRoute(`fixed history`)
   const counts = await runOptimisticHistory(
     [],
     [
@@ -204,6 +225,7 @@ it(`consumes local attribution with an absent-key source delete`, async () => {
 // still persists. A same-key source row can therefore receive local attribution
 // even if that mutation later fails. The model compares both publication cuts.
 it(`retains active-mutation attribution from a truncate after failure`, async () => {
+  oracleRoute(`fixed history`)
   const counts = await runOptimisticHistory(
     [],
     [
@@ -240,6 +262,7 @@ it.each(
 )(
   `keeps source attribution through pending settlement, optimistic=$optimistic outcome=$outcome`,
   async ({ optimistic, outcome }) => {
+    oracleRoute(`case`)
     const counts = await runOptimisticHistory(
       [],
       [
@@ -272,6 +295,7 @@ it.each(
 it.each([false, true])(
   `settles an earlier pending manual request after a later edit starts, success=%s`,
   async (success) => {
+    oracleRoute(`case`)
     const counts = await runOptimisticHistory(
       [],
       [
@@ -307,6 +331,7 @@ it.each([false, true])(
 it.each([false, true])(
   `consumes truncate attribution before a later same-key transaction in one drain, later=%s`,
   async (later) => {
+    oracleRoute(`case`)
     const counts = await runOptimisticHistory(
       [{ id: 1, a: 0, b: 0, c: 0 }],
       [
@@ -351,11 +376,12 @@ it.each([false, true])(
 
 // A truncate consumes attribution for keys it writes, while an active edit on
 // another key still owns its first later source transaction in the same drain.
-// The nonoptimistic lane exposes source origin at the drain cut; the optimistic
-// lane exposes it when the failed edit drops its overlay.
+// The nonoptimistic production path exposes source origin at the drain cut; the optimistic
+// production path exposes it when the failed edit drops its overlay.
 it.each([false, true])(
   `retains active attribution for another key after truncate, optimistic=%s`,
   async (optimistic) => {
+    oracleRoute(`case`)
     const counts = await runOptimisticHistory(
       [],
       [
@@ -419,6 +445,7 @@ it.each(overlappingCases)(
     sourceTransactions,
     settleSecondFirst,
   }) => {
+    oracleRoute(`case`)
     const counts = await runOptimisticHistory(
       [{ id: 1, a: 0, b: 0, c: 0 }],
       [
@@ -465,6 +492,7 @@ it.each([
   `previous-value`,
   `update-as-insert`,
 ] as const)(`rejects captured callback corruption: %s`, async (fault) => {
+  oracleRoute(`calibration`)
   // Rollback then queued source drain supplies two distinct complete cuts.
   await runOptimisticHistory(initial, history(false))
   await expect(
@@ -478,6 +506,7 @@ it.each([
 // and a later active edit covers the key while a sync transaction waits.
 // The key must publish once when the edit's overlay and the sync apply.
 it(`publishes a key once after a settled delete beneath a later active edit`, async () => {
+  oracleRoute(`fixed history`)
   await runOptimisticHistory(
     [{ id: 1, a: 0, b: 0, c: 0 }],
     [

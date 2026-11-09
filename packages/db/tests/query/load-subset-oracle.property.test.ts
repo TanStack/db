@@ -5,7 +5,10 @@ import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import {
+  oracleFixedSeed,
   oracleRandomParameters,
+  oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -277,6 +280,7 @@ const exactScenarioRuns = 40 * multiplier
 // attempt with the transports that it expects. The grammar is the exact-demand
 // trace arbitrary, which the calibration test below reads for coverage.
 declareOracle({
+  owns: ['src/query/subset-dedupe.ts'],
   check: [
     assertCompletedExactDemandTrace,
     assertConcurrentExactDemandTrace,
@@ -289,6 +293,7 @@ describe(`exact loadSubset demand oracle`, () => {
   it.each(exactDemandAxisPairs)(
     `distinguishes a change to %s in completed and concurrent demands`,
     async (_axis, first, second) => {
+      oracleRoute(`case`)
       assertCompletedExactDemandTrace([first, second, first])
       await assertConcurrentExactDemandTrace({
         trace: [first, second, first],
@@ -298,6 +303,7 @@ describe(`exact loadSubset demand oracle`, () => {
   )
 
   it(`uses SQL unknown for nullish comparisons in the independent model`, () => {
+    oracleRoute(`fixed history`)
     const missing = new PropRef<number | null>([`missing`])
 
     expect(
@@ -312,10 +318,11 @@ describe(`exact loadSubset demand oracle`, () => {
   })
 
   it(`generates repeated, cursor, empty, and unbounded exact demands`, () => {
-    const traces = fc.sample(exactDemandTraceArbitrary, {
-      seed: 1656,
-      numRuns: 200,
-    })
+    oracleRoute(`fixed seed`)
+    const traces = fc.sample(
+      exactDemandTraceArbitrary,
+      oracleFixedSeed(1656, { numRuns: 200 }),
+    )
     const demands = traces.flat()
 
     expect(
@@ -332,47 +339,62 @@ describe(`exact loadSubset demand oracle`, () => {
     expect(new Set(demands.map(({ offset }) => offset)).size).toBeGreaterThan(1)
   })
 
-  fcTest.prop([exactDemandTraceArbitrary], {
+  const exactDemandTraceFixedSeed = oracleFixedSeed(1657, {
     numRuns: exactScenarioRuns,
-    seed: 1657,
-  })(
+  })
+  fcTest.prop([exactDemandTraceArbitrary], exactDemandTraceFixedSeed)(
     `starts each completed exact demand once for a fixed seed`,
-    assertCompletedExactDemandTrace,
+    (...args: Parameters<typeof assertCompletedExactDemandTrace>) => {
+      oracleRoute(oracleRouteOf(exactDemandTraceFixedSeed))
+      return assertCompletedExactDemandTrace(...args)
+    },
   )
 
-  fcTest.prop(
-    [exactDemandTraceArbitrary],
-    oracleRandomParameters(
-      exactScenarioRuns,
-      replay,
-      `load-subset.exact-completion`,
-    ),
-  )(
+  const exactDemandTraceCampaign = oracleRandomParameters(
+    exactScenarioRuns,
+    replay,
+    `load-subset.exact-completion`,
+  )
+  fcTest.prop([exactDemandTraceArbitrary], exactDemandTraceCampaign)(
     `starts each completed exact demand once for a random or replayed seed`,
-    assertCompletedExactDemandTrace,
+    (...args: Parameters<typeof assertCompletedExactDemandTrace>) => {
+      oracleRoute(oracleRouteOf(exactDemandTraceCampaign))
+      return assertCompletedExactDemandTrace(...args)
+    },
   )
 
-  fcTest.prop([concurrentExactScenarioArbitrary], {
+  const concurrentExactScenarioFixedSeed = oracleFixedSeed(1661, {
     numRuns: exactScenarioRuns,
-    seed: 1661,
-  })(
-    `shares only identical in-flight demands for a fixed seed`,
-    assertConcurrentExactDemandTrace,
-  )
-
+  })
   fcTest.prop(
     [concurrentExactScenarioArbitrary],
-    oracleRandomParameters(
-      exactScenarioRuns,
-      replay,
-      `load-subset.exact-inflight`,
-    ),
+    concurrentExactScenarioFixedSeed,
+  )(
+    `shares only identical in-flight demands for a fixed seed`,
+    (...args: Parameters<typeof assertConcurrentExactDemandTrace>) => {
+      oracleRoute(oracleRouteOf(concurrentExactScenarioFixedSeed))
+      return assertConcurrentExactDemandTrace(...args)
+    },
+  )
+
+  const concurrentExactScenarioCampaign = oracleRandomParameters(
+    exactScenarioRuns,
+    replay,
+    `load-subset.exact-inflight`,
+  )
+  fcTest.prop(
+    [concurrentExactScenarioArbitrary],
+    concurrentExactScenarioCampaign,
   )(
     `shares only identical in-flight demands for a random or replayed seed`,
-    assertConcurrentExactDemandTrace,
+    (...args: Parameters<typeof assertConcurrentExactDemandTrace>) => {
+      oracleRoute(oracleRouteOf(concurrentExactScenarioCampaign))
+      return assertConcurrentExactDemandTrace(...args)
+    },
   )
 
   it(`reports one rejection to every exact waiter and then retries`, async () => {
+    oracleRoute(`fixed history`)
     await expectExactWaitersShareRejection({
       demand: {
         values: [1, 2],
@@ -390,9 +412,10 @@ describe(`exact loadSubset demand oracle`, () => {
     })
   })
 
-  fcTest.prop([rejectedWaiterScenarioArbitrary], {
+  const rejectedWaiterScenarioFixedSeed = oracleFixedSeed<
+    fc.Parameters<Parameters<typeof expectExactWaitersShareRejection>>
+  >(703027, {
     numRuns: exactScenarioRuns,
-    seed: 703027,
     examples: [
       [
         {
@@ -412,20 +435,31 @@ describe(`exact loadSubset demand oracle`, () => {
         },
       ],
     ],
-  })(
-    `retries failed exact demand histories through fresh success for a fixed seed`,
-    expectExactWaitersShareRejection,
-  )
-
+  })
   fcTest.prop(
     [rejectedWaiterScenarioArbitrary],
-    oracleRandomParameters(
-      exactScenarioRuns,
-      replay,
-      `load-subset.rejected-waiter`,
-    ),
+    rejectedWaiterScenarioFixedSeed,
+  )(
+    `retries failed exact demand histories through fresh success for a fixed seed`,
+    (...args: Parameters<typeof expectExactWaitersShareRejection>) => {
+      oracleRoute(oracleRouteOf(rejectedWaiterScenarioFixedSeed))
+      return expectExactWaitersShareRejection(...args)
+    },
+  )
+
+  const rejectedWaiterScenarioCampaign = oracleRandomParameters(
+    exactScenarioRuns,
+    replay,
+    `load-subset.rejected-waiter`,
+  )
+  fcTest.prop(
+    [rejectedWaiterScenarioArbitrary],
+    rejectedWaiterScenarioCampaign,
   )(
     `retries failed exact demand histories through fresh success for a random or replayed seed`,
-    expectExactWaitersShareRejection,
+    (...args: Parameters<typeof expectExactWaitersShareRejection>) => {
+      oracleRoute(oracleRouteOf(rejectedWaiterScenarioCampaign))
+      return expectExactWaitersShareRejection(...args)
+    },
   )
 })

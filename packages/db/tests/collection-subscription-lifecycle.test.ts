@@ -11,7 +11,7 @@ import { startOutcomes } from './collection-subscription-lifecycle-cell-support.
 import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
 
 /**
- * Pinned unit tests for CollectionSubscription demand lifecycle: concrete
+ * Fixed unit tests for CollectionSubscription demand lifecycle: concrete
  * acquisition, release, restart, and replay examples whose expectations are
  * written by hand. The law, its model, and the generated scenario checks are
  * owned by collection-subscription-lifecycle-oracle.test.ts.

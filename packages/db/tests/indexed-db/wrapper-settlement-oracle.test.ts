@@ -22,6 +22,7 @@
 import { expect, it } from 'vitest'
 import { executeTransaction } from '../../src'
 import { declareOracle } from '../oracle-declaration'
+import { oracleRoute } from '../oracle-config'
 import { deferred, readStore, withHarness } from './harness'
 
 type NativeOutcome = 'complete' | 'abort'
@@ -36,7 +37,15 @@ function expectedCaller(
   if (native === 'abort') return 'rejected'
   return callbackFulfilled ? 'fulfilled' : 'pending'
 }
-declareOracle({ model: [expectedCaller] })
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db-wrapper.ts#executeTransaction',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+  ],
+  model: [expectedCaller],
+})
 
 for (const native of ['complete', 'abort'] as const) {
   for (const registration of [
@@ -48,6 +57,7 @@ for (const native of ['complete', 'abort'] as const) {
   ] as const) {
     for (const heldCallback of [false, true]) {
       it(`preserves ${native} settlement with ${registration} observers and held callback ${heldCallback}`, async () => {
+        oracleRoute(`case`)
         await withHarness(async (h) => {
           const row = { id: 1, name: 'authored' }
           const callback = deferred<string>()
@@ -134,6 +144,7 @@ for (const native of ['complete', 'abort'] as const) {
 // The authored seed survives either history; only the valid sibling is conditional.
 for (const cancelRequestError of [false, true]) {
   it(`uses terminal outcome after a request error canceled ${cancelRequestError}`, async () => {
+    oracleRoute(`case`)
     await withHarness(async (h) => {
       const seed = { id: 1, name: 'retained' }
       const sibling = { id: 2, name: 'valid sibling' }

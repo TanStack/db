@@ -4,8 +4,11 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { Temporal } from 'temporal-polyfill'
 import { deepEquals, sameRowValue } from '../src/utils'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import {
@@ -23,6 +26,10 @@ import {
   sparseArrayCarriers,
   sparseArrayCase,
 } from './sparse-array-value-oracle.js'
+
+// What this oracle owns: the gap report judges the deepEquals relation in
+// utils.ts by this file's tests.
+declareOracle({ owns: [`src/utils.ts`] })
 
 /**
  * The `deepEquals` API contract in `../src/utils.ts`, reinforced by the
@@ -73,14 +80,24 @@ function utilsProperty<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
     // The mapped arbitraries preserve each position's Ts member.
     const argumentsArbitrary = fc.tuple(...arbitraries) as fc.Arbitrary<Ts>
 
-    oracleReplayTest(fcTest).prop([argumentsArbitrary], {
-      seed: fixedSeed,
+    const argumentsFixedSeed = oracleFixedSeed(fixedSeed, {
       numRuns: oracleRuns(runs),
-    })(`${label} fixed`, (values) => check(...values))
+    })
+    oracleReplayTest(fcTest).prop([argumentsArbitrary], argumentsFixedSeed)(
+      `${label} fixed`,
+      (values) => {
+        oracleRoute(oracleRouteOf(argumentsFixedSeed))
+        check(...values)
+      },
+    )
+    const argumentsCampaign = oraclePropertyOptions(runs, property)
     oracleReplayTest(fcTest, property).prop(
       [argumentsArbitrary],
-      oraclePropertyOptions(runs, property),
-    )(`${label} random`, (values) => check(...values))
+      argumentsCampaign,
+    )(`${label} random`, (values) => {
+      oracleRoute(oracleRouteOf(argumentsCampaign))
+      check(...values)
+    })
   }
 }
 
@@ -265,7 +282,7 @@ function adjacentDateTime(time: number): number {
 // Legal rings have 1–5 reachable nodes, integer payloads, and one of four
 // native edge carriers at each node. A zero-node ring has no root and is
 // excluded. The fixed pair enumeration below reconstructs every ordered
-// two-carrier overlap; the length cases pin the lower and upper bounds.
+// two-carrier overlap; the length cases fix the lower and upper bounds.
 const ringArbitrary = fc.array(
   fc.record({
     value: fc.integer(),
@@ -281,9 +298,11 @@ describe(`deepEquals property-based tests`, () => {
       (cells) => expectRingLaw(cells),
     )
     it(`runs a fixed mixed-ring campaign without skipped antecedents`, () => {
+      const parameters = oracleFixedSeed(101301, { numRuns: 100 })
+      oracleRoute(oracleRouteOf(parameters))
       const result = fc.check(
         fc.property(ringArbitrary, (cells) => expectRingLaw(cells)),
-        { seed: 101301, numRuns: 100 },
+        parameters,
       )
       expect(result).toMatchObject({ failed: false, numRuns: 100, numSkips: 0 })
     })
@@ -347,6 +366,7 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
     it(`shrinks and replays a payload-blind graph comparator`, () => {
+      oracleRoute(`calibration`)
       const property = fc.property(ringArbitrary, (cells) =>
         expectRingLaw(cells, () => true),
       )
@@ -497,11 +517,13 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
     it(`fixed campaign reaches an extra property in every case`, () => {
+      const campaignParameters = oracleFixedSeed(20260911, { numRuns: 100 })
+      oracleRoute(oracleRouteOf(campaignParameters))
       const result = fc.check(
         fc.property(arbitraryExtraProperty, (sample) => {
           assertExtraProperty(sample, deepEquals)
         }),
-        { seed: 20260911, numRuns: 100 },
+        campaignParameters,
       )
       expect(result).toMatchObject({ failed: false, numRuns: 100, numSkips: 0 })
     })
@@ -554,7 +576,7 @@ describe(`deepEquals property-based tests`, () => {
   })
   // `deepEquals` drives change-event suppression, so it deliberately ignores
   // state that draft revert detection keeps (see proxy-revert-oracle): Map and
-  // Set insertion order, RegExp `lastIndex`, and array holes. These laws pin
+  // Set insertion order, RegExp `lastIndex`, and array holes. These laws fix
   // that current relation so a shared walker cannot leak draft rules into it.
   describe(`order and state the general relation ignores`, () => {
     utilsProperty([

@@ -7,8 +7,11 @@ import {
   registerOpaqueHash,
 } from '../src/hashing/hash.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -54,7 +57,7 @@ import { colliding } from './hash-collision-support.js'
  *   equal, so every type marker has the same hash number.
  *
  * Authority: the method comments in `src/hashing/hash.ts`, and the behavior at
- * `8283f2e8`, which this file pins before the hash dispatch refactor.
+ * `8283f2e8`, which this file fixes before the hash dispatch refactor.
  *
  * Limits:
  * - Arrays from another realm (`node:vm`) are outside the grammar. An ordinary
@@ -781,7 +784,14 @@ function expectCyclicPair({ spec, changed, seeds }: CyclicPair): void {
 
 // The model is `identity` (and its encoding `canon`): equal identities must
 // share a verdict and hash. The grammar `pairArb` is calibrated below.
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 declareOracle({
+  owns: [
+    `src/hashing/hash.ts#hash`,
+    `src/hashing/hash.ts#equalHashValues`,
+    `src/hashing/hash.ts#registerOpaqueHash`,
+  ],
   check: [expectPair, expectCyclicPair],
   model: [identity, canon],
   grammar: [pairArb],
@@ -801,39 +811,51 @@ const it = oracleReplayTest(vitestIt)
 
 describe(`hash identity oracle`, () => {
   it(`matches the identity model across generated value pairs (${FIXED_SEED})`, () => {
+    const parameters = oracleFixedSeed(FIXED_SEED, { numRuns: oracleRuns(300) })
+    oracleRoute(oracleRouteOf(parameters))
     fc.assert(
       fc.property(pairArb, fc.nat(), fc.nat(), (pair, left, right) =>
         expectPair(pair, [left, right]),
       ),
-      { numRuns: oracleRuns(300), seed: FIXED_SEED },
+      parameters,
     )
   })
+  const pairCampaign = oraclePropertyOptions(300, PAIR_IDENTITY)
   oracleReplayTest(fcTest, PAIR_IDENTITY).prop(
     [pairArb, fc.nat(), fc.nat()],
-    oraclePropertyOptions(300, PAIR_IDENTITY),
+    pairCampaign,
   )(
     `matches the identity model across generated value pairs (random)`,
-    (pair, left, right) => expectPair(pair, [left, right]),
+    (pair, left, right) => {
+      oracleRoute(oracleRouteOf(pairCampaign))
+      expectPair(pair, [left, right])
+    },
   )
 
   it(`matches constructed verdicts across generated cyclic values (${FIXED_SEED})`, () => {
-    fc.assert(fc.property(cyclicArb, expectCyclicPair), {
+    const campaignParameters = oracleFixedSeed(FIXED_SEED, {
       numRuns: oracleRuns(300),
-      seed: FIXED_SEED,
     })
+    oracleRoute(oracleRouteOf(campaignParameters))
+    fc.assert(fc.property(cyclicArb, expectCyclicPair), campaignParameters)
   })
-  oracleReplayTest(fcTest, CYCLIC_IDENTITY).prop(
-    [cyclicArb],
-    oraclePropertyOptions(300, CYCLIC_IDENTITY),
-  )(
+  const cyclicCampaign = oraclePropertyOptions(300, CYCLIC_IDENTITY)
+  oracleReplayTest(fcTest, CYCLIC_IDENTITY).prop([cyclicArb], cyclicCampaign)(
     `matches constructed verdicts across generated cyclic values (random)`,
-    expectCyclicPair,
+    (value: CyclicPair) => {
+      oracleRoute(oracleRouteOf(cyclicCampaign))
+      expectCyclicPair(value)
+    },
   )
 
   // Positive execution witness: the fixed campaign reaches every value kind
   // and every mutation, with both verdicts.
   it(`reaches every kind, mutation, and verdict in the fixed campaign`, () => {
-    const sample = fc.sample(pairArb, { seed: FIXED_SEED, numRuns: 300 })
+    oracleRoute(`fixed seed`)
+    const sample = fc.sample(
+      pairArb,
+      oracleFixedSeed(FIXED_SEED, { numRuns: 300 }),
+    )
     const kinds = new Set<string>()
     for (const { left } of sample)
       for (const [node] of nodes(left))
@@ -902,8 +924,8 @@ describe(`hash identity oracle`, () => {
     expect(merged).toBeGreaterThan(0)
   })
 
-  // Pinned witnesses for rules that a wrong design would plausibly break.
-  const pinned: Array<[string, Spec, Spec]> = [
+  // Fixed witnesses for rules that a wrong design would plausibly break.
+  const fixedWitnesses: Array<[string, Spec, Spec]> = [
     [
       `a hole differs from undefined`,
       { k: `array`, items: [null, num(1)] },
@@ -1027,7 +1049,8 @@ describe(`hash identity oracle`, () => {
       { k: `obj`, entries: [], syms: [[1, num(1)]] },
     ],
   ]
-  it.each(pinned)(`%s`, (_name, left, right) => {
+  it.each(fixedWitnesses)(`%s`, (_name, left, right) => {
+    oracleRoute(`case`)
     for (const seeds of [
       [1, 2],
       [3, 4],
@@ -1036,6 +1059,7 @@ describe(`hash identity oracle`, () => {
   })
 
   it(`does not accept a second copy because the first copy matched`, () => {
+    oracleRoute(`case`)
     const spec: Spec = {
       k: `twice`,
       child: { k: `obj`, entries: [[`a`, num(1)]], syms: [] },
@@ -1053,6 +1077,7 @@ describe(`hash identity oracle`, () => {
   })
 
   it(`keeps distinct identities separate when their digests collide`, () => {
+    oracleRoute(`case`)
     const pair: Pair = {
       left: { k: `map`, entries: [] },
       right: { k: `set`, items: [] },
@@ -1071,6 +1096,7 @@ describe(`hash identity oracle`, () => {
   })
 
   it(`treats shared and copied subtrees, prototypes, and hidden properties as equal`, () => {
+    oracleRoute(`case`)
     const spec: Spec = {
       k: `twice`,
       child: {

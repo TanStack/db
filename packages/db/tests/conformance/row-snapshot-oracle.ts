@@ -577,6 +577,9 @@ export async function runRowSnapshotHistories(
   })
 }
 
+// Owns no production entry in packages/db: this module checks the public
+// observations that each framework driver passes it, so the framework packages
+// that run it own the entries it judges.
 declareOracle({
   model: [facts, rowFacts],
   grammar: [histories],

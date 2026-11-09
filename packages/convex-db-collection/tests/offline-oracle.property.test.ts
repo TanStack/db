@@ -20,10 +20,18 @@ import { runOracleCampaign } from '../../db/tests/oracle-campaign'
 import { oracleRuns } from '../../db/tests/oracle-config'
 import { convexCollectionOptions } from '../src/index'
 import { convexOfflineMutation } from '../src/offline'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { controlledClient, query, withTestCleanup } from './helpers'
 import type { Row } from './helpers'
 import type { ConvexClient } from 'convex/browser'
 import type { OfflineConfig } from '@tanstack/offline-transactions'
+
+declareOracle({
+  owns: [
+    `src/index.ts#convexCollectionOptions`,
+    `src/offline.ts#convexOfflineMutation`,
+  ],
+})
 
 const mutation = makeFunctionReference<
   `mutation`,

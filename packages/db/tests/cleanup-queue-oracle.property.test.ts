@@ -1,7 +1,13 @@
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
 import { CleanupQueue } from '../src/collection/cleanup-queue'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from './oracle-config'
 import { declareOracle } from './oracle-declaration'
 import { resetCleanupQueue } from './utils'
 
@@ -124,7 +130,13 @@ function expectQueueState(
   ).toEqual([...model.errors].sort())
 }
 
-declareOracle({ check: [expectQueueState], model: [stepModel] })
+// What this oracle owns: the gap report judges every function in
+// cleanup-queue.ts by this file's tests.
+declareOracle({
+  owns: [`src/collection/cleanup-queue.ts`],
+  check: [expectQueueState],
+  model: [stepModel],
+})
 
 async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
   vi.useFakeTimers()
@@ -247,66 +259,68 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
 // grammar; a negative elapsed advance is invalid for its monotonic elapsed
 // clock. The fixed seed and seedless campaigns use the same property and run
 // budget. The shared oracle config
-// accepts a seed and shrink path for direct replay of the seedless lane.
+// accepts a seed and shrink path for direct replay of the seedless grammar.
 it.each([20260913, undefined])(
   `obeys appointment histories (seed %s)`,
   async (seed) => {
+    const parameters = {
+      ...(seed === undefined
+        ? oraclePropertyOptions(100, `cleanup-queue.history`)
+        : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
+      examples: [
+        [
+          [
+            { kind: `schedule`, key: 0, delay: 10, throws: false },
+            { kind: `stepWallClock`, offset: -1000 },
+            // At 9 the callback is early; at 10 it is due.
+            { kind: `advance`, elapsed: 9 },
+            { kind: `advance`, elapsed: 1 },
+          ],
+        ],
+        [
+          [
+            { kind: `schedule`, key: 0, delay: 10, throws: false },
+            { kind: `stepWallClock`, offset: 1000 },
+            { kind: `schedule`, key: 1, delay: 20, throws: false },
+            { kind: `advance`, elapsed: 0 },
+            // The wall step cannot shift this elapsed-time boundary.
+            { kind: `advance`, elapsed: 9 },
+            { kind: `advance`, elapsed: 1 },
+          ],
+        ],
+        [
+          [
+            { kind: `schedule`, key: 0, delay: 1, throws: false },
+            { kind: `schedule`, key: 0, delay: 4, throws: true },
+            { kind: `schedule`, key: 1, delay: 4, throws: false },
+            { kind: `schedule`, key: 2, delay: 2, throws: false },
+            { kind: `cancel`, key: 2 },
+            { kind: `advance`, elapsed: 3 },
+            { kind: `advance`, elapsed: 1 },
+            { kind: `schedule`, key: 0, delay: 0, throws: false },
+            { kind: `advance`, elapsed: 0 },
+          ],
+        ],
+        [
+          [
+            { kind: `schedule`, key: 0, delay: 0, throws: false },
+            { kind: `schedule`, key: 1, delay: 0, throws: false },
+            { kind: `schedule`, key: 2, delay: 20, throws: false },
+            { kind: `schedule`, key: 3, delay: 20, throws: false },
+            { kind: `advance`, elapsed: 0 },
+            { kind: `cancel`, key: 2 },
+            { kind: `advance`, elapsed: 20 },
+          ],
+        ],
+      ],
+    }
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(
         fc.array(actionArbitrary, { maxLength: 50 }),
         (actions) => runHistory(actions),
       ),
-      {
-        ...(seed === undefined
-          ? oraclePropertyOptions(100, `cleanup-queue.history`)
-          : { seed, numRuns: oracleRuns(100) }),
-        examples: [
-          [
-            [
-              { kind: `schedule`, key: 0, delay: 10, throws: false },
-              { kind: `stepWallClock`, offset: -1000 },
-              // At 9 the callback is early; at 10 it is due.
-              { kind: `advance`, elapsed: 9 },
-              { kind: `advance`, elapsed: 1 },
-            ],
-          ],
-          [
-            [
-              { kind: `schedule`, key: 0, delay: 10, throws: false },
-              { kind: `stepWallClock`, offset: 1000 },
-              { kind: `schedule`, key: 1, delay: 20, throws: false },
-              { kind: `advance`, elapsed: 0 },
-              // The wall step cannot shift this elapsed-time boundary.
-              { kind: `advance`, elapsed: 9 },
-              { kind: `advance`, elapsed: 1 },
-            ],
-          ],
-          [
-            [
-              { kind: `schedule`, key: 0, delay: 1, throws: false },
-              { kind: `schedule`, key: 0, delay: 4, throws: true },
-              { kind: `schedule`, key: 1, delay: 4, throws: false },
-              { kind: `schedule`, key: 2, delay: 2, throws: false },
-              { kind: `cancel`, key: 2 },
-              { kind: `advance`, elapsed: 3 },
-              { kind: `advance`, elapsed: 1 },
-              { kind: `schedule`, key: 0, delay: 0, throws: false },
-              { kind: `advance`, elapsed: 0 },
-            ],
-          ],
-          [
-            [
-              { kind: `schedule`, key: 0, delay: 0, throws: false },
-              { kind: `schedule`, key: 1, delay: 0, throws: false },
-              { kind: `schedule`, key: 2, delay: 20, throws: false },
-              { kind: `schedule`, key: 3, delay: 20, throws: false },
-              { kind: `advance`, elapsed: 0 },
-              { kind: `cancel`, key: 2 },
-              { kind: `advance`, elapsed: 20 },
-            ],
-          ],
-        ],
-      },
+      parameters,
     )
   },
 )
@@ -315,6 +329,7 @@ it.each([20260913, undefined])(
 it.each([`ignore-cancel`, `lose-replacement`, `duplicate`, `late`] as const)(
   `rejects the %s faulty queue`,
   async (fault) => {
+    oracleRoute(`calibration`)
     await expect(
       runHistory(
         [

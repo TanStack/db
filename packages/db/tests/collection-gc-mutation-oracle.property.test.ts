@@ -10,10 +10,14 @@ import {
   stepGcModel,
 } from './collection-gc-retention-oracle.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
+  oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { createOracleReach } from './oracle-reach.js'
 import { resetCleanupQueue, withOracleCleanup } from './utils.js'
 import type { GcAction, GcModel } from './collection-gc-retention-oracle.js'
@@ -353,16 +357,30 @@ const historyArbitrary = fc.record({
   age: fc.integer({ min: 0, max: 80 }),
   sourceValue: fc.integer({ min: -3, max: 3 }),
 })
+// What this oracle owns: the gap report judges the garbage-collection
+// retention of Collections touched by a mutation, in lifecycle.ts, by this
+// file's tests. The companion retention module declares the shared check and
+// model.
+declareOracle({
+  owns: [`src/collection/lifecycle.ts`],
+  grammar: [historyArbitrary],
+})
+
 it.each(
-  runConfig.replaySeed === undefined ? [20261026, undefined] : [undefined],
+  runConfig.campaignSeed === undefined ? [20261026, undefined] : [undefined],
 )(
   `retains every touched Collection across mutation shapes (seed %s)`,
   async (seed) => {
     reach = createOracleReach(propertyName, states)
-    await fc.assert(fc.asyncProperty(historyArbitrary, runMutationHistory), {
+    const parameters = {
       ...oraclePropertyOptions(150, propertyName),
-      ...(seed === undefined ? {} : { seed }),
-    })
+      ...(seed === undefined ? {} : oracleFixedSeed(seed)),
+    }
+    oracleRoute(oracleRouteOf(parameters))
+    await fc.assert(
+      fc.asyncProperty(historyArbitrary, runMutationHistory),
+      parameters,
+    )
     reach.assertReached()
     console.info(
       `GC mutation reach: ${JSON.stringify(Object.fromEntries(reach.counts()))}`,
@@ -376,6 +394,7 @@ it.each(
 it.skipIf(oracleReplayRequested())(
   `rejects corruption of a supplied mutation projection`,
   () => {
+    oracleRoute(`calibration`)
     const model = createGcModel(100)
     stepGcModel(model, { kind: `mutate`, commit: true })
     const observation = {

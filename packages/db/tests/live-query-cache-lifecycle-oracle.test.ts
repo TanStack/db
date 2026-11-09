@@ -21,6 +21,7 @@ import {
   getLiveQueryHash,
   resolveLiveQueryValue,
 } from '../src'
+import { oracleRoute } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
 import { createOracleReach } from './oracle-reach'
 import { withOracleCleanup } from './utils'
@@ -112,7 +113,13 @@ afterAll(() => {
       ),
     )
 })
+// What this oracle owns: the gap report judges DbClient.dehydrate and
+// resolveLiveQueryValue by this file's claim-lifecycle histories.
 declareOracle({
+  owns: [
+    `src/client.ts#DbClient.dehydrate`,
+    `src/live-query-options.ts#resolveLiveQueryValue`,
+  ],
   check: [
     checkLifecycleAdmission,
     checkCacheOptionRows,
@@ -146,6 +153,7 @@ test.each(
 )(
   `cache claim lifetime %j`,
   async ({ history, claimant, phase, pending, replaceBeforeRelease }) => {
+    oracleRoute(`case`)
     const reach = reaches[claimant]!
     reach.beginHistory()
     const server = new DbClient()
@@ -461,6 +469,7 @@ test.each(
 test.each([`getKey`, `schema`] as const)(
   `portable cache rejects a leaked %s function`,
   (option) => {
+    oracleRoute(`calibration`)
     expect(() => checkPortableCacheState({ [option]: () => {} })).toThrow()
   },
 )
@@ -470,6 +479,7 @@ test.each([`getKey`, `schema`] as const)(
 test.each(phases)(
   `lifecycle checker rejects the opposite claim policy at %s`,
   (phase) => {
+    oracleRoute(`calibration`)
     const history = cacheOptionHistories.find(conflictingCacheOptions)!
     const wrong = () => {
       if (!claimSurvives(phase)) throw new Error(`getKey conflict`)

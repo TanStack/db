@@ -30,7 +30,7 @@ import { declareOracle } from './oracle-declaration.js'
  * would hide the cross-boundary histories this oracle exists to test. Row
  * contents remain outside this grammar and have their own publication model.
  *
- * Pinned histories name important paths. Generated histories explore adjacent
+ * Fixed histories name important paths. Generated histories explore adjacent
  * legal commands with fixed and random seeds. The drivers compare production
  * loads, unloads, results, status, errors, and publication against this trace.
  *

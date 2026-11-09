@@ -10,8 +10,11 @@ import { ShapeStream } from '@electric-sql/client'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -52,7 +55,7 @@ import type { Message } from '@electric-sql/client'
 import type * as ElectricSdkModule from '@electric-sql/client'
 
 // Observe the real constructor boundary without changing the installed SDK's
-// options, prototype, methods, or HTTP behavior. Only the rotation lane enables
+// options, prototype, methods, or HTTP behavior. Only the rotation grammar enables
 // the callback; every construction still executes the original ShapeStream.
 const sdkConstruction = vi.hoisted(() => ({
   observe: undefined as (() => void) | undefined,
@@ -105,7 +108,7 @@ vi.mock(`@electric-sql/client`, async (importOriginal) => {
  * A real node:sqlite cold-launch witness starts with an incompatible partial
  * cache and no reset marker. It must exclude that row before and after the
  * installed SDK returns an empty source snapshot for the demanded predicate.
- * A source-release lane, documented at its property, checks that cleanup
+ * A source-release grammar, documented at its property, checks that cleanup
  * removes every listener that a run's streams registered on `document`.
  *
  * These finite HTTP fixtures do not prove that a live Electric service emits
@@ -150,6 +153,7 @@ declareOracle({
     expectedRetryObservation,
     expectedResumeCheckpoint,
   ],
+  owns: [`src/electric.ts#electricCollectionOptions`],
 })
 
 // Scaled with the run multiplier, so stress campaigns keep their budget.
@@ -704,15 +708,18 @@ sdkCampaigns(
   snapshotViolation,
   async (seed) => {
     snapshotReach = createSnapshotReach()
-    await fc.assert(snapshotProperty, {
+    const options = {
       ...oraclePropertyOptions(40, `electric.sdk-snapshot-delivery`),
-      ...(seed === undefined ? {} : { seed }),
-    })
+      ...(seed === undefined ? {} : oracleFixedSeed(seed)),
+    }
+    oracleRoute(oracleRouteOf(options))
+    await fc.assert(snapshotProperty, options)
     snapshotReach.assertReached()
   },
 )
 
 fixedCase(`detects dropped snapshot rows`, async () => {
+  oracleRoute(`calibration`)
   await expect(checkSnapshots(2, `payload`, true)).rejects.toMatchObject({
     name: `AssertionError`,
     message: expect.stringContaining(`snapshot 0 applied rows`),
@@ -722,6 +729,7 @@ fixedCase(`detects dropped snapshot rows`, async () => {
 fixedCase(
   `retains the snapshot law and checkpoint when cleanup also fails`,
   async () => {
+    oracleRoute(`calibration`)
     const cleanupFailure = new Error(`injected cleanup failure`)
     const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
     const subscribe = ShapeStream.prototype.subscribe
@@ -758,6 +766,7 @@ fixedCase(
 fixedCase(
   `restores the SDK setup resources after construction fails`,
   async () => {
+    oracleRoute(`case`)
     const primary = new Error(`collection construction failed`)
     const secondary = new Error(`provider release failed`)
     const subscribe = ShapeStream.prototype.subscribe
@@ -965,14 +974,18 @@ sdkCampaigns(
   `preserves DNF visibility through installed-SDK silent move-in cycles`,
   20260918,
   membershipViolation,
-  (seed) =>
-    fc.assert(membershipProperty, {
+  (seed) => {
+    const options = {
       ...oraclePropertyOptions(12, `electric.sdk-dnf-membership`),
-      ...(seed === undefined ? {} : { seed }),
-    }),
+      ...(seed === undefined ? {} : oracleFixedSeed(seed)),
+    }
+    oracleRoute(oracleRouteOf(options))
+    return fc.assert(membershipProperty, options)
+  },
 )
 
 fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
+  oracleRoute(`calibration`)
   await expect(checkMembership(1, 1, 1, true)).rejects.toMatchObject({
     name: `AssertionError`,
     message: expect.stringContaining(`after silent move-in`),
@@ -983,7 +996,7 @@ fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
  * # The retry-decision law through the installed Electric client
  *
  * The retry-decision oracle in `electric-oracle.property.test.ts` drives the
- * adapter through a controlled ShapeStream. This lane receives the same law
+ * adapter through a controlled ShapeStream. This receiving path receives the same law
  * through the installed `@electric-sql/client`, its retry policy, and HTTP.
  * It uses the same independent model (`electric-retry-decision-model.ts`).
  *
@@ -1007,7 +1020,7 @@ fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
  * load. An eager or progressive Collection has no subset demand before its
  * first ready, so its demand is the readiness wait (`preload()`).
  *
- * At each checkpoint the lane compares the Collection status, each demand's
+ * At each checkpoint the receiving path compares the Collection status, each demand's
  * settlement, whether the snapshot's row is visible, and two pairs of waits
  * that no evidence satisfies, one started with the history and one started
  * at the checkpoint, with the model:
@@ -1223,7 +1236,10 @@ async function runClientRetryCell(
 
 fixedCase.each(clientRetryCells)(
   `installed client: %s in %s mode with an onError %s follows the retry-decision model`,
-  (outcome, mode, decision) => runClientRetryCell(outcome, mode, decision),
+  (outcome, mode, decision) => {
+    oracleRoute(`case`)
+    return runClientRetryCell(outcome, mode, decision)
+  },
   60_000,
 )
 
@@ -1252,7 +1268,7 @@ fixedCase.each(clientRetryCells)(
  * retired HTTP snapshot arrives while rotation is held, just before replacement
  * snapshots, or after replacement settlement. A forwarding constructor observer
  * records listener ownership before invoking the real SDK. It does not release
- * resources or replace SDK behavior. This lane
+ * resources or replace SDK behavior. This receiving path
  * covers sequential rotations in an on-demand run with the installed browser
  * SDK; overlapping rotations, other SDK versions, and native hosts remain separate.
  * Both retained demands must remain pending until replacement source responses
@@ -1588,9 +1604,10 @@ async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
   ])
 }
 
-fixedCase(`discards an old SDK snapshot after managed cache rotation`, () =>
-  checkManagedRotation([`after-snapshots`]),
-)
+fixedCase(`discards an old SDK snapshot after managed cache rotation`, () => {
+  oracleRoute(`case`)
+  return checkManagedRotation([`after-snapshots`])
+})
 const rotationViolation = sameViolation()
 sdkCampaigns(
   `electric.sdk-rotation-release`,
@@ -1599,6 +1616,11 @@ sdkCampaigns(
   rotationViolation,
   async (seed) => {
     rotationReach = createRotationReach()
+    const options = {
+      ...oraclePropertyOptions(40, `electric.sdk-rotation-release`),
+      ...(seed === undefined ? {} : oracleFixedSeed(seed)),
+    }
+    oracleRoute(oracleRouteOf(options))
     await fc.assert(
       fc.asyncProperty(
         fc.array(
@@ -1612,10 +1634,7 @@ sdkCampaigns(
         (cuts) =>
           rotationViolation.check(cuts, () => checkManagedRotation(cuts)),
       ),
-      {
-        ...oraclePropertyOptions(40, `electric.sdk-rotation-release`),
-        ...(seed === undefined ? {} : { seed }),
-      },
+      options,
     )
     rotationReach.assertReached()
   },
@@ -1670,10 +1689,10 @@ sdkCampaigns(
  * bound and one-registration-per-run calibration describe this installed SDK
  * and the driver's one-stream topology, rather than a universal SDK policy.
  *
- * Limits: the lane observes the browser listener in jsdom. Client versions
+ * Limits: the receiving path observes the browser listener in jsdom. Client versions
  * that observe React Native's AppState instead register through a runtime
- * adapter, which this lane does not install. A live Electric service and
- * snapshot requests are outside this lane. The managed cache rotation case
+ * adapter, which this receiving path does not install. A live Electric service and
+ * snapshot requests are outside this receiving path. The managed cache rotation case
  * above replaces a provider session within one run; it receives the same law
  * for the retired session.
  */
@@ -1882,6 +1901,7 @@ async function checkSourceRelease(history: ReleaseHistory): Promise<void> {
 fixedCase.each([`eager`, `on-demand`, `progressive`] as const)(
   `releases listeners after incomplete delivery in %s mode`,
   async (mode) => {
+    oracleRoute(`case`)
     for (const answer of [`row`, `reset`] as const)
       for (const end of [
         `open`,
@@ -1934,10 +1954,12 @@ sdkCampaigns(
   releaseViolation,
   async (seed) => {
     releaseReach = createReleaseReach()
-    await fc.assert(releaseProperty, {
+    const options = {
       ...oraclePropertyOptions(40, `electric.sdk-source-release`),
-      ...(seed === undefined ? {} : { seed }),
-    })
+      ...(seed === undefined ? {} : oracleFixedSeed(seed)),
+    }
+    oracleRoute(oracleRouteOf(options))
+    await fc.assert(releaseProperty, options)
     releaseReach.assertReached()
   },
 )

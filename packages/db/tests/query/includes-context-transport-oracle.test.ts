@@ -34,6 +34,7 @@ import {
   sum,
   toArray,
 } from '../../src/query/index.js'
+import { oracleRoute } from '../oracle-config.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import {
   createGrammarCollection,
@@ -2454,6 +2455,10 @@ async function runGrammarCell(cell: GrammarCell): Promise<void> {
 // Each grammar cell is checked against the models below. Each expectation is
 // computed from the source Collections, not written as a value.
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [runGrammarCell],
   model: [
     expectedParentSnapshots,
@@ -2477,6 +2482,7 @@ declareOracle({
 
 describe(`correlated include route-context transport grammar`, () => {
   test(`expands every declared product without duplicate cells`, () => {
+    oracleRoute(`case`)
     const expectedCellCount =
       routeContextGrammar.parentProjection.shapes.length +
       routeContextGrammar.correlationDomain.states.length +
@@ -2529,8 +2535,10 @@ describe(`correlated include route-context transport grammar`, () => {
       cell.family === `public-field` || cell.family === `public-field-overlap`
         ? `root and correlated forms × field admission stages`
         : `every materialization form × parent/child updates`
-    test(`${grammarCellName(cell)} × ${observations}`, () =>
-      runGrammarCell(cell))
+    test(`${grammarCellName(cell)} × ${observations}`, () => {
+      oracleRoute(`case`)
+      return runGrammarCell(cell)
+    })
   }
 })
 
@@ -2576,6 +2584,7 @@ describe(`compound join parent context`, () => {
   for (const boundary of [`direct`, `queryRef`] as const) {
     for (const parentSide of [`main`, `joined`] as const) {
       test(`preserves the later parent operand through ${boundary}, ${parentSide}`, async () => {
+        oracleRoute(`case`)
         const parents = createGrammarCollection(`compound-parents`, [
           { id: 1, group: 1, parameter: 1 },
           { id: 2, group: 1, parameter: 2 },
@@ -2931,6 +2940,7 @@ declareOracle({
 
 describe(`parent route after inherited inline input materialization`, () => {
   test(`expands every declared input boundary without duplicates`, () => {
+    oracleRoute(`case`)
     const expected =
       materializedInputGrammar.boundaries.length *
       materializedInputGrammar.selections.length *
@@ -2947,6 +2957,7 @@ describe(`parent route after inherited inline input materialization`, () => {
   })
 
   test(`rejects lost children and cross-parent reuse at the public checkpoint`, () => {
+    oracleRoute(`calibration`)
     const children = [
       { id: 10, parentGroup: 1 },
       { id: 20, parentGroup: 2 },
@@ -2971,8 +2982,10 @@ describe(`parent route after inherited inline input materialization`, () => {
   })
 
   for (const cell of materializedInputCells) {
-    test(`${cell.boundary} / ${cell.selection} / ${cell.input}`, () =>
-      runMaterializedInputCell(cell))
+    test(`${cell.boundary} / ${cell.selection} / ${cell.input}`, () => {
+      oracleRoute(`case`)
+      return runMaterializedInputCell(cell)
+    })
   }
 })
 
@@ -3042,6 +3055,7 @@ declareOracle({
   check: [checkOuterJoinKeyRows],
 })
 test(`rejects missing and duplicated joined contributions`, () => {
+  oracleRoute(`calibration`)
   const mains = [{ id: 10, link: 10, parentGroup: 1 }]
   const children = [
     { id: 20, link: 10, parentGroup: 1 },
@@ -3058,6 +3072,7 @@ test(`rejects missing and duplicated joined contributions`, () => {
 test.each(outerJoinKeyGrammar)(
   `preserves outer-join child identities across independent source keys: %j`,
   async ({ join, mainRef, joinedRef, keys }) => {
+    oracleRoute(`case`)
     const cuts = [`initial`, `main-departed`, `main-returned`, `child-departed`]
     const reach = createOracleReach(
       `outer join independent source keys`,

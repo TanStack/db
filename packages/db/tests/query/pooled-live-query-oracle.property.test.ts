@@ -63,7 +63,7 @@
  *
  * Calibration: a partition that ignored the previous value, kept group rows
  * in arrival order, or compared literals without normalization fails the
- * pinned histories and campaigns. A view that kept reporting the source's
+ * fixed histories and campaigns. A view that kept reporting the source's
  * status, or kept its rows, after cleanup fails the cleanup histories. A
  * view that empties its groups at cleanup without advancing their revisions
  * leaves the detached reader on its old rows and fails the cleanup
@@ -92,9 +92,12 @@ import {
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -374,9 +377,9 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
   ),
 })
 
-// Each pinned history moves a row across groups a short example would keep
+// Each fixed history moves a row across groups a short example would keep
 // still.
-const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
+const fixedHistories: ReadonlyArray<{ name: string; history: History }> = [
   {
     name: `a Date row joins the group of its timestamp`,
     history: {
@@ -1059,12 +1062,18 @@ function expectSnapshotMatchesReference(
 }
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/live-query-observer.ts#createLiveQueryObserver',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/pooled-live-query.ts#createPooledLiveQuery',
+  ],
   check: [runHistory, expectSnapshotMatchesReference],
   model: [expectedKeys, expectedRows],
 })
 
 describe(`pooled live query oracle`, () => {
-  // The pinned histories and the fixed campaign stand aside during any path
+  // The fixed histories and the fixed-seed campaign stand aside during any path
   // replay. The random campaign below is the one that a replay of this
   // property selects.
   // Only generated histories count toward reach; a replay asserts nothing.
@@ -1075,9 +1084,10 @@ describe(`pooled live query oracle`, () => {
     return runHistory(history, reach)
   }
   if (!oracleReplayRequested()) {
-    // Generated fields are plain values; this pins a field whose getter
+    // Generated fields are plain values; this covers a field whose getter
     // throws, which both paths treat as a row that does not match.
     it(`matches the live-query Collection when an eq path getter throws`, async () => {
+      oracleRoute(`fixed history`)
       const source = createCollection(
         mockSyncCollectionOptions<any>({
           id: `pooled-${serial++}`,
@@ -1111,14 +1121,22 @@ describe(`pooled live query oracle`, () => {
       await source.cleanup({ dependents: true })
     })
 
-    for (const { name, history } of pinnedHistories) {
-      it(`matches the live-query Collection when ${name}`, () =>
-        runHistory(history))
+    for (const { name, history } of fixedHistories) {
+      it(`matches the live-query Collection when ${name}`, () => {
+        oracleRoute(`case`)
+        return runHistory(history)
+      })
     }
-    fcTest.prop([historyArbitrary], {
-      seed: 44_502_001,
+    const historyFixedSeed = oracleFixedSeed(44_502_001, {
       numRuns: oracleRuns(80),
-    })(`matches the live-query Collection (fixed)`, runGenerated)
+    })
+    fcTest.prop([historyArbitrary], historyFixedSeed)(
+      `matches the live-query Collection (fixed)`,
+      (history) => {
+        oracleRoute(oracleRouteOf(historyFixedSeed))
+        return runGenerated(history)
+      },
+    )
     afterAll(() => {
       if (generatedRan) {
         process.stdout.write(
@@ -1129,8 +1147,12 @@ describe(`pooled live query oracle`, () => {
     })
   }
 
-  oracleReplayTest(fcTest, property).prop(
-    [historyArbitrary],
-    oraclePropertyOptions(80, property),
-  )(`matches the live-query Collection (random)`, runGenerated)
+  const historyCampaign = oraclePropertyOptions(80, property)
+  oracleReplayTest(fcTest, property).prop([historyArbitrary], historyCampaign)(
+    `matches the live-query Collection (random)`,
+    (history) => {
+      oracleRoute(oracleRouteOf(historyCampaign))
+      return runGenerated(history)
+    },
+  )
 })

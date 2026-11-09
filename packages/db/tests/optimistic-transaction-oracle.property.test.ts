@@ -10,7 +10,13 @@ import {
   observeHistoryPromise,
   withHistoryCleanup,
 } from './optimistic-history-oracle.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import { createOracleReach } from './oracle-reach.js'
 import type { Collection } from '../src/collection/index.js'
@@ -75,7 +81,7 @@ const orders: Array<Array<Operation>> = [
 // value (1..100) and note (0..10 chars). Removing order loses payload-order
 // checks; removing visibility loses the draft cut; removing outcome loses a
 // settlement branch; removing either field variation hides truncated payloads.
-// Repeated operations are checked in the same-key lane below. Deleting an
+// Repeated operations are checked in the same-key grammar below. Deleting an
 // absent key is excluded from this mixed-key grammar.
 
 const sameKeySequences = [
@@ -267,6 +273,7 @@ describe(`Same-key transaction laws`, () => {
   it.each([true, false])(
     `cancels a delete and a reinsert that restores the row (success=%s)`,
     async (success) => {
+      oracleRoute(`case`)
       await runSameKey({
         sequence: `delete-insert`,
         value: 0,
@@ -278,6 +285,7 @@ describe(`Same-key transaction laws`, () => {
   it.each(sameKeySequences)(
     `preserves authored sequence %s`,
     async (sequence) => {
+      oracleRoute(`case`)
       for (const success of [false, true])
         await runSameKey({ sequence, success, value: 7, note: `last` })
     },
@@ -290,6 +298,11 @@ describe(`Same-key transaction laws`, () => {
         [`sign-only-reinsert`],
         { minimum: 3 },
       )
+      const parameters =
+        seed === undefined
+          ? oraclePropertyOptions(40, `collection-state.same-key`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(40) })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.oneof(
@@ -334,9 +347,7 @@ describe(`Same-key transaction laws`, () => {
             return runSameKey(scenario)
           },
         ),
-        seed === undefined
-          ? oraclePropertyOptions(40, `collection-state.same-key`)
-          : { numRuns: oracleRuns(40), seed },
+        parameters,
       )
       reach.assertReached()
     },
@@ -344,6 +355,7 @@ describe(`Same-key transaction laws`, () => {
   it.each([`dropped-field`, `canceled-persistence`] as const)(
     `rejects %s`,
     async (fault) => {
+      oracleRoute(`calibration`)
       const scenario: SameKeyScenario = {
         sequence: fault === `dropped-field` ? `update-update` : `insert-delete`,
         success: true,
@@ -452,6 +464,7 @@ async function runDeleteInsertReplacement(
 
 describe(`Delete then insert transaction laws`, () => {
   it(`cancels an exact same-key restoration`, async () => {
+    oracleRoute(`fixed history`)
     await runDeleteInsertReplacement(
       [{ id: 1, value: 0, note: `original` }],
       undefined,
@@ -486,6 +499,7 @@ describe(`Delete then insert transaction laws`, () => {
   }>)(
     `converts a $name to one symmetric update`,
     async ({ replacement, changes }) => {
+      oracleRoute(`case`)
       await runDeleteInsertReplacement([replacement], {
         type: `update`,
         original: { id: 1, value: 0, note: `original` },
@@ -502,6 +516,7 @@ describe(`Delete then insert transaction laws`, () => {
   )
 
   it(`reduces repeated delete and insert pairs to the final net update`, async () => {
+    oracleRoute(`fixed history`)
     const first = { id: 1, value: 1, note: `first` }
     const final = { id: 1, value: 2, added: `final` }
     await runDeleteInsertReplacement([first, final], {
@@ -519,6 +534,7 @@ describe(`Delete then insert transaction laws`, () => {
   })
 
   it(`preserves the first preimage through duplicate deletes before replacement`, async () => {
+    oracleRoute(`fixed history`)
     const original = { id: 1, value: 0, note: `original` }
     const replacement = { id: 1, value: 2, note: `original` }
     await runDeleteInsertReplacement(
@@ -549,6 +565,7 @@ describe(`Delete then insert transaction laws`, () => {
   })
 
   it(`compares nested replacement values structurally`, async () => {
+    oracleRoute(`fixed history`)
     const original = {
       id: 1,
       value: 0,
@@ -579,6 +596,7 @@ describe(`Delete then insert transaction laws`, () => {
   })
 
   it(`delivers a replacement that differs only by an enumerable symbol`, async () => {
+    oracleRoute(`fixed history`)
     const field = Symbol(`replacement field`)
     const original = { id: 1, value: 0, [field]: 0 }
     const replacement = { id: 1, value: 0, [field]: 1 }
@@ -604,6 +622,7 @@ describe(`Delete then insert transaction laws`, () => {
   })
 
   it(`uses own-string key order for a symmetric replacement diff`, async () => {
+    oracleRoute(`fixed history`)
     const original = {
       10: `remove numeric`,
       2: `stable numeric`,
@@ -1020,11 +1039,17 @@ describe(`Whole mixed transaction publication`, () => {
     ),
   )
   it.each(cells)(`publishes complete transaction cuts %j`, async (cell) => {
+    oracleRoute(`case`)
     await runTransaction({ ...cell, value: 17, note: `new row` })
   })
   it.each([505202, undefined])(
     `varies full payloads, seed=%s`,
     async (seed) => {
+      const campaignParameters =
+        seed === undefined
+          ? oraclePropertyOptions(100, `collection-state.mixed-transaction`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(
           fc.record({
@@ -1040,9 +1065,7 @@ describe(`Whole mixed transaction publication`, () => {
           }),
           (scenario) => runTransaction(scenario),
         ),
-        seed === undefined
-          ? oraclePropertyOptions(100, `collection-state.mixed-transaction`)
-          : { numRuns: oracleRuns(100), seed },
+        campaignParameters,
       )
     },
   )
@@ -1057,6 +1080,7 @@ describe(`Whole mixed transaction publication`, () => {
   ] as const)(
     `rejects captured %s through the real transaction driver's checks`,
     async (fault) => {
+      oracleRoute(`calibration`)
       const scenario: Scenario = {
         order: [`insert`, `update`, `delete`],
         optimistic: true,
@@ -1090,7 +1114,7 @@ function expectedTypedKeyPayload(
 // expected payload is the authored key list, including multiplicity and order;
 // no encoded production globalKey participates in the comparison. Cross each
 // same-text pair with inserts, updates, deletes, repeated updates, and rollback.
-// Existing same-key lanes still require genuine repeated keys to collapse.
+// Existing same-key grammars still require genuine repeated keys to collapse.
 for (const { numberKey, reversed } of [0, -1, 1, 1.5].flatMap((key) =>
   [false, true].map((reverseOrder) => ({
     numberKey: key,
@@ -1100,6 +1124,7 @@ for (const { numberKey, reversed } of [0, -1, 1, 1.5].flatMap((key) =>
   for (const operation of [`insert`, `update`, `delete`, `repeat`] as const) {
     for (const success of [true, false]) {
       it(`keeps typed ${numberKey} keys distinct during ${operation}, success=${success}, reversed=${reversed}`, async () => {
+        oracleRoute(`case`)
         type TypedRow = { id: string | number; value: number }
         const keys = reversed
           ? [String(numberKey), numberKey]
@@ -1187,10 +1212,14 @@ for (const { numberKey, reversed } of [0, -1, 1, 1.5].flatMap((key) =>
   }
 }
 
+// What this oracle owns: the gap report judges the transaction's authored
+// payload and its same-key merge, and the Collection's mutation intake, by this
+// file's tests.
 // The check drivers run one history and compare its public observations with
 // the expected world they compute from the scenario. The typed-key payload model
 // is the authored key list.
 declareOracle({
+  owns: [`src/transactions.ts`, `src/collection/mutations.ts`],
   check: [runTransaction, runSameKey, runDeleteInsertReplacement],
   model: [expectedTypedKeyPayload],
 })

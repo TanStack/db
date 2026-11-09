@@ -1,7 +1,7 @@
 // Fixed-scenario Collection-valued include tests: each runs one hand-written
 // history, or a fixed structural observation, and checks literal facade rows,
 // events, and states. These are unit tests. The generated facade laws, the
-// Map model, and the exhaustive relationship lane are owned by
+// Map model, and the bounded exhaustive relationship campaign are owned by
 // includes-collection-oracle.property.test.ts.
 import { test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'

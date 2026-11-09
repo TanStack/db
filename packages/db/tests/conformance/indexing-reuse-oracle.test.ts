@@ -8,6 +8,7 @@
 import { expect, test } from 'vitest'
 import { BTreeIndex, BasicIndex } from '../../src'
 import { declareOracle } from '../oracle-declaration'
+import { oracleRoute } from '../oracle-config'
 import {
   expectIndependentIndexingOutputs,
   expectedIndexing,
@@ -21,7 +22,10 @@ const histories = indexConfigurationPairs(
     indexTypes: { basic: BasicIndex, btree: BTreeIndex },
   }),
 )
+// Owns no production entry: this file calibrates the shared identity checker
+// with planted wrong relations, so it judges no production code.
 declareOracle({
+  owns: ['src/indexes/basic-index.ts', 'src/indexes/btree-index.ts'],
   grammar: [indexConfigurationPairs],
   model: [expectedIndexing],
   check: [expectIndependentIndexingOutputs],
@@ -30,6 +34,7 @@ declareOracle({
 test.each(histories)(
   `identity comparison rejects the opposite relation: %j`,
   ({ first, second }) => {
+    oracleRoute(`calibration`)
     const left = expectedIndexing(first).rejects ? undefined : {}
     const right = expectedIndexing(second).rejects ? undefined : {}
     if (!left || !right) {
@@ -50,6 +55,7 @@ test.each(histories)(
 test.each([`BasicIndex`, `x`])(
   `configuration labels survive equal names: %s`,
   (name) => {
+    oracleRoute(`case`)
     const basic = class extends BasicIndex {}
     const btree = class extends BTreeIndex {}
     Object.defineProperty(basic, `name`, { value: name })

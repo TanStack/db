@@ -1,8 +1,8 @@
 /** Whole-test expected failure cannot distinguish a known bug from a new one. */
-export function scenarioRegistry(knownGaps: ReadonlyArray<string> = []) {
-  if (knownGaps.length) {
+export function scenarioRegistry(limits: ReadonlyArray<string> = []) {
+  if (limits.length) {
     throw new Error(
-      `Conformance gaps require an approved exact failure signature, not a whole-test waiver`,
+      `Conformance limits require an approved exact failure signature, not a whole-test waiver`,
     )
   }
   const keys = new Set<string>()

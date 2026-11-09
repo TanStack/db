@@ -16,8 +16,11 @@ import { StreamBuilder } from '../src/d2.js'
 import { DifferenceStreamWriter, LinearUnaryOperator } from '../src/graph.js'
 import { MultiSet } from '../src/multiset.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -193,7 +196,7 @@ const generatedCampaigns = [
   {
     name: `fixed`,
     test: oracleReplayTest(it),
-    parameters: { numRuns: RUNS, seed: FIXED_SEED },
+    parameters: oracleFixedSeed(FIXED_SEED, { numRuns: RUNS }),
   },
   {
     name: `random`,
@@ -543,7 +546,21 @@ const orderedHistory: fc.Arbitrary<Array<Weighted<Keyed>>> = fc
 
 // The grammar of legal ordered histories. Its calibration test checks that the
 // generated steps reach row promotions, which the ordered laws need.
-declareOracle({ grammar: [orderedHistory] })
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [
+    `src/operators/map.ts#map`,
+    `src/operators/filter.ts#filter`,
+    `src/operators/consolidate.ts#consolidate`,
+    `src/operators/reduce.ts#reduce`,
+    `src/operators/groupBy.ts#groupBy`,
+    `src/operators/join.ts#join`,
+    `src/operators/orderBy.ts#orderByWithFractionalIndex`,
+    `src/operators/groupedOrderBy.ts#groupedOrderByWithFractionalIndex`,
+  ],
+  grammar: [orderedHistory],
+})
 
 function firstThree(input: Weighted<Keyed>): Weighted<Keyed> {
   return keyedIdentity(input)
@@ -574,7 +591,9 @@ describe(`DBSP incrementalization laws`, () => {
     campaign.test(
       `checks consolidate, reduce, and groupBy against full recomputation (${campaign.name} campaign)`,
       async () => {
+        // The gap report counts a fixed campaign's verdict as reproducible.
         const reach = new CampaignReach()
+        oracleRoute(oracleRouteOf(campaign.parameters))
         await fc.assert(
           fc.asyncProperty(
             fc.array(weightedWorld, { minLength: 2, maxLength: 7 }),
@@ -684,6 +703,7 @@ describe(`DBSP incrementalization laws`, () => {
       `checks simultaneous binary join deltas and split delivery (${campaign.name} campaign)`,
       async () => {
         const reach = new CampaignReach()
+        oracleRoute(oracleRouteOf(campaign.parameters))
         await fc.assert(
           fc.asyncProperty(
             fc.array(fc.tuple(weightedWorld, weightedWorld), {
@@ -794,6 +814,7 @@ describe(`DBSP incrementalization laws`, () => {
       `checks global ordering and window membership (${campaign.name} campaign)`,
       async () => {
         const reach = new CampaignReach()
+        oracleRoute(oracleRouteOf(campaign.parameters))
         await fc.assert(
           fc.asyncProperty(orderedHistory, async (worlds) => {
             await setImmediate()
@@ -843,6 +864,7 @@ describe(`DBSP incrementalization laws`, () => {
   // can promote, so worlds too small to fill it would lose this law while
   // every comparison still passed.
   it(`generates ordered histories that promote retained rows`, () => {
+    oracleRoute(`fixed seed`)
     const promotions = { global: 0, perParity: 0 }
     const promoted = (
       window: (rows: Weighted<Keyed>) => Weighted<Keyed>,
@@ -855,10 +877,10 @@ describe(`DBSP incrementalization laws`, () => {
         ([row]) => held.has(String(row)) && !before.has(String(row)),
       )
     }
-    for (const [worlds] of fc.sample(fc.tuple(orderedHistory), {
-      seed: FIXED_SEED,
-      numRuns: RUNS,
-    })) {
+    for (const [worlds] of fc.sample(
+      fc.tuple(orderedHistory),
+      oracleFixedSeed(FIXED_SEED, { numRuns: RUNS }),
+    )) {
       for (const [index, next] of worlds.slice(1).entries()) {
         const previous = worlds[index]!
         if (promoted(firstThree, previous, next)) promotions.global++
@@ -872,6 +894,7 @@ describe(`DBSP incrementalization laws`, () => {
   })
 
   it(`replays empty, duplicate, replacement, cancellation, and presence-flip cells`, () => {
+    oracleRoute(`case`)
     const unaryReach = assertUnaryIncrementalization({
       name: `named unary cells`,
       initial: [],
@@ -1065,6 +1088,8 @@ describe(`DBSP incrementalization laws`, () => {
   })
 
   it(`rejects invalid negative and duplicate-key input states`, () => {
+    // A checker calibration: a failure here is the framework's, not a kill.
+    oracleRoute(`calibration`)
     expect(() =>
       assertUnaryIncrementalization({
         name: `negative input state excluded`,
@@ -1095,6 +1120,7 @@ describe(`DBSP incrementalization laws`, () => {
   })
 
   it(`rejects omitted, sign-flipped, wrong-member, wrong-window, wrong-limit, missing-promotion, and truthiness-filtered output`, () => {
+    oracleRoute(`calibration`)
     expect(() =>
       assertUnaryIncrementalization({
         name: `omitted output fault`,

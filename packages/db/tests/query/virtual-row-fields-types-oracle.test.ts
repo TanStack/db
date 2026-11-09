@@ -34,6 +34,7 @@ import { afterAll, expect, test } from 'vitest'
 import * as publicDb from '../../src/index.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { createOracleReach } from '../oracle-reach.js'
+import { oracleRoute } from '../oracle-config.js'
 import { checkWithCleanup } from './virtual-row-fields-support.js'
 import {
   metadataCompositions as compositions,
@@ -912,6 +913,7 @@ function checkConsumer(diagnostics: ReadonlyArray<ts.Diagnostic>): void {
   ).toBe(``)
 }
 declareOracle({
+  owns: ['src/index.ts'],
   grammar: [
     typeShapes,
     authoredCollisions,
@@ -930,6 +932,7 @@ declareOracle({
 test.each(typeShapes)(
   `preserves generated public row/value types: %j`,
   async (shape) => {
+    oracleRoute(`case`)
     publicTypesEntered = true
     reach.beginHistory()
     const consumer = consumerSource(shape)
@@ -956,6 +959,7 @@ test.each([
 ] as const)(
   `rejects a hostile public type observation: %s`,
   (fault) => {
+    oracleRoute(`case`)
     const consumer = consumerSource(
       fault === `one-branch-readonly` ? typeShapes[1]! : typeShapes[0]!,
       new Set([
@@ -1029,6 +1033,7 @@ test.each([
 test.each([`non-record-facade`, `missing-index-type`] as const)(
   `rejects an illegal generated construction at admission: %s`,
   async (fault) => {
+    oracleRoute(`calibration`)
     const consumer = consumerSource(
       typeShapes[0]!,
       new Set([`inline/array/toArray`]),

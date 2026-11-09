@@ -101,8 +101,8 @@ observe production publications, not manufacture them in the fixture.
   retaining old rows. The Query-owned cache with shared-prefix invalidation
   passes backend growth, shrink, empty and regrowth plus later page expansion.
 - The frozen candidate passed 87 tests across five files with multiplier 100,
-  seed 863: 35,000 cursor histories, 10,000 cache histories and 15,000 no-peek
-  experiment histories. The latter are retained experiments, not shipped
+  campaign seed 863: 35,000 cursor histories, 10,000 cache histories and 15,000
+  no-peek experiment histories. The latter are retained experiments, not shipped
   metadata behavior. A loss audit and final package gates follow.
 
 The cache oracle uses a full source snapshot plus a freshness deadline, not a
@@ -123,7 +123,7 @@ failed eight cells before production changed (seed 863, minimized size/depth
 `[1, 1]`): global/key `maxPages`, `select`, their combination, and cancellation
 with an existing prefix during growth/refresh. Initial cancellation stayed green.
 
-The fixes pin the internal page format and preserve Query fetch rejection even
+The fixes check the internal page format and preserve Query fetch rejection even
 when Query's fetch API returns reverted cache data. Generated cancellation
 histories hold actual response delivery at varied page depths, observe a real
 peer fetch join, assert both waiters reject without replacement transport, fence
@@ -142,7 +142,7 @@ See LOSS-AUDIT.md for the distinct generator and observation gaps.
 
 Verification for the Query fetch boundary review fixes on base head `3f43deeb6`:
 
-- Full Query DB package: **370 tests in 14 files**, default random-seed lane,
+- Full Query DB package: **370 tests in 14 files**, default random campaign,
   exit 0, 7.82 seconds.
 - Final stress: **116 tests in seven files**, multiplier 100, seed 863, exit 0,
   73.48 seconds. 154,000 generated histories: the previous 135,000 plus
@@ -212,12 +212,12 @@ safety of removing peek-ahead or adding a public metadata API.
   unlimited read: the reader returned only the first row.
 - Negative control: removing the post-response cancellation/generation check
   failed both held-response abort and reset cases. The rejection control still
-  passed. Restoring the check restored green; these were assertion failures,
-  not timeouts.
-- Final green: 48 tests, including 32 backend/UI page-size integration cells
-  and a held-response shared-consumer case. Four generated properties ran
-  35,000 cases in total at multiplier 100 with seed `863`. A separate normal
-  random-seed run also passed.
+  passed. Restoring the check restored green; these were assertion failures, not
+  timeouts.
+- Final green: 48 tests, including 32 backend/UI page-size integration cells and
+  a held-response shared-consumer case. Four generated properties ran 35,000
+  cases in total at multiplier 100 with campaign seed `863`. A separate normal
+  random campaign also passed.
 - Package TypeScript check and lint on all changed TypeScript files passed.
 
 From `packages/query-db-collection`, using the installed local binaries:

@@ -2834,10 +2834,20 @@ export interface ReachCounter {
  * a smaller history that fails a different law, or fails outside the
  * comparison, counts as passing, so the reported counterexample violates the
  * law and observation that the campaign found.
+ *
+ * A calibration names the law it calibrates (`law`: the violation's whole
+ * law, such as `FID-1 (values)`, or a pattern that must match the whole law,
+ * for a mutant that either of two laws may reject). Only that law's
+ * violations fail a history then, so the calibration checks that this law
+ * rejects the mutant, whichever other law a generated history happens to
+ * break first. A name that is only part of a law, such as `FID-1` or
+ * `HEALTH-`, matches nothing, so a calibration cannot pass on a broader law
+ * than it names.
  */
 export function eagerLiveSourceProperty(
   driver: EagerLiveSourceDriver,
   reach?: ReachCounter,
+  law?: string | RegExp,
 ) {
   let target: string | undefined
   return fc.asyncProperty(
@@ -2849,15 +2859,32 @@ export function eagerLiveSourceProperty(
           reach: reach?.reach,
         })
       } catch (error) {
-        const law =
+        const violated =
           error instanceof ConformanceViolation
             ? error.law
             : `failure outside the comparison`
-        target ??= law
-        if (law === target) throw error
+        const calibrated = law === undefined || namesLaw(law, violated)
+        if (calibrated) target ??= violated
+        if (violated === target) throw error
       }
     },
   )
+}
+
+/**
+ * Whether a calibration's `law` names the violated law: the same string, or a
+ * pattern that matches the whole of it. The pattern is anchored at both ends,
+ * so an alternative that matches only a prefix of the law, as `EVID-2` does in
+ * `/EVID-2|EVID-2 \(awaitTxId \d+\)/`, cannot hide one that matches all of
+ * it. The `g`, `y`, and `m` flags are dropped: they would make the answer
+ * depend on the pattern's `lastIndex` or on one line of the law.
+ */
+export function namesLaw(law: string | RegExp, violated: string): boolean {
+  if (typeof law === `string`) return violated === law
+  return new RegExp(
+    `^(?:${law.source})$`,
+    law.flags.replace(/[gmy]/g, ``),
+  ).test(violated)
 }
 
 // Exported for calibration tests: the model's prediction for a history.

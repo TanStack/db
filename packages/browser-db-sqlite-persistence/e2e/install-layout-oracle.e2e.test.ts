@@ -53,6 +53,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { buildForProduction, consumerVite } from './packaged-consumer'
 import type { Browser } from '@playwright/test'
 import type { BrowserWASQLiteDatabase } from '../src'
@@ -218,6 +219,7 @@ const promisedOutcomes: Record<ConsumerVite, ReadonlyArray<LayoutOutcome>> = {
   ],
 }
 
+// Owns nothing: this file checks the installed package layout (build outputs), not a src function.
 declareOracle({
   check: [expectLayoutOutcome],
   model: [expectedOutcome],
@@ -250,6 +252,7 @@ afterAll(async () => {
 it.each(layoutCases)(
   `vite $vite $server $layout install (cache $cache, excluded by $exclusion) matches the layout model`,
   async (layoutCase) => {
+    oracleRoute(`case`)
     const temporaryDirectory = realpathSync(
       mkdtempSync(join(realpathSync(tmpdir()), `db-wasm-layout-`)),
     )
@@ -270,6 +273,7 @@ it.each(layoutCases)(
 // trees.
 for (const vite of [7, 8] as const) {
   it(`covers every promised layout outcome under Vite ${vite}`, () => {
+    oracleRoute(`case`)
     expect([...coveredOutcomes[vite]].sort()).toEqual(
       promisedOutcomes[vite].map((outcome) => JSON.stringify(outcome)).sort(),
     )

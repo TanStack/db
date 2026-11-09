@@ -7,7 +7,10 @@ import { randomUUID } from 'node:crypto'
 import { createLiveQueryCollection, eq, gt, isNull } from '@tanstack/db'
 
 import { describe, expect, it, vi } from 'vitest'
-import { declareOracle } from '../../../db/tests/oracle-declaration.js'
+import {
+  declareOracle,
+  oracleRoute,
+} from '../../../db/tests/oracle-declaration.js'
 import { waitFor, waitForQueryData } from '../utils/helpers'
 import type {
   Comment,
@@ -361,6 +364,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
   describe(`Joins Suite`, () => {
     describe(`Two-Collection Joins`, () => {
       it(`should join Users and Posts`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
         const postsCollection = config.collections.onDemand.posts
@@ -407,6 +411,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
       })
 
       it(`should join with predicates on both collections`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
         const postsCollection = config.collections.onDemand.posts
@@ -465,6 +470,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
         `should join with one eager, one on-demand`,
         { timeout: 60000 },
         async () => {
+          oracleRoute(`fixed history`)
           const config = await getConfig()
           const usersEager = config.collections.eager.users
           const postsOnDemand = config.collections.onDemand.posts
@@ -512,6 +518,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
       )
 
       it(`should join with ordering across collections`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
         const postsCollection = config.collections.onDemand.posts
@@ -583,6 +590,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
       })
 
       it(`should join with pagination`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
         const postsCollection = config.collections.onDemand.posts
@@ -632,6 +640,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
 
     describe(`Three-Collection Joins`, () => {
       it(`should join Users + Posts + Comments`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const { users, posts, comments } = config.collections.onDemand
 
@@ -684,6 +693,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
       })
 
       it(`should handle predicates on all three collections`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const { users, posts, comments } = config.collections.onDemand
 
@@ -745,6 +755,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
         `should handle mixed syncModes in 3-way join`,
         { timeout: 60000 },
         async () => {
+          oracleRoute(`fixed history`)
           const config = await getConfig()
           const usersEager = config.collections.eager.users
           const postsOnDemand = config.collections.onDemand.posts
@@ -801,6 +812,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
 
     describe(`Predicates in Joined Results`, () => {
       it(`should apply predicates to the selected joined fields`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const { users, posts } = config.collections.onDemand
 
@@ -849,6 +861,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
       })
 
       it(`should exclude joined rows outside the user predicate`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const { users, posts } = config.collections.onDemand
 
@@ -899,6 +912,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
 
     describe(`Left Joins`, () => {
       it(`should handle left joins correctly`, async () => {
+        oracleRoute(`fixed history`)
         const config = await getConfig()
         const { users, posts } = config.collections.onDemand
 
@@ -953,4 +967,10 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
   })
 }
 
+// Owns no production entry. The suite judges the collection adapter that a
+// consuming package runs it against (electric.e2e.test.ts, query.e2e.test.ts,
+// trailbase.e2e.test.ts, or the persisted-collection conformance contract),
+// but no consumer declares `owns` either, so the gap report counts none of
+// this suite's kills. The coverage map records this as a follow-up under
+// "Shared e2e suites".
 declareOracle({ check: [withJoinHistory], model: [createJoinOracle] })

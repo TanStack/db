@@ -183,6 +183,8 @@ jobs:
         uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Build Packages
         run: pnpm run build
+      - name: Check that no build carries an oracle probe
+        run: node scripts/check-dist-probes.mjs
       - name: Publish Previews
         run: pnpx pkg-pr-new publish --pnpm --compact './packages/*' --template './examples/*/*'
   size:

@@ -6,14 +6,17 @@ import { OutboxManager } from '../src/outbox/OutboxManager'
 import { TransactionSerializer } from '../src/outbox/TransactionSerializer'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
 import {
+  oracleFixedSeed,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { cleanupOfflineOracle } from './oracle-lifecycle'
 import { FakeStorageAdapter } from './harness'
-import { oracleLaneOptions, readOfflineOracleConfig } from './oracle-config'
+import { oracleCampaignOptions, readOfflineOracleConfig } from './oracle-config'
 import type { OfflineTransaction } from '../src/types'
 
 /**
@@ -48,8 +51,8 @@ import type { OfflineTransaction } from '../src/types'
  * process or restarting an existing Collection's sync run. Seed/path replay is
  * oracle replay of a recorded failure.
  *
- * Reach and controls: pinned histories force every edit kind and hostile marker.
- * Fixed and random lanes support seed/path replay. Encoder and decoder faults
+ * Reach and controls: fixed histories force every edit kind and hostile marker.
+ * Fixed and random campaigns support seed/path replay. Encoder and decoder faults
  * inject Date/string confusion, wrong registry, omitted changes, and unknown
  * versions. Malformed generated markers are rejected before durable data can
  * be replaced; the single-case Temporal failure paths are unit tests.
@@ -385,7 +388,18 @@ async function checkRoundtrip(
 // The check runs one history through production and compares every checkpoint
 // with the semantic model above. Generated properties, fixed histories, and the
 // fault calibrations all reach it.
-declareOracle({ check: [checkRoundtrip] })
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [
+    `src/outbox/TransactionSerializer.ts#TransactionSerializer.serialize`,
+    `src/outbox/TransactionSerializer.ts#TransactionSerializer.deserialize`,
+    `src/outbox/OutboxManager.ts#OutboxManager.add`,
+    `src/outbox/OutboxManager.ts#OutboxManager.getAll`,
+    `src/outbox/OutboxManager.ts#OutboxManager.get`,
+  ],
+  check: [checkRoundtrip],
+})
 
 const twin: Pair = {
   runtime: `2024-01-01T00:00:00.000Z`,
@@ -393,6 +407,7 @@ const twin: Pair = {
 }
 
 it(`preserves marker-shaped user data through current wire encoding`, async () => {
+  oracleRoute(`case`)
   const runtime = {
     __type: `Temporal`,
     type: `Temporal.PlainDate`,
@@ -422,6 +437,13 @@ it.each([`modified`, `original`, `changes`] as const)(
     })
     const serializer = new TransactionSerializer({ rows: collection })
     try {
+      const parameters = oracleFixedSeed(20260914, {
+        numRuns: 100,
+        examples: [undefined, null, 1, `text`, false, []].map(
+          (value): [typeof value, Array<boolean>] => [value, []],
+        ),
+      })
+      oracleRoute(oracleRouteOf(parameters))
       fc.assert(
         fc.property(
           fc.constantFrom(undefined, null, 1, `text`, false, []),
@@ -454,20 +476,14 @@ it.each([`modified`, `original`, `changes`] as const)(
             ).toThrow(`Corrupted Object marker`)
           },
         ),
-        {
-          seed: 20260914,
-          numRuns: 100,
-          examples: [undefined, null, 1, `text`, false, []].map(
-            (value): [typeof value, Array<boolean>] => [value, []],
-          ),
-        },
+        parameters,
       )
     } finally {
       await collection.cleanup()
     }
   },
 )
-const pinned: Array<Edit> = [
+const fixedHistory: Array<Edit> = [
   { kind: `insert`, slot: 1, before: twin, after: { runtime: 0.5, wire: 0.5 } },
   { kind: `insert`, slot: 0, before: twin, after: datePair(1704067200000) },
   { kind: `update`, slot: 1, before: datePair(0), after: twin },
@@ -488,20 +504,20 @@ const pinned: Array<Edit> = [
     }
   }),
 ]
-// Grammar controls: the pinned history is a legal ten-edit reconstruction of
+// Grammar controls: the fixed history is a legal ten-edit reconstruction of
 // every edit kind, both registry slots, Date/string twins, marker escapes, and
 // an own __proto__ key. Dropping one of those axes loses a distinct wire or
 // application-restart observation. Generated trees add empty and nested arrays
 // and objects with depth two and at most three children or keys. Current records
 // admit zero edits, while compatibility records start at one. Cycles and malformed
 // markers are outside this valid-tree grammar and have rejection witnesses
-// above. The generated edit bound includes the complete pinned history. A
+// above. The generated edit bound includes the complete fixed history. A
 // never-escape rule fails its marker-shaped user object; an always-escape rule
 // fails its ordinary object with an own __proto__ key at the wire checkpoint.
-// This package's test root is separate from core's named replay portfolio.
+// This package's test root is separate from core's named fixed-history portfolio.
 // Keep a local replay entry point rather than importing files outside rootDir.
 // Each random campaign is its own replay property, because a recorded path
-// belongs to one generator. Its fixed lane and its random lane share one
+// belongs to one generator. Its fixed campaign and its random campaign share one
 // generator, budget, and assertion set.
 const MUTATION_WIRE_PROPERTY = `offline.serializer.mutation-wire`
 const DATE_MARKER_PROPERTY = `offline.serializer.date-marker`
@@ -526,7 +542,7 @@ const mutationEdits = fc.array(
     before: tree(2),
     after: tree(2),
   }),
-  { maxLength: pinned.length },
+  { maxLength: fixedHistory.length },
 )
 const mutationTime = fc.integer({
   min: -2000000000000,
@@ -538,10 +554,12 @@ const mutationMeaningProperty = (fault: Fault = `none`) =>
   )
 
 const checkMutationWire = async (seed: number | undefined): Promise<void> => {
-  await fc.assert(mutationMeaningProperty(), {
-    ...oracleLaneOptions(mutationWireOracle, seed),
-    examples: [[pinned, 1704067200000]],
-  })
+  const parameters = {
+    ...oracleCampaignOptions(mutationWireOracle, seed),
+    examples: [[fixedHistory, 1704067200000]],
+  }
+  oracleRoute(oracleRouteOf(parameters))
+  await fc.assert(mutationMeaningProperty(), parameters)
 }
 
 oracleReplayTest(it).each([20260914])(
@@ -556,6 +574,7 @@ oracleReplayTest(it, MUTATION_WIRE_PROPERTY).each([undefined])(
 oracleReplayTest(it, MUTATION_WIRE_PROPERTY)(
   `replays a shrunk mutation-wire failure at the same checkpoint`,
   async () => {
+    oracleRoute(`calibration`)
     // The fault drops a mutation field after the real encoder runs. It leaves
     // zero-edit histories green, so fast-check must find and shrink a generated
     // history that reaches the wire assertion. A seed alone reseeds this
@@ -565,15 +584,15 @@ oracleReplayTest(it, MUTATION_WIRE_PROPERTY)(
     // TANSTACK_DB_ORACLE_PROPERTY=offline.serializer.mutation-wire
     const property = mutationMeaningProperty(`omit-changes`)
     const replay = mutationWireOracle.random
-    const { replaySeed } = readOracleRunConfig()
+    const { campaignSeed } = readOracleRunConfig()
     const captured = await fc.check(property, {
       ...replay,
-      seed: replaySeed ?? 20260914,
+      seed: campaignSeed ?? 20260914,
     })
     expect(captured.failed).toBe(true)
     expect(captured.errorInstance).toMatchObject({ name: `AssertionError` })
-    expect(captured.error).toContain(`mutation wire checkpoint`)
-    if (replaySeed !== undefined) return
+    expect(String(captured.errorInstance)).toContain(`mutation wire checkpoint`)
+    if (campaignSeed !== undefined) return
 
     expect(captured.numShrinks).toBeGreaterThan(0)
     expect(captured.counterexamplePath).toMatch(/^\d+(?::\d+)*$/)
@@ -586,7 +605,7 @@ oracleReplayTest(it, MUTATION_WIRE_PROPERTY)(
     })
     expect(original.failed).toBe(true)
     expect(original.errorInstance).toMatchObject({ name: `AssertionError` })
-    expect(original.error).toContain(`mutation wire checkpoint`)
+    expect(String(original.errorInstance)).toContain(`mutation wire checkpoint`)
     const replayed = await fc.check(property, {
       seed: captured.seed,
       path: capturedPath,
@@ -595,15 +614,16 @@ oracleReplayTest(it, MUTATION_WIRE_PROPERTY)(
     expect(replayed.failed).toBe(true)
     expect(replayed.counterexample).toEqual(captured.counterexample)
     expect(replayed.errorInstance).toMatchObject({ name: `AssertionError` })
-    expect(replayed.error).toContain(`mutation wire checkpoint`)
+    expect(String(replayed.errorInstance)).toContain(`mutation wire checkpoint`)
   },
 )
 
 it(`retains the wire mismatch when cleanup also fails`, async () => {
+  oracleRoute(`calibration`)
   let failure: unknown
   try {
     await checkRoundtrip(
-      [pinned[0]!],
+      [fixedHistory[0]!],
       0,
       `omit-changes`,
       `encoder`,
@@ -624,6 +644,13 @@ it(`retains the wire mismatch when cleanup also fails`, async () => {
 })
 
 const checkDateMarker = async (seed: number | undefined): Promise<void> => {
+  const campaignParameters = {
+    ...oracleCampaignOptions(dateMarkerOracle, seed),
+    examples: [
+      [[{ kind: `update`, slot: 0, before: datePair(0), after: twin }]],
+    ],
+  }
+  oracleRoute(oracleRouteOf(campaignParameters))
   await fc.assert(
     fc.asyncProperty(
       fc.array(
@@ -633,7 +660,7 @@ const checkDateMarker = async (seed: number | undefined): Promise<void> => {
           before: leaf,
           after: leaf,
         }),
-        { minLength: 1, maxLength: pinned.length },
+        { minLength: 1, maxLength: fixedHistory.length },
       ),
       async (edits) => {
         // Old records had no object escape. Use only unambiguous legacy trees,
@@ -655,12 +682,7 @@ const checkDateMarker = async (seed: number | undefined): Promise<void> => {
         )
       },
     ),
-    {
-      ...oracleLaneOptions(dateMarkerOracle, seed),
-      examples: [
-        [[{ kind: `update`, slot: 0, before: datePair(0), after: twin }]],
-      ],
-    },
+    campaignParameters,
   )
 }
 
@@ -674,6 +696,11 @@ oracleReplayTest(it, DATE_MARKER_PROPERTY).each([undefined])(
 )
 
 const checkVersionTwo = async (seed: number | undefined): Promise<void> => {
+  const runParameters = {
+    ...oracleCampaignOptions(versionTwoOracle, seed),
+    examples: [[fixedHistory]],
+  }
+  oracleRoute(oracleRouteOf(runParameters))
   await fc.assert(
     fc.asyncProperty(
       fc.array(
@@ -683,14 +710,11 @@ const checkVersionTwo = async (seed: number | undefined): Promise<void> => {
           before: tree(2),
           after: tree(2),
         }),
-        { minLength: 1, maxLength: pinned.length },
+        { minLength: 1, maxLength: fixedHistory.length },
       ),
       async (edits) => checkRoundtrip(edits, 0, `none`, `encoder`, false, true),
     ),
-    {
-      ...oracleLaneOptions(versionTwoOracle, seed),
-      examples: [[pinned]],
-    },
+    runParameters,
   )
 }
 
@@ -721,6 +745,7 @@ it.each(
 )(
   `rejects the $fault $boundary mutant at its own boundary`,
   async ({ fault, boundary }) => {
+    oracleRoute(`calibration`)
     const decode = vi.spyOn(TransactionSerializer.prototype, `deserialize`)
     try {
       const expectedFailure =
@@ -734,7 +759,7 @@ it.each(
                   : `Unsupported transaction value encoding: 5`,
             }
       await expect(
-        checkRoundtrip(pinned, 0, fault, boundary),
+        checkRoundtrip(fixedHistory, 0, fault, boundary),
       ).rejects.toMatchObject(expectedFailure)
       expect(decode).toHaveBeenCalledTimes(boundary === `encoder` ? 0 : 1)
     } finally {

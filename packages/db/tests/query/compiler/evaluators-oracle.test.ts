@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { compileExpression } from '../../../src/query/compiler/evaluators.js'
 import { Func, Value } from '../../../src/query/ir.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../oracle-config.js'
 import { declareOracle } from '../../oracle-declaration.js'
@@ -20,8 +23,8 @@ import { declareOracle } from '../../oracle-declaration.js'
  *
  * History grammar: each case contains a value, a pattern, and a case-fold flag.
  * The small alphabet concentrates on literal/wildcard precedence, `_`, case,
- * newlines, and non-ASCII code units. Every generated string is legal. Pinned
- * witnesses reconstruct the reported `%` collision; removing `%` removes that
+ * newlines, and non-ASCII code units. Every generated string is legal. Fixed
+ * histories reconstruct the reported `%` collision; removing `%` removes that
  * distinction, while empty and literal-only cases exercise its boundaries.
  *
  * Production driver: compile a public `like` or `ilike` expression and invoke
@@ -59,18 +62,17 @@ const likeCalibrationCases: Array<LikeCase> = [
 // The fixed campaign stands aside during a path replay. The random campaign uses
 // the seed of a replay of this property, when TANSTACK_DB_ORACLE_SEED supplies
 // one. This generator has no shrink path, so a path replay only reseeds it.
+// Each campaign's parameters carry its seed and give the test its route.
 const likeOracleCampaigns = [
   {
     name: `fixed`,
     test: oracleReplayTest(it),
-    seed: FIXED_LIKE_ORACLE_SEED,
+    parameters: oracleFixedSeed(FIXED_LIKE_ORACLE_SEED),
   },
   {
     name: `random`,
     test: oracleReplayTest(it, likeProperty),
-    seed:
-      oraclePropertyOptions(10_000, likeProperty).seed ??
-      Math.floor(Math.random() * 0x1_0000_0000),
+    parameters: oraclePropertyOptions(10_000, likeProperty),
   },
 ]
 
@@ -164,6 +166,7 @@ function findLikeMismatch(
 }
 
 declareOracle({
+  owns: ['src/query/compiler/evaluators.ts#compileExpression'],
   check: [findLikeMismatch],
   model: [referenceLike],
   grammar: [seededLikeCases],
@@ -174,6 +177,7 @@ describe(`evaluators`, () => {
     describe(`function compilation`, () => {
       describe(`like/ilike functions`, () => {
         it(`rejects the literal-before-wildcard wrong result`, () => {
+          oracleRoute(`calibration`)
           const witness: LikeCase = {
             value: `100% done`,
             pattern: `100%done`,
@@ -194,7 +198,10 @@ describe(`evaluators`, () => {
           campaign.test(
             `matches the LIKE law in the ${campaign.name} campaign`,
             () => {
-              const { seed } = campaign
+              oracleRoute(oracleRouteOf(campaign.parameters))
+              const seed =
+                campaign.parameters.seed ??
+                Math.floor(Math.random() * 0x1_0000_0000)
               let mismatchCount = 0
               const mismatchSamples: Array<LikeMismatch> = []
               const reach = {

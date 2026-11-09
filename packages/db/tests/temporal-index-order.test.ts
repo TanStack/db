@@ -21,8 +21,8 @@ import type { CompareOptions } from '../src/query/builder/types'
  * direction, and equal-instant ties, then compares exact ordered keys after
  * the action. A ready source exercises scan and indexed live-query paths at
  * preload; an on-demand Collection checks the first published ordered row.
- * Index spies prove the named indexed reads. The PlainDate lane checks one
- * extended-year calendar boundary; the exception lane requires `TypeError`
+ * Index spies prove the named indexed reads. The PlainDate grammar checks one
+ * extended-year calendar boundary; the exception grammar requires `TypeError`
  * for its named mixed or unordered Temporal pairs and claims no ordered
  * result for them. Custom index callbacks, mutated built-ins, and other
  * mixed Temporal pairs remain outside this owner.

@@ -17,6 +17,7 @@ import {
 import { descriptorStartFixture } from '../../db/tests/descriptor-start-release-support'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { withOracleCleanup } from '../../db/tests/utils'
 import type { DescriptorStartHistory } from '../../db/tests/descriptor-start-release-oracle'
 
@@ -70,10 +71,14 @@ async function checkHistory(history: DescriptorStartHistory) {
 
 it.each(descriptorStartHistories)(
   `releases independent descriptor starts in Svelte: %j`,
-  checkHistory,
+  (history) => {
+    oracleRoute(`case`)
+    return checkHistory(history)
+  },
 )
 
 declareOracle({
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   check: [checkDescriptorStart],
   model: [expectedDescriptorStart],
   grammar: [descriptorStartHistories],

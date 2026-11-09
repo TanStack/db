@@ -7,6 +7,7 @@
 import { expect, test } from '@playwright/test'
 import { requestOrderExamples } from '../tests/opfs-request-order-oracle'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import type { OPFSRequestOrderResult } from './opfs-request-order.opfs'
 
 // The page's comparison of each fixed history's settlements with the model: no history may report a violation.
@@ -21,11 +22,15 @@ function expectRequestOrderLawsHold(result: {
   ).toEqual([])
 }
 
-declareOracle({ check: [expectRequestOrderLawsHold] })
+declareOracle({
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+  check: [expectRequestOrderLawsHold],
+})
 
 test(`real Chromium OPFS connection answers requests in order and closes after them`, async ({
   page,
 }) => {
+  oracleRoute(`fixed history`)
   test.setTimeout(120_000)
   const pageErrors: Array<string> = []
   page.on(`pageerror`, (error) => pageErrors.push(error.message))

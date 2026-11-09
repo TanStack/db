@@ -180,6 +180,6 @@ export interface InfiniteQueryDriver {
     build: QueryBuild,
     config?: InfiniteQueryConfig,
   ) => InfiniteQueryInputHandle
-  /** Whole-test waivers are not supported; future gaps need exact signatures. */
-  knownGaps?: ReadonlyArray<never>
+  /** Whole-test waivers are not supported; future limits need exact signatures. */
+  limits?: ReadonlyArray<never>
 }

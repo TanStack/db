@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -123,7 +126,10 @@ function expectRetryHistory(history: History): void {
   expect(reads).toEqual(afterSuccess)
 }
 
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 declareOracle({
+  owns: [`src/hashing/hash.ts#hash`],
   check: [expectRetryHistory],
   model: [expectedFailedReads, expectedSuccessReads, expectedPlainCopy],
 })
@@ -132,42 +138,50 @@ describe(`getter failure does not publish partial structural hashes`, () => {
   it.each([0, 1, 2, 3])(
     `retries the same root after %s completed siblings`,
     (completed) => {
+      oracleRoute(`case`)
       expectRetryHistory({ completed, tail: 2, failures: 2, value: 10 })
     },
   )
 
   it(`retries a first-getter failure without an untouched tail`, () => {
+    oracleRoute(`case`)
     expectRetryHistory({ completed: 0, tail: 0, failures: 1, value: -20 })
   })
 
   it(`retries three failures at the last getter`, () => {
+    oracleRoute(`case`)
     expectRetryHistory({ completed: 3, tail: 0, failures: 3, value: 20 })
   })
 
   oracleReplayTest(it)(
     `preserves failure causes and retry cuts (fixed seed 205206)`,
     () => {
+      const parameters = oracleFixedSeed(205206, { numRuns: oracleRuns(100) })
+      oracleRoute(oracleRouteOf(parameters))
       fc.assert(
         fc.property(retryHistoryArbitrary, (history) =>
           expectRetryHistory(history),
         ),
-        { numRuns: oracleRuns(100), seed: 205206 },
+        parameters,
       )
     },
   )
   oracleReplayTest(it, retryProperty)(
     `preserves failure causes and retry cuts (random seed)`,
     () => {
+      const campaignParameters = oraclePropertyOptions(100, retryProperty)
+      oracleRoute(oracleRouteOf(campaignParameters))
       fc.assert(
         fc.property(retryHistoryArbitrary, (history) =>
           expectRetryHistory(history),
         ),
-        oraclePropertyOptions(100, retryProperty),
+        campaignParameters,
       )
     },
   )
 
   it(`rejects cached-sibling and substituted-error observations`, () => {
+    oracleRoute(`calibration`)
     const error = new Error(`getter rejected`)
     expectFailureCut(error, [2, 2, 0], error, [2, 2, 0])
     expect(() => expectFailureCut(error, [1, 2, 0], error, [2, 2, 0])).toThrow()

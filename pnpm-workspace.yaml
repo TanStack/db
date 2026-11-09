@@ -13,6 +13,9 @@ packages:
   - examples/**/*
 
 overrides:
+  # @fast-check/vitest accepts fast-check 3 or 4; one copy (4) keeps test.prop
+  # campaigns and fast-check's types on the version the oracles use.
+  '@fast-check/vitest>fast-check': '^4.10.2'
   # Chokidar 4.0.2 and 4.0.3 fail the trust policy; 4.0.1 satisfies v4 consumers.
   'chokidar@^4.0.0': '4.0.1'
   # UUID 13.0.2 includes the security fix and retains trusted publishing evidence.

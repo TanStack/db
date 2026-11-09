@@ -37,9 +37,12 @@ import {
 } from '../../src/errors.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRandomParameters,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
@@ -1785,6 +1788,15 @@ async function runCampaign(
     const generatedExamples = fc
       .sample(requiredHistories, { seed: parameters.seed, numRuns: 1 })[0]!
       .map((entry) => [entry] as [History])
+    const campaignParameters = {
+      ...parameters,
+      examples: [...parameters.examples, ...generatedExamples],
+      numRuns:
+        parameters.path === undefined
+          ? parameters.numRuns + generatedExamples.length
+          : parameters.numRuns,
+    }
+    oracleRoute(oracleRouteOf(campaignParameters))
     await fc.assert(
       fc.asyncProperty(history, async (entry) => {
         const fixed = structuralInputs.has(entry)
@@ -1792,14 +1804,7 @@ async function runCampaign(
         reach.beginHistory({ fixed })
         await runHistory(entry)
       }),
-      {
-        ...parameters,
-        examples: [...parameters.examples, ...generatedExamples],
-        numRuns:
-          parameters.path === undefined
-            ? parameters.numRuns + generatedExamples.length
-            : parameters.numRuns,
-      },
+      campaignParameters,
     )
     structuralReach.assertReached()
     generatedReach.assertReached()
@@ -1825,6 +1830,10 @@ async function runCampaign(
 // `modelGroup` and `modelError`. Generated histories, structural examples, and
 // existing model replays use this same check.
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [runHistory],
   model: [modelGroup, modelError],
   grammar: [history, requiredHistories],
@@ -1835,14 +1844,19 @@ describe(`aggregate select shapes`, () => {
     `match the model across generated shapes (fixed campaign)`,
     async () => {
       // Keep the literal budget/seed binding visible to the run-budget audit.
-      const options = { numRuns: oracleRuns(160), seed: 2094 }
+      // runCampaign registers the route of the parameters, which declare the
+      // seed fixed.
+      const options = oracleFixedSeed(2094, { numRuns: oracleRuns(160) })
       await runCampaign(
         `fixed`,
-        oracleRandomParameters(
-          options.numRuns,
+        oracleFixedSeed(
           options.seed,
-          undefined,
-          examples,
+          oracleRandomParameters(
+            options.numRuns,
+            options.seed,
+            undefined,
+            examples,
+          ),
         ),
       )
     },
@@ -1858,9 +1872,10 @@ describe(`aggregate select shapes`, () => {
     },
   )
 
-  // Pinned replay of a review counterexample: a grouped select value that
+  // Fixed regression of a review counterexample: a grouped select value that
   // holds the group key inside a function must read the group's key.
   oracleReplayTest(it)(`reads the group key inside a function`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory({
       top: {
         fields: { f0: { k: `add`, a: { k: `lit`, n: 0 }, b: { k: `key` } } },
@@ -1870,9 +1885,10 @@ describe(`aggregate select shapes`, () => {
     })
   })
 
-  // Pinned replay: a published row keeps the select's field order, also
+  // Fixed regression: a published row keeps the select's field order, also
   // when a group key comes before a plain aggregate.
   oracleReplayTest(it)(`keeps the select's field order`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory({
       top: {
         fields: {
@@ -1885,11 +1901,12 @@ describe(`aggregate select shapes`, () => {
     })
   })
 
-  // Pinned replay of a generated counterexample: an aggregate query without
+  // Fixed regression of a generated counterexample: an aggregate query without
   // groupBy whose select wraps its only aggregate still accepts HAVING.
   oracleReplayTest(it)(
     `accepts HAVING beside a wrapped aggregate without groupBy`,
     async () => {
+      oracleRoute(`fixed history`)
       await runHistory({
         top: {
           fields: {
@@ -1912,11 +1929,12 @@ describe(`aggregate select shapes`, () => {
     },
   )
 
-  // Pinned replay: a parent field stays legal when the include's source
+  // Fixed regression: a parent field stays legal when the include's source
   // shadows the parent alias.
   oracleReplayTest(it)(
     `reads a parent field under a shadowing child alias`,
     async () => {
+      oracleRoute(`fixed history`)
       await runHistory({
         top: { fields: { f0: { k: `agg`, fn: `count` } } },
         nested: {

@@ -48,7 +48,7 @@
   ],
   "dependencies": {
     "@tanstack/db": "workspace:*",
-    "fast-check": "^3.23.2"
+    "fast-check": "^4.10.2"
   },
   "devDependencies": {
     "@fast-check/vitest": "^0.5.0",

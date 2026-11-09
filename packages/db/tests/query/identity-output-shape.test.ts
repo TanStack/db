@@ -1,4 +1,4 @@
-// Hand-written equality pairs that pin the value relation, and the public group
+// Hand-written equality pairs that check the value relation, and the public group
 // rows they produce. identity-output-shape-oracle.test.ts owns the law and its
 // generated campaign.
 import { Temporal } from 'temporal-polyfill'

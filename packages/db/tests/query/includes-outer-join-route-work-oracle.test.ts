@@ -9,6 +9,7 @@ import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises } from '../utils.js'
 import { declareOracle } from '../oracle-declaration.js'
+import { oracleRoute } from '../oracle-config.js'
 import { createScopedSource } from './includes-scope-identity-oracle.js'
 import type { crossJoinParentRoutes } from '../../src/query/compiler/parent-routes.js'
 
@@ -111,12 +112,21 @@ const model = (
     ),
   )
 
-declareOracle({ model: [model] })
+declareOracle({
+  owns: [
+    'src/collection/change-events.ts#createFilterFunctionFromExpression',
+    'src/collection/index.ts#createCollection',
+    'src/indexes/basic-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
+  model: [model],
+})
 
 describe(`direct outer-join route work`, () => {
   for (const kind of [`right`, `full`] as const) {
     for (const mode of [`eager`, `onDemand`] as const) {
       test(`${kind} main correlation with ${mode} sources avoids work from unrelated joined rows`, async () => {
+        oracleRoute(`case`)
         const parentRows: Array<Parent> = [{ id: 1 }, { id: 2 }]
         const mainRows: Array<Main> = [
           { id: 10, parentId: 1, anchorId: 7 },

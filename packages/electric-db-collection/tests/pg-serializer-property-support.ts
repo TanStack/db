@@ -1,7 +1,10 @@
 import { test as fcTest } from '@fast-check/vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import type { fc } from '@fast-check/vitest'
@@ -21,13 +24,23 @@ export function serializerProp<T>(
     registeredProperties.add(name)
     // A path replay of the property runs only the random campaign, from its
     // path. The fixed campaign stands aside during every path replay.
-    oracleReplayTest(fcTest).prop([arbitrary], {
+    const fixedCampaign = oracleFixedSeed(20260930, {
       numRuns: oracleRuns(100),
-      seed: 20260930,
-    })(`${name} (fixed)`, check)
-    oracleReplayTest(fcTest, property).prop(
-      [arbitrary],
-      oraclePropertyOptions(100, property),
-    )(`${name} (random)`, check)
+    })
+    oracleReplayTest(fcTest).prop([arbitrary], fixedCampaign)(
+      `${name} (fixed)`,
+      (value) => {
+        oracleRoute(oracleRouteOf(fixedCampaign))
+        check(value)
+      },
+    )
+    const randomCampaign = oraclePropertyOptions(100, property)
+    oracleReplayTest(fcTest, property).prop([arbitrary], randomCampaign)(
+      `${name} (random)`,
+      (value) => {
+        oracleRoute(oracleRouteOf(randomCampaign))
+        check(value)
+      },
+    )
   }
 }

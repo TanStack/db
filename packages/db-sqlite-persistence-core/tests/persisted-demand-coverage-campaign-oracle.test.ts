@@ -8,9 +8,12 @@ import {
   eq,
 } from '@tanstack/db'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplaySkips,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   recordOracleReplay,
 } from '../../db/tests/oracle-config'
@@ -1179,14 +1182,15 @@ async function assertRun<T>(property: string, result: fc.RunDetails<T>) {
     throw new Error(message, { cause: result.errorInstance })
 }
 
-async function campaign(options: Parameters<typeof fc.assert>[1]) {
-  // A seed alone replays the whole campaign and must still enforce reach.
+async function campaign(options: NonNullable<Parameters<typeof fc.assert>[1]>) {
+  // A seed alone runs a reseeded campaign and must still enforce reach.
   // A path replays one input directly and does not owe campaign-wide reach.
   const reach = createOracleReach<CoverageReach>(PROPERTY, REACH_STATES, {
     replaying: oracleReplayRequested(),
   })
   let seed: number | undefined
   if (!oracleReplaySkips(PROPERTY)) {
+    oracleRoute(oracleRouteOf(options))
     const result = await fc.check(
       fc.asyncProperty(historyArb, (history) => checkHistory(history, reach)),
       options,
@@ -1240,7 +1244,7 @@ async function campaign(options: Parameters<typeof fc.assert>[1]) {
     reach.assertReached()
   } catch (error) {
     throw new Error(
-      `${PROPERTY}: seed=${seed}, numRuns=${options?.numRuns}; replay the full campaign with this seed`,
+      `${PROPERTY}: seed=${seed}, numRuns=${options.numRuns}; replay the full campaign with this seed`,
       { cause: error },
     )
   }
@@ -1262,6 +1266,7 @@ function checkRelease(
 }
 
 declareOracle({
+  owns: [`src/persisted.ts`],
   check: [coverageViolations, checkFault, checkRelease],
   grammar: [historyArb, requiredHistoriesArb],
 })
@@ -1270,6 +1275,7 @@ describe(`persisted demand coverage over generated histories`, () => {
   it.skipIf(oracleReplayRequested())(
     `keeps the law when any one storage call fails`,
     async () => {
+      oracleRoute(`case`)
       quietConsole()
       const baseline = await runWithFault(undefined)
       // Positive witness: without a failure, session 2 settles D offline.
@@ -1311,6 +1317,7 @@ describe(`persisted demand coverage over generated histories`, () => {
   it.skipIf(oracleReplayRequested())(
     `owns no wait after a release at any step of a load`,
     async () => {
+      oracleRoute(`case`)
       quietConsole()
       const driver = createDriver(new DatabaseSync(`:memory:`))
       await coverGroupA(driver)
@@ -1337,6 +1344,7 @@ describe(`persisted demand coverage over generated histories`, () => {
   it.skipIf(oracleReplayRequested())(
     `rejects observations that ignore lost rows, obsolete loads, or other window rows`,
     () => {
+      oracleRoute(`calibration`)
       // Checker calibration (ORC-006): the shared judgment must reject a wrong
       // observation of each kind. Each record below states what production
       // would wrongly show; the comparison must report it.
@@ -1449,7 +1457,7 @@ describe(`persisted demand coverage over generated histories`, () => {
     `refines the model over a fixed campaign`,
     async () => {
       quietConsole()
-      await campaign({ seed: 2102, numRuns: oracleRuns(RUNS) })
+      await campaign(oracleFixedSeed(2102, { numRuns: oracleRuns(RUNS) }))
     },
     campaignTimeoutMs,
   )

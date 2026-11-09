@@ -20,6 +20,7 @@
 import { expect, it } from 'vitest'
 import { executeTransaction } from '../../src'
 import { declareOracle } from '../oracle-declaration'
+import { oracleRoute } from '../oracle-config'
 import { Channel, assertRows, readStore, seed, withHarness } from './harness'
 import type { Row } from './harness'
 
@@ -48,6 +49,7 @@ for (const replacement of ['clear', 'import'] as const) {
         delivery +
         ' notifications',
       async () => {
+        oracleRoute(`case`)
         await withHarness(async (h) => {
           await seed(h.db, 'items', [{ id: 'old', name: 'replaced' }])
           const source = await h.open()
@@ -103,6 +105,12 @@ function expectedAfterPeerEdit(
 }
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db-wrapper.ts#executeTransaction',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+  ],
   model: [expectedAfterReplacement, expectedAfterPeerEdit],
 })
 
@@ -113,6 +121,7 @@ for (const metadata of ['none', 'mixed', 'all'] as const) {
   for (const key of [1, '1'])
     for (const action of ['update', 'delete'] as const) {
       it(`reconciles ${action} of ${typeof key} keys with ${metadata} initial versions`, async () => {
+        oracleRoute(`case`)
         await withHarness(async (h) => {
           const initial = [
             { id: key, name: 'legacy' },

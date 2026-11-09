@@ -29,11 +29,11 @@
  *
  * Calibration: the fixed pair (`a,b`, `c`) versus (`a`, `b,c`) and the pair
  * (1, `c`) versus (`1`, `c`) collided under the comma encoding; restoring it
- * fails both pinned histories and both campaigns. Plain `JSON.stringify`
- * printed `Infinity` and `-Infinity` as `null`; restoring it fails the pinned
+ * fails both fixed histories and both campaigns. Plain `JSON.stringify`
+ * printed `Infinity` and `-Infinity` as `null`; restoring it fails the fixed
  * infinity history and both campaigns. Comparing the join index's source-key
  * prefixes with `===` let a retracted `NaN`-keyed row survive; restoring it
- * fails the pinned `NaN` history.
+ * fails the fixed `NaN` history.
  *
  * The pair-only campaign above does not cover joins over subqueries or more
  * than two sources. The receiving grammar below adds bounded custom-key and
@@ -53,9 +53,12 @@ import {
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -166,7 +169,7 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
 // and (1, `c`) and (`1`, `c`) share `[1,c]`. Under plain JSON, (`a`, Infinity)
 // and (`a`, -Infinity) share `["a",null]`, and so do the unmatched right rows
 // once `a` moves away.
-const pinnedHistories: ReadonlyArray<History> = [
+const fixedHistories: ReadonlyArray<History> = [
   {
     join: `inner`,
     left: [
@@ -271,31 +274,51 @@ async function runHistory(history: History): Promise<void> {
   ])
 }
 
-declareOracle({ check: [runHistory], model: [expectedPairs] })
+declareOracle({
+  owns: [
+    `src/query/compiler/joins.ts#processJoins`,
+    `src/query/live-query-collection.ts#createLiveQueryCollection`,
+  ],
+  check: [runHistory],
+  model: [expectedPairs],
+})
 
 describe(`joined result key oracle`, () => {
-  // The pinned histories and the fixed campaign stand aside during any path
+  // The fixed histories and the fixed-seed campaign stand aside during any path
   // replay. The random campaign below is the one that a replay of this
   // property selects.
   if (!oracleReplayRequested()) {
-    for (const history of pinnedHistories) {
+    for (const history of fixedHistories) {
       it(`keeps every ${history.join} join pair for ${history.left
         .map((row) =>
           typeof row.id === `number` ? String(row.id) : JSON.stringify(row.id),
         )
-        .join(` `)}`, () => runHistory(history))
+        .join(` `)}`, () => {
+        oracleRoute(`case`)
+        return runHistory(history)
+      })
     }
 
-    fcTest.prop([historyArbitrary], {
-      seed: 44_501_962,
+    const historyFixedSeed = oracleFixedSeed(44_501_962, {
       numRuns: oracleRuns(80),
-    })(`publishes one row per joined pair (fixed)`, runHistory)
+    })
+    fcTest.prop([historyArbitrary], historyFixedSeed)(
+      `publishes one row per joined pair (fixed)`,
+      (history) => {
+        oracleRoute(oracleRouteOf(historyFixedSeed))
+        return runHistory(history)
+      },
+    )
   }
 
-  oracleReplayTest(fcTest, property).prop(
-    [historyArbitrary],
-    oraclePropertyOptions(80, property),
-  )(`publishes one row per joined pair (random)`, runHistory)
+  const historyCampaign = oraclePropertyOptions(80, property)
+  oracleReplayTest(fcTest, property).prop([historyArbitrary], historyCampaign)(
+    `publishes one row per joined pair (random)`,
+    (history) => {
+      oracleRoute(oracleRouteOf(historyCampaign))
+      return runHistory(history)
+    },
+  )
 })
 
 /**
@@ -779,15 +802,28 @@ describe(`whole-source joined occurrences`, () => {
   if (!oracleReplayRequested()) {
     it.each(selectionExamples)(
       `preserves every selected occurrence: %j`,
-      runSelectionHistory,
+      (history) => {
+        oracleRoute(`case`)
+        return runSelectionHistory(history)
+      },
     )
-    fcTest.prop([selectionHistoryArbitrary], {
-      seed: 15_811_743,
+    const selectionHistoryFixedSeed = oracleFixedSeed(15_811_743, {
       numRuns: oracleRuns(80),
-    })(`preserves selected occurrences (fixed)`, runSelectionHistory)
+    })
+    fcTest.prop([selectionHistoryArbitrary], selectionHistoryFixedSeed)(
+      `preserves selected occurrences (fixed)`,
+      (history) => {
+        oracleRoute(oracleRouteOf(selectionHistoryFixedSeed))
+        return runSelectionHistory(history)
+      },
+    )
   }
+  const selectionHistoryCampaign = oraclePropertyOptions(80, selectionProperty)
   oracleReplayTest(fcTest, selectionProperty).prop(
     [selectionHistoryArbitrary],
-    oraclePropertyOptions(80, selectionProperty),
-  )(`preserves selected occurrences (random)`, runSelectionHistory)
+    selectionHistoryCampaign,
+  )(`preserves selected occurrences (random)`, (history) => {
+    oracleRoute(oracleRouteOf(selectionHistoryCampaign))
+    return runSelectionHistory(history)
+  })
 })

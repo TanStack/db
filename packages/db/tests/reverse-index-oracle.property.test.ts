@@ -3,7 +3,13 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { ReverseIndex } from '../src/indexes/reverse-index.js'
 import { PropRef } from '../src/query/ir.js'
-import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
+import {
+  oracleFixedSeed,
+  oracleRandomParameters,
+  oracleRoute,
+  oracleRouteOf,
+  readOracleRunConfig,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 
 /**
@@ -43,7 +49,7 @@ import { declareOracle } from './oracle-declaration.js'
  *   is the reader `@tanstack/db` exported before query-aware placement. It
  *   reads the original index's reversed walk unchanged, so its nullish group
  *   sits wherever plain reversal puts it, for BTree and Basic indexes and for
- *   either null placement of the original. The pinned keys below are the
+ *   either null placement of the original. The fixed keys below are the
  *   results of the earlier release.
  * - **Capability:** ordered-query admission requires only range operations
  *   (`supports('gt')`). The reader may use the `equalityLookup` every index
@@ -172,7 +178,10 @@ const readCase: fc.Arbitrary<ReadCase> = fc.record({
   rejected: fc.uniqueArray(fc.integer({ min: 0, max: 15 }), { maxLength: 6 }),
 })
 
+// What this oracle owns: the gap report judges every function in
+// reverse-index.ts by this file's tests.
 declareOracle({
+  owns: [`src/indexes/reverse-index.ts`],
   check: [checkRead],
   model: [modelOrder, after, expectedRead],
 })
@@ -184,6 +193,7 @@ describe(`reversed index reads`, () => {
   it.each([`first`, `last`] as const)(
     `reads 50 keys among 5,000 nullish keys with nulls %s in bounded non-null work`,
     (nulls) => {
+      oracleRoute(`case`)
       const entries: Array<Entry> = Array.from({ length: 10_000 }, (_, key) => [
         key,
         key % 2 === 0 ? null : key,
@@ -200,16 +210,25 @@ describe(`reversed index reads`, () => {
     },
   )
 
-  fcTest.prop([readCase], { numRuns: runs, seed: 2045 })(
+  const readCaseFixedSeed = oracleFixedSeed(2045, { numRuns: runs })
+  fcTest.prop([readCase], readCaseFixedSeed)(
     `matches the query order in bounded work for a fixed seed`,
-    checkRead,
+    (read) => {
+      oracleRoute(oracleRouteOf(readCaseFixedSeed))
+      checkRead(read)
+    },
   )
 
-  fcTest.prop(
-    [readCase],
-    oracleRandomParameters(runs, replay, `reverse-index.reads`),
-  )(
+  const readCaseCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `reverse-index.reads`,
+  )
+  fcTest.prop([readCase], readCaseCampaign)(
     `matches the query order in bounded work for a random or replayed seed`,
-    checkRead,
+    (read) => {
+      oracleRoute(oracleRouteOf(readCaseCampaign))
+      checkRead(read)
+    },
   )
 })

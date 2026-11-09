@@ -407,7 +407,7 @@ export interface LiveQueryDriver {
    */
   comparesQueryIdentity: boolean
   /** No active waivers. Kept empty in drivers to make this boundary explicit. */
-  knownGaps?: ReadonlyArray<never>
+  limits?: ReadonlyArray<never>
   /**
    * How the adapter surfaces a query error (see the `error-status` scenario):
    * - `flag` (default): a readable `isLoadingError`/`status === 'error'` on the result.

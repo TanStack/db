@@ -4,8 +4,11 @@ import { createCollection } from '../src/collection/index'
 import { createChangeProxy, withChangeTracking } from '../src/proxy'
 import { makeFrozenRow, makeStoredRow } from './proxy-native-rows'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
@@ -21,7 +24,7 @@ import type { FrozenRow, StoredRow } from './proxy-native-rows'
  * descriptors, keys, iteration, cycles, aliases, and revert-to-original rules.
  * The input object must remain unchanged.
  *
- * Pinned examples of individual language operations live in proxy.test.ts.
+ * Fixed examples of individual language operations live in proxy.test.ts.
  * The array callback oracle is differential: it runs the same callback history on a plain native row and
  * on a draft, then compares callback results, visit order, reconstructed rows,
  * change records, peers, and the untouched baseline. Generated two-step
@@ -182,13 +185,18 @@ function writeThroughAccessPath(
   return row
 }
 
+// What this oracle owns: the gap report judges the draft's array callback
+// methods and the stored-function and defineProperty behavior of drafts in
+// proxy.ts by this file's tests.
 declareOracle({
+  owns: [`src/proxy.ts`],
   check: [assertArrayCallbacks],
   model: [runArrayCallback, writeThroughAccessPath],
 })
 
 describe(`native array callback oracle`, () => {
   it(`keeps the shared baseline independent of every captured actual cut`, () => {
+    oracleRoute(`fixed history`)
     const cuts = observeArrayCallbacks(
       [1, 2],
       [
@@ -208,6 +216,7 @@ describe(`native array callback oracle`, () => {
   it.each(accessPaths)(
     `preserves native writes through the %s access path`,
     async (path) => {
+      oracleRoute(`case`)
       for (const delta of [0, 3, -2]) {
         const make = () => ({ id: 1, items: [{ value: 1 }, { value: 2 }] })
         const run = (row: ReturnType<typeof make>) =>
@@ -255,6 +264,7 @@ describe(`native array callback oracle`, () => {
   it.each(callbackMethods)(
     `matches native %s reads, writes and reverts`,
     (method) => {
+      oracleRoute(`case`)
       for (const target of [0, 1, 2]) {
         for (const deltas of [
           [0, 0],
@@ -299,6 +309,10 @@ describe(`native array callback oracle`, () => {
       [`zero-sign-write`],
       { minimum: 5 },
     )
+    const parameters = options as fc.Parameters<
+      [{ values: Array<number>; steps: unknown }]
+    >
+    oracleRoute(oracleRouteOf(parameters))
     fc.assert(
       fc.property(callbackHistory, ({ values, steps }) => {
         reach.beginHistory()
@@ -318,14 +332,14 @@ describe(`native array callback oracle`, () => {
         }
         assertArrayCallbacks(cuts)
       }),
-      options as fc.Parameters<[{ values: Array<number>; steps: unknown }]>,
+      parameters,
     )
     reach.assertReached()
   }
   oracleReplayTest(it)(
     `matches native two-step callback histories (2026103)`,
     () => {
-      callbackCampaign({ seed: 2026103, numRuns: oracleRuns(200) })
+      callbackCampaign(oracleFixedSeed(2026103, { numRuns: oracleRuns(200) }))
     },
   )
   oracleReplayTest(it, `proxy.callback-history`)(
@@ -338,6 +352,7 @@ describe(`native array callback oracle`, () => {
   it.each([`lost-write`, `extra-visit`, `wrong-peer`] as const)(
     `rejects a captured %s independently of the native authority`,
     (fault) => {
+      oracleRoute(`calibration`)
       const cuts = observeArrayCallbacks(
         [4, -2, 7],
         [{ method: `forEach`, target: 1, delta: 3 }],
@@ -505,6 +520,7 @@ describe(`stored functions behave like native values`, () => {
   declareOracle({ check: [expectNativeProbeResult] })
 
   it.each(probes)(`%s gives the native result`, (_name, probe) => {
+    oracleRoute(`case`)
     expectNativeProbeResult(probe)
   })
 })
@@ -585,6 +601,7 @@ describe(`defineProperty behaves like on a native row`, () => {
   declareOracle({ check: [expectDefinitionMatchesNative] })
 
   it.each(definitions)(`%s`, (_name, define) => {
+    oracleRoute(`case`)
     expectDefinitionMatchesNative(define)
   })
 })
@@ -638,6 +655,7 @@ describe(`frozen and sealed drafts keep nested writes`, () => {
   declareOracle({ check: [expectNativeRowAfter] })
 
   it.each(histories)(`%s gives the native row`, (_name, run) => {
+    oracleRoute(`case`)
     expectNativeRowAfter(run)
   })
 

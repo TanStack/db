@@ -19,9 +19,12 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -1287,7 +1290,8 @@ function generatedPersistenceGrammarSamples(): ReadonlyArray<{
     if (match === undefined) throw new Error(`missing grammar: ${property}`)
     return match
   }
-  const sampleOptions = (seed: number) => ({ seed, numRuns: oracleRuns(4) })
+  const sampleOptions = (seed: number) =>
+    oracleFixedSeed(seed, { numRuns: oracleRuns(4) })
   return [
     {
       grammar: grammar(`sqlite-persistence.source-fifo-order`),
@@ -1414,14 +1418,21 @@ function registerGeneratedPersistenceProperty<Value>(options: {
   run: (value: Value) => Promise<void>
 }): void {
   const { property, title, arbitrary, fixedSeed, run } = options
-  oracleReplayTest(fcTest).prop([arbitrary], {
-    seed: fixedSeed,
-    numRuns: oracleRuns(4),
-  })(`${title} (fixed)`, run)
-  oracleReplayTest(fcTest, property).prop(
+  oracleReplayTest(fcTest).prop(
     [arbitrary],
-    oraclePropertyOptions(4, property),
-  )(`${title} (random)`, run)
+    oracleFixedSeed(fixedSeed, { numRuns: oracleRuns(4) }),
+  )(`${title} (fixed)`, (...args: Parameters<typeof run>) => {
+    oracleRoute(`fixed seed`)
+    return run(...args)
+  })
+  const randomCampaign = oraclePropertyOptions(4, property)
+  oracleReplayTest(fcTest, property).prop([arbitrary], randomCampaign)(
+    `${title} (random)`,
+    (...args: Parameters<typeof run>) => {
+      oracleRoute(oracleRouteOf(randomCampaign))
+      return run(...args)
+    },
+  )
 }
 
 // The durability drivers run generated histories through the laws in this
@@ -1429,6 +1440,11 @@ function registerGeneratedPersistenceProperty<Value>(options: {
 // authored inputs; the check drivers compare production observations with
 // them, and the grammar reaches the generated histories.
 declareOracle({
+  owns: [
+    `src/persisted.ts`,
+    `src/sqlite-core-adapter.ts`,
+    `src/remote-subset-owner.ts`,
+  ],
   check: [
     runGeneratedSourceFifoOrderingHistory,
     runGeneratedAbortGraphHistory,
@@ -1478,6 +1494,7 @@ const describeDurabilityOracles = oracleReplayTest(
 describeDurabilityOracles(`generated persistence durability oracles`, () => {
   if (!oracleReplayRequested()) {
     it(`reconstructs the full grammar and rejects ablated, out-of-range, and foreign histories`, () => {
+      oracleRoute(`calibration`)
       for (const {
         grammar,
         histories,
@@ -1632,6 +1649,7 @@ describeDurabilityOracles(`generated persistence durability oracles`, () => {
           ),
       },
     ])(`rejects named wrong answer: $name`, ({ reject }) => {
+      oracleRoute(`calibration`)
       expect(reject).toThrow()
     })
   }
@@ -1681,6 +1699,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   it.each([`during`, `straddles`, `after`] as const)(
     `durably settles a source transaction that commits %s persisted hydration`,
     async (position) => {
+      oracleRoute(`case`)
       const hydrationEntered = createEventGate()
       const hydration = createEventGate()
       const adapter = createRecordingAdapter()
@@ -1839,6 +1858,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   )
 
   it(`does not let a later same-key transaction overtake a hydration-straddling commit`, async () => {
+    oracleRoute(`fixed history`)
     const hydrationEntered = createEventGate()
     const hydration = createEventGate()
     const adapter = createRecordingAdapter()
@@ -1939,6 +1959,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   })
 
   it(`settles an aborted hydration-straddling commit without applying it`, async () => {
+    oracleRoute(`fixed history`)
     const hydrationEntered = createEventGate()
     const hydration = createEventGate()
     const adapter = createRecordingAdapter()
@@ -2012,6 +2033,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   })
 
   it(`append-only transaction judgment rejects omission and reordering`, () => {
+    oracleRoute(`calibration`)
     const events: Array<DurabilityLedgerEvent> = [
       { type: `begin`, transactionId: `first` },
       {
@@ -2042,6 +2064,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   it.each([`startup`, `resume`, `reset`] as const)(
     `keeps the %s hydration ready after a buffered pre-application abort`,
     async (entry) => {
+      oracleRoute(`case`)
       const adapter = createRecordingAdapter()
       const hydrationEntered = createEventGate()
       const releaseHydration = createEventGate()
@@ -2250,6 +2273,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   )(
     `publishes committed source $type after $hydrationCount queued hydrations (reserveCommitTurn=$reserveCommitTurn, successor=$hasSuccessor)`,
     async ({ type, hydrationCount, reserveCommitTurn, hasSuccessor }) => {
+      oracleRoute(`case`)
       // https://github.com/TanStack/db/issues/2036
       const adapter = createRecordingAdapter([
         { id: `shared`, title: `persisted`, detail: `retained baseline` },
@@ -2474,6 +2498,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   )(
     `publishes exact durable row shape within $route ($shape)`,
     async ({ route, shape }) => {
+      oracleRoute(`case`)
       const ordinary: Todo =
         shape === `add undefined`
           ? { id: `ordinary`, title: `Old` }
@@ -2697,6 +2722,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   )(
     `publishes the durable result of a targeted partial $transition with $route`,
     async ({ route, transition }) => {
+      oracleRoute(`case`)
       const old: Todo = {
         id: `ordinary`,
         title: transition === `enter` ? `Other` : `Keep`,
@@ -2900,6 +2926,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   )(
     `replaces a hydrated seed and metadata with a peer's targeted $mutation with $route ($metadataAction)`,
     async ({ route, mutation, metadataAction }) => {
+      oracleRoute(`case`)
       const ordinary =
         route === `active filter`
           ? { id: `ordinary`, title: `Keep`, detail: `old` }
@@ -3175,6 +3202,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   )(
     `follows durable same-key order for targeted $sequence with $route`,
     async ({ route, sequence }) => {
+      oracleRoute(`case`)
       const old = { id: `row`, title: `Old`, detail: `old detail` }
       const fresh = { id: old.id, title: `Fresh` }
       const detailPatch = { id: old.id, detail: `new detail` }
@@ -3476,19 +3504,26 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   }
 
-  fcTest.prop([retainedDemandHistory], {
+  const retainedDemandHistoryFixedSeed = oracleFixedSeed(186001, {
     numRuns: oracleRuns(50),
-    seed: 186001,
-  })(
+  })
+  fcTest.prop([retainedDemandHistory], retainedDemandHistoryFixedSeed)(
     `matches the retained exact-demand model with a fixed seed`,
-    runRetainedDemandHistory,
+    (...args: Parameters<typeof runRetainedDemandHistory>) => {
+      oracleRoute(oracleRouteOf(retainedDemandHistoryFixedSeed))
+      return runRetainedDemandHistory(...args)
+    },
   )
-  fcTest.prop(
-    [retainedDemandHistory],
-    oraclePropertyOptions(50, `persistence.retained-demand`),
-  )(
+  const retainedDemandHistoryCampaign = oraclePropertyOptions(
+    50,
+    `persistence.retained-demand`,
+  )
+  fcTest.prop([retainedDemandHistory], retainedDemandHistoryCampaign)(
     `matches the retained exact-demand model with a random or replayed seed`,
-    runRetainedDemandHistory,
+    (...args: Parameters<typeof runRetainedDemandHistory>) => {
+      oracleRoute(oracleRouteOf(retainedDemandHistoryCampaign))
+      return runRetainedDemandHistory(...args)
+    },
   )
 
   /**
@@ -3529,8 +3564,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * ensure log at quiescence. The coordinator is a controlled double of an
    * elected owner; it does not prove the browser transport.
    *
-   * Known gap (#2139): production does not end a rotated follower's scoped
-   * recovery, so this lane's cells are pinned as failing until it does.
+   * Known limit (#2139): production does not end a rotated follower's scoped
+   * recovery, so this production path's cells are fixed histories that fail until it does.
    */
   type FollowerGenerationNoticeHistory = {
     ownerCommit: `before-rotation` | `after-rotation`
@@ -3838,7 +3873,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   }
 
-  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // Known limit: see #2139. A rotated follower stays in scoped recovery, so
   // the owner's rows in the new generation never become visible.
   it.fails.each([
     { ownerCommit: `before-rotation`, later: `none` },
@@ -3847,11 +3882,16 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     { ownerCommit: `before-rotation`, later: `peer` },
   ] as const)(
     `publishes an elected owner's rows to a follower after rotation: commit $ownerCommit, later $later`,
-    (history) =>
-      assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `ok` }),
+    (history) => {
+      oracleRoute(`case`)
+      return assertFollowerGenerationNoticeHistory({
+        ...history,
+        ownerRead: `ok`,
+      })
+    },
   )
 
-  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // Known limit: see #2139. A rotated follower stays in scoped recovery, so
   // the owner's rows in the new generation never become visible.
   it.fails.each(
     ([`gap`, `reconciliation`] as const).flatMap((noticeShape) =>
@@ -3865,32 +3905,44 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     ),
   )(
     `publishes an elected owner's rows after rotation when its notice is a $noticeShape: commit $ownerCommit, later $later`,
-    (history) =>
-      assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `ok` }),
+    (history) => {
+      oracleRoute(`case`)
+      return assertFollowerGenerationNoticeHistory({
+        ...history,
+        ownerRead: `ok`,
+      })
+    },
   )
 
-  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // Known limit: see #2139. A rotated follower stays in scoped recovery, so
   // the owner's rows in the new generation never become visible.
   it.fails.each([
     { ownerCommit: `before-rotation`, later: `owner` },
     { ownerCommit: `after-rotation`, later: `owner` },
   ] as const)(
     `fails a follower when its elected owner's update cannot be read after rotation: commit $ownerCommit`,
-    (history) =>
-      assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `fails` }),
+    (history) => {
+      oracleRoute(`case`)
+      return assertFollowerGenerationNoticeHistory({
+        ...history,
+        ownerRead: `fails`,
+      })
+    },
   )
 
-  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // Known limit: see #2139. A rotated follower stays in scoped recovery, so
   // the owner's rows in the new generation never become visible.
   it.fails(
     `ignores a follower read failure when rotation starts while the read is in flight`,
-    () =>
-      assertFollowerGenerationNoticeHistory({
+    () => {
+      oracleRoute(`fixed history`)
+      return assertFollowerGenerationNoticeHistory({
         ownerCommit: `before-rotation`,
         later: `none`,
         ownerRead: `ok`,
         readFailsAsRotationStarts: true,
-      }),
+      })
+    },
   )
 
   const followerGenerationNoticeHistory = fc.record({
@@ -3907,21 +3959,24 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       `fails`,
     ),
   })
-  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // Known limit: see #2139. A rotated follower stays in scoped recovery, so
   // the owner's rows in the new generation never become visible. Some
-  // generated histories pass today, so a random draw cannot be pinned as
-  // failing; this fixed seed pins the gap. The fix for #2139 adds the random
+  // generated histories pass today, so a random draw cannot be a fixed history that
+  // fails; this fixed seed records the limit. The fix for #2139 adds the random
   // and replayed campaign back.
   it.fails(
     `checks generated follower generation-notice histories (fixed)`,
-    () =>
-      fc.assert(
+    () => {
+      const parameters = oracleFixedSeed(2128, { numRuns: oracleRuns(12) })
+      oracleRoute(oracleRouteOf(parameters))
+      return fc.assert(
         fc.asyncProperty(
           followerGenerationNoticeHistory,
           assertFollowerGenerationNoticeHistory,
         ),
-        { seed: 2128, numRuns: oracleRuns(12) },
-      ),
+        parameters,
+      )
+    },
   )
 
   const expectedFollowerRemoteDemand = (
@@ -4080,9 +4135,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     ),
   )(
     `settles a follower's remote demand with the owner's applied rows: $placement broadcast, apply $apply, $consumer`,
-    assertFollowerRemoteDemandHistory,
+    (...args: Parameters<typeof assertFollowerRemoteDemandHistory>) => {
+      oracleRoute(`case`)
+      return assertFollowerRemoteDemandHistory(...args)
+    },
   )
-  // Known gap: see #2139. A rotated follower stays in scoped recovery, so
+  // Known limit: see #2139. A rotated follower stays in scoped recovery, so
   // the owner's rows in the new generation never become visible.
   it.fails.each(
     followerRemoteDemandHistories.filter(
@@ -4090,7 +4148,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     ),
   )(
     `settles a follower's remote demand with the owner's applied rows: $placement broadcast, apply $apply, $consumer`,
-    assertFollowerRemoteDemandHistory,
+    (...args: Parameters<typeof assertFollowerRemoteDemandHistory>) => {
+      oracleRoute(`calibration`)
+      return assertFollowerRemoteDemandHistory(...args)
+    },
   )
 
   // Scoped recovery means durable rows cannot replace source rows. Owner
@@ -4136,9 +4197,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * recovery in place, and a newer rotation supersedes an older one's
    * reacquisition.
    *
-   * Known gap (#2139): production does not yet end scoped recovery after a
+   * Known limit (#2139): production does not yet end scoped recovery after a
    * rotation, so the histories in which recovery should end, or in which a
-   * new demand waits for it, are pinned as failing.
+   * new demand waits for it, are fixed histories that fail.
    *
    * Limits. A failed reacquisition is not retried; the follower stays in
    * scoped recovery until a later recovery rotates again.
@@ -4533,67 +4594,71 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       ),
     ),
   )
-  // Known gap: see #2139. Recovery never ends today, so the histories in
+  // Known limit: see #2139. Recovery never ends today, so the histories in
   // which it should end, or in which a new demand must wait for it, fail.
-  const reacquisitionGap = ({
+  const reacquisitionLimit = ({
     fails,
     newDemand,
   }: RotatedReacquisitionHistory) =>
     newDemand === true || fails === `none` || fails === `released`
   it.each(
     rotatedReacquisitionHistories.filter(
-      (history) => !reacquisitionGap(history),
+      (history) => !reacquisitionLimit(history),
     ),
   )(
     `ends a follower's scoped recovery only after every reacquisition succeeds: order $order, notice between $noticeBetween, fails $fails, new demand $newDemand`,
-    assertRotatedReacquisition,
+    (...args: Parameters<typeof assertRotatedReacquisition>) => {
+      oracleRoute(`case`)
+      return assertRotatedReacquisition(...args)
+    },
     10_000,
   )
-  it.fails.each(rotatedReacquisitionHistories.filter(reacquisitionGap))(
+  it.fails.each(rotatedReacquisitionHistories.filter(reacquisitionLimit))(
     `ends a follower's scoped recovery only after every reacquisition succeeds: order $order, notice between $noticeBetween, fails $fails, new demand $newDemand`,
-    assertRotatedReacquisition,
+    (...args: Parameters<typeof assertRotatedReacquisition>) => {
+      oracleRoute(`calibration`)
+      return assertRotatedReacquisition(...args)
+    },
     10_000,
   )
-  it(
-    `releases held notices when a second rotation supersedes reacquisition as leader`,
-    () =>
-      assertRotatedReacquisition({
-        order: [`a`, `b`],
-        noticeBetween: false,
-        fails: `none`,
-        supersededAsLeader: true,
-      }),
-    10_000,
-  )
+  it(`releases held notices when a second rotation supersedes reacquisition as leader`, () => {
+    oracleRoute(`fixed history`)
+    return assertRotatedReacquisition({
+      order: [`a`, `b`],
+      noticeBetween: false,
+      fails: `none`,
+      supersededAsLeader: true,
+    })
+  }, 10_000)
   // Two hydrations that both find the claim lost queue work while the
   // follower reacquires. Their flushes must leave the held notices alone;
   // otherwise each notice refreshes the scoped demand and the follower spins.
-  it(
-    `holds a rotated follower's notices when two reads find the claim lost: fails 'a'`,
-    () =>
-      assertRotatedReacquisition({
-        order: [`a`, `b`],
-        noticeBetween: false,
-        fails: `a`,
-        trigger: `claim-lost-during-reads`,
-      }),
-    10_000,
-  )
-  // Known gap: see #2139. Recovery never ends, so the rows stay hidden.
+  it(`holds a rotated follower's notices when two reads find the claim lost: fails 'a'`, () => {
+    oracleRoute(`fixed history`)
+    return assertRotatedReacquisition({
+      order: [`a`, `b`],
+      noticeBetween: false,
+      fails: `a`,
+      trigger: `claim-lost-during-reads`,
+    })
+  }, 10_000)
+  // Known limit: see #2139. Recovery never ends, so the rows stay hidden.
   it.fails(
     `holds a rotated follower's notices when two reads find the claim lost: fails 'none'`,
-    () =>
-      assertRotatedReacquisition({
+    () => {
+      oracleRoute(`calibration`)
+      return assertRotatedReacquisition({
         order: [`a`, `b`],
         noticeBetween: false,
         fails: `none`,
         trigger: `claim-lost-during-reads`,
-      }),
+      })
+    },
     10_000,
   )
 
   const followerRemoteDemandHistory = fc.record({
-    // Known gap: see #2139. The rotated placement is pinned above.
+    // Known limit: see #2139. The rotated placement is a fixed history above.
     placement: fc.constantFrom<FollowerRemoteDemandHistory[`placement`]>(
       `direct`,
       `queued`,
@@ -4605,17 +4670,25 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       `load`,
     ),
   })
+  const followerRemoteDemandHistoryCampaign = oraclePropertyOptions(
+    12,
+    `persistence.follower-remote-demand`,
+  )
   fcTest.prop(
     [followerRemoteDemandHistory],
-    oraclePropertyOptions(12, `persistence.follower-remote-demand`),
+    followerRemoteDemandHistoryCampaign,
   )(
     `checks generated follower remote-demand histories (random or replayed)`,
-    assertFollowerRemoteDemandHistory,
+    (...args: Parameters<typeof assertFollowerRemoteDemandHistory>) => {
+      oracleRoute(oracleRouteOf(followerRemoteDemandHistoryCampaign))
+      return assertFollowerRemoteDemandHistory(...args)
+    },
   )
 
   it.each(persistedKeySetEvidenceStatuses.map((status) => ({ status })))(
     `keeps on-demand rows independent from $status baseline evidence`,
     async ({ status }) => {
+      oracleRoute(`case`)
       const adapter = createRecordingAdapter([
         { id: `on-demand`, title: `On-demand row` },
       ])
@@ -4677,6 +4750,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   it.each(persistedKeySetEvidenceStatuses.map((status) => ({ status })))(
     `keeps force reload rows independent from $status startup evidence`,
     async ({ status }) => {
+      oracleRoute(`case`)
       const adapter = createRecordingAdapter([
         { id: `on-demand`, title: `On-demand row` },
       ])
@@ -4717,6 +4791,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   )
 
   it(`rejects an evidence-coupled on-demand hydration mutant`, () => {
+    oracleRoute(`calibration`)
     expect(() =>
       expectOnDemandEvidenceLaw({
         status: `incompatible`,
@@ -4736,6 +4811,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
   it(`keeps generated crossed-leadership index RPC histories outside local hydration scopes`, async () => {
     let run = 0
+    const campaignParameters = oracleFixedSeed(1868, {
+      numRuns: 8,
+      endOnFailure: true,
+    })
+    oracleRoute(oracleRouteOf(campaignParameters))
     await fc.assert(
       fc.asyncProperty(
         fc.record({
@@ -4838,7 +4918,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           }
         },
       ),
-      { seed: 1868, numRuns: 8, endOnFailure: true },
+      campaignParameters,
     )
   })
 
@@ -4849,6 +4929,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   itUnlessAnyOracleReplay.each(hydrationScopeModes)(
     `replays a buffered source receipt without blocking its persisting predecessor (%s scope)`,
     async (scopeMode) => {
+      oracleRoute(`case`)
       const adapter = createRecordingAdapter()
       const hydrateLoadEntered = createDeferred()
       const allowHydrateLoad = createDeferred()
@@ -6525,7 +6606,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     ),
   )(
     `preserves sync history over persisted reads ($syncMode, $route, $operation, truncate=$truncateReplay, timing=$commitTiming)`,
-    runPersistedReadHistory,
+    (...args: Parameters<typeof runPersistedReadHistory>) => {
+      oracleRoute(`case`)
+      return runPersistedReadHistory(...args)
+    },
   )
 
   // Reservation cross: every route, reserving timing, ending, and follow-up,
@@ -6666,11 +6750,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   ).flat()
   it.each(reReserveHistories)(
     `keeps a follower's load behind a second reservation (delays=$reReserveDelays)`,
-    runPersistedReadHistory,
+    (...args: Parameters<typeof runPersistedReadHistory>) => {
+      oracleRoute(`case`)
+      return runPersistedReadHistory(...args)
+    },
   )
   it.each(reservationHistories)(
     `keeps reserved commits and their neighbours lawful ($syncMode, $route, timing=$commitTiming, ending=$ending, follow-up=$followUp)`,
-    runPersistedReadHistory,
+    (...args: Parameters<typeof runPersistedReadHistory>) => {
+      oracleRoute(`case`)
+      return runPersistedReadHistory(...args)
+    },
   )
 
   // The model predicts every observation from the history and its input
@@ -6787,8 +6877,9 @@ function expectedDurableHydrationTransactions(
 // replay from this shared file. These bounded cases exclude every explicit replay.
 // Terminal local persistence failures crash the Collection after readiness,
 // following the IndexedDB closure precedent. Upstream (wrapped sync adapter)
-// failures after readiness stay health metadata; this lane holds both.
+// failures after readiness stay health metadata; this block holds both.
 describeUnlessAnyOracleReplay(`hydration source durability routing`, () => {
+  oracleRoute(`fixed history`)
   const first = { id: `shared`, title: `first source value` }
   const second = { id: `shared`, title: `last source value` }
   const other = { id: `other`, title: `independent source value` }
@@ -6912,6 +7003,7 @@ describeUnlessAnyOracleReplay(`hydration source durability routing`, () => {
   it.each(cases)(
     `$phase scoped=$scoped baseline=$baselineCount $name`,
     async ({ phase, scoped, baselineCount, transactions, failAt }) => {
+      oracleRoute(`case`)
       // The shared key makes source precedence over persisted data observable.
       const baseline = baselineCount
         ? [{ id: `shared`, title: `old persisted value` }]
@@ -7348,19 +7440,26 @@ declareOracle({
 })
 
 describe(`persistedCollectionOptions`, () => {
-  fcTest.prop([generationNoticeHistory], {
-    seed: 2069,
+  const generationNoticeHistoryFixedSeed = oracleFixedSeed(2069, {
     numRuns: oracleRuns(24),
-  })(
+  })
+  fcTest.prop([generationNoticeHistory], generationNoticeHistoryFixedSeed)(
     `checks generated cache-generation notice histories (fixed)`,
-    assertGenerationNoticeHistory,
+    (...args: Parameters<typeof assertGenerationNoticeHistory>) => {
+      oracleRoute(oracleRouteOf(generationNoticeHistoryFixedSeed))
+      return assertGenerationNoticeHistory(...args)
+    },
   )
 
-  fcTest.prop(
-    [generationNoticeHistory],
-    oraclePropertyOptions(24, `persistence.generation-notice`),
-  )(
+  const generationNoticeHistoryCampaign = oraclePropertyOptions(
+    24,
+    `persistence.generation-notice`,
+  )
+  fcTest.prop([generationNoticeHistory], generationNoticeHistoryCampaign)(
     `checks generated cache-generation notice histories (random or replayed)`,
-    assertGenerationNoticeHistory,
+    (...args: Parameters<typeof assertGenerationNoticeHistory>) => {
+      oracleRoute(oracleRouteOf(generationNoticeHistoryCampaign))
+      return assertGenerationNoticeHistory(...args)
+    },
   )
 })

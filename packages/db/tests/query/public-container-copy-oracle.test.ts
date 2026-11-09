@@ -11,8 +11,11 @@ import {
 import { materializeCompilation } from '../../src/query/live/materialized-pipeline.js'
 import { Query, eq, include } from '../../src/query/index.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -86,6 +89,11 @@ function expectCopyFollowsLaw(
 }
 
 declareOracle({
+  owns: [
+    `src/query/compiler/route-metadata.ts#stripInternalCallbackMetadata`,
+    `src/query/compiler/route-metadata.ts#transformPublicContainers`,
+    `src/query/live/materialized-pipeline.ts#compileValueResolver`,
+  ],
   model: [expectedCopy],
   check: [expectCopyFollowsLaw, checkCopyPrograms],
   grammar: [programs, inputGrammar],
@@ -210,7 +218,10 @@ const examples: Array<[CopyInput]> = [
 for (const campaign of [
   {
     name: `fixed`,
-    options: { numRuns: oracleRuns(6) + examples.length, seed: 2355, examples },
+    options: oracleFixedSeed(2355, {
+      numRuns: oracleRuns(6) + examples.length,
+      examples,
+    }),
   },
   {
     name: `fresh or replayed`,
@@ -223,6 +234,11 @@ for (const campaign of [
       : oracleReplayTest(fcTest, property)
   register.prop([inputGrammar], campaign.options)(
     `cleanup preserves authored public copies (${campaign.name})`,
-    checkCopyPrograms,
+    (description) => {
+      // The options are built when the file loads, so each run registers its
+      // campaign's route.
+      oracleRoute(oracleRouteOf(campaign.options))
+      checkCopyPrograms(description)
+    },
   )
 }

@@ -38,4 +38,7 @@ export function expectPublishedRows(
   expectUnorderedRows(values.at(-1), rows)
 }
 
+// Owns no production entry in packages/db: this module checks the public
+// observations that each framework driver passes it, so the framework packages
+// that run it own the entries it judges.
 declareOracle({ check: [expectPublishedRows] })

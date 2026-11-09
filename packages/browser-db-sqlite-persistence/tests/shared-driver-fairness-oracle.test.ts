@@ -1,15 +1,15 @@
 /**
  * Node campaign for the shared-driver K=1 contract documented in
  * `shared-driver-fairness-oracle.ts`. Fixed histories prove neutral reach and a
- * persist storm; generated legal histories vary both lane sizes, mutation
+ * persist storm; generated legal histories vary the sizes of both lanes, mutation
  * width, and tail order. Public rows and logical completion checkpoints are
  * checked independently of production scheduling, and an executable
  * named persist-first FIFO wrong answer proves the checker rejects the original
  * fault. Grammar controls reconstruct that witness, exercise the bounded
  * marginals, reject a nearby invalid storm, and ablate tail-order variation.
  * The identical generated property runs in retained fixed-seed and seedless
- * random lanes. Supplying both TANSTACK_DB_DRIVER_FAIRNESS_SEED and
- * TANSTACK_DB_DRIVER_FAIRNESS_PATH replaces those lanes with one checked
+ * random campaigns. Supplying both TANSTACK_DB_DRIVER_FAIRNESS_SEED and
+ * TANSTACK_DB_DRIVER_FAIRNESS_PATH replaces those campaigns with one checked
  * seed+shrink-path replay. An axis-removal calibration proves that removing
  * tail-order variation loses hydrate-before-later-persist histories.
  * The shared fixture holds the first `BEGIN IMMEDIATE` while cold `preload()`
@@ -25,7 +25,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
-import { oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oracleFixedSeed,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   SHARED_DRIVER_FAIRNESS_BOUND,
@@ -279,6 +284,7 @@ const generatedHistoryArbitrary = createGeneratedHistoryArbitrary(`varied`)
 const tailOrderAblatedArbitrary = createGeneratedHistoryArbitrary(`removed`)
 
 declareOracle({
+  owns: [`src/wa-sqlite-driver.ts`],
   grammar: [generatedHistoryArbitrary, tailOrderAblatedArbitrary],
 })
 let generatedPropertyExecutions = 0
@@ -334,6 +340,7 @@ const generatedFairnessProperty = fc.asyncProperty(
 
 describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
   it(`reconstructs the known persist-first witness, covers range marginals, and rejects a nearby invalid storm`, async () => {
+    oracleRoute(`calibration`)
     const knownWitness = buildGeneratedHistory(2, 4, 1, [
       { kind: `persist`, token: `p1` },
       { kind: `persist`, token: `p2` },
@@ -401,6 +408,7 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
   })
 
   it(`reaches cold hydration and preserves independently seeded public rows without queued persists`, async () => {
+    oracleRoute(`fixed history`)
     await withNodeScenario(
       createScenario(`neutral-reach`, [`hydrate`, `hydrate`, `hydrate`]),
       (observation) => {
@@ -417,6 +425,7 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
   })
 
   it(`completes a pending cold hydrate before an unrelated persist backlog drains and distinguishes K=1 from K=2`, async () => {
+    oracleRoute(`fixed history`)
     const scenario = createScenario(
       `fixed-persist-storm`,
       [`persist`, `persist`, `persist`, `hydrate`, `hydrate`],
@@ -521,14 +530,16 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
   it.each(fairnessPropertyModes)(
     `bounds persist completions for generated ordered cold-hydrate/persist histories in $label mode`,
     async (mode) => {
+      const parameters = {
+        numRuns: oracleRuns(GENERATED_RUNS),
+        verbose: 2 as const,
+        ...(mode.seed === undefined ? {} : oracleFixedSeed(mode.seed)),
+        ...(mode.path === undefined ? {} : { path: mode.path }),
+      }
+      oracleRoute(oracleRouteOf(parameters))
       const executionsBefore = generatedPropertyExecutions
       const failuresBefore = generatedFailureRecords.length
-      const result = await fc.check(generatedFairnessProperty, {
-        numRuns: oracleRuns(GENERATED_RUNS),
-        verbose: 2,
-        ...(mode.seed === undefined ? {} : { seed: mode.seed }),
-        ...(mode.path === undefined ? {} : { path: mode.path }),
-      })
+      const result = await fc.check(generatedFairnessProperty, parameters)
       if (result.failed) {
         const failures = generatedFailureRecords.slice(failuresBefore)
         const original = failures[0]
@@ -598,6 +609,7 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
     }
 
     it(`keeps the K=1 interleaving and waits only for the hydrate queued before it`, async () => {
+      oracleRoute(`fixed history`)
       let baseline: ReadonlyArray<string> | undefined
       await withNodeScenario(withoutBarrier, (observation) => {
         expectFairObservation(observation)
@@ -615,6 +627,7 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
     })
 
     it(`rejects an empty regular task used as the barrier`, async () => {
+      oracleRoute(`calibration`)
       let baseline: ReadonlyArray<string> | undefined
       await withNodeScenario(withoutBarrier, (observation) => {
         baseline = observation.logicalCompletionOrder
@@ -640,6 +653,7 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
     })
 
     it(`rejects an empty hydrate scope used as the barrier`, async () => {
+      oracleRoute(`calibration`)
       let failure: unknown
       await withNodeScenario(
         withBarrier,
@@ -660,6 +674,7 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
   })
 
   it(`proves tail-order ablation removes a hydrate-before-later-persist history`, () => {
+    oracleRoute(`calibration`)
     const sampleOptions = {
       seed: FIXED_SEED,
       numRuns: oracleRuns(GENERATED_RUNS),
@@ -677,6 +692,7 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
   })
 
   it(`rejects the named persist-first FIFO wrong answer through the real package path`, async () => {
+    oracleRoute(`calibration`)
     await withNodeScenario(
       createScenario(
         `persist-first-fixture-fault`,
@@ -701,6 +717,7 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
   })
 
   it(`calibrates the checker against a synthetic persist-first observation`, () => {
+    oracleRoute(`calibration`)
     const scenario = createScenario(
       `persist-first-checker-calibration`,
       [`persist`, `persist`, `persist`, `persist`, `hydrate`, `hydrate`],

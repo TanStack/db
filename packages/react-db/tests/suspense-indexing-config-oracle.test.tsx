@@ -13,10 +13,10 @@
  * Suspense commits its rows. Rechecking the first binding after the second
  * rejects a cache repair that overwrites a retained Collection's settings.
  * Both unscoped and DbProvider-scoped caches receive the same histories. A
- * second lane uses distinct constructor references with the same class name;
- * names cannot replace the declared constructor reference. A presence lane
+ * same-name grammar uses distinct constructor references with the same class name;
+ * names cannot replace the declared constructor reference. A presence grammar
  * compares omitted fields with explicit undefined in both orders.
- * A focused pending lane holds source writes while two separate boundaries
+ * A focused pending grammar holds source writes while two separate boundaries
  * show fallbacks, then checks the same output law after delivery. It crosses
  * mode/constructor equality and both cache scopes, without multiplying the
  * entire ready matrix. This driver judges no hydration, abandoned render,
@@ -50,6 +50,7 @@ import {
 } from '../../db/tests/conformance/indexing-config-oracle'
 import { expectUnorderedRows } from '../../db/tests/conformance/result-laws'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { withOracleCleanup } from '../../db/tests/utils'
 import type { InitialQueryBuilder } from '@tanstack/db'
@@ -58,6 +59,10 @@ import type { IndexSettings } from '../../db/tests/conformance/indexing-config-o
 import type { Row } from '../../db/tests/conformance/contract'
 
 declareOracle({
+  owns: [
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+    `src/DbProvider.tsx#DbProvider`,
+  ],
   grammar: [indexConfigurationPairs, indexOptionAbsencePairs],
   model: [expectedIndexing],
   check: [
@@ -84,17 +89,17 @@ const namedConfigurations = ([`off`, `eager`] as const).flatMap((autoIndex) =>
 const pairs = [
   ...indexOptionAbsencePairs().map((history) => ({
     ...history,
-    lane: `presence`,
+    kind: `presence`,
   })),
   ...indexConfigurationPairs(configurations).map((history) => ({
     ...history,
-    lane: `built-in`,
+    kind: `built-in`,
   })),
   ...indexConfigurationPairs(namedConfigurations)
     .filter(
       ({ first, second }) => first.defaultIndexType !== second.defaultIndexType,
     )
-    .map((history) => ({ ...history, lane: `same-name` })),
+    .map((history) => ({ ...history, kind: `same-name` })),
 ]
 const histories = pairs.flatMap((history, cell) =>
   (history.first.autoIndex === `off` &&
@@ -150,9 +155,10 @@ afterAll(() => {
 
 test.each(histories)(
   `each initial Suspense binding keeps its indexing settings: %j`,
-  async ({ first, second, identity, cell, scope, lane, phase }) => {
+  async ({ first, second, identity, cell, scope, kind, phase }) => {
+    oracleRoute(`case`)
     const reach = createOracleReach(
-      `React Suspense indexing/${scope}/${phase}/${lane}/${identity}/${cell}`,
+      `React Suspense indexing/${scope}/${phase}/${kind}/${identity}/${cell}`,
       [
         `first-admission`,
         `second-admission`,
@@ -169,7 +175,7 @@ test.each(histories)(
     const pendingReach =
       phase === `pending` ? pendingReaches[scope]! : undefined
     pendingReach?.beginHistory()
-    if (lane === `same-name`) {
+    if (kind === `same-name`) {
       expect(first.defaultIndexType).not.toBe(second.defaultIndexType)
       expect(first.defaultIndexType?.name).toBe(second.defaultIndexType?.name)
     }

@@ -42,12 +42,13 @@ membership. Empty-store delete first inserts. Import chooses empty or one-row
 replacement. Manual acceptance writes overlapping keys with distinct values in
 two stores. Every history ends with fresh restores.
 
-The authored reconstruction history visits every action in both stores.
-Pinned cases retain generated update/clear and repeated no-op histories.
-Matrices reconstruct CRUD × decision, persistence-entry × bad-row-position,
-and remote delete/clear × local rollback/commit. Transport cases retain the old
+The authored reconstruction history visits every action in both stores. Fixed
+histories retain generated update/clear and repeated no-op histories. Matrices
+reconstruct CRUD × decision, persistence-entry × bad-row-position, and remote
+delete/clear × local rollback/commit. Transport cases retain the old
 rapid/concurrent and routing coverage and add the twelve histories below.
-Missing-key updates and duplicate imported keys have explicit rejection witnesses.
+Missing-key updates and duplicate imported keys have explicit rejection
+witnesses.
 
 Each axis contributes independently:
 
@@ -204,12 +205,12 @@ introduced.
 
 ## Campaigns and direct replay
 
-The normal test command runs the same property, generator, recorder, driver and
-30-run budget twice: fixed seed 1179001, then no supplied seed. Each campaign
-reports its actual seed, run count and outcome. Fast-check reports counterexample
-and shrink path; verbose output retains failed histories. A reduced trace proves
-its reported checkpoint; do not label a reduction a reproduction of a different
-facet without replaying both.
+The normal test command runs the same property, generator, recorder, production
+driver and 30-run budget twice: fixed campaign seed 1179001, then no supplied
+campaign seed. Each campaign reports its actual campaign seed, run count and
+outcome. Fast-check reports counterexample and shrink path; verbose output
+retains failed histories. A reduced trace proves its reported checkpoint; do not
+label a reduction a reproduction of a different facet without replaying both.
 
 From this package directory:
 
@@ -285,7 +286,7 @@ The executable companions keep distinct responsibilities:
 | `pending-history-oracle.test.ts`                                                 | One held multi-row intent, durable rows, exposed base, queued source batches and acknowledgement attribution; public/raw/downstream snapshots at handler entry, each peer step and settlement | 24 CRUD × peer action × decision cases, with all actual peer CRUD operations reached; 30+30 generated histories of up to four peer actions, 1–3 local rows; stress 300+300 |
 | `persistence-oracle.test.ts`                                                     | Three distinct Collection owners, mixed deletes/inserts, two stores and version isolation after each acceptance                                                                               | All six acceptance orders; no cross-Collection atomicity or same-ID identity policy                                                                                        |
 | `settlement.test.ts` (fixed tests; no oracle owner (tracked in #2264))           | Failure before, within and after valid rows in a three-row native batch                                                                                                                       | First/middle/last clone failures × automatic/manual/import, each a `SerializationError`, with populated replacement rollback                                               |
-| `e2e/indexed-db/cross-tab-oracle.spec.ts`                                        | Native IndexedDB and BroadcastChannel, independent same-origin pages, runner-owned raw evidence                                                                                               | Chromium, Firefox and WebKit; pinned receiving matrix and 10 fixed + 10 fresh histories per engine                                                                         |
+| `e2e/indexed-db/cross-tab-oracle.spec.ts`                                        | Native IndexedDB and BroadcastChannel, independent same-origin pages, runner-owned raw evidence                                                                                               | Chromium, Firefox and WebKit; fixed receiving matrix and 10 fixed + 10 random-campaign histories per engine                                                                |
 
 The transport model combines exposed base and public rows only when local
 mutations have settled. The pending companion keeps them separate. It adapts
@@ -419,7 +420,7 @@ non-truncating full-row comparison. Automatic writes intentionally wait for
 their predecessor; they can no longer supply that old fixture schedule.
 
 Runtime/type tests resolve workspace source with no dependency build. The
-packed-package lane tests ESM/CJS consumers after complete builds.
+packed-package production path tests ESM/CJS consumers after complete builds.
 The review evidence and guide audit are in
 [`2026-10-05-indexeddb-xhigh.md`](../../../../docs/contributing/oracle-reviews/2026-10-05-indexeddb-xhigh.md).
 

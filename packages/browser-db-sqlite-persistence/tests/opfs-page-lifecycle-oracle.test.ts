@@ -1,8 +1,11 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { afterEach, describe, expect, vi } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -43,7 +46,7 @@ import type { BrowserOPFSWorkerErrorCode } from '../src/opfs-worker-protocol'
  *
  * The real worker answers earlier requests before close; the request-order
  * oracle owns that law. This file's controlled worker can answer in any order,
- * so the close lane also checks that pending work settles when close settles
+ * so the close grammar also checks that pending work settles when close settles
  * first.
  *
  * Controlled page and worker objects implement only the browser event and
@@ -898,103 +901,160 @@ and termination count. Synthetic events and a fake worker do not prove real
 bfcache admission, durability, native handle release, or wa-sqlite #88. The
 Chromium Web Lock fixture checks native queued-lock release separately.
 Challenge/replay: fixed examples exhaust the cheap structural products. Each
-generated lane runs a fixed and an unseeded campaign with the same grammar and
+generated property runs a fixed and an unseeded campaign with the same grammar and
 run budget. Verbose FastCheck output retains original/reduced traces. A path
-replay selects only the direct replay of its lane's property, named by
+replay selects only the direct replay of its property, named by
 TANSTACK_DB_ORACLE_PROPERTY: opfs.page-lifecycle, opfs.mixed-execute,
 opfs.terminal-event, opfs.close, or opfs.failure-cleanup. A seed without a
 path reseeds the unseeded campaigns. Run it with this file's package-local
 Vitest command.
 */
 declareOracle({
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
   check: [runFailureHistory],
   model: [expectedCloseSettlements],
 })
 
 describe(`OPFS page lifecycle oracle`, () => {
-  oracleReplayTest(fcTest).prop([pagehideHistory], {
-    seed: 1844,
+  const pagehideHistoryFixedSeed = oracleFixedSeed(1844, {
     numRuns: oracleRuns(48),
     examples: pagehideExamples,
     verbose: true,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([pagehideHistory], pagehideHistoryFixedSeed)(
     `matches the independent model across generated histories (fixed)`,
-    runPagehideHistory,
+    (history) => {
+      oracleRoute(oracleRouteOf(pagehideHistoryFixedSeed))
+      return runPagehideHistory(history)
+    },
   )
-  oracleReplayTest(fcTest, `opfs.page-lifecycle`).prop([pagehideHistory], {
+  const pagehideHistoryCampaign = {
     ...oraclePropertyOptions(48, `opfs.page-lifecycle`),
     examples: pagehideExamples,
     verbose: true,
-  })(
+  }
+  oracleReplayTest(fcTest, `opfs.page-lifecycle`).prop(
+    [pagehideHistory],
+    pagehideHistoryCampaign,
+  )(
     `matches the independent model across generated histories (random)`,
-    runPagehideHistory,
+    (history) => {
+      oracleRoute(oracleRouteOf(pagehideHistoryCampaign))
+      return runPagehideHistory(history)
+    },
   )
-  oracleReplayTest(fcTest).prop([mixedExecuteHistory], {
-    seed: 1845,
+  const mixedExecuteHistoryFixedSeed = oracleFixedSeed(1845, {
     numRuns: oracleRuns(32),
     examples: mixedExamples,
     verbose: true,
-  })(
+  })
+  oracleReplayTest(fcTest).prop(
+    [mixedExecuteHistory],
+    mixedExecuteHistoryFixedSeed,
+  )(
     `preserves completed siblings while aborting pending siblings (fixed)`,
-    runMixedExecuteHistory,
+    (history) => {
+      oracleRoute(oracleRouteOf(mixedExecuteHistoryFixedSeed))
+      return runMixedExecuteHistory(history)
+    },
   )
-  oracleReplayTest(fcTest, `opfs.mixed-execute`).prop([mixedExecuteHistory], {
+  const mixedExecuteHistoryCampaign = {
     ...oraclePropertyOptions(32, `opfs.mixed-execute`),
     examples: mixedExamples,
     verbose: true,
-  })(
+  }
+  oracleReplayTest(fcTest, `opfs.mixed-execute`).prop(
+    [mixedExecuteHistory],
+    mixedExecuteHistoryCampaign,
+  )(
     `preserves completed siblings while aborting pending siblings (random)`,
-    runMixedExecuteHistory,
+    (history) => {
+      oracleRoute(oracleRouteOf(mixedExecuteHistoryCampaign))
+      return runMixedExecuteHistory(history)
+    },
   )
-  oracleReplayTest(fcTest).prop([terminalEventHistory], {
-    seed: 1847,
+  const terminalEventHistoryFixedSeed = oracleFixedSeed(1847, {
     numRuns: oracleRuns(24),
     examples: terminalEventExamples,
     verbose: true,
-  })(
+  })
+  oracleReplayTest(fcTest).prop(
+    [terminalEventHistory],
+    terminalEventHistoryFixedSeed,
+  )(
     `rejects pending work across Worker terminal event paths (fixed)`,
-    runTerminalEventHistory,
+    (history) => {
+      oracleRoute(oracleRouteOf(terminalEventHistoryFixedSeed))
+      return runTerminalEventHistory(history)
+    },
   )
-  oracleReplayTest(fcTest, `opfs.terminal-event`).prop([terminalEventHistory], {
+  const terminalEventHistoryCampaign = {
     ...oraclePropertyOptions(24, `opfs.terminal-event`),
     examples: terminalEventExamples,
     verbose: true,
-  })(
+  }
+  oracleReplayTest(fcTest, `opfs.terminal-event`).prop(
+    [terminalEventHistory],
+    terminalEventHistoryCampaign,
+  )(
     `rejects pending work across Worker terminal event paths (random)`,
-    runTerminalEventHistory,
+    (history) => {
+      oracleRoute(oracleRouteOf(terminalEventHistoryCampaign))
+      return runTerminalEventHistory(history)
+    },
   )
-  oracleReplayTest(fcTest).prop([closeHistory], {
-    seed: 1848,
+  const closeHistoryFixedSeed = oracleFixedSeed(1848, {
     numRuns: oracleRuns(32),
     examples: closeExamples,
     verbose: true,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([closeHistory], closeHistoryFixedSeed)(
     `settles pending work and refuses new work across explicit close (fixed)`,
-    runCloseHistory,
+    (history) => {
+      oracleRoute(oracleRouteOf(closeHistoryFixedSeed))
+      return runCloseHistory(history)
+    },
   )
-  oracleReplayTest(fcTest, `opfs.close`).prop([closeHistory], {
+  const closeHistoryCampaign = {
     ...oraclePropertyOptions(32, `opfs.close`),
     examples: closeExamples,
     verbose: true,
-  })(
+  }
+  oracleReplayTest(fcTest, `opfs.close`).prop(
+    [closeHistory],
+    closeHistoryCampaign,
+  )(
     `settles pending work and refuses new work across explicit close (random)`,
-    runCloseHistory,
+    (history) => {
+      oracleRoute(oracleRouteOf(closeHistoryCampaign))
+      return runCloseHistory(history)
+    },
   )
-  oracleReplayTest(fcTest).prop([failureHistory], {
-    seed: 1846,
+  const failureHistoryFixedSeed = oracleFixedSeed(1846, {
     numRuns: oracleRuns(18),
     examples: failureExamples,
     verbose: true,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([failureHistory], failureHistoryFixedSeed)(
     `matches terminal cleanup and error mapping across worker failures (fixed)`,
-    runFailureHistory,
+    (history) => {
+      oracleRoute(oracleRouteOf(failureHistoryFixedSeed))
+      return runFailureHistory(history)
+    },
   )
-  oracleReplayTest(fcTest, `opfs.failure-cleanup`).prop([failureHistory], {
+  const failureHistoryCampaign = {
     ...oraclePropertyOptions(18, `opfs.failure-cleanup`),
     examples: failureExamples,
     verbose: true,
-  })(
+  }
+  oracleReplayTest(fcTest, `opfs.failure-cleanup`).prop(
+    [failureHistory],
+    failureHistoryCampaign,
+  )(
     `matches terminal cleanup and error mapping across worker failures (random)`,
-    runFailureHistory,
+    (history) => {
+      oracleRoute(oracleRouteOf(failureHistoryCampaign))
+      return runFailureHistory(history)
+    },
   )
 })

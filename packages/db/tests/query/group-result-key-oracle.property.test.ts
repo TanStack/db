@@ -48,7 +48,13 @@ import fc from 'fast-check'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { count } from '../../src/query/builder/functions.js'
 import { createCollection } from '../../src/collection/index.js'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
@@ -129,7 +135,7 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
 })
 
 // Each lookalike pair publishes together, then one member's group changes.
-const pinnedHistories: ReadonlyArray<History> = [
+const fixedHistories: ReadonlyArray<History> = [
   {
     rows: [null, `null`, undefined, `undefined`],
     changes: [{ kind: `move`, index: 0, g: `null` }],
@@ -258,12 +264,18 @@ async function runHistory(history: History, reach?: Reach): Promise<void> {
   }, [() => live.cleanup(), () => source.cleanup()])
 }
 
-declareOracle({ check: [runHistory], model: [expectedGroups] })
+declareOracle({
+  owns: ['src/query/live-query-collection.ts#createLiveQueryCollection'],
+  check: [runHistory],
+  model: [expectedGroups],
+})
 
 describe(`grouped result key oracle`, () => {
-  for (const [index, history] of pinnedHistories.entries()) {
-    it(`keeps lookalike group values apart (pinned ${index})`, () =>
-      runHistory(history))
+  for (const [index, history] of fixedHistories.entries()) {
+    it(`keeps lookalike group values apart (fixed history ${index})`, () => {
+      oracleRoute(`fixed history`)
+      return runHistory(history)
+    })
   }
 
   it.each([92_604_118, undefined])(
@@ -278,13 +290,16 @@ describe(`grouped result key oracle`, () => {
         ],
         { minimum: 5 },
       )
+      const parameters =
+        seed === undefined
+          ? oraclePropertyOptions(80, property)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(80) })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(historyArbitrary, (history) =>
           runHistory(history, reach),
         ),
-        seed === undefined
-          ? oraclePropertyOptions(80, property)
-          : { seed, numRuns: oracleRuns(80) },
+        parameters,
       )
       if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
         console.log(property, seed ?? `random`, [...reach.counts()])

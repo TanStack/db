@@ -78,6 +78,7 @@ import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { createOracleReach } from '../oracle-reach.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import { oracleRoute } from '../oracle-config.js'
 import {
   metadataCollisionCases,
   metadataCompositions,
@@ -146,6 +147,12 @@ function expectPublishedFieldClassification(
 }
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/virtual-props.ts#hasVirtualProps',
+  ],
   check: [
     expectPublishedFieldClassification,
     checkRootMetadata,
@@ -513,6 +520,7 @@ declareOracle({
 test.each(boundaryPublicationHistories)(
   `publishes implicit and materialized-input metadata: %j`,
   async (history) => {
+    oracleRoute(`case`)
     boundaryPublicationReach.beginHistory()
     let parent: AttributionRow = {
       id: `parent`,
@@ -705,6 +713,7 @@ test.each(
     ({ kind }) => kind === `grouped` || kind === `aggregate`,
   ),
 )(`rejects source metadata on a grouped output: %j`, (history) => {
+  oracleRoute(`calibration`)
   const parent = { id: `parent`, parentId: `root`, label: `parent` }
   const child = { id: `child`, parentId: `parent`, label: `held` }
   const expected = expectedBoundaryPublication(
@@ -770,6 +779,7 @@ test.each(
     composition,
     customKey,
   }) => {
+    oracleRoute(`case`)
     metadataReach.beginHistory()
     const parents = createCollection(
       mockSyncCollectionOptions<{ id: string }>({
@@ -895,9 +905,10 @@ test.each(
     const pendingKeys = new Set<string>()
     let finishMutation = async () => {}
     const check = () => {
-      // The custom-key lane has a completely independent key prediction. The
-      // default lane retains the old clean-sibling key comparison only as a
-      // differential check of undocumented compiler-generated key encoding.
+      // The custom-key histories have a completely independent key prediction.
+      // The default-key histories retain the old clean-sibling key comparison
+      // only as a differential check of undocumented compiler-generated key
+      // encoding.
       const outputKey = (id: AttributionKey) =>
         customKey
           ? `projected-${id}`
@@ -990,6 +1001,7 @@ test.each(
 
 describe(`virtual row field runtime boundary`, () => {
   test(`matches the row and value classification after publication`, async () => {
+    oracleRoute(`fixed history`)
     const createdAt = new Date(`2026-09-20T12:34:56.000Z`)
     const rows = createCollection(
       mockSyncCollectionOptions<Row>({
@@ -1191,6 +1203,7 @@ test.each(
 )(
   `retains metadata from the last present spread: %j`,
   async ({ matched, reverse, pendingRight }) => {
+    oracleRoute(`case`)
     metadataReach.beginHistory()
     const left = createCollection(
       mockSyncCollectionOptions<{ id: string; label: string }>({
@@ -1263,7 +1276,7 @@ test.each(
  * A held write in either branch must not change the other's metadata. Removing
  * and reinserting that peer checks retractions and subsequent contributions.
  * Each checkpoint reuses the authored-facts model; no sibling query supplies
- * expected keys in this lane.
+ * expected keys in these histories.
  */
 const unionHistories = [false, true].flatMap((reverse) =>
   [false, true].flatMap((nested) =>
@@ -1318,6 +1331,7 @@ test.each(unionHistories)(
     authoredPending,
     shape,
   }) => {
+    oracleRoute(`case`)
     metadataReach.beginHistory()
     unionMetadataReach.beginHistory()
     const reach = (cut: string) =>
@@ -1484,6 +1498,7 @@ test.each(
     ].map((fault) => ({ shape, fault })),
   ),
 )(`rejects a hostile complete metadata result: %j`, ({ shape, fault }) => {
+  oracleRoute(`case`)
   const keyOf = (id: AttributionKey) => `key-${typeof id}:${id}`
   const expected = [
     ...expectedAttributedRows(
@@ -1721,6 +1736,7 @@ declareOracle({
 test.each(metadataTimelineHistories)(
   `publishes metadata through join and write histories: %j`,
   async ({ shape, reverse, topology, reject, rightFirst }) => {
+    oracleRoute(`case`)
     metadataTimelineReach.beginHistory()
     const reach = (cut: string) =>
       metadataTimelineReach.reach(`${shape}/${topology}/${cut}`)
@@ -2024,6 +2040,7 @@ test.each([
   `no-callback`,
   `early-wrong-later-correct`,
 ] as const)(`rejects a hostile metadata publication: %s`, (fault) => {
+  oracleRoute(`case`)
   const base: AttributionRow = { id: `a`, parentId: `parent`, label: `before` }
   const before = expectedAttributedRows(
     [base],
@@ -2185,6 +2202,7 @@ test.each(facadeMetadataHistories)(
     destinationPopulated,
     reject,
   }) => {
+    oracleRoute(`case`)
     facadeMetadataReach.beginHistory()
     const reach = (cut: string) => facadeMetadataReach.reach(`${shape}/${cut}`)
     let release!: () => void
@@ -2406,6 +2424,7 @@ test.each(facadeMetadataHistories)(
 test.each([`none`, `$key`, `$hasPendingWrites`, `all`] as const)(
   `rejects facade enrichment of an inline value: %s`,
   (collision) => {
+    oracleRoute(`calibration`)
     const overrides: Record<string, unknown> = {}
     for (const field of virtualFieldNames)
       if (collision === field || collision === `all`)
@@ -2503,6 +2522,7 @@ declareOracle({
 test.each(nullableFacadeHistories)(
   `publishes nullable whole rows through a facade: %j`,
   async ({ initialMatch }) => {
+    oracleRoute(`case`)
     nullableFacadeReach.beginHistory()
     const children = createCollection(
       mockSyncCollectionOptions<{ id: string }>({
@@ -2587,6 +2607,7 @@ test.each([
   `empty-inline-enriched`,
   `matched-field-missing`,
 ] as const)(`rejects a hostile nullable whole-row observation: %s`, (fault) => {
+  oracleRoute(`calibration`)
   const expected = expectedNullableSelection(
     fault === `matched-field-missing`
       ? { id: `child`, label: `source` }

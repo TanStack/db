@@ -8,7 +8,7 @@
  * history of whole effects, with raw event and public status checks. Existing
  * peers and an ordinary successful suffix precede fresh restore.
  *
- * Fixed/random campaigns share the exact property and bounds. Pinned histories
+ * Fixed/random campaigns share the exact property and bounds. Fixed histories
  * reconstruct every action; finite templates enumerate every sender/delivery
  * choice within their stated two-operation scope. This is not exhaustive native
  * scheduling, arbitrary optimistic overlap, or a same-key conflict policy.
@@ -19,11 +19,15 @@ import { join } from 'node:path'
 import { fc } from '@fast-check/vitest'
 import { expect, it, vi } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplaySkips,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
+import { declareOracle } from '../oracle-declaration'
 import { runCampaign } from './campaign'
 import { runTransportHistory } from './cross-tab-driver'
 import {
@@ -34,6 +38,14 @@ import {
   assertStatuses,
 } from './cross-tab-oracle'
 import type { TransportStep } from './cross-tab-driver'
+
+declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+  ],
+})
 
 const kinds = [
   'write',
@@ -88,22 +100,25 @@ const crossTabProperty = `indexeddb.cross-tab-history`
 
 it.skipIf(oracleReplayRequested())(
   'refines independent per-Collection snapshots with fixed histories',
-  () => campaign(oracleRuns(runs), 11792026),
+  () => {
+    oracleRoute(`fixed seed`)
+    return campaign(oracleRuns(runs), 11792026)
+  },
   120_000,
 )
 it.skipIf(oracleReplaySkips(crossTabProperty))(
   'refines independent per-Collection snapshots with fresh histories',
   () => {
-    const { numRuns, seed, path } = oraclePropertyOptions(
-      runs,
-      crossTabProperty,
-    )
+    const parameters = oraclePropertyOptions(runs, crossTabProperty)
+    oracleRoute(oracleRouteOf(parameters))
+    const { numRuns, seed, path } = parameters
     return campaign(numRuns, seed, path)
   },
   120_000,
 )
 
 it('reconstructs every action and overlapping receiver reads', async () => {
+  oracleRoute(`fixed history`)
   const reached = await runTransportHistory([
     action('write', 0),
     action('delete', 0),
@@ -119,6 +134,7 @@ it('reconstructs every action and overlapping receiver reads', async () => {
 })
 
 it('enumerates two ordered writes with every intermediate delivery choice', async () => {
+  oracleRoute(`case`)
   let explored = 0
   // 2 first writers × 2 second writers × 4 delivery subsets = 16 schedules.
   for (const first of [0, 1])
@@ -135,6 +151,7 @@ it('enumerates two ordered writes with every intermediate delivery choice', asyn
 }, 60_000)
 
 it('requires local admission to distinguish identical durable deletions', () => {
+  oracleRoute(`fixed history`)
   const row = { id: 0, name: 'old' }
   const delayed = new CrossTabModel([0, 0], [[row]])
   delayed.accept(0, { rows: [], deletes: [0], replace: false })
@@ -154,6 +171,7 @@ it('requires local admission to distinguish identical durable deletions', () => 
 })
 
 it('rejects repaired partial publications and malformed raw deltas', () => {
+  oracleRoute(`calibration`)
   const before = [
     { id: 0, name: 'a' },
     { id: 1, name: 'b' },
@@ -217,6 +235,7 @@ it('rejects repaired partial publications and malformed raw deltas', () => {
 })
 
 it('replays a generated intentional mismatch at its original law and checkpoint', () => {
+  oracleRoute(`calibration`)
   const property = fc.property(fc.integer({ min: 1, max: 20 }), (value) =>
     assertSnapshot(
       [{ id: value, name: 'wrong' }],
@@ -238,11 +257,14 @@ it('replays a generated intentional mismatch at its original law and checkpoint'
     premiseReached: replay.numRuns > 0,
     sameFailure:
       replay.failed &&
-      String(replay.error).includes('public rows at replay calibration'),
+      String(String(replay.errorInstance)).includes(
+        'public rows at replay calibration',
+      ),
   })
 })
 
 it('rejects wrong raw event keys before folding including duplicate malformed inserts', () => {
+  oracleRoute(`calibration`)
   const row = { id: 1, name: 'accepted value' }
   const effect = { rows: [row], deletes: [], replace: false }
   for (const key of ['wrong', '1']) {
@@ -283,9 +305,11 @@ it('replays only the selected history after the original failure is repaired', a
   // This shrink path has a later sibling. fast-check check() continues into
   // that sibling when the selected counterexample passes, despite numRuns: 1.
   const arbitrary = fc.integer({ min: 0, max: 100 })
+  const parameters = oracleFixedSeed(11792027, { numRuns: 30 })
+  oracleRoute(oracleRouteOf(parameters))
   const original = fc.check(
     fc.property(arbitrary, (value) => value < 10),
-    { seed: 11792027, numRuns: 30 },
+    parameters,
   )
   expect(original.counterexample).toEqual([10])
   expect(original.counterexamplePath).toBe('0:1:0:0:1')
@@ -303,6 +327,7 @@ it('replays only the selected history after the original failure is repaired', a
 })
 
 it('preserves campaign outcomes and reports without revision metadata', async () => {
+  oracleRoute(`fixed seed`)
   // Revision lookup is diagnostic. It cannot turn passing histories red or
   // replace the original failed law. Both results must retain their reports.
   const directory = await mkdtemp(join(tmpdir(), 'indexeddb-no-git-'))

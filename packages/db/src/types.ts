@@ -1274,6 +1274,12 @@ export interface SubscribeChangesOptions<
    */
   owner?: CollectionDependent
   /**
+   * The subscriber drops the rows it was sent when the Collection is cleaned
+   * up, so cleanup retains none of them to reconcile later writes against.
+   * @internal
+   */
+  discardsRowsOnCleanup?: boolean
+  /**
    * Listener for subscription status changes.
    * Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.
    * @internal

@@ -32,6 +32,7 @@
 import { afterAll, expect, test } from 'vitest'
 import { declareOracle } from '../oracle-declaration.js'
 import { createOracleReach } from '../oracle-reach.js'
+import { oracleRoute } from '../oracle-config.js'
 import {
   expectedMetadataInput,
   expectedMetadataRecord,
@@ -154,6 +155,12 @@ afterAll(() => {
   }
 })
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/compiler/index.ts#compileQuery',
+    'src/query/effect.ts#createEffect',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [metadataInputViolations, metadataOutputViolations],
   model: [expectedMetadataInput],
   grammar: [
@@ -168,6 +175,7 @@ declareOracle({
 test.each(callbackCases)(
   `receives callback metadata before deriving ordinary values: $label`,
   async (history) => {
+    oracleRoute(`case`)
     callbackEntered = true
     callbackReach.beginHistory()
     const report = await runMetadataCallbackHistory(
@@ -195,6 +203,7 @@ test.each(
 )(
   `receives direct source metadata before deriving ordinary values: %j`,
   async ({ kind, receiver }) => {
+    oracleRoute(`case`)
     callbackEntered = true
     callbackReach.beginHistory()
     const report = await runMetadataCallbackHistory(
@@ -214,6 +223,7 @@ test.each(
 test.each(inlineCases)(
   `receives inline authored metadata or rejects compiled Collection input: $label`,
   async (history) => {
+    oracleRoute(`case`)
     inlineEntered = true
     inlineReach.beginHistory()
     const report = await runInlineMetadataCallbackHistory(
@@ -239,6 +249,7 @@ test.each(inlineCases)(
 test.each(compilerCases)(
   `preserves metadata across compiler cache modes: $label`,
   async (history) => {
+    oracleRoute(`case`)
     compilerEntered = true
     compilerReach.beginHistory()
     const report = await runMetadataCompilerCacheHistory(
@@ -275,6 +286,7 @@ test.each([
   `late-capture-rewrite`,
   `compiler-symbol`,
 ] as const)(`rejects a hostile callback-input observation: %s`, (fault) => {
+  oracleRoute(`case`)
   const description = {
     shape: `structured-spread`,
     collision: `all`,
@@ -324,6 +336,7 @@ test.each([
   `intermediate-sanitizer`,
   `missing-derived-field`,
 ] as const)(`rejects a hostile derived ordinary output: %s`, (fault) => {
+  oracleRoute(`calibration`)
   const description = {
     shape: `functional-projection`,
     collision: `$collectionId`,
@@ -352,6 +365,7 @@ test.each([
   expect(metadataOutputViolations(hostile, expected)).not.toStrictEqual([])
 })
 test(`copies callback input before later source objects change`, () => {
+  oracleRoute(`fixed history`)
   const description = {
     shape: `functional-direct`,
     collision: `none`,
@@ -370,6 +384,7 @@ test(`copies callback input before later source objects change`, () => {
   ).toStrictEqual([])
 })
 test(`accepts readable inherited source metadata at callback input`, () => {
+  oracleRoute(`fixed history`)
   const description = {
     shape: `functional-direct`,
     collision: `none`,
@@ -390,6 +405,7 @@ test(`accepts readable inherited source metadata at callback input`, () => {
   ).toStrictEqual([])
 })
 test(`copies nested callback values before later child objects change`, () => {
+  oracleRoute(`fixed history`)
   const child = {
     ...sourceFact.row,
     ...expectedSourceVirtualFields(sourceFact),
@@ -407,6 +423,7 @@ test(`copies nested callback values before later child objects change`, () => {
 test.each([`selected-virtual`, `own-undefined`] as const)(
   `rejects an inherited replacement for an authored inline field: %s`,
   (fault) => {
+    oracleRoute(`calibration`)
     const description = {
       shape: `functional-projection`,
       collision: `$collectionId`,
@@ -451,6 +468,7 @@ test.each([`selected-virtual`, `own-undefined`] as const)(
 test.each([`unexpected`, `$collectionId`] as const)(
   `rejects an extra own field on an inline array: %s`,
   (field) => {
+    oracleRoute(`calibration`)
     const child = expectedMetadataInput(sourceFact, {
       shape: `functional-projection`,
       collision: `none`,
