@@ -1,16 +1,13 @@
 import { defineConfig, mergeConfig } from 'vitest/config'
 import { tanstackViteConfig } from '@tanstack/vite-config'
 import { commonJsDeclarations } from '../../scripts/commonjs-declarations.mjs'
+import { publishableModuleOutput } from '../../scripts/publishable-module-output.mjs'
 import packageJson from './package.json'
 
 const config = defineConfig({
   build: {
     rollupOptions: {
-      output: {
-        preserveModulesRoot: `src`,
-        // npm omits node_modules directories even inside published dist.
-        sanitizeFileName: (name) => name.replaceAll(`node_modules`, `vendor`),
-      },
+      output: publishableModuleOutput,
     },
   },
   test: {
