@@ -34,13 +34,15 @@ import { declareOracle } from './oracle-declaration.js'
  * legal commands with fixed and random seeds. The drivers compare production
  * loads, unloads, results, status, errors, and publication against this trace.
  *
- * A demand change is one step (ARCHITECTURE law 9, "Replay participants and
- * failure"). Its `change` command retires several logical owners at once, as
- * a lazy join's demand change retires several segments, and the model judges
+ * A demand change is one step (ARCHITECTURE normative law 9, "Publication";
+ * replay failure is in the "Replay participants and failure" section). Its
+ * `change` command retires several logical owners at once, as a lazy join's
+ * demand change retires several segments, and the model judges
  * an open replay once, after every owner in the change has retired. Its
  * `replace` command marks one held owner as the replacement for another's
- * coverage, as a lazy join's fragmented-churn replacement does (law 10,
- * "Source cancellation and applied settlement"): the replacement requests the
+ * coverage, as a lazy join's fragmented-churn replacement does (ARCHITECTURE
+ * normative law 10, "Initial demand"; the source rule is in the "Source
+ * cancellation and applied settlement" section): the replacement requests the
  * whole current key union, so while it is held and its own acquisition did
  * not fail, the replay does not fail for the owner it replaces. Retiring the
  * replacement returns that verdict to the replaced owner. Only the
