@@ -74,8 +74,7 @@ type History = { rows: Array<unknown>; changes: Array<Change> }
 
 // Concrete actions: a row id and its value, so no index needs resolving.
 type Step =
-  | { kind: `skip` }
-  | { kind: `insert` | `update` | `delete`; row: Row }
+  { kind: `skip` } | { kind: `insert` | `update` | `delete`; row: Row }
 type Plan = { initial: Array<Row>; steps: Array<Step> }
 
 // Values that a key encoding by `String(value)` cannot tell apart, values
@@ -266,25 +265,22 @@ async function runHistory(
   // instead of the run failing as a setup error.
   let checkpoint = `after preload`
   try {
-    await withOracleCleanup(
-      async () => {
-        await live.preload()
+    await withOracleCleanup(async () => {
+      await live.preload()
+      observe(checkpoint, snapshot())
+      for (const [index, step] of plan.steps.entries()) {
+        checkpoint = `after change ${index} (${step.kind})`
+        source.utils.begin()
+        if (step.kind === `insert`)
+          source.utils.write({ type: `insert`, value: { ...step.row } })
+        else if (step.kind === `update`)
+          source.utils.write({ type: `update`, value: { ...step.row } })
+        else if (step.kind === `delete`)
+          source.utils.write({ type: `delete`, value: { ...step.row } })
+        source.utils.commit()
         observe(checkpoint, snapshot())
-        for (const [index, step] of plan.steps.entries()) {
-          checkpoint = `after change ${index} (${step.kind})`
-          source.utils.begin()
-          if (step.kind === `insert`)
-            source.utils.write({ type: `insert`, value: { ...step.row } })
-          else if (step.kind === `update`)
-            source.utils.write({ type: `update`, value: { ...step.row } })
-          else if (step.kind === `delete`)
-            source.utils.write({ type: `delete`, value: { ...step.row } })
-          source.utils.commit()
-          observe(checkpoint, snapshot())
-        }
-      },
-      [() => live.cleanup(), () => source.cleanup()],
-    )
+      }
+    }, [() => live.cleanup(), () => source.cleanup()])
   } catch (error) {
     observe(checkpoint, { error: errorData(error) })
   }
@@ -421,7 +417,12 @@ oracleProperty<History, Array<Array<[string, number]>>, Plan>({
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       const verdict =
         differs(checkpoint, LAW_GROUPS, published, expected[index]) ??
-        differs(checkpoint, LAW_DISTINCT, snapshot.size, snapshot.rows.length) ??
+        differs(
+          checkpoint,
+          LAW_DISTINCT,
+          snapshot.size,
+          snapshot.rows.length,
+        ) ??
         differs(
           checkpoint,
           LAW_DISTINCT,
@@ -435,12 +436,10 @@ oracleProperty<History, Array<Array<[string, number]>>, Plan>({
       for (const [group, key] of keys) {
         if (!previous.has(group)) continue
         if (!Object.is(previous.get(group), key))
-          return violation(
-            checkpoint,
-            `${group} changed its key`,
-            LAW_KEPT,
-            { actual: key, expected: previous.get(group) },
-          )
+          return violation(checkpoint, `${group} changed its key`, LAW_KEPT, {
+            actual: key,
+            expected: previous.get(group),
+          })
       }
       previous = keys
     }
