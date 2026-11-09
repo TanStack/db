@@ -8,8 +8,11 @@ import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalI
 import { groupedTopKWithFractionalIndex } from '../../src/operators/groupedTopKWithFractionalIndex.js'
 import { orderByWithFractionalIndex } from '../../src/operators/orderBy.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../../db/tests/oracle-config.js'
 import { declareOracle } from '../../../db/tests/oracle-declaration.js'
@@ -21,7 +24,14 @@ import {
 import { TopKRelation } from './topk-relation-oracle.js'
 import type { TopKWithFractionalIndexOptions } from '../../src/operators/topKWithFractionalIndex.js'
 
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 declareOracle({
+  owns: [
+    `src/operators/topKWithFractionalIndex.ts#topKWithFractionalIndex`,
+    `src/operators/groupedTopKWithFractionalIndex.ts#groupedTopKWithFractionalIndex`,
+    `src/operators/orderBy.ts#orderByWithFractionalIndex`,
+  ],
   check: [TopKRelation, checkNumericWindow],
   model: [selectedWindowKeys, requestedWindowChanged],
 })
@@ -38,13 +48,13 @@ declareOracle({
  * calibrate that checker without exercising production.
  *
  * The grammar covers five finite scalar keys, one fixed payload per key,
- * support 0..3, and offset/limit 0..6. The numeric-window lane also reaches
+ * support 0..3, and offset/limit 0..6. The numeric-window grammar also reaches
  * safe-integer offsets and widths near Number.MAX_SAFE_INTEGER. Every input turn and window move has
  * a graph-run checkpoint for output rows and reported window size.
- * The pinned 0/1/2 support crossing and boundary history distinguish presence
+ * The fixed 0/1/2 support crossing and boundary history distinguish presence
  * from raw multiplicity and inclusive from displaced window cuts. Row replacements,
  * multiple groups, negative net support, and downstream lazy acquisition are
- * outside this owner. The numeric lane does observe the empty output message
+ * outside this owner. The numeric-window grammar does observe the empty output message
  * that lets a downstream graph respond to changed requested demand.
  */
 
@@ -84,7 +94,7 @@ const campaigns = [
   {
     name: `fixed`,
     test: oracleReplayTest(it),
-    parameters: { numRuns: runs, seed: 409033 },
+    parameters: oracleFixedSeed(409033, { numRuns: runs }),
   },
   {
     name: `random`,
@@ -136,6 +146,11 @@ describe.each([
               message: string
             }
           | undefined
+        const campaignParameters = {
+          ...campaign.parameters,
+          examples: [[boundaryHistory]],
+        }
+        oracleRoute(oracleRouteOf(campaignParameters))
         fc.assert(
           fc.property(
             fc.array(
@@ -223,7 +238,7 @@ describe.each([
                   expect(size()).toBe(selected.length),
                 )
               }
-              // Pin positivity crossings before every generated history.
+              // Fix positivity crossings before every generated history.
               const history = [1, 2, 1, 0, 2, 1, 0].map((support) => ({
                 slot: 0,
                 support,
@@ -244,10 +259,7 @@ describe.each([
               }
             },
           ),
-          {
-            ...campaign.parameters,
-            examples: [[boundaryHistory]],
-          },
+          campaignParameters,
         )
       },
     )
@@ -261,7 +273,7 @@ describe.each([
  * message is this operator boundary's demand signal, not source completeness.
  * Extra graph messages remain permitted, including for unchanged requested sets.
  *
- * This lane keeps three to five positive typed keys installed. It varies the
+ * This grammar keeps three to five positive typed keys installed. It varies the
  * installed size, near-maximum offset, finite width, and empty-range gap.
  * The four profiles distinguish overflowing arithmetic, work proportional to
  * absent ranks, exact width retention after a partial move, and lost demand
@@ -384,7 +396,7 @@ describe.each([
       {
         name: `fixed`,
         test: oracleReplayTest(it),
-        parameters: { numRuns: runs, seed: 2291 },
+        parameters: oracleFixedSeed(2291, { numRuns: runs }),
       },
       {
         name: `random`,
@@ -412,6 +424,11 @@ describe.each([
           let firstFailure:
             { step: number; error: NumericWindowMismatch } | undefined
           try {
+            const campaignParameters = {
+              ...campaign.parameters,
+              examples: [[numericWindowExample]],
+            }
+            oracleRoute(oracleRouteOf(campaignParameters))
             fc.assert(
               fc.property(numericWindowInput, (generated) => {
                 reach.beginHistory({ fixed: begun++ === 0 })
@@ -498,7 +515,7 @@ describe.each([
                   if (index === 7) reach.reach(`returned to installed rows`)
                 }
               }),
-              { ...campaign.parameters, examples: [[numericWindowExample]] },
+              campaignParameters,
             )
             reach.assertReached()
           } finally {
@@ -524,7 +541,7 @@ describe.each([
  * with installed ranks; clamping its offset before applying width changes it.
  * Negative limits and fractional bounds have no authority here and stay out.
  *
- * This lane adds the missing offset domain without replacing the support or
+ * This grammar adds the missing offset domain without replacing the support or
  * large-numeric campaigns. Installed cardinality, negative depth, width and gap
  * distinguish absolute intervals from JavaScript's end-relative slice indices.
  * A legal support tail adds nearby edits and moves. A constructive prefix
@@ -536,7 +553,7 @@ describe.each([
  * one-group top-K and the public orderBy wrapper. Where the public size getter
  * accepts a predicate, an always-true predicate must count the same selected
  * rows. Multiple groups, varying prefix predicates and downstream acquisition
- * remain outside this lane. Mismatches
+ * remain outside this grammar. Mismatches
  * accumulate through the history so a size defect cannot hide row movement or
  * a source-edit defect. A runtime interruption remains a separate failure.
  */
@@ -713,6 +730,7 @@ declareOracle({
 // wrong rows to the same signed-output checker; no production helper supplies
 // the expected answer, and no output normalization removes the distinction.
 it(`rejects end-relative slicing and offset-first clamping`, () => {
+  oracleRoute(`calibration`)
   const present = orderedKeys.slice(0, 3)
   for (const window of [
     { offset: -2, limit: 1 },
@@ -769,6 +787,16 @@ describe.each([
         const fidelity = createOracleFailureFidelity<NegativeWindowHistory>()
         let begun = 0
         try {
+          const parameters =
+            campaign === `fixed`
+              ? oracleFixedSeed(2316, {
+                  numRuns: oracleRuns(100) + negativeWindowExamples.length,
+                  examples: negativeWindowExamples,
+                })
+              : oraclePropertyOptions(100, property, {
+                  examples: negativeWindowExamples,
+                })
+          oracleRoute(oracleRouteOf(parameters))
           await fidelity.assert(() =>
             fc.assert(
               fc.asyncProperty(negativeWindowHistory, async (history) => {
@@ -784,15 +812,7 @@ describe.each([
                   ),
                 )
               }),
-              campaign === `fixed`
-                ? {
-                    seed: 2316,
-                    numRuns: oracleRuns(100) + negativeWindowExamples.length,
-                    examples: negativeWindowExamples,
-                  }
-                : oraclePropertyOptions(100, property, {
-                    examples: negativeWindowExamples,
-                  }),
+              parameters,
             ),
           )
           reach.assertReached()
@@ -810,6 +830,7 @@ describe.each([
 it.each([-2, 2])(
   `rejects excess signed weight %s across a moved window`,
   (weight) => {
+    oracleRoute(`calibration`)
     const check = (corrupt: boolean) => {
       const relation = new TopKRelation<Key>()
       relation.add([[[1, [{ id: 9, value: `tie` }, `a0`]], 1]])

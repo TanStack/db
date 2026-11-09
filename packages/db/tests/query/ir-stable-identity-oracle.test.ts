@@ -29,7 +29,7 @@ import {
   getQueryIdentity,
 } from '../../src/query/ir-stable-identity.js'
 import { Func, IncludesSubquery, PropRef, Value } from '../../src/query/ir.js'
-import { oracleRuns } from '../oracle-config.js'
+import { oracleFixedSeed, oracleRoute, oracleRuns } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import {
   createAlphaRenamedIncludesQuery,
@@ -234,6 +234,16 @@ const outputProgramArbitrary: fc.Arbitrary<OutputProgram> = fc.record({
 })
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts',
+    'src/live-query-options.ts#getPreparedLiveQueryIdentity',
+    'src/query/compiler/evaluators.ts#compileExpression',
+    'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+    'src/query/ir-stable-identity.ts#getQueryIdentity',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/live/includes-runtime.ts',
+    'src/query/pooled-live-query.ts',
+  ],
   check: [expectIdentitySharingMatchesOutcome],
   model: [interpretOutputProgram, modelOutcome],
 })
@@ -318,6 +328,7 @@ describe(`semantic expression identity`, () => {
     equivalentExpressionPairArbitrary,
     fc.record({ age: fc.integer(), active: fc.boolean() }),
   ])(`canonical expression grammar preserves semantics`, (pair, sample) => {
+    oracleRoute(`random seed`)
     const row = { user: sample }
 
     expect(compileExpression(pair.original)(row)).toBe(
@@ -331,6 +342,7 @@ describe(`semantic expression identity`, () => {
   fcTest.prop([referenceSemanticPairArbitrary])(
     `keeps reference-semantic values distinct across expression and demand identity`,
     ([first, second]) => {
+      oracleRoute(`random seed`)
       const value = new PropRef<unknown>([`row`, `value`])
       const firstPredicate = new Func<boolean>(`eq`, [value, new Value(first)])
       const secondPredicate = new Func<boolean>(`eq`, [
@@ -356,6 +368,7 @@ describe(`semantic expression identity`, () => {
       maxLength: 8,
     }),
   ])(`treats IN candidates as a set`, (candidates) => {
+    oracleRoute(`random seed`)
     const value = new PropRef<unknown>([`row`, `value`])
     const ordered = new Func<boolean>(`in`, [value, new Value(candidates)])
     const reordered = new Func<boolean>(`in`, [
@@ -395,6 +408,7 @@ describe(`stable QueryIR identity smoke test`, () => {
       maxLength: 4,
     }),
   ])(`does not depend on lexical source aliases`, (aliases) => {
+    oracleRoute(`random seed`)
     const [firstUser, firstPost, secondUser, secondPost] = aliases
 
     expect(
@@ -419,6 +433,7 @@ describe(`stable QueryIR identity smoke test`, () => {
   fcTest.prop([outputExpressionPairArbitrary])(
     `equal query identities imply equal projected expression results`,
     ({ first, second }) => {
+      oracleRoute(`random seed`)
       const firstIdentity = getQueryIdentity(
         createProjectedExpressionQuery(first),
       )
@@ -438,6 +453,7 @@ describe(`stable QueryIR identity smoke test`, () => {
   )
 
   it(`preserves signed zero through coalesce and binary conversion through conditional output`, () => {
+    oracleRoute(`fixed history`)
     assertOutputProgram(
       observeOutputProgram({
         literals: { kind: `signed-zero` },
@@ -457,18 +473,26 @@ describe(`stable QueryIR identity smoke test`, () => {
     }
   })
 
-  fcTest.prop([outputProgramArbitrary], { numRuns: 200, seed: 715031 })(
+  const outputProgramFixedSeed = oracleFixedSeed(715031, { numRuns: 200 })
+  fcTest.prop([outputProgramArbitrary], outputProgramFixedSeed)(
     `matches output denotation through composed contexts with a fixed seed`,
-    (program) => assertOutputProgram(observeOutputProgram(program)),
+    (program) => {
+      oracleRoute(`fixed seed`)
+      return assertOutputProgram(observeOutputProgram(program))
+    },
   )
   fcTest.prop([outputProgramArbitrary], { numRuns: oracleRuns(200) })(
     `matches output denotation through random composed contexts`,
-    (program) => assertOutputProgram(observeOutputProgram(program)),
+    (program) => {
+      oracleRoute(`random seed`)
+      return assertOutputProgram(observeOutputProgram(program))
+    },
   )
 
   it.each([`shared-wrong-output`, `constant-identity`] as const)(
     `rejects ${`%s`} despite mutual agreement`,
     (fault) => {
+      oracleRoute(`calibration`)
       const observations = observeOutputProgram({
         literals: { kind: `signed-zero` },
         wrappers: [{ kind: `coalesce` }],
@@ -492,6 +516,7 @@ describe(`stable QueryIR identity smoke test`, () => {
           alias !== `kind` && alias !== `profile` && alias !== `userId`,
       ),
   ])(`does not bind union-derived output fields to outer aliases`, (alias) => {
+    oracleRoute(`random seed`)
     expect(getQueryIdentity(createUnionDerivedNestedQuery(`kind`))).toBe(
       getQueryIdentity(createUnionDerivedNestedQuery(alias)),
     )
@@ -509,6 +534,7 @@ describe(`stable QueryIR identity smoke test`, () => {
   fcTest.prop([referenceSemanticPairArbitrary])(
     `keeps queries distinct when captured values compare by reference`,
     ([first, second]) => {
+      oracleRoute(`random seed`)
       const firstQuery = createProfileValueQuery(first)
       const secondQuery = createProfileValueQuery(second)
       const firstPredicate = firstQuery.where![0] as BasicExpression<boolean>
@@ -637,6 +663,7 @@ describe(`operator-code identity`, () => {
   )
 
   it(`keeps queries whose operator code changes the compile outcome distinct`, () => {
+    oracleRoute(`fixed history`)
     const results = cases.map(({ groupBy, agg, inc }) => {
       const ir = buildIR(groupBy, agg, inc)
       const label = `${groupBy} groupBy, ${agg} aggregate, ${inc} include`
@@ -809,6 +836,7 @@ describe(`operator-code identity`, () => {
                 })
 
   it(`keeps every operator-code variant with a different compile outcome distinct`, () => {
+    oracleRoute(`case`)
     const identities = {
       ir: (ir: QueryIR) => getQueryIdentity(ir),
       pooled: (ir: QueryIR) =>

@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           # The run-budget report compares changed files with the merge-base.
           fetch-depth: 0
@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
       - name: Setup Tools
@@ -52,6 +52,20 @@ jobs:
         run: pnpm run check:mangle
       - name: Build DB packages
         run: pnpm --filter @tanstack/db-ivm --filter @tanstack/db --filter @tanstack/react-db build
+      - name: Check CommonJS entrypoint without require(ESM)
+        run: node --no-experimental-require-module -e "require('./packages/db/dist/cjs/index.cjs')"
+      - name: Check packed DB entrypoints
+        run: |
+          dependency_pack_root=$(mktemp -d)
+          mkdir "$dependency_pack_root/ivm" "$dependency_pack_root/db"
+          pnpm --filter @tanstack/db-ivm pack --pack-destination "$dependency_pack_root/ivm"
+          pnpm --filter @tanstack/db pack --pack-destination "$dependency_pack_root/db"
+          tar -xzf "$dependency_pack_root/ivm/"*.tgz -C "$dependency_pack_root/ivm"
+          tar -xzf "$dependency_pack_root/db/"*.tgz -C "$dependency_pack_root/db"
+          mkdir -p "$dependency_pack_root/db/package/node_modules/@tanstack"
+          ln -s "$dependency_pack_root/ivm/package" "$dependency_pack_root/db/package/node_modules/@tanstack/db-ivm"
+          node --no-experimental-require-module -e "require(process.argv[1])" "$dependency_pack_root/db/package"
+          node --input-type=module -e "await import(process.argv[1])" "$dependency_pack_root/db/package/dist/esm/index.js"
       - name: Check minified public API
         run: pnpm run test:minified-db
       - name: Check client-only query bundles
@@ -71,7 +85,7 @@ jobs:
       TEST_GROUP: ${{ matrix.group }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
       - name: Setup Tools
@@ -100,7 +114,7 @@ jobs:
       TEST_GROUP: ${{ matrix.group }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
       - name: Setup Tools
@@ -140,7 +154,7 @@ jobs:
           PACKAGES_RESULT: ${{ needs.test-packages.result }}
         run: test "$LINT_RESULT" = success && test "$DB_RESULT" = success && test "$PACKAGES_RESULT" = success
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
       - name: Setup Tools
@@ -161,7 +175,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -169,6 +183,8 @@ jobs:
         uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Build Packages
         run: pnpm run build
+      - name: Check that no build carries an oracle probe
+        run: node scripts/check-dist-probes.mjs
       - name: Publish Previews
         run: pnpx pkg-pr-new publish --pnpm --compact './packages/*' --template './examples/*/*'
   size:
@@ -180,14 +196,14 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Setup Tools
         uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Compare DB and React DB sizes
-        uses: preactjs/compressed-size-action@66325aad6443cb7cf89c4bfcd414aea2367cda94 # 2.9.1
+        uses: preactjs/compressed-size-action@f322c295dde06a1cb7ccaef105732dd8a726d1d9 # 2.10.0
         with:
           repo-token: '${{ secrets.GITHUB_TOKEN }}'
           pattern: './packages/{db,react-db}/dist/**/*.{js,mjs}'
@@ -201,7 +217,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
       - name: Setup Tools
@@ -224,7 +240,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
       - name: Setup Tools

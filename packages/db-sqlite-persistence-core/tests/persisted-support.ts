@@ -1345,11 +1345,11 @@ export const assertGenerationNoticeHistory = async ({
  * loss: the load rejects as after a failed ensure, and the demand stays
  * active and retries instead of releasing the owner's acquisition.
  *
- * Known gap (#2139): a rotated follower never ends scoped recovery, so the
+ * Known limit (#2139): a rotated follower never ends scoped recovery, so the
  * owner's row never becomes visible in the rotated placement. Its cells are
- * pinned as failing, and the generated histories omit that placement. A
+ * fixed histories that fail, and the generated histories omit that placement. A
  * rotation that starts while a load waits for the owner's commits is also
- * outside this lane and tracked there.
+ * outside this history grammar and tracked there.
  */
 export type FollowerRemoteDemandHistory = {
   placement: `direct` | `queued` | `rotated` | `expired`

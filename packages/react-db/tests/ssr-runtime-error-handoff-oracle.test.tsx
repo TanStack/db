@@ -25,9 +25,12 @@ import {
   ssrRuntimeErrorHistoryArbitrary,
 } from '../../db/tests/ssr-snapshot-admission-oracle'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -288,28 +291,40 @@ async function checkRuntimeHistory(
 
 // checkRuntimeHistory compares the server view, the browser's first hydration
 // view and its committed view with the shared runtime model's expected views.
-declareOracle({ check: [checkRuntimeHistory] })
+declareOracle({
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveInfiniteQuery.ts#useLiveInfiniteQuery`,
+    `src/useLiveQuery.ts#useLiveQuery`,
+  ],
+  check: [checkRuntimeHistory],
+})
 
 describe(`runtime errors across SSR hydration`, () => {
   for (const hook of [`ordinary`, `infinite`] as const) {
     for (const history of ssrRuntimeErrorExamples)
       it.skipIf(oracleReplayRequested())(
         `${hook} runtime ${history.serverOutcome}/${history.browserOutcome} preload=${history.browserPreload} cause=${history.definedError}`,
-        () => checkRuntimeHistory(hook, history, runtimeReach(hook)),
+        () => {
+          oracleRoute(`case`)
+          return checkRuntimeHistory(hook, history, runtimeReach(hook))
+        },
       )
     const runCampaign = async (campaign: `fixed` | `random`) => {
       const reach = runtimeReach(hook)
       try {
+        const parameters = {
+          ...(campaign === `fixed`
+            ? oracleFixedSeed(2229, { numRuns: oracleRuns(64) })
+            : oraclePropertyOptions(64, runtimeProperties[hook])),
+          examples: ssrRuntimeErrorExamples.map((history) => [history]),
+        }
+        oracleRoute(oracleRouteOf(parameters))
         await fc.assert(
           fc.asyncProperty(ssrRuntimeErrorHistoryArbitrary, (history) =>
             checkRuntimeHistory(hook, history, reach),
           ),
-          {
-            ...(campaign === `fixed`
-              ? { numRuns: oracleRuns(64), seed: 2229 }
-              : oraclePropertyOptions(64, runtimeProperties[hook])),
-            examples: ssrRuntimeErrorExamples.map((history) => [history]),
-          },
+          parameters,
         )
         reach.assertReached()
       } finally {

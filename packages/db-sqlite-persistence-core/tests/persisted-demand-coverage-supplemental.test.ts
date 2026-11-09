@@ -20,7 +20,7 @@ import type { SQLiteDriver } from '../src/index.js'
 
 /**
  * Supplemental checks beside the persisted demand coverage oracle
- * (`persisted-demand-coverage-oracle.test.ts`). These pin two behaviors that
+ * (`persisted-demand-coverage-oracle.test.ts`). These check two behaviors that
  * the opt-in must leave as they were, and whose laws other owners hold, so
  * they are ordinary examples rather than inputs to the coverage judgment
  * (ORC-016):

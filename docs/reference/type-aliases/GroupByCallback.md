@@ -4,10 +4,10 @@ title: GroupByCallback
 ---
 
 ```ts
-type GroupByCallback<TContext> = (refs) => any;
+type GroupByCallback<TContext, TKeys> = (refs) => TKeys;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:649](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L649)
+Defined in: [packages/db/src/query/builder/types.ts:643](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L643)
 
 GroupByCallback - Type for groupBy clause callback functions
 
@@ -22,6 +22,10 @@ Example: `(refs) => refs.orders.status`
 
 `TContext` *extends* [`Context`](../interfaces/Context.md)
 
+### TKeys
+
+`TKeys` = `any`
+
 ## Parameters
 
 ### refs
@@ -30,4 +34,4 @@ Example: `(refs) => refs.orders.status`
 
 ## Returns
 
-`any`
+`TKeys`

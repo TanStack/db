@@ -20,6 +20,7 @@ import {
 } from '../../db/tests/live-query-cache-options-oracle'
 import { withOracleCleanup } from '../../db/tests/utils'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import type { CacheRow } from '../../db/tests/live-query-cache-options-oracle'
 
@@ -38,11 +39,13 @@ afterAll(() => {
     )
 })
 declareOracle({
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
   check: [checkCacheOptionAdmission, checkCacheOptionRows],
   model: [conflictingCacheOptions],
   grammar: [cacheOptionHistories],
 })
 test.each(cacheOptionHistories)(`Svelte cached options %j`, async (history) => {
+  oracleRoute(`case`)
   reach.beginHistory()
   const client = new DbClient()
   const rows: Array<CacheRow> = [

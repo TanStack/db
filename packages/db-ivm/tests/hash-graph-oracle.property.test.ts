@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -21,7 +24,7 @@ import { declareOracle } from '../../db/tests/oracle-declaration.js'
  * keep rare topology classes present even when random generation misses them.
  * The generated topology claim is limited to plain objects with numeric
  * labels and array edges, at most six nodes and three edges per node. Cycle
- * rejection through other containers is pinned by hash-graph.test.ts, an
+ * rejection through other containers is fixed by hash-graph.test.ts, an
  * ordinary test file. This file does not establish collision freedom or
  * complexity limits.
  */
@@ -102,7 +105,10 @@ function expectGraphHash(
   expect(hashValue(nodes[0])).toBe(hashValue(unfoldEdges(edges, 0)))
 }
 
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 declareOracle({
+  owns: [`src/hashing/hash.ts#hash`],
   check: [expectGraphHash],
   model: [isAcyclic, unfoldEdges],
 })
@@ -134,6 +140,7 @@ const graphWitnesses: Array<{
 
 describe(`structural hash graph boundary`, () => {
   it.each(graphWitnesses)(`matches the $name witness`, ({ edges, acyclic }) => {
+    oracleRoute(`case`)
     // These expected categories are specified independently of Kahn's result.
     expect(isAcyclic(edges)).toBe(acyclic)
     expectGraphHash(edges)
@@ -142,27 +149,34 @@ describe(`structural hash graph boundary`, () => {
   oracleReplayTest(it)(
     `matches reachable graph cycles and shared DAGs (fixed)`,
     () => {
+      const parameters = oracleFixedSeed(fixedSeed, {
+        numRuns: oracleRuns(300),
+      })
+      oracleRoute(oracleRouteOf(parameters))
       fc.assert(
         fc.property(graphArbitrary, (edges) => {
           expectGraphHash(edges)
         }),
-        { numRuns: oracleRuns(300), seed: fixedSeed },
+        parameters,
       )
     },
   )
   oracleReplayTest(it, graphProperty)(
     `matches reachable graph cycles and shared DAGs (random)`,
     () => {
+      const campaignParameters = oraclePropertyOptions(300, graphProperty)
+      oracleRoute(oracleRouteOf(campaignParameters))
       fc.assert(
         fc.property(graphArbitrary, (edges) => {
           expectGraphHash(edges)
         }),
-        oraclePropertyOptions(300, graphProperty),
+        campaignParameters,
       )
     },
   )
 
   it(`rejects cycle acceptance while accepting its acyclic near-neighbor`, () => {
+    oracleRoute(`calibration`)
     expect(() => expectGraphHash([[1], [0]], () => 0)).toThrow()
     expectGraphHash([[1], []], () => 0)
     expectGraphHash([[1], [0]])
@@ -170,6 +184,7 @@ describe(`structural hash graph boundary`, () => {
   })
 
   it(`replays a cycle-acceptance mismatch at the same checkpoint`, () => {
+    oracleRoute(`calibration`)
     const property = fc.property(fc.integer({ min: 1, max: 3 }), (length) => {
       const edges = Array.from({ length: length + 1 }, (_, node) => [
         node === length ? 0 : node + 1,
@@ -193,6 +208,7 @@ describe(`structural hash graph boundary`, () => {
   })
 
   it(`rejects false cycle rejection for unreachable cycles and shared DAGs`, () => {
+    oracleRoute(`calibration`)
     const rejectAll = (): number => {
       throw new TypeError(`Cannot hash cyclic structural values`)
     }
@@ -210,6 +226,7 @@ describe(`structural hash graph boundary`, () => {
   })
 
   it(`rejects unequal hashes of a shared DAG and its unfolding`, () => {
+    oracleRoute(`calibration`)
     let calls = 0
     expect(() =>
       expectGraphHash([[1, 2], [3], [3], []], () => ++calls),

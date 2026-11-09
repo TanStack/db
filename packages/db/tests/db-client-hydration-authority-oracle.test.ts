@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DbClient, collectionOptions } from '../src'
+import { oracleRoute } from './oracle-config'
 import { declareOracle } from './oracle-declaration.js'
 import type { Collection, SyncConfig } from '../src'
 import type { ChangeMessage } from '../src/types'
@@ -63,7 +64,7 @@ import type { ChangeMessage } from '../src/types'
  * mirror/public agreement. The change-message mirror carries no metadata, so
  * metadata is observed only through dehydration.
  *
- * Pinned reference cases (not run against production) cover the equal
+ * Fixed reference cases (not run against production) cover the equal
  * re-insert, clarification (b) in both arrival orders, a metadata-less latest
  * seed, and a metadata-only write held against a later seed. The reference
  * throws on an insert that differs from a row the source wrote; the grammar
@@ -72,7 +73,7 @@ import type { ChangeMessage } from '../src/types'
  * Limits: this owner covers one or two immediately applied adapter
  * transactions, all of them on the target key, three keys, and at most two
  * hydration chunks. A source insert over a source-written row appears only in
- * the pinned reference cases. `initialData` carries no metadata. The
+ * the fixed reference cases. `initialData` carries no metadata. The
  * state-retention oracle and focused DbClient tests own queued transactions and
  * cancellation. This test does not establish provider transport order or a
  * later authoritative hydration epoch.
@@ -429,7 +430,16 @@ async function runHistory(
     })
 }
 
-declareOracle({ check: [runHistory], model: [referenceRows] })
+// What this oracle owns: the gap report judges DbClient.collection and
+// DbClient.applyCollectionChunk by this file's hydration histories.
+declareOracle({
+  owns: [
+    `src/client.ts#DbClient.collection`,
+    `src/client.ts#DbClient.applyCollectionChunk`,
+  ],
+  check: [runHistory],
+  model: [referenceRows],
+})
 
 describe(`DbClient hydration authority oracle`, () => {
   type Case = {
@@ -497,6 +507,7 @@ describe(`DbClient hydration authority oracle`, () => {
   })
 
   it(`reaches applied delete and truncate with late hydration`, () => {
+    oracleRoute(`case`)
     expect(cases).toContainEqual({
       decisions: [`delete`],
       label: `delete`,
@@ -529,7 +540,8 @@ describe(`DbClient hydration authority oracle`, () => {
     ])
   })
 
-  it(`reference folds the D5 rules over pinned histories`, () => {
+  it(`reference folds the D5 rules over fixed histories`, () => {
+    oracleRoute(`case`)
     const before = hydrate(hydrationRows(`before`))
     const after = hydrate(hydrationRows(`after`))
 
@@ -612,6 +624,7 @@ describe(`DbClient hydration authority oracle`, () => {
   })
 
   it(`reference keeps the metadata of an equal re-insert of a source-written row`, () => {
+    oracleRoute(`case`)
     expect(
       targetOf(
         referenceRows(
@@ -640,6 +653,7 @@ describe(`DbClient hydration authority oracle`, () => {
   })
 
   it(`reference lets seed B supply metadata when a partial update wrote only row data`, () => {
+    oracleRoute(`case`)
     // Seed A's `seeded` survives the partial merge; B supplies only the metadata.
     expect(
       targetOf(
@@ -671,6 +685,7 @@ describe(`DbClient hydration authority oracle`, () => {
   })
 
   it(`reference merges a partial update over the later seed when both seeds arrive first`, () => {
+    oracleRoute(`case`)
     // Seed B replaces A's row whole, so the update's merge base has no `seeded`.
     expect(
       targetOf(
@@ -688,6 +703,7 @@ describe(`DbClient hydration authority oracle`, () => {
   })
 
   it(`reference leaves metadata absent when the latest seed names none`, () => {
+    oracleRoute(`case`)
     expect(
       targetOf(
         referenceRows([seedA], [hydrate([{ value: seedB.value }])], `partial`),
@@ -700,6 +716,7 @@ describe(`DbClient hydration authority oracle`, () => {
   })
 
   it(`reference holds a metadata-only write against a later seed`, () => {
+    oracleRoute(`case`)
     expect(
       targetOf(
         referenceRows(
@@ -717,13 +734,16 @@ describe(`DbClient hydration authority oracle`, () => {
 
   it.each(cases)(
     `keeps $label authoritative with hydration $order its receipt in $rowUpdateMode mode`,
-    async ({ decisions, order, rowUpdateMode }) =>
-      runHistory(decisions, order, rowUpdateMode),
+    async ({ decisions, order, rowUpdateMode }) => {
+      oracleRoute(`case`)
+      return runHistory(decisions, order, rowUpdateMode)
+    },
   )
 
   // Both seeds carry the same row fields, so the row check cannot tell a whole
   // replacement from a merge; only the metadata distinguishes them.
   it(`keeps metadata absent when the latest seed names none, in production`, () => {
+    oracleRoute(`fixed history`)
     const row = { id: target, name: `seed`, seeded: `initial` }
     return runHistory([], `both`, `partial`, (stage) =>
       stage === `before`
@@ -810,6 +830,7 @@ describe(`DbClient hydration interleaving oracle`, () => {
   it.each(interleavings)(
     `accepts a chunk with persisting=$persisting and source $source writing $sourceKey`,
     async (history) => {
+      oracleRoute(`case`)
       let sync!: SyncActions
       let release!: () => void
       const held = new Promise<void>((resolve) => {

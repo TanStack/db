@@ -37,10 +37,10 @@ import type { PersistedTx, PersistenceAdapter, ProtocolEnvelope } from '../src'
  * Checkpoints: source reads after every action; `collection.base` only at the
  * final checkpoint, after every hold ends and the wrapper's continuations
  * drain. The wrapper hands rows to core after its durable step, so consumers
- * see them a turn or more later even with no hold. In the peer lanes the
+ * see them a turn or more later even with no hold. In the peer production paths the
  * holding adapter's stored rows are compared at the final checkpoint too.
  *
- * Lanes: `persisted-flat`, `persisted-nested`, `persisted-seeds`,
+ * Production paths: `persisted-flat`, `persisted-nested`, `persisted-seeds`,
  * `persisted-cached` (row 1 is in storage when the run starts),
  * `persisted-conflicts` (inner writes that land ahead of enclosing ones), and
  * `persisted-nested-seeds`, which crosses seeds with nesting and the cached
@@ -52,7 +52,7 @@ import type { PersistedTx, PersistenceAdapter, ProtocolEnvelope } from '../src'
  * `persisted-peers-on-demand`, which loads on demand with a demand for every
  * row active from the start. Seeds
  * use a `DbClient` that owns the persisted Collection. Restart and resume
- * reads are outside these lanes.
+ * reads are outside these production paths.
  *
  * A peer is a second writer the driver plays. It writes the stored row and
  * metadata directly, takes the next stream position after this tab's
@@ -215,8 +215,8 @@ const drainTurns = async () => {
 let run = 0
 
 /**
- * Drives one persisted Collection through the shared session contract. Lane
- * options select hydration seeds, cached rows, storage holds and peer notices;
+ * Drives one persisted Collection through the shared session contract. Production
+ * path options select hydration seeds, cached rows, storage holds and peer notices;
  * source reads and durable observations remain separate comparison inputs.
  */
 export async function createPersistedDriver(

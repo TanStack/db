@@ -7,7 +7,13 @@ import { BaseQueryBuilder, Query } from '../../src/query/builder/index.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { CollectionHasSubscribersError } from '../../src/errors.js'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
 import { declareOracle } from '../oracle-declaration.js'
 import {
@@ -79,6 +85,12 @@ async function expectPooledReleaseMatchesCollection(
 }
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/live-query-observer.ts#createLiveQueryObserver',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/pooled-live-query.ts#createPooledLiveQuery',
+  ],
   check: [
     expectPooledReleaseMatchesCollection,
     checkCallbackHistory,
@@ -334,14 +346,17 @@ describe(`pooled live query gcTime`, () => {
           ]
           const reach = createOracleReach(property, states)
           try {
+            const parameters =
+              campaign === `fixed`
+                ? oracleFixedSeed(2229, { numRuns: oracleRuns(80) })
+                : oraclePropertyOptions(80, property)
+            oracleRoute(oracleRouteOf(parameters))
             await fc.assert(
               fc.asyncProperty(callbackHistory, async (history) => {
                 reach.beginHistory()
                 await checkCallbackHistory(path, boundary, history, reach)
               }),
-              campaign === `fixed`
-                ? { numRuns: oracleRuns(80), seed: 2229 }
-                : oraclePropertyOptions(80, property),
+              parameters,
             )
             reach.assertReached()
           } finally {
@@ -370,6 +385,11 @@ describe(`pooled live query gcTime`, () => {
         `throw`,
         `undefined-cause`,
       ])
+      const parameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(2229, { numRuns: oracleRuns(40) })
+          : oraclePropertyOptions(40, `pooled-live-query.late-cleanup`)
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.record({
@@ -464,9 +484,7 @@ describe(`pooled live query gcTime`, () => {
             }
           },
         ),
-        campaign === `fixed`
-          ? { numRuns: oracleRuns(40), seed: 2229 }
-          : oraclePropertyOptions(40, `pooled-live-query.late-cleanup`),
+        parameters,
       )
       reach.assertReached()
       console.info(
@@ -479,6 +497,7 @@ describe(`pooled live query gcTime`, () => {
   for (const gcTime of [1, 100, 0, Number.POSITIVE_INFINITY]) {
     for (const subscribe of [true, false]) {
       it(`matches a live-query Collection for gcTime ${gcTime}${subscribe ? `` : ` without a subscriber`}`, async () => {
+        oracleRoute(`case`)
         await expectPooledReleaseMatchesCollection(gcTime, subscribe)
       })
     }
@@ -755,7 +774,7 @@ describe(`pooled live query cleanup admission`, () => {
   // A view read by a subscribed live query is cleaned up and rejects, then
   // its unobserved sibling is cleaned up; the reader ends and the view's
   // cleanup is retried.
-  const pinned: CleanupHistory = {
+  const fixedHistory: CleanupHistory = {
     views: [
       { g: `x`, observed: false, reader: true },
       { g: `y`, observed: false, reader: false },
@@ -768,20 +787,24 @@ describe(`pooled live query cleanup admission`, () => {
     ],
   }
   it(`keeps a view whose cleanup rejected in its partition`, async () => {
-    await expectPooledCleanupMatchesOrdinary(pinned)
+    oracleRoute(`fixed history`)
+    await expectPooledCleanupMatchesOrdinary(fixedHistory)
   })
 
   for (const campaign of [`fixed`, `random`] as const) {
     it(`matches a live-query Collection's cleanup admission (${campaign})`, async () => {
       const reach = createOracleReach(property, cleanupReachStates)
+      const campaignParameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(2168, { numRuns: oracleRuns(80) })
+          : oraclePropertyOptions(80, property)
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(cleanupHistory, async (history) => {
           reach.beginHistory()
           await expectPooledCleanupMatchesOrdinary(history, reach)
         }),
-        campaign === `fixed`
-          ? { numRuns: oracleRuns(80), seed: 2168 }
-          : oraclePropertyOptions(80, property),
+        campaignParameters,
       )
       reach.assertReached()
     })

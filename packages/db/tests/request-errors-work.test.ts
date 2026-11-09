@@ -3,7 +3,7 @@ import { RequestErrors } from '../src/collection/lifecycle.js'
 
 /**
  * Work witness for request-error bookkeeping. The request error bookkeeping
- * lane of the source-health oracle owns what a node shows; this file only
+ * grammar of the source-health oracle owns what a node shows; this file only
  * checks what it costs.
  *
  * A failed lazy segment reports one request error per needed key, all with

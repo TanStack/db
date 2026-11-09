@@ -1,18 +1,25 @@
+import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
 import { isPlainObject } from '../../utils/type-guards.js'
 import { getParentContextValue } from '../equality-value-identity.js'
 import type { NamespacedRow } from '../../types.js'
 
 const ROUTED_SCALAR_VALUE = Symbol(`tanstack_db_routed_scalar_value`)
-export const CALLBACK_INPUT = Symbol(`tanstack_db_callback_input`)
-export const CALLBACK_SELECTED = Symbol(`tanstack_db_callback_selected`)
 const ROUTE_METADATA = Symbol(`tanstack_db_route_metadata`)
 export const INCLUDES_PUBLIC_KEY = Symbol(`includesPublicKey`)
+export const SOURCE_METADATA = Symbol(`sourceMetadata`)
+const SOURCE_ROUTING = Symbol(`sourceRouting`)
+export const ROW_METADATA = Symbol(`rowMetadata`)
+export type RowMetadata = Partial<
+  Record<(typeof VIRTUAL_PROP_NAMES)[number], unknown>
+>
+
 export const INCLUDES_ROUTING = Symbol(`includesRouting`)
 const INTERNAL_ROUTE_KEYS = new Set<PropertyKey>([
   ROUTE_METADATA,
   INCLUDES_PUBLIC_KEY,
-  CALLBACK_INPUT,
-  CALLBACK_SELECTED,
+  SOURCE_METADATA,
+  ROW_METADATA,
+  SOURCE_ROUTING,
 ])
 const INTERNAL_CALLBACK_KEYS = new Set<PropertyKey>([
   ...INTERNAL_ROUTE_KEYS,
@@ -32,7 +39,6 @@ type PublicContainer = {
     PropertyDescriptor & { child?: PublicContainer }
   >
   parents: Array<PublicContainer>
-  dirty?: true
   copy?: object
 }
 
@@ -81,12 +87,6 @@ export function getNamespacedRouteMetadata(
   )
 }
 
-export function stripRouteMetadata<T extends object>(value: T): T {
-  const result = { ...value } as T & Record<PropertyKey, unknown>
-  delete result[ROUTE_METADATA]
-  return result
-}
-
 export function attachRouteMetadataToResult(
   value: unknown,
   correlationKey: unknown,
@@ -133,53 +133,107 @@ export function getRoutedScalarMetadata(
 export function wrapInputRow(
   alias: string,
   row: unknown,
-  callbackValue?: unknown,
+  metadata?: RowMetadata | null,
+  hasInternalState = true,
 ): NamespacedRow {
+  if (!hasInternalState) return { [alias]: row } as NamespacedRow
   const scalar = getRoutedScalarMetadata(row)
   const route = scalar ?? getRouteMetadata(row)
   const namespaced = {
     ...getParentContextValue(route?.parentContext),
-    [alias]: scalar
-      ? scalar.value
-      : route
-        ? stripRouteMetadata(row as Record<PropertyKey, unknown>)
-        : row,
+    [alias]: scalar ? scalar.value : stripInternalCallbackMetadata(row),
   } as NamespacedRow
   if (route)
     attachRouteMetadata(namespaced, route.correlationKey, route.parentContext)
-  if (scalar)
-    Object.assign(namespaced, { [INCLUDES_PUBLIC_KEY]: scalar.publicKey })
-  if (callbackValue !== undefined && callbackValue !== row)
-    Object.assign(namespaced, { [CALLBACK_INPUT]: { [alias]: callbackValue } })
+  if (route)
+    Object.assign(namespaced, {
+      [INCLUDES_PUBLIC_KEY]:
+        scalar?.publicKey ??
+        (row as Record<PropertyKey, unknown>)[INCLUDES_PUBLIC_KEY],
+    })
+  if (metadata !== undefined)
+    Object.assign(namespaced, { [SOURCE_METADATA]: { [alias]: metadata } })
+  if (row !== null && typeof row === `object` && INCLUDES_ROUTING in row)
+    Object.assign(namespaced, {
+      [SOURCE_ROUTING]: {
+        [alias]: (row as Record<PropertyKey, unknown>)[INCLUDES_ROUTING],
+      },
+    })
   return namespaced
 }
 
-/** A namespace keeps authored values beside its callback source overrides.
- * A one-element tuple denotes a flat union view: absent fields must disappear,
- * whereas named overrides replace only their own source aliases.
- */
-export function getCallbackInput<T extends object>(row: T): T {
-  const view = (row as Record<PropertyKey, unknown>)[CALLBACK_INPUT]
-  if (Array.isArray(view)) {
-    const result = { ...view[0] }
-    if (`$selected` in row) result.$selected = row.$selected
-    return result as T
-  }
-  return view && typeof view === `object` ? { ...row, ...view } : row
+/** Attribution and include routing belong to the namespace, never source data. */
+export function getSourceMetadata(
+  row: Record<PropertyKey, unknown>,
+  alias: string,
+): RowMetadata | null {
+  const metadata = row[SOURCE_METADATA] as
+    Record<string, RowMetadata | null> | undefined
+  if (metadata && Object.hasOwn(metadata, alias)) return metadata[alias]!
+  const source = row[alias]
+  if (source == null || typeof source !== `object`) return null
+  const result: RowMetadata = {}
+  for (const name of VIRTUAL_PROP_NAMES)
+    if (name in source) result[name] = (source as Record<string, unknown>)[name]
+  return result
 }
 
-/** Copy public containers while removing private route state at every depth. */
+export function getSourceRouting(
+  row: Record<PropertyKey, unknown>,
+  alias: string,
+): unknown {
+  return (row[SOURCE_ROUTING] as Record<string, unknown> | undefined)?.[alias]
+}
+
+export function mergeSourceContext(
+  target: Record<PropertyKey, unknown>,
+  left: Record<PropertyKey, unknown> | undefined,
+  right: Record<PropertyKey, unknown> | undefined,
+): void {
+  for (const field of [SOURCE_METADATA, SOURCE_ROUTING])
+    if (left?.[field] || right?.[field])
+      target[field] = {
+        ...(left?.[field] as object | undefined),
+        ...(right?.[field] as object | undefined),
+      }
+}
+
+/** Restore namespace state after resolving its public include paths. */
+export function restoreInternalRouteMetadata(
+  target: Record<PropertyKey, unknown>,
+  source: object,
+): void {
+  for (const key of INTERNAL_ROUTE_KEYS)
+    if (Object.hasOwn(source, key))
+      target[key] = (source as Record<PropertyKey, unknown>)[key]
+}
+
+/** Remove private route state from a known result root. */
 export function stripInternalRouteMetadata(value: unknown): unknown {
-  return transformPublicContainers(value, (leaf) => leaf, INTERNAL_ROUTE_KEYS)
+  return stripInternalMetadata(value, INTERNAL_ROUTE_KEYS)
 }
 
-/** Remove every compiler-owned key before invoking user code. */
+/** Remove compiler-owned keys before invoking user code, at the known scope. */
 export function stripInternalCallbackMetadata(value: unknown): unknown {
-  return transformPublicContainers(
-    value,
-    (leaf) => leaf,
-    INTERNAL_CALLBACK_KEYS,
-  )
+  return stripInternalMetadata(value, INTERNAL_CALLBACK_KEYS)
+}
+
+function stripInternalMetadata(
+  value: unknown,
+  keys: ReadonlySet<PropertyKey>,
+): unknown {
+  if (!isPublicContainer(value)) return value
+  for (const key of keys)
+    if (Object.hasOwn(value, key)) {
+      const properties: Record<PropertyKey, PropertyDescriptor> =
+        Object.getOwnPropertyDescriptors(value)
+      for (const omitted of keys) delete properties[omitted]
+      return Object.defineProperties(
+        createPublicContainerShell(value),
+        properties,
+      )
+    }
+  return value
 }
 
 /** Copy only paths changed by a leaf transform or an omitted private key. */
@@ -195,8 +249,8 @@ export function transformPublicContainers(
   const containers = new Map<object, PublicContainer>()
   const queue: Array<PublicContainer> = []
   const markDirty = (container: PublicContainer) => {
-    if (container.dirty) return
-    container.dirty = true
+    if (container.copy) return
+    container.copy = createPublicContainerShell(container.value)
     queue.push(container)
   }
   const visit = (current: object): PublicContainer => {
@@ -230,20 +284,25 @@ export function transformPublicContainers(
   for (const container of queue) {
     for (const parent of container.parents) markDirty(parent)
   }
-  const copy = (container: PublicContainer): object => {
-    if (!container.dirty) return container.value
-    if (container.copy) return container.copy
-    const result = Array.isArray(container.value)
-      ? []
-      : Object.create(Object.getPrototypeOf(container.value))
-    container.copy = result
+  // Every dirty container has a shell before linking children, so shared
+  // references and cycles point to the same copy without a second recursion.
+  for (const container of queue) {
     for (const key of Reflect.ownKeys(container.properties)) {
       const descriptor = container.properties[key]!
-      if (descriptor.child) descriptor.value = copy(descriptor.child)
+      if (descriptor.child)
+        descriptor.value = descriptor.child.copy ?? descriptor.child.value
     }
-    return Object.defineProperties(result, container.properties)
+    Object.defineProperties(container.copy!, container.properties)
   }
-  return copy(root)
+  return root.copy ?? value
+}
+
+/** Allocate a descriptor-copy target without losing array prototypes. */
+export function createPublicContainerShell(value: object): object {
+  const prototype = Object.getPrototypeOf(value)
+  return Array.isArray(value)
+    ? Object.setPrototypeOf([], prototype)
+    : Object.create(prototype)
 }
 
 export function isPublicContainer(value: unknown): value is object {

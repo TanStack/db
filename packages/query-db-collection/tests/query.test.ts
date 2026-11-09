@@ -11527,7 +11527,7 @@ describe(`QueryCollection`, () => {
  * A reload runs the Query Collection's `sync` again while the Collection still
  * shows the previous run's status. The new run's first successful result makes
  * it ready, and a failure before that fails the reload, whatever status the
- * Collection showed when the reload began. The lane crosses the status before
+ * Collection showed when the reload began. This grammar crosses the status before
  * the reload (a failed first load, or ready) with the new run's outcome.
  */
 describe(`reload settles on the new run's first result`, () => {
@@ -11861,7 +11861,7 @@ describe(`reload settles on the new run's first result`, () => {
    * Checkpoint: the driver observes the window when the entry is gone (the
    * housekeeping commit has applied), polling rather than sleeping a fixed
    * time, so a loaded runner cannot move the observation before the expiry.
-   * A housekeeping begin marked `snapshot: true` is the hostile mutant: it
+   * A housekeeping begin marked `snapshot: true` is the mutant: it
    * replaces the kept rows with none.
    *
    * A third kind, `release-at-startup`, reaches the other housekeeping
@@ -11872,7 +11872,7 @@ describe(`reload settles on the new run's first result`, () => {
    * Limits: releasing a Query's rows (`cleanupQueryInternal`) begins a
    * housekeeping transaction too, but no legal history begins it in the new
    * run while the reload is in flight, so a snapshot there is an equivalent
-   * mutant for this lane. Its callers are the run's own
+   * mutant for this grammar. Its callers are the run's own
    * cleanup and the fallback of a subset release. Core invokes a run's
    * cleanup (on cleanup, on a reload's retirement, or after sync entry) only
    * after it has retired that run's callbacks, so that begin does nothing.
@@ -12078,7 +12078,7 @@ describe(`reload settles on the new run's first result`, () => {
      * run starts and gives that run startup maintenance. During the reload the
      * driver requests and releases a fresh subset, through a public change
      * subscription, in every microtask turn from `reload()` until the new
-     * run's `markReady()`. So the lane covers every turn of the window,
+     * run's `markReady()`. So the grammar covers every turn of the window,
      * whatever its width. The refetch history makes the same requests and
      * releases for the same number of turns.
      *
@@ -12328,7 +12328,7 @@ describe(`reload settles on the new run's first result`, () => {
  * The model keeps each failing subset's latest error value and the listed
  * values, oldest first. A failure lists its value at the end unless it is
  * already listed. After every step, a listed value that no failing subset
- * still holds leaves the list. The lane loads two subsets and enumerates
+ * still holds leaves the list. The grammar loads two subsets and enumerates
  * every history of four steps, each step a fetch of one subset's Query that
  * succeeds, fails with a fresh error, or fails with one error value shared by
  * every Query and fetch. After each step the node's `failureReason.errors`
@@ -12479,7 +12479,7 @@ describe(`failureReason follows the still-failing Queries`, () => {
             thrownBefore + 1,
           )
         const error = fails ? thrown.at(-1) : undefined
-        // The persisted run replays the plain lane's histories, whose reach
+        // The persisted production path replays the plain path's histories, whose reach
         // the plain run records.
         if (!persisted) recordReach(model, fetch, error)
         const previous = model.listed

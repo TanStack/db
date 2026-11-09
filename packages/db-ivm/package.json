@@ -25,7 +25,7 @@
     "test": "vitest --run",
     "test:incrementalization": "vitest --run tests/incrementalization-law-oracle.property.test.ts",
     "typecheck": "tsc --noEmit",
-    "bench:hash": "vitest bench --run tests/hash.bench.ts --coverage.enabled=false"
+    "bench:hash": "vitest bench --run tests/hash.bench.ts --coverage.enabled=false --reporter=verbose"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",
@@ -50,13 +50,13 @@
     "src"
   ],
   "dependencies": {
-    "fractional-indexing": "^3.2.0"
+    "fractional-indexing": "^3.4.0"
   },
   "peerDependencies": {
     "typescript": ">=4.7"
   },
   "devDependencies": {
-    "@vitest/coverage-istanbul": "^4.1.12",
-    "temporal-polyfill": "^0.3.0"
+    "@vitest/coverage-istanbul": "^5.1.0",
+    "temporal-polyfill": "^0.3.2"
   }
 }

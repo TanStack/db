@@ -3,7 +3,14 @@ import { expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
-import { oraclePropertyOptions, readOracleRunConfig } from './oracle-config.js'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  readOracleRunConfig,
+} from './oracle-config.js'
+import { declareOracle } from './oracle-declaration.js'
 import { createOracleReach } from './oracle-reach.js'
 import { resetCleanupQueue, withOracleCleanup } from './utils.js'
 import type { Deferred } from '../src/deferred.js'
@@ -398,23 +405,33 @@ const property = fc.asyncProperty(
   (history) => runHistory(history),
 )
 
+// What this oracle owns: the garbage-collection hold that a persisting
+// transaction places on each Collection it touches, in lifecycle.ts. The
+// cleanup-queue oracle owns the timer dispatch that runs the deadline.
+declareOracle({
+  owns: [`src/collection/lifecycle.ts`],
+  grammar: [stepArbitrary],
+})
+
 // Replay one history with TANSTACK_DB_ORACLE_SEED, TANSTACK_DB_ORACLE_PATH,
 // and TANSTACK_DB_ORACLE_PROPERTY=collection-lifecycle.gc-persisting-transaction.
 it.each(
-  runConfig.replaySeed === undefined ? [20261024, undefined] : [undefined],
+  runConfig.campaignSeed === undefined ? [20261024, undefined] : [undefined],
 )(
   `retires a Collection only after gcTime with no subscriber and no persisting transaction (seed %s)`,
   async (seed) => {
     reach = createReach()
-    await fc.assert(property, {
+    const parameters = {
       ...oraclePropertyOptions(
         100,
         `collection-lifecycle.gc-persisting-transaction`,
       ),
       ...(seed === undefined || runConfig.replayPath !== undefined
         ? {}
-        : { seed }),
-    })
+        : oracleFixedSeed(seed)),
+    }
+    oracleRoute(oracleRouteOf(parameters))
+    await fc.assert(property, parameters)
     reach.assertReached()
     console.info(
       `GC transaction reach: ${JSON.stringify(Object.fromEntries(reach.counts()))}`,

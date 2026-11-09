@@ -23,12 +23,16 @@ import { IR, createCollection, createLiveQueryCollection } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { lazyOracleRuns } from './lazy-paging-campaign'
 import { expectedLazyRows } from './lazy-paging-model-oracle'
 import { LazyVersionModel } from './lazy-paging-version-model-oracle'
 import type { LazyRow } from './lazy-paging-model-oracle'
 import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
+
+// Owns no convex source: this grammar drives @tanstack/db Collection and live queries with its own SyncConfig, not the convex pager.
+declareOracle({})
 
 const grammar = fc.record({
   count: fc.integer({ min: 1, max: 4 }),

@@ -1,5 +1,6 @@
-// Shared fixtures for the LocalStorage write-order tests. The law and its
-// generated histories are owned by local-storage-order-oracle.test.ts.
+// Shared fixtures for the LocalStorage write-order tests. The law is stated in
+// local-storage-order-oracle.test.ts; its enumerated histories run in
+// local-storage-write-order-oracle.test.ts.
 import { expect } from 'vitest'
 
 export type Row = { id: string; value: number }

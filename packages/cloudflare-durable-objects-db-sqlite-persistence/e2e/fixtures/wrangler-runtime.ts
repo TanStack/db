@@ -34,7 +34,10 @@ export type WranglerRuntimeResponse<TPayload> =
 const packageDirectory = dirname(fileURLToPath(import.meta.url))
 const wranglerConfigPath = join(packageDirectory, `wrangler.toml`)
 const require = createRequire(import.meta.url)
-const wranglerBinPath = require.resolve(`wrangler/bin/wrangler.js`)
+const wranglerBinPath = join(
+  dirname(require.resolve(`wrangler/package.json`)),
+  `bin/wrangler.js`,
+)
 
 async function getAvailablePort(): Promise<number> {
   const netModule = await import('node:net')

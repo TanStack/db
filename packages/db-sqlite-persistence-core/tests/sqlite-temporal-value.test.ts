@@ -3,7 +3,7 @@
  * Scenario checks for native Temporal values in the SQLite core adapter: IN
  * membership against lookalike string keys, and the native literal encoding
  * budget. `sqlite-temporal-value-oracle.test.ts` owns the typed-value law and its
- * grammar; these tests pin single cases with hand-written expectations.
+ * grammar; these tests check single cases with hand-written expectations.
  */
 import { IR } from '@tanstack/db'
 import { Temporal } from 'temporal-polyfill'
@@ -75,7 +75,7 @@ it(`keeps native IN membership distinct from lookalike string keys`, async () =>
 // of occurrences supplies the work budget; no codec helper computes it. Empty
 // tables isolate compilation from revival. Positive counts also calibrate the
 // sensor. The existing rank/text and index owners check resulting query semantics.
-it.sequential.each([`Instant`, `PlainDate`] as const)(
+it.each([`Instant`, `PlainDate`] as const)(
   `encodes each native query literal at most once / %s`,
   async (kind) => {
     const { adapter } = scope.create().open()

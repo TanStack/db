@@ -28,8 +28,11 @@ import {
   createOracleFailureFidelity,
 } from '../oracle-failure-fidelity'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config'
 import { expectOrderedRows, expectUnorderedRows } from './result-laws'
@@ -696,20 +699,19 @@ export function registerWindowHistoryOracle(driver: LiveQueryDriver) {
                   },
                 )
                 try {
+                  const parameters =
+                    campaign === `fixed`
+                      ? oracleFixedSeed(2291, {
+                          numRuns:
+                            oracleRuns(12) + windowHistoryExamples.length,
+                          examples: windowHistoryExamples,
+                        })
+                      : oraclePropertyOptions(12, property, {
+                          examples: windowHistoryExamples,
+                        })
+                  oracleRoute(oracleRouteOf(parameters))
                   await fidelity.assert(() =>
-                    fc.assert(
-                      propertyUnderTest,
-                      campaign === `fixed`
-                        ? {
-                            numRuns:
-                              oracleRuns(12) + windowHistoryExamples.length,
-                            seed: 2291,
-                            examples: windowHistoryExamples,
-                          }
-                        : oraclePropertyOptions(12, property, {
-                            examples: windowHistoryExamples,
-                          }),
-                    ),
+                    fc.assert(propertyUnderTest, parameters),
                   )
                 } finally {
                   console.info(
@@ -728,6 +730,9 @@ export function registerWindowHistoryOracle(driver: LiveQueryDriver) {
   })
 }
 
+// Owns no production entry in packages/db: this module checks the public
+// observations that each framework driver passes it, so the framework packages
+// that run it own the entries it judges.
 declareOracle({
   model: [sameWindowPlan, windowRows],
   grammar: [windowHistoryArbitrary],
@@ -742,7 +747,7 @@ declareOracle({
 /**
  * Pending window moves keep the last settled page. A later commit supersedes
  * the requested window; an older acquisition cannot publish its own page. This
- * receiving lane uses each real adapter over an on-demand source that already
+ * receiving path uses each real adapter over an on-demand source that already
  * holds the rows but has not settled its demand. Available rows alone prove no
  * coverage (ARCHITECTURE.md, atomic window publication). Settlement is explicit;
  * no timer stands in for provider completion. The core ordered-window owner
@@ -931,6 +936,9 @@ async function checkPendingWindowHistory(
   })
 }
 
+// Owns no production entry in packages/db: this module checks the public
+// observations that each framework driver passes it, so the framework packages
+// that run it own the entries it judges.
 declareOracle({
   grammar: [pendingWindowArbitrary],
   check: [checkPendingWindowHistory],
@@ -966,20 +974,17 @@ function registerPendingWindowOracle(driver: LiveQueryDriver) {
           },
         )
         try {
-          await fidelity.assert(() =>
-            fc.assert(
-              propertyUnderTest,
-              campaign === `fixed`
-                ? {
-                    numRuns: oracleRuns(6) + pendingExamples.length,
-                    seed: 2291,
-                    examples: pendingExamples,
-                  }
-                : oraclePropertyOptions(6, property, {
-                    examples: pendingExamples,
-                  }),
-            ),
-          )
+          const parameters =
+            campaign === `fixed`
+              ? oracleFixedSeed(2291, {
+                  numRuns: oracleRuns(6) + pendingExamples.length,
+                  examples: pendingExamples,
+                })
+              : oraclePropertyOptions(6, property, {
+                  examples: pendingExamples,
+                })
+          oracleRoute(oracleRouteOf(parameters))
+          await fidelity.assert(() => fc.assert(propertyUnderTest, parameters))
         } finally {
           console.info(
             `pending reach ${driver.name}/${campaign}`,
@@ -1000,7 +1005,7 @@ function registerPendingWindowOracle(driver: LiveQueryDriver) {
  * The application never calls imperative setWindow, whose reentrancy guard is
  * outside this input language (contract.ts; maintainer decision 2026-10-30).
  *
- * This receiving lane uses all six real framework drivers. A direct Collection
+ * This receiving path uses all six real framework drivers. A direct Collection
  * change callback changes the binding's parameter while source publication is
  * on the stack. The callback entry is measured; no delayed trigger simulates it.
  * A one-shot guard permits the moved window to publish without another input
@@ -1191,20 +1196,17 @@ function registerPublicationWindowOracle(driver: LiveQueryDriver) {
           },
         )
         try {
-          await fidelity.assert(() =>
-            fc.assert(
-              propertyUnderTest,
-              campaign === `fixed`
-                ? {
-                    numRuns: oracleRuns(6) + publicationWindowExamples.length,
-                    seed: 2291,
-                    examples: publicationWindowExamples,
-                  }
-                : oraclePropertyOptions(6, property, {
-                    examples: publicationWindowExamples,
-                  }),
-            ),
-          )
+          const parameters =
+            campaign === `fixed`
+              ? oracleFixedSeed(2291, {
+                  numRuns: oracleRuns(6) + publicationWindowExamples.length,
+                  examples: publicationWindowExamples,
+                })
+              : oraclePropertyOptions(6, property, {
+                  examples: publicationWindowExamples,
+                })
+          oracleRoute(oracleRouteOf(parameters))
+          await fidelity.assert(() => fc.assert(propertyUnderTest, parameters))
         } finally {
           console.info(
             `publication callback reach ${driver.name}/${campaign}`,
@@ -1218,6 +1220,9 @@ function registerPublicationWindowOracle(driver: LiveQueryDriver) {
   }
 }
 
+// Owns no production entry in packages/db: this module checks the public
+// observations that each framework driver passes it, so the framework packages
+// that run it own the entries it judges.
 declareOracle({
   grammar: [publicationWindowArbitrary],
   check: [checkPublicationWindowHistory],
@@ -1363,6 +1368,16 @@ function registerPeerWindowOracle(driver: LiveQueryDriver) {
         jump: number
       }>()
       try {
+        const parameters =
+          campaign === `fixed`
+            ? oracleFixedSeed(2345, {
+                numRuns: oracleRuns(6) + pendingExamples.length,
+                examples: pendingExamples,
+              })
+            : oraclePropertyOptions(6, property, {
+                examples: pendingExamples,
+              })
+        oracleRoute(oracleRouteOf(parameters))
         await fidelity.assert(() =>
           fc.assert(
             fc.asyncProperty(pendingWindowArbitrary, async (history) => {
@@ -1371,15 +1386,7 @@ function registerPeerWindowOracle(driver: LiveQueryDriver) {
                 checkPeerWindowHistory(driver, history, reach),
               )
             }),
-            campaign === `fixed`
-              ? {
-                  numRuns: oracleRuns(6) + pendingExamples.length,
-                  seed: 2345,
-                  examples: pendingExamples,
-                }
-              : oraclePropertyOptions(6, property, {
-                  examples: pendingExamples,
-                }),
+            parameters,
           ),
         )
       } finally {
@@ -1512,6 +1519,11 @@ function registerKeyedAdmissionOracle(driver: LiveQueryDriver) {
         offset: number
       }>()
       try {
+        const parameters =
+          campaign === `fixed`
+            ? oracleFixedSeed(2345, { numRuns: oracleRuns(6) })
+            : oraclePropertyOptions(6, property)
+        oracleRoute(oracleRouteOf(parameters))
         await fidelity.assert(() =>
           fc.assert(
             fc.asyncProperty(keyedAdmissionArbitrary, async (history) => {
@@ -1520,9 +1532,7 @@ function registerKeyedAdmissionOracle(driver: LiveQueryDriver) {
                 checkKeyedAdmission(driver, history, reach),
               )
             }),
-            campaign === `fixed`
-              ? { numRuns: oracleRuns(6), seed: 2345 }
-              : oraclePropertyOptions(6, property),
+            parameters,
           ),
         )
         reach.assertReached()
@@ -1763,6 +1773,11 @@ function registerImmutableKeyOracle(driver: LiveQueryDriver) {
       )
       const fidelity = createOracleFailureFidelity<ImmutableKeyHistory>()
       try {
+        const parameters =
+          campaign === `fixed`
+            ? oracleFixedSeed(2345, { numRuns: oracleRuns(6) })
+            : oraclePropertyOptions(6, property)
+        oracleRoute(oracleRouteOf(parameters))
         await fidelity.assert(() =>
           fc.assert(
             fc.asyncProperty(immutableKeyArbitrary, async (history) => {
@@ -1771,9 +1786,7 @@ function registerImmutableKeyOracle(driver: LiveQueryDriver) {
                 checkImmutableKeyHistory(driver, history, reach),
               )
             }),
-            campaign === `fixed`
-              ? { numRuns: oracleRuns(6), seed: 2345 }
-              : oraclePropertyOptions(6, property),
+            parameters,
           ),
         )
         reach.assertReached()

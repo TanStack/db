@@ -4,7 +4,14 @@ import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
 import { reduce } from '../../src/operators/reduce.js'
 import { output } from '../../src/operators/output.js'
-import { oracleRuns } from '../../../db/tests/oracle-config.js'
+import { oracleRoute, oracleRuns } from '../../../db/tests/oracle-config.js'
+import { declareOracle } from '../../../db/tests/oracle-declaration'
+
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [`src/operators/reduce.ts#reduce`],
+})
 
 /**
  * # Does the reduce fast path emit what the general path emits?
@@ -128,6 +135,8 @@ const stepArbitrary: fc.Arbitrary<Step> = fc.record({
 
 describe(`reduce fast path`, () => {
   it(`emits the general path's entries after every run`, () => {
+    // No seed: a random campaign.
+    oracleRoute(`random seed`)
     fc.assert(
       fc.property(
         fc.array(fc.array(stepArbitrary, { minLength: 1, maxLength: 4 }), {

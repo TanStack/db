@@ -1,8 +1,11 @@
 import { describe, it as vitestIt } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -68,16 +71,26 @@ const it = oracleReplayTest(vitestIt)
 
 // The model is native array and typed-array behavior. observeArray and
 // observeTyped record a call on either side, so they are not declared.
-declareOracle({ check: [expectArrayCall, expectTypedCall] })
+// What this oracle owns: the gap report judges the built-in array and typed
+// array method behavior of drafts in proxy.ts by this file's tests.
+declareOracle({
+  owns: [`src/proxy.ts`],
+  check: [expectArrayCall, expectTypedCall],
+})
 
 describe(`array methods behave like native arrays`, () => {
-  // The row of the original pinned table, for every method.
+  // The row of the original fixed table, for every method.
   it.each(arrayMethods)(`%s on a fixed row gives the native result`, (m) => {
+    oracleRoute(`case`)
     for (const k of [0, 1, 3])
       expectArrayCall([{ x: 1 }, 2, [{ x: 3 }], { x: 0 }], m, k)
   })
 
   it(`matches native arrays across generated rows (${FIXED_SEED})`, () => {
+    const parameters = oracleFixedSeed(FIXED_SEED, {
+      numRuns: oracleRuns(RUNS),
+    })
+    oracleRoute(oracleRouteOf(parameters))
     fc.assert(
       fc.property(
         arraySpecArb,
@@ -85,27 +98,37 @@ describe(`array methods behave like native arrays`, () => {
         fc.nat(4),
         expectArrayCall,
       ),
-      { numRuns: oracleRuns(RUNS), seed: FIXED_SEED },
+      parameters,
     )
   })
+  const arraySpecCampaign = oraclePropertyOptions(RUNS, ARRAY_METHODS)
   oracleReplayTest(fcTest, ARRAY_METHODS).prop(
     [arraySpecArb, fc.constantFrom(...arrayMethods), fc.nat(4)],
-    oraclePropertyOptions(RUNS, ARRAY_METHODS),
-  )(`matches native arrays across generated rows (random)`, expectArrayCall)
+    arraySpecCampaign,
+  )(`matches native arrays across generated rows (random)`, (...args) => {
+    oracleRoute(oracleRouteOf(arraySpecCampaign))
+    expectArrayCall(...args)
+  })
 })
 describe(`typed-array methods behave like native typed arrays`, () => {
-  // The row of the original pinned table, for every method.
+  // The row of the original fixed table, for every method.
   it.each(typedMethods)(`%s on a fixed row gives the native result`, (m) => {
+    oracleRoute(`case`)
     for (const write of [false, true]) expectTypedCall([3, 1, 2], m, 1, write)
   })
 
   // Reversal swaps distinct signed-zero values. The native comparison checks
   // their final positions, including the detached change-set value.
   it(`reversing signed zeros preserves their native positions`, () => {
+    oracleRoute(`case`)
     expectTypedCall([-0, 0], `reverse`, 0, false)
   })
 
   it(`matches native typed arrays across generated rows (${FIXED_SEED})`, () => {
+    const campaignParameters = oracleFixedSeed(FIXED_SEED, {
+      numRuns: oracleRuns(RUNS),
+    })
+    oracleRoute(oracleRouteOf(campaignParameters))
     fc.assert(
       fc.property(
         typedSpecArb,
@@ -114,14 +137,15 @@ describe(`typed-array methods behave like native typed arrays`, () => {
         fc.boolean(),
         expectTypedCall,
       ),
-      { numRuns: oracleRuns(RUNS), seed: FIXED_SEED },
+      campaignParameters,
     )
   })
+  const typedSpecCampaign = oraclePropertyOptions(RUNS, TYPED_METHODS)
   oracleReplayTest(fcTest, TYPED_METHODS).prop(
     [typedSpecArb, fc.constantFrom(...typedMethods), fc.nat(4), fc.boolean()],
-    oraclePropertyOptions(RUNS, TYPED_METHODS),
-  )(
-    `matches native typed arrays across generated rows (random)`,
-    expectTypedCall,
-  )
+    typedSpecCampaign,
+  )(`matches native typed arrays across generated rows (random)`, (...args) => {
+    oracleRoute(oracleRouteOf(typedSpecCampaign))
+    expectTypedCall(...args)
+  })
 })

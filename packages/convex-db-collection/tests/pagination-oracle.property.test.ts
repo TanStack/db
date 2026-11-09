@@ -26,7 +26,7 @@ import { createCollection } from '@tanstack/db'
 import { expect, it } from 'vitest'
 import { convexPaginatedCollectionOptions } from '../src/index'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRuns } from '../../db/tests/oracle-config'
+import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { copyRows, keyedRows, provider, query } from './pagination-support'
@@ -108,7 +108,11 @@ function expectRevisionTrace(
 
 // The check below compares each observed snapshot with the model's prior and
 // current complete snapshots; the grammar draws the source histories.
-declareOracle({ check: [expectRevisionTrace], grammar: [history, snapshot] })
+declareOracle({
+  check: [expectRevisionTrace],
+  grammar: [history, snapshot],
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+})
 
 // Calibrate both recorders' shared trace relation without imposing one callback
 // per revision. Repeated old/new snapshots are legal; prefixes and rollback
@@ -116,6 +120,7 @@ declareOracle({ check: [expectRevisionTrace], grammar: [history, snapshot] })
 it.each([`select`, `Collection publication`])(
   `calibrates complete monotone snapshots at %s`,
   (boundary) => {
+    oracleRoute(`calibration`)
     const current = Array.from({ length: 3 }, (_, rank) => ({
       id: String(rank),
       rank,

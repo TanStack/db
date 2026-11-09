@@ -208,7 +208,7 @@ describe(`virtual metadata attribution regressions`, () => {
     ])
   })
 
-  test(`keeps a selected joined row's source metadata across match and pending update`, async () => {
+  test(`keeps joined identity and source attribution across a pending update`, async () => {
     const lists = createCollection(
       mockSyncCollectionOptions<{ id: string }>({
         id: `joined-virtual-lists`,
@@ -268,9 +268,9 @@ describe(`virtual metadata attribution regressions`, () => {
         .fn.select(({ item }) => item ?? {}),
     )
 
-    // A whole-row selection names the joined item as its metadata source.
-    // The independent expected row is the item's public Collection row at
-    // each checkpoint; list metadata has a different key and Collection ID.
+    // The pair owns identity; the whole-row selection names its attribution
+    // source. These supplemental examples use the source's public metadata.
+    // The join key oracle independently checks multiplicity and key agreement.
     await checkWithCleanup(async () => {
       await Promise.all([
         live.preload(),
@@ -285,26 +285,24 @@ describe(`virtual metadata attribution regressions`, () => {
         const item = items.get(`item-1`)!
         expect(actual.label).toBe(item.label)
         for (const name of virtualFieldNames) {
-          expect(actual[name], name).toBe(item[name])
-          expect(extended.toArray[0]![name], `extended ${name}`).toBe(
-            item[name],
-          )
-          expect(lastItem.toArray[0]![name], `last item ${name}`).toBe(
-            item[name],
-          )
-          expect(functional.toArray[0]![name], `functional ${name}`).toBe(
-            item[name],
-          )
+          for (const output of [live, extended, lastItem, functional])
+            expect(output.toArray[0]![name], name).toBe(
+              name === `$key` ? [...output.keys()][0] : item[name],
+            )
         }
       }
 
       expectItemMetadata()
       for (const name of virtualFieldNames) {
         expect(fromLive.toArray[0]![name], name).toBe(
-          lists.get(`list-1`)![name],
+          name === `$key`
+            ? [...fromLive.keys()][0]
+            : lists.get(`list-1`)![name],
         )
         expect(lastList.toArray[0]![name], `last list ${name}`).toBe(
-          lists.get(`list-1`)![name],
+          name === `$key`
+            ? [...lastList.keys()][0]
+            : lists.get(`list-1`)![name],
         )
       }
       const update = items.update(`item-1`, (draft) => {
@@ -356,7 +354,9 @@ describe(`virtual metadata attribution regressions`, () => {
       await live.preload()
       expect(live.toArray).toHaveLength(1)
       for (const name of virtualFieldNames) {
-        expect(live.toArray[0]![name], name).toBe(items.get(`item-1`)![name])
+        expect(live.toArray[0]![name], name).toBe(
+          name === `$key` ? [...live.keys()][0] : items.get(`item-1`)![name],
+        )
       }
     }, [() => live.cleanup(), () => items.cleanup(), () => lists.cleanup()])
   })

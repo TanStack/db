@@ -21,7 +21,13 @@ import fc from 'fast-check'
 import { createTransaction } from '@tanstack/db'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oracleFixedSeed,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import {
@@ -31,6 +37,10 @@ import {
   ordered,
 } from './lazy-paging-model-oracle'
 import type { LazyRow } from './lazy-paging-model-oracle'
+
+declareOracle({
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+})
 
 const commands = fc.array(
   fc.record({
@@ -444,6 +454,8 @@ it(`compares paired hidden suffixes at the production discovery boundary`, async
  * strategies. An overshot row may be kept, or dropped and reacquired before a
  * later deeper success. Assuming it was retained after dropping it is illegal. */
 it(`accepts retained and reacquired overshoot while rejecting a lost row`, () => {
+  const parameters = oracleFixedSeed(20261027, { numRuns: oracleRuns(120) })
+  oracleRoute(oracleRouteOf(parameters))
   fc.assert(
     fc.property(
       fc.integer({ min: 2, max: 8 }),
@@ -467,6 +479,6 @@ it(`accepts retained and reacquired overshoot while rejecting a lost row`, () =>
         assertLazyCoverage(reacquired, source, { limit: size }, descending)
       },
     ),
-    { seed: 20261027, numRuns: oracleRuns(120) },
+    parameters,
   )
 })

@@ -2,9 +2,11 @@
 /**
  * Chromium production driver for the OPFS open outcome oracle in
  * `tests/opfs-open-outcome-oracle.ts`. A consumer app installs the built
- * package, and a Vite dev server pre-bundles it, so every open runs the asset
- * lookup. Dev-server middleware resolves, holds, or fails that lookup and can
- * fail the worker script or the real worker's WASM fetch. A page init script
+ * package, and a Vite dev server serves it. Under Vite 7 the pre-bundled copy
+ * runs the asset lookup, and the dev-server middleware resolves, holds, or
+ * fails it; under Vite 8 the lookup is not needed (decision on TanStack/db#2371,
+ * 2026-11-08), so those histories declare `lookup: not needed`. The middleware
+ * can also hold or fail the real worker's WASM fetch, and the worker script. A page init script
  * can make the Worker constructor refuse to start, as a browser does for a
  * worker it will not run. Reach is recorded at the boundaries the driver
  * controls: the dev server counts lookup and WASM file requests, and the page
@@ -12,10 +14,10 @@
  *
  * Interruptions use no wall-clock timing. An init script holds back the
  * opener's deadline timer, recognized by its unique delay, and the driver fires
- * it explicitly; every other page timer runs normally. The driver
- * interrupts only after the middleware reports the lookup held, reads the
- * settlement one task after the interruption, and counts workers one task after
- * the released lookup's module loads in the page. Every history uses a new
+ * it explicitly; every other page timer runs normally. The driver interrupts
+ * only after the middleware reports a held step (an asset lookup or a WASM
+ * fetch), reads the settlement one task after the interruption, then releases
+ * every held step and counts workers one task after the release. Every history uses a new
  * browser context, because a document caches a failed module fetch and a
  * context shares its HTTP cache and OPFS storage.
  */
@@ -24,14 +26,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createServer } from 'vite'
 import {
   describeHistory,
   expectOpenOutcome,
+  expectedOpenOutcome,
   openHistories,
   reachedOutcomes,
 } from '../tests/opfs-open-outcome-oracle'
-import { createPackagedConsumer, probeWorkers } from './packaged-consumer'
+import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
+import {
+  consumerVite,
+  createPackagedConsumer,
+  probeWorkers,
+} from './packaged-consumer'
+import type { ConsumerVite, ProbeGlobal } from './packaged-consumer'
 import type { Browser } from '@playwright/test'
 import type { ViteDevServer } from 'vite'
 import type {
@@ -43,16 +52,30 @@ import type {
   WasmLoad,
 } from '../tests/opfs-open-outcome-oracle'
 import type { BrowserWASQLiteDatabase } from '../src'
-import type { ProbeGlobal } from './packaged-consumer'
 
 const chromiumReach: OpenDriverReach = {
   lookup: [`resolves`, `held`, `fails`],
   workerStart: [`starts`, `throws`, `fails to load`],
-  wasm: [`loads`, `fails`],
+  wasm: [`loads`, `fails`, `held`],
   init: [`answers`],
   interrupt: [`none`, `deadline`, `abort`],
 }
-const histories = openHistories(chromiumReach)
+// Under Vite 8 the dev server never receives the asset lookup, so the lookup
+// states are declared for Vite 7 only. Authority: maintainer decision on
+// TanStack/db#2371 (2026-11-08).
+const vite8Reach: OpenDriverReach = {
+  ...chromiumReach,
+  lookup: [`not needed`],
+}
+const historiesByVite = {
+  7: openHistories(chromiumReach),
+  8: openHistories(vite8Reach),
+}
+// Liveness only: a held step that never reaches the dev server fails its
+// history after this fixed bound, which stays below the 120 s test timeout. It
+// is not scaled by the run multiplier, because the multiplier scales run counts,
+// not the duration of one history, and it decides no observation.
+const heldStepWaitMs = 10_000
 // A delay no other page timer uses, so the init script can hold it back.
 const deadlineMs = 987_654
 const wasmLookup = `/@id/@tanstack/browser-db-sqlite-persistence/wa-sqlite.wasm`
@@ -72,28 +95,31 @@ const premises: {
   wasm: WasmLoad
   lookupRequests: number
   wasmFileRequests: number
-  heldLookups: Array<() => void>
+  heldSteps: Array<() => void>
   heldLookupPath?: string
   onHeld?: () => void
+  // Settles when the dev server has finished sending a held WASM response.
+  wasmFinished?: Promise<void>
 } = {
   lookup: `resolves`,
   workerScript: `loads`,
   wasm: `loads`,
   lookupRequests: 0,
   wasmFileRequests: 0,
-  heldLookups: [],
+  heldSteps: [],
 }
 
 const temporaryDirectory = realpathSync(
   mkdtempSync(join(realpathSync(tmpdir()), `db-open-outcome-`)),
 )
 let browser: Browser
-let server: ViteDevServer
+// The dev server of the Vite major whose describe block is running.
+let server: ViteDevServer | undefined
+const consumerDirectory = join(temporaryDirectory, `consumer`)
 
-beforeAll(async () => {
-  const consumerDirectory = join(temporaryDirectory, `consumer`)
-  createPackagedConsumer(consumerDirectory)
-  server = await createServer({
+// Starts a dev server for the consumer under one Vite major.
+async function startServer(major: ConsumerVite): Promise<void> {
+  server = await consumerVite(major).createServer({
     configFile: false,
     root: consumerDirectory,
     base: `/nested/`,
@@ -114,7 +140,7 @@ beforeAll(async () => {
                 return
               }
               if (premises.lookup === `held`) {
-                premises.heldLookups.push(next)
+                premises.heldSteps.push(next)
                 premises.heldLookupPath = url
                 premises.onHeld?.()
                 return
@@ -131,6 +157,20 @@ beforeAll(async () => {
             }
             if (!url.includes(`/@id/`) && pathname.endsWith(`.wasm`)) {
               premises.wasmFileRequests++
+              // A held fetch waits until the driver interrupts the open and
+              // releases it, so the worker's initialization is pending.
+              if (premises.wasm === `held`) {
+                // An interrupted open cancels its fetch, so the response
+                // closes without finishing; either event means the response
+                // has left the dev server.
+                premises.wasmFinished = new Promise<void>((resolve) => {
+                  response.once(`finish`, () => resolve())
+                  response.once(`close`, () => resolve())
+                })
+                premises.heldSteps.push(next)
+                premises.onHeld?.()
+                return
+              }
             }
             if (
               premises.wasm === `fails` &&
@@ -148,13 +188,15 @@ beforeAll(async () => {
     ],
   })
   await server.listen()
+}
+
+beforeAll(async () => {
+  createPackagedConsumer(consumerDirectory)
   browser = await chromium.launch({ headless: true })
 }, 120_000)
 
 afterAll(async () => {
-  for (const release of premises.heldLookups.splice(0)) release()
   await browser.close()
-  await server.close()
   rmSync(temporaryDirectory, { recursive: true, force: true })
 })
 
@@ -192,8 +234,32 @@ function holdDeadlineTimers(heldDelay: number): void {
 let historyIndex = 0
 
 // The middleware sets this during a history, after the driver reset it.
+// Read through a function: the premise is reset in the same history, so a
+// direct read would narrow to undefined.
+function readWasmFinished(): Promise<void> | undefined {
+  return premises.wasmFinished
+}
+
 function readHeldLookupPath(): string | undefined {
   return premises.heldLookupPath
+}
+
+// Waits for a held step to reach the dev server, or fails the history.
+async function awaitHeldStep(stepHeld: Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      stepHeld,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`the held step never reached the dev server`)),
+          heldStepWaitMs,
+        )
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
@@ -203,9 +269,10 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
   premises.wasm = history.wasm
   premises.lookupRequests = 0
   premises.wasmFileRequests = 0
-  premises.heldLookups = []
+  premises.heldSteps = []
   premises.heldLookupPath = undefined
-  const lookupHeld = new Promise<void>((resolve) => {
+  premises.wasmFinished = undefined
+  const stepHeld = new Promise<void>((resolve) => {
     premises.onHeld = resolve
   })
   const context = await browser.newContext()
@@ -215,7 +282,7 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
       refuseWorkers: history.workerStart === `throws`,
     })
     await page.addInitScript(holdDeadlineTimers, deadlineMs)
-    const baseUrl = server.resolvedUrls!.local[0]!
+    const baseUrl = server!.resolvedUrls!.local[0]!
     await page.goto(baseUrl)
     await page.waitForFunction(
       () => typeof (globalThis as ProbeGlobal).openDatabase === `function`,
@@ -255,7 +322,7 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
         return probe.settlement!
       })
     } else {
-      await lookupHeld
+      await awaitHeldStep(stepHeld)
       if (history.interrupt === `deadline`) {
         await page.evaluate(() => (globalThis as OracleProbe).elapseDeadline())
       } else {
@@ -277,12 +344,21 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
       })
     }
 
-    // Checkpoint: let a held lookup complete in the page, then wait one task
+    // Checkpoint: let every held step complete in the page, then wait one task
     // so every continuation of the interrupted open has run.
+    const wasmFinished = readWasmFinished()
+    for (const release of premises.heldSteps.splice(0)) release()
+    // A released WASM fetch has arrived once the dev server finishes its
+    // response; one page task after that, the worker has handled it.
+    if (wasmFinished) {
+      await awaitHeldStep(wasmFinished)
+      await page.evaluate(
+        `new Promise((resolve) => { const channel = new MessageChannel(); channel.port1.onmessage = () => resolve(); channel.port2.postMessage(null) })`,
+      )
+    }
     const heldLookupPath = readHeldLookupPath()
     if (heldLookupPath) {
       const lookupUrl = new URL(heldLookupPath, baseUrl).href
-      for (const release of premises.heldLookups.splice(0)) release()
       // A string keeps Vitest from rewriting this page-side dynamic import.
       await page.evaluate(
         `import(${JSON.stringify(lookupUrl)}).catch(() => {}).then(() => new Promise((resolve) => { const channel = new MessageChannel(); channel.port1.onmessage = () => resolve(); channel.port2.postMessage(null) }))`,
@@ -310,7 +386,9 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
     })
 
     if (history.interrupt !== `none`) {
+      // The later open runs without the interruption's held step.
       premises.lookup = `resolves`
+      premises.wasm = `loads`
       observation.laterOpen = (await page.evaluate(async (databaseName) => {
         const probe = globalThis as OracleProbe
         try {
@@ -327,28 +405,66 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
     }
     return observation
   } finally {
-    for (const release of premises.heldLookups.splice(0)) release()
+    for (const release of premises.heldSteps.splice(0)) release()
     await context.close()
   }
 }
 
-describe(`OPFS open outcome oracle (Chromium driver)`, () => {
-  it(`reaches every outcome that this driver controls`, () => {
-    expect(reachedOutcomes(histories)).toEqual([
-      `lookup: AbortError`,
-      `lookup: PersistenceUnavailableError`,
-      `lookup: TimeoutError`,
-      `none: opened`,
-      `wasm: PersistenceUnavailableError`,
-      `worker start: PersistenceUnavailableError`,
-    ])
-  })
-
-  it.each(histories.map((history) => [describeHistory(history), history]))(
-    `%s`,
-    async (_name, history) => {
-      expectOpenOutcome(history, await runOpenHistory(history))
-    },
-    120_000,
-  )
+declareOracle({
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+  check: [expectOpenOutcome],
+  model: [expectedOpenOutcome],
+  grammar: [openHistories],
 })
+
+// One block per consumer Vite major. Each runs its histories against a dev
+// server of that major.
+function describeOpenOutcomes(
+  major: ConsumerVite,
+  reached: ReadonlyArray<string>,
+): void {
+  const histories = historiesByVite[major]
+  describe(`vite ${major} OPFS open outcome oracle (Chromium driver)`, () => {
+    beforeAll(async () => {
+      await startServer(major)
+    }, 120_000)
+    // Closes only the server this block started; a failed start leaves none.
+    afterAll(async () => {
+      for (const release of premises.heldSteps.splice(0)) release()
+      await server?.close()
+      server = undefined
+    })
+
+    it(`reaches every outcome that this driver controls`, () => {
+      oracleRoute(`case`)
+      expect(reachedOutcomes(histories)).toEqual([...reached])
+    })
+
+    it.each(histories.map((history) => [describeHistory(history), history]))(
+      `%s`,
+      async (_name, history) => {
+        oracleRoute(`case`)
+        expectOpenOutcome(history, await runOpenHistory(history))
+      },
+      120_000,
+    )
+  })
+}
+
+describeOpenOutcomes(7, [
+  `lookup: AbortError`,
+  `lookup: PersistenceUnavailableError`,
+  `lookup: TimeoutError`,
+  `none: opened`,
+  `wasm: AbortError`,
+  `wasm: PersistenceUnavailableError`,
+  `wasm: TimeoutError`,
+  `worker start: PersistenceUnavailableError`,
+])
+describeOpenOutcomes(8, [
+  `none: opened`,
+  `wasm: AbortError`,
+  `wasm: PersistenceUnavailableError`,
+  `wasm: TimeoutError`,
+  `worker start: PersistenceUnavailableError`,
+])

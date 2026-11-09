@@ -22,7 +22,13 @@ import {
   UnionFrom,
 } from '../../src/query/ir.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
-import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import { assertEqualityPartition } from './identity-output-shape-support.js'
@@ -330,12 +336,18 @@ describe('query identity agrees with compiled lexical output shape', () => {
   it.each(forms)(
     'preserves full results and multiplicity for %s',
     async (form) => {
+      oracleRoute(`case`)
       await runShapes(form, ['user', 'post', 'account', 'article'], 'author')
     },
   )
   it.each([101600, undefined])(
     'varies safe aliases and payloads, seed=%s',
     async (seed) => {
+      const parameters =
+        seed === undefined
+          ? oraclePropertyOptions(60, `query-identity.compiled-output`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(60) })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.constantFrom(...forms),
@@ -347,9 +359,7 @@ describe('query identity agrees with compiled lexical output shape', () => {
           (form, aliases, label) =>
             runShapes(form, aliases as [string, string, string, string], label),
         ),
-        seed === undefined
-          ? oraclePropertyOptions(60, `query-identity.compiled-output`)
-          : { numRuns: oracleRuns(60), seed },
+        parameters,
       )
     },
   )
@@ -362,6 +372,7 @@ describe('query identity agrees with compiled lexical output shape', () => {
   ] as const)(
     'rejects captured %s against independent results',
     async (mutant) => {
+      oracleRoute(`calibration`)
       const form = mutant === 'missing-peer' ? 'explicit-join' : 'implicit-join'
       await runShapes(form, ['user', 'post', 'account', 'article'], 'author')
       await expect(
@@ -457,14 +468,17 @@ describe(`equality-value and IR operand identity agree`, () => {
   it.each([20260928, undefined])(
     `agrees across the supported value grammar, seed=%s`,
     async (seed) => {
+      const campaignParameters =
+        seed === undefined
+          ? oraclePropertyOptions(160, `query-identity.equality-partition`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(160) })
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(equalityPairArbitrary, (pair) => {
           assertEqualityPartition(pair)
           return Promise.resolve()
         }),
-        seed === undefined
-          ? oraclePropertyOptions(160, `query-identity.equality-partition`)
-          : { numRuns: oracleRuns(160), seed },
+        campaignParameters,
       )
     },
   )
@@ -502,6 +516,7 @@ function expectedCompoundJoinRows(
 describe(`compound join identity and output`, () => {
   for (const boundary of [`direct`, `from`, `joined`] as const) {
     it(`retains every equality across ${boundary}`, async () => {
+      oracleRoute(`case`)
       const leftRows = [
         { id: 1, a: 1, b: 2, c: 9 },
         { id: 2, a: 1, b: 3, c: 8 },
@@ -620,6 +635,16 @@ describe(`compound join identity and output`, () => {
   }
 })
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/compiler/evaluators.ts#compileExpression',
+    'src/query/compiler/index.ts#compileQuery',
+    'src/query/compiler/query-equivalence.ts#queriesMatchForCaching',
+    'src/query/equality-value-identity.ts#getEqualityValueIdentity',
+    'src/query/ir-stable-identity.ts#getLoadSubsetDemandKey',
+    'src/query/ir-stable-identity.ts#getQueryIdentity',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [runShapes],
   model: [expectedShapeRows, expectedCompoundJoinRows],
 })

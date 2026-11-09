@@ -36,8 +36,11 @@ import {
 } from '../../db/tests/oracle-failure-fidelity'
 import {
   declareOracle,
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import type { InitialQueryBuilder } from '@tanstack/db'
@@ -306,19 +309,18 @@ describe(`window changes at React commit`, () => {
                   },
                 )
                 try {
+                  const parameters =
+                    campaign === `fixed`
+                      ? oracleFixedSeed(2291, {
+                          numRuns: oracleRuns(6) + examples.length,
+                          examples: [...examples].map(([value]) => [value]),
+                        })
+                      : oraclePropertyOptions(6, property, {
+                          examples: [...examples].map(([value]) => [value]),
+                        })
+                  oracleRoute(oracleRouteOf(parameters))
                   await fidelity.assert(() =>
-                    fc.assert(
-                      propertyUnderTest,
-                      campaign === `fixed`
-                        ? {
-                            numRuns: oracleRuns(6) + examples.length,
-                            seed: 2291,
-                            examples: [...examples].map(([value]) => [value]),
-                          }
-                        : oraclePropertyOptions(6, property, {
-                            examples: [...examples].map(([value]) => [value]),
-                          }),
-                    ),
+                    fc.assert(propertyUnderTest, parameters),
                   )
                 } finally {
                   console.info(
@@ -332,6 +334,7 @@ describe(`window changes at React commit`, () => {
         }
 })
 declareOracle({
+  owns: [`src/useLiveQuery.ts#useLiveQuery`],
   grammar: [renderHistoryArbitrary],
   check: [checkRenderHistory],
 })
@@ -619,6 +622,16 @@ for (const client of [false, true])
             let index = 0
             const fidelity = createOracleFailureFidelity<RenderHistory>()
             try {
+              const parameters =
+                campaign === `fixed`
+                  ? oracleFixedSeed(2345, {
+                      numRuns: oracleRuns(6) + examples.length,
+                      examples: [...examples].map(([value]) => [value]),
+                    })
+                  : oraclePropertyOptions(6, property, {
+                      examples: [...examples].map(([value]) => [value]),
+                    })
+              oracleRoute(oracleRouteOf(parameters))
               await fidelity.assert(() =>
                 fc.assert(
                   fc.asyncProperty(renderHistoryArbitrary, async (history) => {
@@ -634,15 +647,7 @@ for (const client of [false, true])
                       ),
                     )
                   }),
-                  campaign === `fixed`
-                    ? {
-                        numRuns: oracleRuns(6) + examples.length,
-                        seed: 2345,
-                        examples: [...examples].map(([value]) => [value]),
-                      }
-                    : oraclePropertyOptions(6, property, {
-                        examples: [...examples].map(([value]) => [value]),
-                      }),
+                  parameters,
                 ),
               )
             } finally {
@@ -655,6 +660,7 @@ for (const client of [false, true])
           })
         }
 declareOracle({
+  owns: [`src/useLiveQuery.ts#useLiveQuery`],
   grammar: [renderHistoryArbitrary],
   check: [checkRetryOwnershipHistory],
 })

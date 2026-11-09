@@ -8,8 +8,11 @@ import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { Query, createLiveQueryCollection } from '../src/query/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -312,7 +315,11 @@ async function checkHistory(
   }
 }
 
+// What this oracle owns: the gap report judges every function in
+// src/live-query-observer.ts by this file's snapshot histories, which read
+// retained getSnapshot() objects and the health tree of the observer.
 declareOracle({
+  owns: [`src/live-query-observer.ts`],
   check: [checkRead, checkHistory, checkHealthHistory],
   model: [modelRows],
 })
@@ -348,12 +355,12 @@ describe(`retained live-query snapshots are point-in-time`, () => {
         reach.beginHistory()
         return checkHistory(shape, attached, commands, order, reach)
       })
-      await fc.assert(
-        property,
+      const parameters =
         campaign === `fixed`
-          ? { numRuns: oracleRuns(40), seed: 2043 }
-          : oraclePropertyOptions(40, PROPERTY),
-      )
+          ? oracleFixedSeed(2043, { numRuns: oracleRuns(40) })
+          : oraclePropertyOptions(40, PROPERTY)
+      oracleRoute(oracleRouteOf(parameters))
+      await fc.assert(property, parameters)
       reach.assertReached()
       console.info(
         `snapshot-getter ${shape} ${attached} ${campaign}`,
@@ -363,6 +370,7 @@ describe(`retained live-query snapshots are point-in-time`, () => {
   )
 
   it(`reads a snapshot after several newer snapshots were built`, async () => {
+    oracleRoute(`fixed history`)
     const commands: Array<Command> = [
       { type: `upsert`, id: `a`, version: 1 },
       { type: `upsert`, id: `b`, version: 1 },
@@ -385,6 +393,7 @@ describe(`retained live-query snapshots are point-in-time`, () => {
   })
 
   it(`rejects a snapshot that reads the live Collection on first access`, async () => {
+    oracleRoute(`calibration`)
     // Calibration: the #1542 design. Its getters read the live query when
     // first accessed instead of the rows captured at snapshot time.
     const { observer, query, source } = setup(`ordered`)
@@ -642,13 +651,19 @@ describe(`a snapshot shows the current health tree`, () => {
         await checkHealthHistory(commands, reach)
       },
     )
-    // Fixed campaign: a repeatable baseline. Seed 695 is arbitrary.
-    await fc.assert(property, { numRuns: oracleRuns(80), seed: 695 })
-    await fc.assert(property, oraclePropertyOptions(80))
+    // Fixed campaign: a repeatable baseline. Seed 695 is arbitrary. Each
+    // campaign registers its own route before it runs.
+    const fixed = oracleFixedSeed(695, { numRuns: oracleRuns(80) })
+    oracleRoute(oracleRouteOf(fixed))
+    await fc.assert(property, fixed)
+    const random = oraclePropertyOptions(80)
+    oracleRoute(oracleRouteOf(random))
+    await fc.assert(property, random)
     reach.assertReached()
   })
 
   it(`shows a health-only change made between a detached read and attach`, async () => {
+    oracleRoute(`fixed history`)
     // Replay of the reported trace: a framework renders (detached read), a
     // source reports a problem before commit, the framework commits
     // (attach), then reads again.
@@ -968,22 +983,24 @@ describe(`metadata snapshots share immutable row containers`, () => {
         ],
         { fixedHistories: examples.length },
       )
-      // fast-check 3 emits examples before generated histories. A failed
+      // fast-check runs examples before generated histories. A failed
       // campaign throws before aggregate reach; path replay disables it.
       let histories = 0
+      const campaignParameters = {
+        ...oraclePropertyOptions(
+          40,
+          `live-query-observer.row-container-sharing`,
+          { examples },
+        ),
+        ...(campaign === `fixed` ? oracleFixedSeed(1101) : {}),
+      }
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(containerHistory, async (scenario) => {
           reach.beginHistory({ fixed: histories++ < examples.length })
           await checkContainerHistory(scenario, reach)
         }),
-        {
-          ...oraclePropertyOptions(
-            40,
-            `live-query-observer.row-container-sharing`,
-            { examples },
-          ),
-          ...(campaign === `fixed` ? { seed: 1101 } : {}),
-        },
+        campaignParameters,
       )
       reach.assertReached()
       process.stdout.write(
@@ -1317,6 +1334,7 @@ describe(`snapshot capture paths preserve row and layout laws`, () => {
   // failure cannot hide the distinct layout premise during RED verification.
   for (const action of [`discard-write`, `discard-move`] as const)
     it(`reads committed rows after ${action}`, async () => {
+      oracleRoute(`fixed history`)
       const reach = createOracleReach<CapturePathReach>(
         `capture-discard-replay`,
         [
@@ -1418,17 +1436,19 @@ describe(`snapshot capture paths preserve row and layout laws`, () => {
         { fixedHistories: examples.length },
       )
       let histories = 0
+      const runParameters = {
+        ...oraclePropertyOptions(40, `live-query-observer.capture-paths`, {
+          examples,
+        }),
+        ...(campaign === `fixed` ? oracleFixedSeed(2346) : {}),
+      }
+      oracleRoute(oracleRouteOf(runParameters))
       await fc.assert(
         fc.asyncProperty(capturePathHistory, async (scenario) => {
           reach.beginHistory({ fixed: histories++ < examples.length })
           await checkCapturePathHistory(scenario, reach)
         }),
-        {
-          ...oraclePropertyOptions(40, `live-query-observer.capture-paths`, {
-            examples,
-          }),
-          ...(campaign === `fixed` ? { seed: 2346 } : {}),
-        },
+        runParameters,
       )
       reach.assertReached()
       process.stdout.write(
@@ -1744,6 +1764,13 @@ describe(`publications preserve nested record shape`, () => {
         { fixedHistories: examples.length },
       )
       let histories = 0
+      const parameters = {
+        ...oraclePropertyOptions(40, `live-query-observer.record-shape`, {
+          examples,
+        }),
+        ...(campaign === `fixed` ? oracleFixedSeed(234602) : {}),
+      }
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(payloadHistory, async (scenario) => {
           reach.beginHistory({ fixed: histories++ < examples.length })
@@ -1764,12 +1791,7 @@ describe(`publications preserve nested record shape`, () => {
               { cause: errors[0] },
             )
         }),
-        {
-          ...oraclePropertyOptions(40, `live-query-observer.record-shape`, {
-            examples,
-          }),
-          ...(campaign === `fixed` ? { seed: 234602 } : {}),
-        },
+        parameters,
       )
       reach.assertReached()
       process.stdout.write(
@@ -1973,6 +1995,11 @@ describe(`array value publication`, () => {
           `live-query-observer.sparse-array`,
           sparseReceivingStates,
         )
+        const parameters = {
+          ...oraclePropertyOptions(20, `live-query-observer.sparse-array`),
+          ...(campaign === `fixed` ? oracleFixedSeed(234603) : {}),
+        }
+        oracleRoute(oracleRouteOf(parameters))
         await fc.assert(
           fc.asyncProperty(sparseArrayCase, async (spec) => {
             reach.beginHistory()
@@ -2004,10 +2031,7 @@ describe(`array value publication`, () => {
                 { cause: errors[0] },
               )
           }),
-          {
-            ...oraclePropertyOptions(20, `live-query-observer.sparse-array`),
-            ...(campaign === `fixed` ? { seed: 234603 } : {}),
-          },
+          parameters,
         )
         reach.assertReached()
         process.stdout.write(

@@ -125,7 +125,7 @@ async function recordFiniteComparison(property, action) {
   return withFiniteComparison(action, ({ failed }) => {
     if (selected && replay.replayProperty === property)
       recordOracleFiniteReplay(property, {
-        seed: replay.replaySeed,
+        seed: replay.campaignSeed,
         path: replay.replayPath,
         failed,
       })

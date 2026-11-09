@@ -5,7 +5,10 @@ import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { and, createLiveQueryCollection, eq } from '../../src/query/index.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
@@ -374,6 +377,7 @@ describe.each([`off`, `eager`] as const)(
     it.each(equalityJoinCases)(
       `$label joins agree with equality predicates`,
       async ({ label, createValues }) => {
+        oracleRoute(`case`)
         const { left: leftValue, right: rightValue, other } = createValues()
         const left = createEqualitySource<EqualityRow>(
           `equality-left-${label}`,
@@ -459,6 +463,7 @@ const history: ReadonlyArray<Step> = [
 // amounts -5..5, and lengths 0..15. It excludes simultaneous duplicate child
 // keys, which a keyed Collection cannot represent, and unmatched parent IDs.
 it(`reconciles cold join acquisition, deletion, restoration and route moves`, async () => {
+  oracleRoute(`fixed history`)
   const batches = await runColdJoin(history)
   expect(
     batches.flat().filter((change) => change.type === `delete`).length,
@@ -486,6 +491,11 @@ it.each(coldJoinSeeds)(`checks cold join histories, seed=%s`, async (seed) => {
       })
       .map((row) => ({ type: `put` as const, row })),
   )
+  const parameters =
+    seed === undefined
+      ? oraclePropertyOptions(50, coldJoinProperty)
+      : oracleFixedSeed(seed, { numRuns: oracleRuns(50) })
+  oracleRoute(oracleRouteOf(parameters))
   await fc.assert(
     fc.asyncProperty(
       fc.array(step, { minLength: 0, maxLength: 15 }),
@@ -493,14 +503,13 @@ it.each(coldJoinSeeds)(`checks cold join histories, seed=%s`, async (seed) => {
         await runColdJoin([...history, ...steps])
       },
     ),
-    seed === undefined
-      ? oraclePropertyOptions(50, coldJoinProperty)
-      : { seed, numRuns: oracleRuns(50) },
+    parameters,
   )
 })
 it.each([`hide-acquisition`, `drop-delete`, `wrong-result`] as const)(
   `rejects %s through the real cold join trace checker`,
   async (mutant) => {
+    oracleRoute(`calibration`)
     await runColdJoin(history)
     await expect(runColdJoin(history, mutant)).rejects.toMatchObject({
       name: `TraceAssertionError`,
@@ -834,12 +843,17 @@ async function runCompoundHistory(
  * the scenario it runs, so the caller supplies inputs, not expected rows.
  */
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [runColdJoin, runCompoundHistory, expectEqualityJoinMatchesPredicate],
   model: [expectedColdJoinRows, compoundPairs],
 })
 
 // All atom classes occur in the initial matrix. Partial matches differ only
-// in the last term; nulls occur in both tuple positions. The pinned scenario
+// in the last term; nulls occur in both tuple positions. The fixed scenario
 // leaves, restores, deletes and reinserts a match on each side.
 const compoundBoundaryRows = compoundAtoms().map((_, atom) => ({
   id: atom,
@@ -875,6 +889,7 @@ describe(`compound join relational oracle`, () => {
   for (const autoIndex of [`off`, `eager`] as const) {
     for (const atomFirst of [false, true]) {
       it(`loads the matching compound tuple: index=${autoIndex}, atomFirst=${atomFirst}`, async () => {
+        oracleRoute(`case`)
         await runCompoundHistory({
           ...compoundWitness,
           left: [{ id: 1, atom: 10, b: 7, c: 9 }],
@@ -898,6 +913,7 @@ describe(`compound join relational oracle`, () => {
         for (const atom of [0, 21]) {
           for (const b of [null, 0]) {
             it(`checks nullish and satisfiable tuples: index=${autoIndex}, atomFirst=${atomFirst}, atom=${atom}, b=${b}`, async () => {
+              oracleRoute(`case`)
               await runCompoundHistory({
                 ...compoundWitness,
                 left: [{ id: 0, atom, b, c: 0 }],
@@ -921,6 +937,7 @@ describe(`compound join relational oracle`, () => {
     { name: `Date and ISO string`, leftAtom: 2, rightAtom: 3 },
     { name: `bigint`, leftAtom: 8, rightAtom: 8 },
   ])(`preserves compound $name equality`, async ({ leftAtom, rightAtom }) => {
+    oracleRoute(`case`)
     await runCompoundHistory({
       ...compoundWitness,
       atomFirst: false,
@@ -932,6 +949,7 @@ describe(`compound join relational oracle`, () => {
   for (const join of [`inner`, `left`, `right`, `full`] as const) {
     for (const cold of [false, true]) {
       it(`preserves all equality classes through ${join} histories, cold=${cold}`, async () => {
+        oracleRoute(`case`)
         await runCompoundHistory({ ...compoundWitness, join, cold })
       })
     }
@@ -939,6 +957,7 @@ describe(`compound join relational oracle`, () => {
   it.each([`off`, `eager`] as const)(
     `rejects a hidden acquisition for a satisfiable tuple, index=%s`,
     async (autoIndex) => {
+      oracleRoute(`calibration`)
       await expect(
         runCompoundHistory(
           {
@@ -970,6 +989,11 @@ describe(`compound join relational oracle`, () => {
         b: fc.constantFrom<number | null>(0, 1, null),
         c: fc.integer({ min: 0, max: 1 }),
       })
+      const campaignParameters =
+        seed === undefined
+          ? oraclePropertyOptions(60, property)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(60) })
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(
           fc.record({
@@ -1004,9 +1028,7 @@ describe(`compound join relational oracle`, () => {
           }),
           (scenario) => runCompoundHistory(scenario),
         ),
-        seed === undefined
-          ? oraclePropertyOptions(60, property)
-          : { seed, numRuns: oracleRuns(60) },
+        campaignParameters,
       )
     },
   )

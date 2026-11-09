@@ -29,8 +29,11 @@ import { createOracleReach } from '../../db/tests/oracle-reach'
 import { createOracleFailureFidelity } from '../../db/tests/oracle-failure-fidelity'
 import {
   declareOracle,
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import type {
@@ -256,6 +259,14 @@ describe(`Svelte client page identity`, () => {
         let index = 0
         const fidelity = createOracleFailureFidelity<History>()
         try {
+          const parameters =
+            campaign === `fixed`
+              ? oracleFixedSeed(2345, {
+                  numRuns: oracleRuns(6) + examples.length,
+                  examples,
+                })
+              : oraclePropertyOptions(6, property, { examples })
+          oracleRoute(oracleRouteOf(parameters))
           await fidelity.assert(() =>
             fc.assert(
               fc.asyncProperty(clientWindowArbitrary, async (history) => {
@@ -264,13 +275,7 @@ describe(`Svelte client page identity`, () => {
                   checkClientWindowHistory(history, keyed, reach),
                 )
               }),
-              campaign === `fixed`
-                ? {
-                    numRuns: oracleRuns(6) + examples.length,
-                    seed: 2345,
-                    examples,
-                  }
-                : oraclePropertyOptions(6, property, { examples }),
+              parameters,
             ),
           )
           reach.assertReached()
@@ -283,7 +288,10 @@ describe(`Svelte client page identity`, () => {
       }, 30_000)
     }
 })
-declareOracle({ check: [checkClientWindowHistory] })
+declareOracle({
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
+  check: [checkClientWindowHistory],
+})
 
 /** An unchanged explicit client key retains the authored input, including after
  * a rejected key read. Recovery must not replay a prior declarative move over
@@ -454,6 +462,11 @@ for (const campaign of [`fixed`, `fresh`] as const) {
     const reach = createOracleReach(`${property}/${campaign}`, recoveryStates)
     const fidelity = createOracleFailureFidelity<RecoveryHistory>()
     try {
+      const parameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(2348, { numRuns: oracleRuns(24) })
+          : oraclePropertyOptions(24, property)
+      oracleRoute(oracleRouteOf(parameters))
       await fidelity.assert(() =>
         fc.assert(
           fc.asyncProperty(recoveryArbitrary, async (history) => {
@@ -462,9 +475,7 @@ for (const campaign of [`fixed`, `fresh`] as const) {
               await fidelity.run(member, () => checkRecovery(member, reach))
             }
           }),
-          campaign === `fixed`
-            ? { numRuns: oracleRuns(24), seed: 2348 }
-            : oraclePropertyOptions(24, property),
+          parameters,
         ),
       )
       reach.assertReached()

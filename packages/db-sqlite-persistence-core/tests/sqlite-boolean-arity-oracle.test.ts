@@ -3,9 +3,12 @@ import { fc } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import { IR } from '@tanstack/db'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   recordOracleReplay,
 } from '../../db/tests/oracle-config'
@@ -458,6 +461,7 @@ oracleReplayTest(it, booleanArityProperty)(
         original ??= sameLaw
         throw new Error(JSON.stringify(brief(sameLaw)))
       })
+      oracleRoute(oracleRouteOf(parameters))
       const result = await fc.check(property, parameters)
       recordOracleReplay(booleanArityProperty, result)
       const reducedFailures = result.counterexample
@@ -518,7 +522,9 @@ oracleReplayTest(it, booleanArityProperty)(
 
       const failures: Array<Failure> = []
       for (const model of matrix()) failures.push(...(await check(model)))
-      const fixed = await campaign({ numRuns: oracleRuns(150), seed: 1994 })
+      const fixed = await campaign(
+        oracleFixedSeed(1994, { numRuns: oracleRuns(150) }),
+      )
       const random = await campaign(
         oraclePropertyOptions(150, booleanArityProperty),
       )

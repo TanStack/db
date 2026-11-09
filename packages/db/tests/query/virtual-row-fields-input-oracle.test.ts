@@ -1,5 +1,5 @@
 /**
- * # Reserved fields must be correct before user JavaScript consumes them.
+ * # Intermediate values keep authored fields until Collection publication.
  *
  * The shared input oracle states the maintainer's source/projection/inline law.
  * This finite receiver exhausts 1,155 root histories, 1,155 wrapped child
@@ -18,7 +18,7 @@
  *
  * Reconstruction retains every single-field collision and both populated union
  * branches with numeric/string keys. Removing path, shape, collision, boolean
- * or checkpoint loses a distinct sanitizer shortcut; the calibrated attacks
+ * or checkpoint loses a distinct authored-value or boundary shortcut; the calibrated attacks
  * below exhibit those consequences. Legal direct source returns cannot carry
  * authored overrides. Compiled Collection-valued inputs are the nearby rejected
  * form. Recursion is bounded at two QueryRefs, one LEFT join and flat child
@@ -32,6 +32,7 @@
 import { afterAll, expect, test } from 'vitest'
 import { declareOracle } from '../oracle-declaration.js'
 import { createOracleReach } from '../oracle-reach.js'
+import { oracleRoute } from '../oracle-config.js'
 import {
   expectedMetadataInput,
   expectedMetadataRecord,
@@ -154,6 +155,12 @@ afterAll(() => {
   }
 })
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/query/compiler/index.ts#compileQuery',
+    'src/query/effect.ts#createEffect',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [metadataInputViolations, metadataOutputViolations],
   model: [expectedMetadataInput],
   grammar: [
@@ -168,6 +175,7 @@ declareOracle({
 test.each(callbackCases)(
   `receives callback metadata before deriving ordinary values: $label`,
   async (history) => {
+    oracleRoute(`case`)
     callbackEntered = true
     callbackReach.beginHistory()
     const report = await runMetadataCallbackHistory(
@@ -195,6 +203,7 @@ test.each(
 )(
   `receives direct source metadata before deriving ordinary values: %j`,
   async ({ kind, receiver }) => {
+    oracleRoute(`case`)
     callbackEntered = true
     callbackReach.beginHistory()
     const report = await runMetadataCallbackHistory(
@@ -214,6 +223,7 @@ test.each(
 test.each(inlineCases)(
   `receives inline authored metadata or rejects compiled Collection input: $label`,
   async (history) => {
+    oracleRoute(`case`)
     inlineEntered = true
     inlineReach.beginHistory()
     const report = await runInlineMetadataCallbackHistory(
@@ -239,6 +249,7 @@ test.each(inlineCases)(
 test.each(compilerCases)(
   `preserves metadata across compiler cache modes: $label`,
   async (history) => {
+    oracleRoute(`case`)
     compilerEntered = true
     compilerReach.beginHistory()
     const report = await runMetadataCompilerCacheHistory(
@@ -268,27 +279,40 @@ const sourceFact: MetadataSourceFact = {
 test.each([
   `source-spoof`,
   `source-stripped`,
-  `projection-leak`,
+  `projection-stripped`,
   `inline-stripped`,
   `own-undefined-lost`,
   `mixed-before-after`,
   `late-capture-rewrite`,
+  `compiler-symbol`,
 ] as const)(`rejects a hostile callback-input observation: %s`, (fault) => {
+  oracleRoute(`case`)
   const description = {
     shape: `structured-spread`,
     collision: `all`,
     authoredPending: true,
   } as const
   const projected = { ...description, shape: `functional-spread` } as const
-  const use = fault === `projection-leak` ? projected : description
-  const inline = fault === `inline-stripped`
-  const expected = expectedMetadataInput(sourceFact, use, inline)
+  const direct = {
+    ...description,
+    shape: `functional-direct`,
+    collision: `none`,
+  } as const
+  const use =
+    fault === `projection-stripped`
+      ? projected
+      : fault.startsWith(`source-`) || fault === `mixed-before-after`
+        ? direct
+        : description
+  const expected = expectedMetadataInput(sourceFact, use)
   const hostile = structuredClone(expected)
+  if (fault === `compiler-symbol`)
+    hostile.symbols.push(Symbol(`compiler-state`))
   if (fault === `source-spoof`) hostile.fields.$collectionId!.value = `spoof`
   if (fault === `source-stripped` || fault === `inline-stripped`)
     hostile.fields.$key = { present: false, own: false, value: undefined }
-  if (fault === `projection-leak`)
-    hostile.fields.$key = { present: true, own: true, value: `spoof` }
+  if (fault === `projection-stripped`)
+    hostile.fields.$key = { present: false, own: false, value: undefined }
   if (fault === `own-undefined-lost`) delete hostile.ordinary.optional
   const next = expectedMetadataInput(
     {
@@ -297,7 +321,6 @@ test.each([
       pending: true,
     },
     use,
-    inline,
   )
   if (fault === `mixed-before-after`) hostile.fields = next.fields
   if (fault === `late-capture-rewrite`) hostile.ordinary.label = `later`
@@ -310,9 +333,10 @@ test.each([
   `omitted-peer`,
   `duplicate-peer`,
   `wrong-key-kind`,
-  `publication-only-sanitizer`,
+  `intermediate-sanitizer`,
   `missing-derived-field`,
 ] as const)(`rejects a hostile derived ordinary output: %s`, (fault) => {
+  oracleRoute(`calibration`)
   const description = {
     shape: `functional-projection`,
     collision: `$collectionId`,
@@ -329,11 +353,11 @@ test.each([
   if (fault === `omitted-peer`) hostile.pop()
   if (fault === `duplicate-peer`) hostile.push(structuredClone(hostile[1]!))
   if (fault === `wrong-key-kind`) hostile[1]!.id = 1
-  if (fault === `publication-only-sanitizer`)
+  if (fault === `intermediate-sanitizer`)
     hostile[0]!.observed.fields.$collectionId = {
-      present: true,
-      own: true,
-      value: `spoof`,
+      present: false,
+      own: false,
+      value: undefined,
     }
   if (fault === `missing-derived-field`)
     Reflect.deleteProperty(hostile[0]!, `observed`)
@@ -341,6 +365,7 @@ test.each([
   expect(metadataOutputViolations(hostile, expected)).not.toStrictEqual([])
 })
 test(`copies callback input before later source objects change`, () => {
+  oracleRoute(`fixed history`)
   const description = {
     shape: `functional-direct`,
     collision: `none`,
@@ -359,6 +384,7 @@ test(`copies callback input before later source objects change`, () => {
   ).toStrictEqual([])
 })
 test(`accepts readable inherited source metadata at callback input`, () => {
+  oracleRoute(`fixed history`)
   const description = {
     shape: `functional-direct`,
     collision: `none`,
@@ -379,6 +405,7 @@ test(`accepts readable inherited source metadata at callback input`, () => {
   ).toStrictEqual([])
 })
 test(`copies nested callback values before later child objects change`, () => {
+  oracleRoute(`fixed history`)
   const child = {
     ...sourceFact.row,
     ...expectedSourceVirtualFields(sourceFact),
@@ -396,12 +423,13 @@ test(`copies nested callback values before later child objects change`, () => {
 test.each([`selected-virtual`, `own-undefined`] as const)(
   `rejects an inherited replacement for an authored inline field: %s`,
   (fault) => {
+    oracleRoute(`calibration`)
     const description = {
       shape: `functional-projection`,
       collision: `$collectionId`,
       authoredPending: false,
     } as const
-    const selected = expectedMetadataInput(sourceFact, description, true)
+    const selected = expectedMetadataInput(sourceFact, description)
     const child: Record<string, unknown> = {
       ...selected.ordinary,
       ...Object.fromEntries(
@@ -440,15 +468,12 @@ test.each([`selected-virtual`, `own-undefined`] as const)(
 test.each([`unexpected`, `$collectionId`] as const)(
   `rejects an extra own field on an inline array: %s`,
   (field) => {
-    const child = expectedMetadataInput(
-      sourceFact,
-      {
-        shape: `functional-projection`,
-        collision: `none`,
-        authoredPending: false,
-      },
-      true,
-    ).ordinary
+    oracleRoute(`calibration`)
+    const child = expectedMetadataInput(sourceFact, {
+      shape: `functional-projection`,
+      collision: `none`,
+      authoredPending: false,
+    }).ordinary
     const authored = { id: `parent`, children: [child] }
     const expected = expectedMetadataRecord(authored)
     const value = structuredClone(authored)

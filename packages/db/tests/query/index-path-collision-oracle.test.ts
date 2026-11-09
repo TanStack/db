@@ -43,6 +43,7 @@ import { PropRef } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import { declareOracle } from '../oracle-declaration.js'
+import { oracleRoute } from '../oracle-config.js'
 import { checkWithCleanup } from './index-path-collision-support.js'
 import type { Release } from './index-path-collision-support.js'
 import type { BasicExpression } from '../../src/query/ir.js'
@@ -105,6 +106,11 @@ function modelSelectedOrder(): Array<string> {
 const expectedKeys = modelKeys((row) => row[`a.b`] > 5 && row.a.b < 20)
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   model: [modelKeys, modelSelectedOrder],
 })
 
@@ -138,6 +144,7 @@ const cases: Array<{
 it.each(cases)(
   `keeps dotted scalar and nested predicates distinct: $name`,
   async ({ name, where, accepts }) => {
+    oracleRoute(`case`)
     await checkWithCleanup(async (register) => {
       const collection = await readyCollection(name, register)
       const expected = modelKeys(accepts)
@@ -159,6 +166,7 @@ it.each(cases)(
 it.each([false, true])(
   `preserves distinct fields in a Collection subscription callback (indexed=%s)`,
   async (indexed) => {
+    oracleRoute(`case`)
     await checkWithCleanup(async (register) => {
       const collection = await readyCollection(
         `subscription-${indexed}`,
@@ -180,6 +188,7 @@ it.each([false, true])(
 )
 
 it(`keeps selected dotted and nested paths distinct in a public order`, async () => {
+  oracleRoute(`fixed history`)
   await checkWithCleanup(async (register) => {
     const collection = await readyCollection(`selected-order`, register)
     const result = createLiveQueryCollection({
@@ -206,6 +215,7 @@ it(`keeps selected dotted and nested paths distinct in a public order`, async ()
 it.each([false, true])(
   `preserves distinct fields in a live-query callback (indexed=%s)`,
   async (indexed) => {
+    oracleRoute(`case`)
     await checkWithCleanup(async (register) => {
       const collection = await readyCollection(
         `live-query-${indexed}`,

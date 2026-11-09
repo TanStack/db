@@ -13,10 +13,13 @@
  * lookup and the real worker's WASM fetch.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { oracleRoute } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { openBrowserWASQLiteOPFSDatabase } from '../src/opfs-database'
 import {
   describeHistory,
   expectOpenOutcome,
+  expectedOpenOutcome,
   openHistories,
   reachedOutcomes,
 } from './opfs-open-outcome-oracle'
@@ -30,6 +33,15 @@ import type {
   BrowserOPFSWorkerRequest,
   BrowserOPFSWorkerResponse,
 } from '../src/opfs-worker-protocol'
+
+// The helper module declares the law and model; this driver is the only
+// production path that its open histories reach.
+declareOracle({
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+  check: [expectOpenOutcome],
+  model: [expectedOpenOutcome],
+  grammar: [openHistories],
+})
 
 const jsdomReach: OpenDriverReach = {
   lookup: [`not needed`],
@@ -210,6 +222,7 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
 
 describe(`OPFS open outcome oracle (jsdom driver)`, () => {
   it(`reaches every outcome that this driver controls`, () => {
+    oracleRoute(`case`)
     expect(reachedOutcomes(histories)).toEqual([
       `initialization: AbortError`,
       `initialization: TimeoutError`,
@@ -222,6 +235,7 @@ describe(`OPFS open outcome oracle (jsdom driver)`, () => {
   it.each(histories.map((history) => [describeHistory(history), history]))(
     `%s`,
     async (_name, history) => {
+      oracleRoute(`case`)
       expectOpenOutcome(history, await runOpenHistory(history))
     },
   )

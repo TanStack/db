@@ -7,9 +7,9 @@
  * each committed mount and the first is checked again after its peer mounts.
  * These mounts create no reusable DbClient preload record. Cached-result
  * getKey/schema conflicts are judged by cache-options-oracle's warm driver.
- * A focused pending lane keeps delivery held until two separate boundaries
+ * A focused pending grammar keeps delivery held until two separate boundaries
  * show their fallbacks. Equal/different callback and scalar declarations then
- * use the same committed-output comparison as the ready lane. It checks no
+ * use the same committed-output comparison as the ready grammar. It checks no
  * abandoned render, rejection or cleanup race.
  * This receiver makes no server-render or hydration scheduling claim.
  */
@@ -31,6 +31,7 @@ import {
   localOptionPairs,
 } from '../../db/tests/live-query-cache-options-oracle'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import { withOracleCleanup } from '../../db/tests/utils'
 import type { Collection, Context, InitialQueryBuilder } from '@tanstack/db'
@@ -38,6 +39,10 @@ import type { UseLiveQueryConfig } from '../src/useLiveQuery'
 import type { ReactNode } from 'react'
 
 declareOracle({
+  owns: [
+    `src/DbProvider.tsx#DbProvider`,
+    `src/useLiveSuspenseQuery.ts#useLiveSuspenseQuery`,
+  ],
   grammar: [localOptionPairs],
   check: [checkLocalOutputOwnership],
 })
@@ -91,6 +96,7 @@ afterAll(() => {
 test.each(histories)(
   `independent Suspense output options: %j`,
   async (history) => {
+    oracleRoute(`case`)
     const reach = createOracleReach(
       `Suspense local options/${history.scope}/${history.phase}/${history.cell}`,
       [

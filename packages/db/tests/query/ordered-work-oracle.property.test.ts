@@ -12,7 +12,10 @@ import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { eq, gte, isUndefined, not } from '../../src/query/builder/functions.js'
 import {
+  oracleFixedSeed,
   oracleRandomParameters,
+  oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -78,7 +81,7 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * mutation or repair checkpoint. Adapter requests and work counts are separate
  * observations; they are not public rows or evidence of remote provider work.
  *
- * Counts are contract bounds, not timing benchmarks. They pin established
+ * Counts are contract bounds, not timing benchmarks. They check established
  * request and graph-scheduling behavior only where the test names that promise.
  * These scenarios exercise local evaluation; they do not model a remote adapter
  * applying a relation hint.
@@ -1600,6 +1603,7 @@ async function observeHeldEffectDelta(
 
 describe(`ordered source work oracle`, () => {
   it(`reconstructs every legal small scenario exactly once`, () => {
+    oracleRoute(`case`)
     expect(exhaustiveScenarios).toHaveLength(64)
     expect(
       new Set(exhaustiveScenarios.map((scenario) => JSON.stringify(scenario)))
@@ -1608,6 +1612,7 @@ describe(`ordered source work oracle`, () => {
   })
 
   it(`keeps later order-term invalidation equal across consumers`, async () => {
+    oracleRoute(`fixed history`)
     const [collection, effect] = await Promise.all([
       observeLaterOrderTermMutation(`collection`),
       observeLaterOrderTermMutation(`effect`),
@@ -1621,6 +1626,7 @@ describe(`ordered source work oracle`, () => {
   it.each([`move`, `delete`] as const)(
     `recovers a finite source prefix equally across consumers after %s`,
     async (mutation) => {
+      oracleRoute(`case`)
       const [collection, effect] = await Promise.all([
         observeFinitePrefixMutation(`collection`, mutation),
         observeFinitePrefixMutation(`effect`, mutation),
@@ -1632,16 +1638,19 @@ describe(`ordered source work oracle`, () => {
   )
 
   it(`holds the last complete Effect result across an asynchronous prefix and synchronous tie repair`, async () => {
+    oracleRoute(`fixed history`)
     await expect(observeHeldEffectRepair(`asynchronous`)).resolves.toEqual([
       [2],
     ])
   })
 
   it(`publishes one Effect replacement when ordered repair settles synchronously`, async () => {
+    oracleRoute(`fixed history`)
     await expect(observeHeldEffectRepair(`synchronous`)).resolves.toEqual([[2]])
   })
 
   it(`publishes the repaired ordered Effect delta when a source changes during startup`, async () => {
+    oracleRoute(`fixed history`)
     // Fixed history: the first ordered page contains row 1. Subscribing to
     // the sibling updates row 1 before the Effect can run its initial graph.
     // The independent final rank order is row 2, then row 1. At the first
@@ -1785,6 +1794,7 @@ describe(`ordered source work oracle`, () => {
   })
 
   it(`keeps an Effect live when truncate replay aborts an obsolete repair participant`, async () => {
+    oracleRoute(`fixed history`)
     await expect(
       observeEffectAfterObsoleteRepairAbort(),
     ).resolves.toMatchObject({
@@ -1794,6 +1804,7 @@ describe(`ordered source work oracle`, () => {
   })
 
   it(`suppresses an asynchronous initial ordered window when skipInitial is set`, async () => {
+    oracleRoute(`fixed history`)
     await expect(observeSkipInitialOrderedLoad()).resolves.toEqual({
       initialEvents: [],
       laterEvents: expect.arrayContaining([`enter:3`, `exit:1`]),
@@ -1801,6 +1812,7 @@ describe(`ordered source work oracle`, () => {
   })
 
   it(`restarts bounded repair when another order mutation arrives during its tie request`, async () => {
+    oracleRoute(`fixed history`)
     await expect(observeMutationDuringBoundedRepair()).resolves.toMatchObject({
       rows: [3],
       publications: [[3]],
@@ -1808,6 +1820,7 @@ describe(`ordered source work oracle`, () => {
   })
 
   it(`emits no Effect delta for a row that enters and exits during held repair`, async () => {
+    oracleRoute(`fixed history`)
     await expect(observeHeldEffectDelta(`absent-cycle`)).resolves.toMatchObject(
       {
         rows: [3],
@@ -1816,6 +1829,7 @@ describe(`ordered source work oracle`, () => {
   })
 
   it(`emits the published value when an updated row exits during held repair`, async () => {
+    oracleRoute(`fixed history`)
     await expect(
       observeHeldEffectDelta(`present-update-exit`),
     ).resolves.toMatchObject({ rows: [3, 4] })
@@ -1837,6 +1851,7 @@ describe(`ordered source work oracle`, () => {
   )(
     `does not refetch when a visible row changes outside the ordering key: %j`,
     async ({ consumer, limit, position, direction }) => {
+      oracleRoute(`case`)
       let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
       let loads = 0
       const rows = rowsForScenario({
@@ -1945,6 +1960,7 @@ describe(`ordered source work oracle`, () => {
   ])(
     `waits for a $name joined source after exhausting tied ordered rows`,
     async ({ name, secondaryRows, expected }) => {
+      oracleRoute(`case`)
       type Primary = { id: string; rank: number; joinKey: string }
       type Secondary = { id: string; joinKey: string }
       const primaryRows: Array<Primary> = [`a`, `b`, `c`, `d`].map((id) => ({
@@ -2093,6 +2109,7 @@ describe(`ordered source work oracle`, () => {
   )
 
   it(`keeps independent joined loads isolated when they settle in reverse`, async () => {
+    oracleRoute(`fixed history`)
     type Primary = { id: string; rank: number; joinKey: string }
     type Secondary = { id: string; joinKey: string }
     const pending: Array<{
@@ -2216,6 +2233,7 @@ describe(`ordered source work oracle`, () => {
   })
 
   it(`keeps one source's replay from suppressing another source's recovery`, async () => {
+    oracleRoute(`fixed history`)
     type Primary = { id: number; rank: number }
     type Secondary = { id: number; primaryId: number }
     const primaryTruth = new Map<number, Primary>([
@@ -2368,6 +2386,7 @@ describe(`ordered source work oracle`, () => {
   })
 
   it(`publishes one complete batch after an indexed loader fills a window`, async () => {
+    oracleRoute(`fixed history`)
     const remoteRows: ReadonlyArray<Row> = [
       { id: 1, rank: 1, eligible: true, label: `one` },
       { id: 2, rank: 2, eligible: true, label: `two` },
@@ -2449,12 +2468,14 @@ describe(`ordered source work oracle`, () => {
   })
 
   it(`keeps live collections and Effects equal across the exhaustive small domain`, async () => {
+    oracleRoute(`case`)
     for (const scenario of exhaustiveScenarios) {
       await assertConsumerParity(scenario)
     }
   })
 
   it(`keeps the collection anti-join result when the joined row exists`, async () => {
+    oracleRoute(`fixed history`)
     const observed = await observeConsumer(
       `collection`,
       exhaustiveScenarios[0]!,
@@ -2464,6 +2485,7 @@ describe(`ordered source work oracle`, () => {
   })
 
   it(`removes a matched parent from the anti-join Effect`, async () => {
+    oracleRoute(`fixed history`)
     const observed = await observeConsumer(
       `effect`,
       exhaustiveScenarios[0]!,
@@ -2473,6 +2495,7 @@ describe(`ordered source work oracle`, () => {
   })
 
   it(`processes a synchronous root refill before joined publication`, async () => {
+    oracleRoute(`fixed history`)
     type Root = { id: number; rank: number }
     type Child = { id: number; rootId: number }
     const truth: Array<Root> = [
@@ -2606,6 +2629,7 @@ describe(`ordered source work oracle`, () => {
   })
 
   it(`resumes bounded ordered repair after joined demand settles`, async () => {
+    oracleRoute(`fixed history`)
     type Root = { id: number; rank: number }
     type Child = { id: number; rootId: number }
     const truth: Array<Root> = [
@@ -2749,6 +2773,7 @@ describe(`ordered source work oracle`, () => {
   })
 
   it(`bounds ordered root acquisition for a none left-join filter`, async () => {
+    oracleRoute(`fixed history`)
     for (const scenario of exhaustiveScenarios) {
       const observed = await observeConsumer(`collection`, scenario, `none`)
       expect(observed.requests.length).toBeGreaterThan(0)
@@ -2760,6 +2785,7 @@ describe(`ordered source work oracle`, () => {
   it.each([`joined-only`, `some`, `to-one`] as const)(
     `bounds ordered root acquisition for a %s left-join filter`,
     async (joinFilter) => {
+      oracleRoute(`case`)
       for (const scenario of exhaustiveScenarios) {
         const [collection, effect] = await Promise.all([
           observeConsumer(`collection`, scenario, joinFilter),
@@ -2789,6 +2815,7 @@ describe(`ordered source work oracle`, () => {
   )(
     `settles joined demand and publishes a complete $loadingMode $consumer window`,
     async ({ consumer, loadingMode }) => {
+      oracleRoute(`case`)
       const observed = await observeConsumer(
         consumer,
         {
@@ -2831,6 +2858,7 @@ describe(`ordered source work oracle`, () => {
   )(
     `waits for a $joinFilter joined demand before requesting another root page in a $consumer`,
     async ({ consumer, joinFilter }) => {
+      oracleRoute(`case`)
       const observed = await observeConsumer(
         consumer,
         {
@@ -2851,6 +2879,7 @@ describe(`ordered source work oracle`, () => {
   it.each([`collection`, `effect`] as const)(
     `refills a joined-filter %s window after a child leaves`,
     async (consumer) => {
+      oracleRoute(`case`)
       const observed = await observeConsumer(
         consumer,
         {
@@ -2872,6 +2901,7 @@ describe(`ordered source work oracle`, () => {
   it.each([`collection`, `effect`] as const)(
     `stops a joined-filter %s after the needed root prefix`,
     async (consumer) => {
+      oracleRoute(`case`)
       const observed = await observeConsumer(
         consumer,
         {
@@ -2901,6 +2931,7 @@ describe(`ordered source work oracle`, () => {
   )(
     `settles an underfilled source without repeating a continuation: %j`,
     async ({ middleCount, direction, tied }) => {
+      oracleRoute(`case`)
       const scenario: Scenario = {
         middleCount,
         middleEligible: false,
@@ -2945,6 +2976,7 @@ describe(`ordered source work oracle`, () => {
   )
 
   it(`replaces an ordered snapshot after truncate without repeating void loads`, async () => {
+    oracleRoute(`fixed history`)
     const initial: ReadonlyArray<Row> = [
       { id: 1, rank: 1, eligible: true, label: `old-one` },
       { id: 2, rank: 2, eligible: true, label: `old-two` },
@@ -3065,6 +3097,7 @@ describe(`ordered source work oracle`, () => {
       },
     },
   ])(`keeps an ordered snapshot unchanged $name`, async ({ failure }) => {
+    oracleRoute(`case`)
     const makeRows = (ranks: ReadonlyArray<number>): Array<Row> =>
       ranks.map((rank, index) => ({
         id: index + 1,
@@ -3278,6 +3311,7 @@ describe(`ordered source work oracle`, () => {
   it.each([`collection`, `effect`] as const)(
     `continues an ordered anti-join %s while an unrelated include demand is pending`,
     async (kind) => {
+      oracleRoute(`case`)
       const rows = [
         { id: 1, rank: 1 },
         { id: 2, rank: 2 },
@@ -3439,17 +3473,26 @@ describe(`ordered source work oracle`, () => {
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 20 * multiplier
 
-  fcTest.prop([scenarioArbitrary], { numRuns: runs, seed: 17801 })(
+  const scenarioFixedSeed = oracleFixedSeed(17801, { numRuns: runs })
+  fcTest.prop([scenarioArbitrary], scenarioFixedSeed)(
     `keeps rows, request traces, batches, errors, and liveness equal for a fixed seed`,
-    assertConsumerParity,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(scenarioFixedSeed))
+      await assertConsumerParity(scenario)
+    },
   )
 
-  fcTest.prop(
-    [scenarioArbitrary],
-    oracleRandomParameters(runs, replay, `ordered-work.consumer-parity`),
-  )(
+  const scenarioCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `ordered-work.consumer-parity`,
+  )
+  fcTest.prop([scenarioArbitrary], scenarioCampaign)(
     `keeps rows, request traces, batches, errors, and liveness equal for a random or replayed seed`,
-    assertConsumerParity,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(scenarioCampaign))
+      await assertConsumerParity(scenario)
+    },
   )
 })
 
@@ -3609,8 +3652,8 @@ describe(`ordered source work oracle`, () => {
  * `offset + limit + 1` rows. Its rows law holds beside the first query's at
  * every checkpoint; the work laws count one consumer, so they do not apply
  * to those cases. A peer over a refetching provider with a joined filter is
- * excluded from the grammar until #2155 is fixed: an indexed trace is fixed
- * and pinned, but an unindexed peer still keeps a short joined window after
+ * excluded from the grammar until #2155 is fixed: an indexed trace is kept as a
+ * fixed history, but an unindexed peer still keeps a short joined window after
  * a refetch. A peer over a source filter stays in the grammar.
  *
  * `null` and `undefined` ranks are both nullish, so they tie: either may
@@ -3829,7 +3872,7 @@ const eagerCaseBase: fc.Arbitrary<EagerCase> = fc.record({
 })
 
 // A peer over a refetching on-demand provider can keep a short joined window
-// after a refetch (#2155). An indexed plan's trace is fixed and pinned below,
+// after a refetch (#2155). An indexed plan's trace is kept as a fixed history below,
 // but an unindexed one still fails (a peer shows [100] where the model shows
 // [100, 101]). Each campaign excludes only a joined, anti-joined, or full-joined
 // filter in that pairing, as its last map, until the fix; a source filter
@@ -4084,7 +4127,7 @@ const eagerHeldCase: fc.Arbitrary<EagerCase> = fc
     // A forwarding provider sends the delete, and an indexed source filter
     // or a joined filter refills from the provider, so the refill is a held
     // request. An unindexed source filter issues no held request. With the
-    // provider pinned, this campaign needs no peer exclusion (#2155 concerns
+    // provider fixed, this campaign needs no peer exclusion (#2155 concerns
     // only a refetching provider).
     provider: `forward` as const,
     filter:
@@ -6404,6 +6447,7 @@ describe(`eager indexed ordered windows`, () => {
   const runs = 40 * multiplier
 
   it(`places null ranks first in an indexed descending window`, async () => {
+    oracleRoute(`fixed history`)
     await checkEagerWindow({
       path: `sync`,
       filter: `source`,
@@ -6418,6 +6462,7 @@ describe(`eager indexed ordered windows`, () => {
   })
 
   it(`refills after a visible delete without resending the source`, async () => {
+    oracleRoute(`fixed history`)
     await checkEagerWindow({
       path: `local-only`,
       filter: `source`,
@@ -6443,6 +6488,7 @@ describe(`eager indexed ordered windows`, () => {
   it.each([`sync`, `local-only`] as const)(
     `publishes one complete window when a repair reaches a NaN tie group (%s)`,
     async (path) => {
+      oracleRoute(`case`)
       // The bounded prefix ends inside a NaN tie group, which cannot be a
       // cursor, so the repair falls back to a full-source read.
       await checkEagerWindow({
@@ -6468,6 +6514,7 @@ describe(`eager indexed ordered windows`, () => {
   )
 
   it(`refills a joined window over several pages after a refetch empties it`, async () => {
+    oracleRoute(`fixed history`)
     // Every row the window held changes while the refetching provider lags.
     // The final refetch empties the window, and the loader refills it one
     // page at a time, publishing [], then one row, then the final two (#2131).
@@ -6499,6 +6546,7 @@ describe(`eager indexed ordered windows`, () => {
   })
 
   it(`shows a row that moved between two served pages after a refetch`, async () => {
+    oracleRoute(`fixed history`)
     // The loader pages the top two rows, then one more after a cursor. Rows
     // 10 and 11 arrive while the provider lags; the refetched first page now
     // ends at row 11, so row 10 sorts between the pages. A provider that
@@ -6534,6 +6582,7 @@ describe(`eager indexed ordered windows`, () => {
   // reports the shift. Row 10 is in no answer after the refetch; the
   // report makes the loader re-establish the window with a bounded repair.
   it(`shows a row that moved between two served pages after a signalling refetch`, async () => {
+    oracleRoute(`fixed history`)
     await checkEagerWindow({
       path: `on-demand`,
       provider: `refetch-signal`,
@@ -6565,6 +6614,7 @@ describe(`eager indexed ordered windows`, () => {
   // the window is short. The refill grows the prefix instead of reading the
   // full source, which the refetch law forbids.
   it(`grows the prefix of a short unindexed window after a signalling refetch`, async () => {
+    oracleRoute(`fixed history`)
     await checkEagerWindow({
       path: `on-demand`,
       provider: `refetch-signal`,
@@ -6594,6 +6644,7 @@ describe(`eager indexed ordered windows`, () => {
   // short prefix took the full-source fallback. The prefix now grows, so the
   // refetch law, which allows no full-source read here, holds.
   it(`reads no full source after a signalling refetch past a NaN boundary`, async () => {
+    oracleRoute(`fixed history`)
     await checkEagerWindow({
       path: `on-demand`,
       provider: `refetch-signal`,
@@ -6625,6 +6676,7 @@ describe(`eager indexed ordered windows`, () => {
   // short prefix took the full-source fallback, twice, after a signalling
   // refetch; the refetch law allows none.
   it(`reads no full source after a signalling refetch of a short anti-joined window`, async () => {
+    oracleRoute(`fixed history`)
     await checkEagerWindow({
       path: `on-demand`,
       provider: `refetch-signal`,
@@ -6653,6 +6705,7 @@ describe(`eager indexed ordered windows`, () => {
   // loader repairs with its bounded prefix instead; a loader that read the
   // tie broke the refetch law.
   it(`repairs instead of reading an unexpressible end's tie after a signalling refetch`, async () => {
+    oracleRoute(`fixed history`)
     await checkEagerWindow({
       path: `on-demand`,
       provider: `refetch-signal`,
@@ -6691,6 +6744,7 @@ describe(`eager indexed ordered windows`, () => {
   // start no request for the first query and leave it owing no repair: the
   // window move that follows continues from its boundary instead.
   it(`starts no request for a window its own first page still proves after a report`, async () => {
+    oracleRoute(`fixed history`)
     await checkEagerWindow({
       path: `on-demand`,
       provider: `refetch-signal`,
@@ -6725,6 +6779,7 @@ describe(`eager indexed ordered windows`, () => {
   // the end. The loader must read the new end's tie; ignoring the report
   // made a later window move read the local rows and skip row 11.
   it(`repairs a signalling refetch before a window move reads past its page`, async () => {
+    oracleRoute(`fixed history`)
     await checkEagerWindow({
       path: `on-demand`,
       provider: `refetch-signal`,
@@ -6761,6 +6816,7 @@ describe(`eager indexed ordered windows`, () => {
   // the tie request still holds the rank-1 row, so the loader sees no
   // delete. The report repairs the window.
   it(`repairs a signalling refetch whose page now ends before its tie`, async () => {
+    oracleRoute(`fixed history`)
     await checkEagerWindow({
       path: `on-demand`,
       provider: `refetch-signal`,
@@ -6792,6 +6848,7 @@ describe(`eager indexed ordered windows`, () => {
   // staged continuation after a synchronous answer the graph already
   // processed closed this trace.
   it(`shows a peer's full joined window after a refetch removes a tied row`, async () => {
+    oracleRoute(`fixed history`)
     await checkEagerWindow({
       path: `on-demand`,
       provider: `refetch`,
@@ -6819,6 +6876,7 @@ describe(`eager indexed ordered windows`, () => {
   })
 
   it(`publishes a full-join window that only loses a row`, async () => {
+    oracleRoute(`fixed history`)
     // The delete leaves fewer result rows than the offset, so the window
     // only loses its row. A subscriber that did not start with that key
     // receives no removal; this one starts with every visible key and must
@@ -6847,6 +6905,7 @@ describe(`eager indexed ordered windows`, () => {
   })
 
   it(`refills an unindexed on-demand anti-join window after a visible delete`, async () => {
+    oracleRoute(`fixed history`)
     // The plan pages without an index; the anti-join drops row 0 after the
     // provider's limit. Before the compiler counted the rows this window
     // needs, the window stayed empty after the delete instead of reading the
@@ -7010,6 +7069,7 @@ describe(`eager indexed ordered windows`, () => {
   it.each(optimisticWindowCases)(
     `characterizes a width-$width $indexed indexed optimistic $shape $mutation from $mutationSource with $extent replacement extent for a $consumer before $outcome ($answerTiming)`,
     async (testCase) => {
+      oracleRoute(`case`)
       const observation = await checkOptimisticWindow(testCase)
       const actual = optimisticWindowViolations(observation, testCase)
       // Each legal history must refine the independent public-window model.
@@ -7018,6 +7078,7 @@ describe(`eager indexed ordered windows`, () => {
   )
 
   it(`refills an optimistic rank move that leaves a full installed window`, async () => {
+    oracleRoute(`fixed history`)
     // Moving the leading row below a missing source row does not shrink the
     // installed window. A local row-count check alone cannot discover that
     // the remote ordered prefix now contains row 1.
@@ -7038,6 +7099,7 @@ describe(`eager indexed ordered windows`, () => {
   })
 
   it(`restores an optimistic membership departure with a rank change on rollback`, async () => {
+    oracleRoute(`fixed history`)
     // This is a membership departure, so the short-window law applies even
     // though its source row also changes order. Rollback must remove both
     // overlay effects at the same public cut.
@@ -7068,6 +7130,7 @@ describe(`eager indexed ordered windows`, () => {
   )(
     `publishes an ascending $shape limit-one optimistic delete before $outcome`,
     async ({ shape, outcome }) => {
+      oracleRoute(`case`)
       // Negated ranks make row 3 the ascending head and row 2 its provider
       // successor. The leading rejected row 4 remains ahead of both.
       const testCase: OptimisticWindowCase = {
@@ -7088,6 +7151,7 @@ describe(`eager indexed ordered windows`, () => {
   )
 
   it(`rejects a hostile optimistic observation that makes no refill progress`, () => {
+    oracleRoute(`calibration`)
     const testCase: OptimisticWindowCase = {
       shape: `joined`,
       mutation: `delete`,
@@ -7122,6 +7186,7 @@ describe(`eager indexed ordered windows`, () => {
   })
 
   it(`rejects a delayed Collection publication`, () => {
+    oracleRoute(`calibration`)
     const testCase: OptimisticWindowCase = {
       shape: `joined`,
       mutation: `update`,
@@ -7163,6 +7228,7 @@ describe(`eager indexed ordered windows`, () => {
   })
 
   it(`rejects a stale publication after transaction settlement`, () => {
+    oracleRoute(`calibration`)
     const testCase: OptimisticWindowCase = {
       shape: `joined`,
       mutation: `update`,
@@ -7205,6 +7271,7 @@ describe(`eager indexed ordered windows`, () => {
   })
 
   it(`rejects a full-source refill disguised as useful bounded progress`, () => {
+    oracleRoute(`calibration`)
     const testCase: OptimisticWindowCase = {
       shape: `joined`,
       mutation: `delete`,
@@ -7257,6 +7324,7 @@ describe(`eager indexed ordered windows`, () => {
   })
 
   it(`rejects a source refill that omits eligibility or adds broad work`, async () => {
+    oracleRoute(`calibration`)
     const testCase: OptimisticWindowCase = {
       shape: `source`,
       mutation: `delete`,
@@ -7309,6 +7377,7 @@ describe(`eager indexed ordered windows`, () => {
   })
 
   it(`rejects acquisition deferred until after optimistic settlement`, async () => {
+    oracleRoute(`calibration`)
     const testCase: OptimisticWindowCase = {
       shape: `source`,
       mutation: `delete`,
@@ -7376,6 +7445,7 @@ describe(`eager indexed ordered windows`, () => {
   )(
     `publishes an optimistic departure in an installed $name before $outcome`,
     async ({ ranks, direction, offset, limit, outcome }) => {
+      oracleRoute(`case`)
       const persistence = createDeferred<void>()
       const rows = ranks.map((rank, index) => ({ id: index + 1, rank }))
       const source = createCollection(
@@ -7443,6 +7513,7 @@ describe(`eager indexed ordered windows`, () => {
   ] as const)(
     `shows no rootless full-join row for a null-ranked root past the prefix (%s, %s terms)`,
     async (path, terms) => {
+      oracleRoute(`case`)
       // Nulls last. Row 2 and the marker of row 3 tie on rank in the null
       // group. A full join reads its full source, so row 3's marker is
       // matched. A loader that paged this plan and ended its prefix inside
@@ -7472,6 +7543,7 @@ describe(`eager indexed ordered windows`, () => {
   it.each([`sync`, `local-only`] as const)(
     `shows no rootless full-join row whose root row is past the prefix (%s)`,
     async (path) => {
+      oracleRoute(`case`)
       // Every domain row has a marker, and nulls sort first. A bounded root
       // prefix of one row would leave the other markers unmatched in the
       // graph, and their null-ranked rootless rows would take the window
@@ -7499,6 +7571,7 @@ describe(`eager indexed ordered windows`, () => {
   it.each([`sync`, `local-only`] as const)(
     `refills a joined-filter window when a row leaves only through the join (%s)`,
     async (path) => {
+      oracleRoute(`case`)
       // The bounded prefix holds rows 3 and 1; row 0 then enters the query's
       // input past it. Row 3 loses its marker without a root delete, so row 0
       // must not stand in for row 4, which the prefix never sent.
@@ -7532,6 +7605,7 @@ describe(`eager indexed ordered windows`, () => {
   it.each([`sync`, `local-only`] as const)(
     `refills a joined-filter window past a retained distant row (%s)`,
     async (path) => {
+      oracleRoute(`case`)
       // A label update brings eligible row 10 into the query's input. After
       // row 2 leaves, a prefix of one root row (row 1) fails the joined
       // filter, and row 10 must not stand in for row 4.
@@ -7559,6 +7633,7 @@ describe(`eager indexed ordered windows`, () => {
   it.each([false, true])(
     `revalidates an empty joined prefix after an ineligible insert (indexed: %s)`,
     async (indexed) => {
+      oracleRoute(`case`)
       await checkEagerWindow({
         path: `on-demand`,
         provider: `refetch-signal`,
@@ -7582,17 +7657,26 @@ describe(`eager indexed ordered windows`, () => {
     },
   )
 
-  fcTest.prop([eagerCase], { numRuns: runs, seed: 2044 })(
+  const eagerCaseFixedSeed = oracleFixedSeed(2044, { numRuns: runs })
+  fcTest.prop([eagerCase], eagerCaseFixedSeed)(
     `keeps rows and per-change work bounded for a fixed seed`,
-    checkEagerWindow,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(eagerCaseFixedSeed))
+      await checkEagerWindow(scenario)
+    },
   )
 
-  fcTest.prop(
-    [eagerCase],
-    oracleRandomParameters(runs, replay, `ordered-work.eager-indexed-window`),
-  )(
+  const eagerCaseCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `ordered-work.eager-indexed-window`,
+  )
+  fcTest.prop([eagerCase], eagerCaseCampaign)(
     `keeps rows and per-change work bounded for a random or replayed seed`,
-    checkEagerWindow,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(eagerCaseCampaign))
+      await checkEagerWindow(scenario)
+    },
   )
 
   // Reconstruction: the fixed-seed campaign reaches the premise. Sampling
@@ -7601,12 +7685,13 @@ describe(`eager indexed ordered windows`, () => {
   // windows that hold a rootless row beside a root row with a null rank.
   const FULL_JOIN_SEED = 2073
   it(`generates full-join windows that reach the null group`, () => {
+    oracleRoute(`fixed seed`)
     let rootless = 0
     let mixedNullGroup = 0
-    for (const [testCase] of fc.sample(fc.tuple(eagerFullJoinCase), {
-      numRuns: runs,
-      seed: FULL_JOIN_SEED,
-    })) {
+    for (const [testCase] of fc.sample(
+      fc.tuple(eagerFullJoinCase),
+      oracleFixedSeed(FULL_JOIN_SEED, { numRuns: runs }),
+    )) {
       const roots = [
         ...fillerRows(testCase.direction, testCase.fillers),
         ...testCase.initial,
@@ -7640,17 +7725,28 @@ describe(`eager indexed ordered windows`, () => {
     expect(mixedNullGroup).toBeGreaterThanOrEqual(5)
   })
 
-  fcTest.prop([eagerFullJoinCase], { numRuns: runs, seed: FULL_JOIN_SEED })(
+  const eagerFullJoinCaseFixedSeed = oracleFixedSeed(FULL_JOIN_SEED, {
+    numRuns: runs,
+  })
+  fcTest.prop([eagerFullJoinCase], eagerFullJoinCaseFixedSeed)(
     `keeps a full-join window to the first result rows for a fixed seed`,
-    checkEagerWindow,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(eagerFullJoinCaseFixedSeed))
+      await checkEagerWindow(scenario)
+    },
   )
 
-  fcTest.prop(
-    [eagerFullJoinCase],
-    oracleRandomParameters(runs, replay, `ordered-work.eager-full-join`),
-  )(
+  const eagerFullJoinCaseCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `ordered-work.eager-full-join`,
+  )
+  fcTest.prop([eagerFullJoinCase], eagerFullJoinCaseCampaign)(
     `keeps a full-join window to the first result rows for a random or replayed seed`,
-    checkEagerWindow,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(eagerFullJoinCaseCampaign))
+      await checkEagerWindow(scenario)
+    },
   )
 
   // The fixed-seed held campaign and its reconstruction run in one test, so
@@ -7662,11 +7758,13 @@ describe(`eager indexed ordered windows`, () => {
   it(`starts no repair for reports a window's own first page proves for a fixed seed`, async () => {
     const PROVEN_SEED = 2091
     let proven = 0
+    const parameters = oracleFixedSeed(PROVEN_SEED, { numRuns: runs })
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(eagerProvenReportCase, async (testCase) => {
         proven += (await runEagerWindow(testCase)).ignoredProvenReports
       }),
-      { numRuns: runs, seed: PROVEN_SEED },
+      parameters,
     )
     expect(proven, `reports a first page proved`).toBeGreaterThan(0)
   })
@@ -7680,6 +7778,7 @@ describe(`eager indexed ordered windows`, () => {
     const reach = createOracleReach(`ordered-work.eager-proven-report`, [
       `ignoredProvenReports`,
     ] as const)
+    oracleRoute(oracleRouteOf(options))
     await fc.assert(
       fc.asyncProperty(eagerProvenReportCase, async (testCase) => {
         reach.beginHistory()
@@ -7719,6 +7818,13 @@ describe(`eager indexed ordered windows`, () => {
         [`unindexedRefetchChecks`, `shortUnindexedRefills`] as const,
         { minimum: 5 },
       )
+      const campaignParameters =
+        campaign === `fixed`
+          ? // This seed kills a loader that repairs every report with a
+            // full-source read; about half of seeds do.
+            oracleFixedSeed(2094, { numRuns: runs })
+          : oracleRandomParameters(runs, replay, property)
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(eagerUnindexedRefetchCase, async (testCase) => {
           reach.beginHistory()
@@ -7730,11 +7836,7 @@ describe(`eager indexed ordered windows`, () => {
             if (observed[state] > 0) reach.reach(state)
           }
         }),
-        campaign === `fixed`
-          ? // This seed kills a loader that repairs every report with a
-            // full-source read; about half of seeds do.
-            { numRuns: runs, seed: 2094 }
-          : oracleRandomParameters(runs, replay, property),
+        campaignParameters,
       )
       reach.assertReached()
     })
@@ -7747,17 +7849,19 @@ describe(`eager indexed ordered windows`, () => {
       string,
       Awaited<ReturnType<typeof runEagerWindow>>
     >()
+    const runParameters = oracleFixedSeed(HELD_SEED, { numRuns: runs })
+    oracleRoute(oracleRouteOf(runParameters))
     await fc.assert(
       fc.asyncProperty(eagerHeldCase, async (testCase) => {
         heldReach.set(fc.stringify(testCase), await runEagerWindow(testCase))
       }),
-      { numRuns: runs, seed: HELD_SEED },
+      runParameters,
     )
     // Reconstruction: sampling the arbitrary with the same seed and run
     // count yields the executed cases.
     const executed = new Set(
       fc
-        .sample(eagerHeldCase, { numRuns: runs, seed: HELD_SEED })
+        .sample(eagerHeldCase, oracleFixedSeed(HELD_SEED, { numRuns: runs }))
         .map((testCase) => fc.stringify(testCase)),
     )
     expect(
@@ -7789,18 +7893,24 @@ describe(`eager indexed ordered windows`, () => {
     ).toBeGreaterThanOrEqual(1)
   })
 
-  fcTest.prop(
-    [eagerHeldCase],
-    oracleRandomParameters(runs, replay, `ordered-work.eager-held-load`),
-  )(
+  const eagerHeldCaseCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `ordered-work.eager-held-load`,
+  )
+  fcTest.prop([eagerHeldCase], eagerHeldCaseCampaign)(
     `keeps a window whose loads answer between live changes for a random or replayed seed`,
-    checkEagerWindow,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(eagerHeldCaseCampaign))
+      await checkEagerWindow(scenario)
+    },
   )
 
   // A local null-ranked row can appear to fill the window while the settled
   // provider prefix ends before a better row. Held answers must not let that
   // local row stand in for source coverage after earlier visible deletes.
   it(`keeps a joined window within its settled source prefix after held answers`, async () => {
+    oracleRoute(`fixed history`)
     await checkEagerWindow({
       path: `on-demand`,
       provider: `forward`,
@@ -7836,30 +7946,48 @@ describe(`eager indexed ordered windows`, () => {
     })
   })
 
-  fcTest.prop([eagerJoinedGapCase], { numRuns: runs, seed: 2063 })(
+  const eagerJoinedGapCaseFixedSeed = oracleFixedSeed(2063, { numRuns: runs })
+  fcTest.prop([eagerJoinedGapCase], eagerJoinedGapCaseFixedSeed)(
     `keeps a joined-filter window whose row leaves only through the join for a fixed seed`,
-    checkEagerWindow,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(eagerJoinedGapCaseFixedSeed))
+      await checkEagerWindow(scenario)
+    },
   )
 
-  fcTest.prop(
-    [eagerJoinedGapCase],
-    oracleRandomParameters(runs, replay, `ordered-work.eager-joined-gap`),
-  )(
+  const eagerJoinedGapCaseCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `ordered-work.eager-joined-gap`,
+  )
+  fcTest.prop([eagerJoinedGapCase], eagerJoinedGapCaseCampaign)(
     `keeps a joined-filter window whose row leaves only through the join for a random or replayed seed`,
-    checkEagerWindow,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(eagerJoinedGapCaseCampaign))
+      await checkEagerWindow(scenario)
+    },
   )
 
-  fcTest.prop([eagerJoinedCase], { numRuns: runs, seed: 2059 })(
+  const eagerJoinedCaseFixedSeed = oracleFixedSeed(2059, { numRuns: runs })
+  fcTest.prop([eagerJoinedCase], eagerJoinedCaseFixedSeed)(
     `keeps a joined-filter window to the first eligible rows for a fixed seed`,
-    checkEagerWindow,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(eagerJoinedCaseFixedSeed))
+      await checkEagerWindow(scenario)
+    },
   )
 
-  fcTest.prop(
-    [eagerJoinedCase],
-    oracleRandomParameters(runs, replay, `ordered-work.eager-joined-window`),
-  )(
+  const eagerJoinedCaseCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `ordered-work.eager-joined-window`,
+  )
+  fcTest.prop([eagerJoinedCase], eagerJoinedCaseCampaign)(
     `keeps a joined-filter window to the first eligible rows for a random or replayed seed`,
-    checkEagerWindow,
+    async (scenario) => {
+      oracleRoute(oracleRouteOf(eagerJoinedCaseCampaign))
+      await checkEagerWindow(scenario)
+    },
   )
 })
 
@@ -7904,6 +8032,16 @@ function expectedInstalledWindow(
 // are the generators of legal histories: the exhaustive small domain and the
 // full-join case that the null-group calibration samples.
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/btree-index.ts',
+    'src/local-only.ts#localOnlyCollectionOptions',
+    'src/query/compiler/index.ts#compileQuery',
+    'src/query/effect.ts#createEffect',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/live/ordered-source-loader.ts',
+    'src/query/subset-dedupe.ts',
+  ],
   check: [expectEagerWindow, optimisticWindowViolations, assertConsumerParity],
   model: [
     eagerWindow,
@@ -7976,6 +8114,7 @@ declareOracle({
 it.each(compilerCacheWindows)(
   `serves every metadata-mode window of one ordered source: %j`,
   async (history) => {
+    oracleRoute(`case`)
     compilerWindowEntered = true
     compilerWindowReach.beginHistory()
     const rows = [
@@ -8103,6 +8242,7 @@ afterAll(() => {
 it.each(joinedPlanHistories)(
   `retains every joined dependency through ordered plans: %j`,
   async (history) => {
+    oracleRoute(`case`)
     joinedPlanEntered = true
     joinedPlanReach.beginHistory()
     const failures: Array<unknown> = []

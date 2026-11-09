@@ -12,8 +12,11 @@ import fc from 'fast-check'
 import { describe, expect, it, onTestFailed, vi } from 'vitest'
 import { createOracleReach } from '../../db/tests/oracle-reach.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
@@ -112,15 +115,15 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   that honors only `offset` already gets a wrong window at preload under a
  *   joined filter: the loader repeats a continuation offset capped at the
  *   window size. That loader defect is separate from #2136 and is recorded as
- *   open in the coverage map. The named replays still run both encodings.
+ *   open in the coverage map. The named fixed histories still run both encodings.
  * - It does not check the window after a marker flip, even when the provider
  *   is current. The loader used to stop refilling after a joined-side
- *   removal; a named replay now checks that trace, but the campaigns do not
+ *   removal; a named fixed history now checks that trace, but the campaigns do not
  *   check after flips.
  * - The generated campaigns use an uncapped provider. With a provider that
  *   caps pages, a row whose order changes can drop out of the window after a
  *   refetch even on main, through the loader's own repair. That defect is
- *   separate from #2136 and has an `it.fails` witness. The named replays run
+ *   separate from #2136 and has an `it.fails` witness. The named fixed histories run
  *   the issue trace with a page cap.
  * - The report laws bound when Query DB reports, not exactly when it must.
  *   Whether a missing report leaves a gap is judged through the window law.
@@ -132,7 +135,7 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  *   accepted, so a later successful retry still sees the change. No public
  *   history distinguishes that from recording earlier: the failed attempt
  *   reports on its own, and the repair it starts reads the provider again.
- *   The application-failure replay checks only the window around a failed
+ *   The application-failure fixed history checks only the window around a failed
  *   application.
  * - A Query refetch that joins a running `refetch: true` acquisition on the
  *   same Query hash does not report, because the guard cannot tell the two
@@ -252,7 +255,7 @@ function expectedCoverage(
 // write from its start, or from just before its refetch, and releases it
 // after the refetch. Ids come from a small space, so
 // inserts often land between served pages and upserts often move a served
-// row. Named replays use the same commands in other orders. With one order
+// row. Named fixed histories use the same commands in other orders. With one order
 // term, the fixture maps a generated rank to `rank * 100 + id`, so ranks stay
 // unique.
 type Command =
@@ -307,7 +310,7 @@ const caseArbitrary: fc.Arbitrary<Case> = fc.record({
     functionKey: fc.boolean(),
     terms: fc.constantFrom(1 as const, 2 as const),
     orderKey: fc.constantFrom(`rank` as const, `label` as const),
-    // Page caps run in named replays only; see the limits above.
+    // Page caps run in named fixed histories only; see the limits above.
     pageCap: fc.constant(undefined),
     limit: fc.integer({ min: 1, max: 3 }),
     offset: fc.integer({ min: 0, max: 1 }),
@@ -1229,7 +1232,10 @@ const campaigns =
       ? ([`replay`] as const)
       : ([] as const)
 
+// What this oracle owns: the on-demand Query collection's refetch and the ordered
+// prefix it serves (queryCollectionOptions and the loader it builds).
 declareOracle({
+  owns: [`src/query.ts#queryCollectionOptions`],
   check: [checkCase],
   model: [expectedWindow, expectedCoverage],
   grammar: [caseArbitrary, heldCaseArbitrary, sameKeyEndCaseArbitrary],
@@ -1243,6 +1249,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.each([`cursor`, `offset`] as const)(
     `shows a row that moved between two served pages after a refetch (%s encoding)`,
     async (encoding) => {
+      oracleRoute(`case`)
       const observation = await checkCase({
         scenario: {
           encoding,
@@ -1275,6 +1282,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.each([`cursor`, `offset`] as const)(
     `loads a row that moved between two served pages before it joins the window (%s encoding)`,
     async (encoding) => {
+      oracleRoute(`case`)
       const observation = await checkCase({
         scenario: {
           encoding,
@@ -1301,6 +1309,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.each([`cursor`, `offset`] as const)(
     `shows a moved row after a refetch when the provider caps pages (%s encoding)`,
     async (encoding) => {
+      oracleRoute(`case`)
       const observation = await checkCase({
         scenario: {
           encoding,
@@ -1329,6 +1338,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.each([`cursor`, `offset`] as const)(
     `shows a moved row when another live query loaded the page's new row first (%s encoding)`,
     async (encoding) => {
+      oracleRoute(`case`)
       const observation = await checkCase({
         scenario: {
           encoding,
@@ -1359,6 +1369,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.each([`cursor`, `offset`] as const)(
     `repairs when a page keeps its keys but its last row moves (%s encoding)`,
     async (encoding) => {
+      oracleRoute(`case`)
       await checkCase({
         scenario: {
           encoding,
@@ -1395,6 +1406,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.each([`cursor`, `offset`] as const)(
     `shows a row that ties at a page's new, earlier end (%s encoding)`,
     async (encoding) => {
+      oracleRoute(`case`)
       await checkCase({
         scenario: {
           encoding,
@@ -1426,6 +1438,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   // new end and the loader's old boundary and is in neither result.
   // (Found by the random campaign.)
   it(`shows a row that lands between a filtered page's new and old end`, async () => {
+    oracleRoute(`case`)
     await checkCase({
       scenario: {
         encoding: `cursor`,
@@ -1455,6 +1468,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   // apply, unmarked row 4 heads the page and row 3 sorts between it and
   // row 0; only a repair after the rows become visible can load row 3.
   it(`shows a row that lands between a page's new and old end while an optimistic update persists`, async () => {
+    oracleRoute(`case`)
     const scenario: Scenario = {
       encoding: `cursor`,
       functionKey: false,
@@ -1503,6 +1517,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.each([1, 2] as const)(
     `a refetch that moves a first page's end proves the window again with bounded reads (%i order terms)`,
     async (terms) => {
+      oracleRoute(`case`)
       const scenario: Scenario = {
         encoding: `cursor`,
         functionKey: false,
@@ -1551,6 +1566,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   // continuation still starts where the first page used to end, so a row
   // that now sorts between them is in neither result.
   it(`shows a row that moved before an empty later page`, async () => {
+    oracleRoute(`case`)
     await checkCase({
       scenario: {
         encoding: `cursor`,
@@ -1583,6 +1599,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.each([`cursor`, `offset`] as const)(
     `shows a row that moved between two served pages after a Query invalidation (%s encoding)`,
     async (encoding) => {
+      oracleRoute(`case`)
       const observation = await checkCase({
         scenario: {
           encoding,
@@ -1612,6 +1629,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.each([`cursor`, `offset`] as const)(
     `a second refetch still covers the first served boundary (%s encoding)`,
     async (encoding) => {
+      oracleRoute(`case`)
       const observation = await checkCase({
         scenario: {
           encoding,
@@ -1665,6 +1683,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
       history: [{ type: `delete` as const, id: 2 }],
     },
   ])(`a refetch does not report when $name`, async ({ initial, history }) => {
+    oracleRoute(`case`)
     const observation = await checkCase({
       scenario: {
         encoding: `cursor`,
@@ -1685,6 +1704,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   // that page's rows do not apply. The window then shows its last result or
   // the right one, and the next refetch must restore it.
   it(`a refetch whose page application fails keeps the last window until the next refetch`, async () => {
+    oracleRoute(`case`)
     const scenario: Scenario = {
       encoding: `cursor`,
       functionKey: false,
@@ -1726,6 +1746,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   })
 
   it(`a refetch settles when the provider honors neither cursor nor offset`, async () => {
+    oracleRoute(`case`)
     const run = await startRun({
       scenario: {
         encoding: `cursor`,
@@ -1761,6 +1782,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.each([`cursor`, `offset`] as const)(
     `keeps the last window when the repair fails, and the retry restores it (%s encoding)`,
     async (encoding) => {
+      oracleRoute(`case`)
       const testCase: Case = {
         scenario: {
           encoding,
@@ -1831,6 +1853,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.fails(
     `an offset-only provider fills a joined window at preload (known loader defect)`,
     async () => {
+      oracleRoute(`case`)
       const run = await startRun({
         scenario: {
           encoding: `offset`,
@@ -1861,6 +1884,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   // sent, which discarded the repair's boundary, and paging restarted from
   // the start of the order. It now passes.
   it(`a current provider refills a joined window after a marker removal`, async () => {
+    oracleRoute(`case`)
     const testCase: Case = {
       scenario: {
         encoding: `cursor`,
@@ -1907,6 +1931,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.fails(
     `a capped provider keeps a moved row in the window after a refetch (known loader defect)`,
     async () => {
+      oracleRoute(`case`)
       await checkCase({
         scenario: {
           encoding: `cursor`,
@@ -1943,6 +1968,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   // new, smaller first page that could not retire the repair's prefix, and
   // every later refetch of an unchanged backend read both.
   it(`a repair that releases another request's row keeps one first page`, async () => {
+    oracleRoute(`case`)
     await checkCase({
       scenario: {
         encoding: `cursor`,
@@ -1980,6 +2006,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   // each such answer: if it stops, row 0 is never loaded, although a short
   // window treats every row as read. Only the coverage law sees that.
   it(`a short window keeps paging through Queries answered from the cache`, async () => {
+    oracleRoute(`case`)
     await checkCase({
       scenario: {
         encoding: `cursor`,
@@ -2023,6 +2050,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   // reverted; the fix that resumes a continuation after a synchronous answer
   // closed it. The generated grammar now holds deletes too.
   it(`a refetch during a held optimistic delete keeps the window right after release`, async () => {
+    oracleRoute(`case`)
     await checkCase({
       scenario: {
         encoding: `cursor`,
@@ -2059,6 +2087,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   // is unchanged: after release, the ordered window equals the pure backend
   // window, regardless of which consumer previously observed a deleted row.
   it(`a held refetch removes a deleted row owned by an observed query`, async () => {
+    oracleRoute(`case`)
     await checkCase({
       scenario: {
         encoding: `cursor`,
@@ -2093,6 +2122,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   // This is the exact reduced CI history. It has no separate expected
   // answer: both the window and latent coverage use the shared model.
   it(`keeps coverage when a held page keeps its key and moves earlier`, async () => {
+    oracleRoute(`case`)
     await checkCase({
       scenario: {
         encoding: `cursor`,
@@ -2138,7 +2168,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
       )
       const options =
         campaign === `fixed`
-          ? { seed: 20261102, numRuns: oracleRuns(24) }
+          ? oracleFixedSeed(20261102, { numRuns: oracleRuns(24) })
           : oraclePropertyOptions(24, endProperty)
       const seed = options.seed ?? Math.floor(Math.random() * 2 ** 31)
       onTestFailed(() => {
@@ -2146,6 +2176,8 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
           `${endProperty} ${campaign} campaign: rerun with TANSTACK_DB_ORACLE_SEED=${seed}`,
         )
       })
+      const parameters = oracleFixedSeed(seed, { ...options })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(sameKeyEndCaseArbitrary, async (testCase) => {
           reach.beginHistory()
@@ -2155,7 +2187,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
           if (observation.reachedDeleteHeldGapReportAndRepair)
             reach.reach(`delete-held gap reported and repaired`)
         }),
-        { ...options, seed },
+        parameters,
       )
       reach.assertReached()
       console.info(endProperty, campaign, Object.fromEntries(reach.counts()))
@@ -2168,6 +2200,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.skipIf(oracleReplayRequested())(
     `same-key boundary shifts preserve coverage across widths and hold regimes`,
     async () => {
+      oracleRoute(`case`)
       const states = [1, 2, 3].flatMap((limit) =>
         [0, 1].map(
           (offset) => `delete-held gap width ${limit} offset ${offset}`,
@@ -2241,12 +2274,14 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
     `generated refetch histories under a hold (fixed campaign)`,
     async () => {
       let reachedReport = 0
+      const parameters = oracleFixedSeed(20261015, { numRuns: oracleRuns(40) })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(heldCaseArbitrary, async (testCase) => {
           const observation = await withDeadline(checkCase(testCase))
           if (observation.reachedReportDuringHold) reachedReport++
         }),
-        { seed: 20261015, numRuns: oracleRuns(40) },
+        parameters,
       )
       expect(reachedReport).toBeGreaterThan(0)
     },
@@ -2268,7 +2303,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
       const reach = createOracleReach(property, states, { minimum: 3 })
       const options =
         campaign === `fixed`
-          ? { seed: 20261013, numRuns: oracleRuns(80) }
+          ? oracleFixedSeed(20261013, { numRuns: oracleRuns(80) })
           : oraclePropertyOptions(80, property)
       // fast-check reports its seed only when the property fails. Choose the
       // random campaign's seed here, so a test timeout can report it too.
@@ -2278,6 +2313,8 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
           `${property} ${campaign} campaign: rerun with TANSTACK_DB_ORACLE_SEED=${seed}`,
         )
       })
+      const campaignParameters = oracleFixedSeed(seed, { ...options })
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(caseArbitrary, async (testCase) => {
           reach.beginHistory()
@@ -2286,7 +2323,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
             if (observation[state]) reach.reach(state)
           }
         }),
-        { ...options, seed },
+        campaignParameters,
       )
       reach.assertReached()
       console.info(property, campaign, Object.fromEntries(reach.counts()))

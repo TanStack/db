@@ -7,17 +7,22 @@
  * The finite grammar crosses adapter, key/scalar domain, CRUD handler, direct
  * Config annotation/factory call, schema presence, Query row/envelope selection,
  * Promise construction and return-value shape.
- * An independent output/transport rule predicts admission. The actual compiler
- * receives generated consumers importing public source entries. Diagnostics
- * must match exactly the rejected candidate lines; missing imports or unrelated
- * compiler failures never count as rejection evidence. Built declarations/npm
- * resolution and actual application migrations remain separate O22 receivers.
+ * An independent output/transport rule predicts admission. Each type shape
+ * resolves to a generated consumer program, one candidate declaration per line;
+ * the driver is the real TypeScript compiler, which records each diagnostic.
+ * Diagnostics must match exactly the rejected candidate lines; missing imports
+ * or unrelated compiler failures never count as rejection evidence. Built
+ * declarations, npm resolution, and actual application migrations remain
+ * separate receivers (the coverage map's O22 boundary).
  */
-import { resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 import ts from 'typescript'
-import { afterAll, describe, expect, test } from 'vitest'
-import { declareOracle } from './oracle-declaration'
-import { createOracleReach } from './oracle-reach'
+import { oracleProperty, pass, violation } from './oracle-property'
+import type { Observation } from './oracle-property'
+
+// ---------------------------------------------------------------------------
+// Grammar
+// ---------------------------------------------------------------------------
 
 type ResultDescription = {
   name: string
@@ -99,26 +104,27 @@ const typeShapes = ([`query`, `electric`] as const).flatMap((adapter) =>
 )
 type TypeShape = (typeof typeShapes)[number]
 
-// Promise<void> accepts fulfilled void/undefined and rejection. A synchronous
-// never-returning function is also assignable; a synchronous void one is not.
-// This rule uses the declared result description, not production handler types.
-function admitsHandler(result: ResultDescription): boolean {
-  return (
-    result.output === `never` ||
-    (result.transport !== `sync` && result.output !== `value`)
-  )
-}
-
 type Candidate = {
   id: string
+  /** The result description the candidate's handler returns. */
+  result: string
   line: number
-  admitted: boolean
   surface: string
   start: number
   end: number
   handlerStart: number
   handlerEnd: number
 }
+
+// ---------------------------------------------------------------------------
+// Resolution: a type shape becomes a consumer program
+// ---------------------------------------------------------------------------
+//
+// The plan is the generated source and where each candidate declaration and
+// its CRUD property sit in it. It holds no expected admission.
+
+type Plan = { shape: TypeShape; source: string; candidates: Array<Candidate> }
+
 function handlerConsumer(shape: TypeShape): {
   source: string
   candidates: Array<Candidate>
@@ -170,7 +176,7 @@ function handlerConsumer(shape: TypeShape): {
         candidates.push({
           id,
           line: lines.length + 1,
-          admitted: admitsHandler(result),
+          result: result.name,
           surface,
           start,
           end: start + declaration.length,
@@ -184,6 +190,10 @@ function handlerConsumer(shape: TypeShape): {
   }
   return { source: lines.join(`\n`), candidates }
 }
+
+// ---------------------------------------------------------------------------
+// Production driver: the TypeScript compiler
+// ---------------------------------------------------------------------------
 
 // Only compiler mechanics are cached. Every history gets a fresh consumer AST;
 // all dependency diagnostics are retained. Public imports resolve to source so
@@ -244,179 +254,300 @@ function compileHandlerConsumer(source: string): ReadonlyArray<ts.Diagnostic> {
   return [...parsed.errors, ...ts.getPreEmitDiagnostics(program)]
 }
 
-// A negative candidate owes a handler-result incompatibility inside its own
-// declaration, anchored on its CRUD property; positive neighbors owe none.
-// TypeScript may report both schema and handler overload errors for one call. Keep those distinct diagnostics,
-// reject duplicates, and compare candidate membership rather than multiplicity.
-// The Promise<void> cause prevents unrelated same-code errors from substituting
-// for the required rejection. The property anchor also rejects an unrelated
-// Promise<void> error inside the callback. Built diagnostics are an O22 receiver.
-function checkHandlerAdmission(
-  candidates: ReadonlyArray<Candidate>,
-  diagnostics: ReadonlyArray<ts.Diagnostic>,
-): void {
-  const observed = diagnostics.map((diagnostic) => {
-    const line =
-      diagnostic.file && diagnostic.start !== undefined
-        ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line +
-          1
-        : undefined
-    const candidate = candidates.find((entry) => entry.line === line)
-    expect(
-      diagnostic.file?.fileName,
-      ts.flattenDiagnosticMessageText(diagnostic.messageText, `\n`),
-    ).toBe(filename)
-    expect(
-      candidate,
-      `unexpected diagnostic at line ${line}: TS${diagnostic.code} ${ts.flattenDiagnosticMessageText(diagnostic.messageText, ` `)}`,
-    ).toBeDefined()
-    expect(candidate!.admitted, `admitted handler ${candidate!.id}`).toBe(false)
-    expect(candidate!.surface === `config` ? [2322] : [2322, 2769]).toContain(
-      diagnostic.code,
-    )
-    expect(diagnostic.start).toBeGreaterThanOrEqual(candidate!.start)
-    expect(diagnostic.start! + (diagnostic.length ?? 0)).toBeLessThanOrEqual(
-      candidate!.end,
-    )
-    expect(
-      ts.flattenDiagnosticMessageText(diagnostic.messageText, ` `),
-    ).toContain(`Promise<void>`)
-    return {
-      id: candidate!.id,
-      handler:
-        diagnostic.start === candidate!.handlerStart &&
-        diagnostic.start + (diagnostic.length ?? 0) === candidate!.handlerEnd,
-      diagnostic: `${diagnostic.start}/${diagnostic.length}/${diagnostic.code}/${ts.flattenDiagnosticMessageText(diagnostic.messageText, ` `)}`,
-    }
-  })
-  expect(new Set(observed.map((entry) => entry.diagnostic)).size).toBe(
-    observed.length,
+// The driver compiles the plan's source and records every diagnostic as
+// plain data: its file (the generated consumer, another file by name, or
+// none), its line, span, code, and message.
+type Diagnostic = {
+  file: string
+  line: number | undefined
+  start: number | undefined
+  length: number
+  code: number
+  message: string
+}
+
+function compileDriver(
+  plan: Plan,
+  observe: (checkpoint: string, value: unknown) => void,
+) {
+  const diagnostics = compileHandlerConsumer(plan.source).map(
+    (diagnostic): Diagnostic => ({
+      file:
+        diagnostic.file === undefined
+          ? `(no file)`
+          : diagnostic.file.fileName === filename
+            ? `(generated consumer)`
+            : relative(packageRoot, diagnostic.file.fileName),
+      line:
+        diagnostic.file && diagnostic.start !== undefined
+          ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
+              .line + 1
+          : undefined,
+      start: diagnostic.start,
+      length: diagnostic.length ?? 0,
+      code: diagnostic.code,
+      message: ts.flattenDiagnosticMessageText(diagnostic.messageText, ` `),
+    }),
   )
-  expect(
-    [
-      ...new Set(
-        observed.filter((entry) => entry.handler).map((entry) => entry.id),
-      ),
-    ].sort(),
-  ).toEqual(
-    candidates
-      .filter((entry) => !entry.admitted)
-      .map((entry) => entry.id)
-      .sort(),
+  observe(`diagnostics`, diagnostics)
+}
+
+// ---------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------
+//
+// Promise<void> accepts fulfilled void/undefined and rejection. A synchronous
+// never-returning function is also assignable; a synchronous void one is not.
+// This rule uses the declared result description, not production handler
+// types. The model owes the set of rejected candidates, and names the states
+// each shape reaches.
+
+function admitsHandler(result: ResultDescription): boolean {
+  return (
+    result.output === `never` ||
+    (result.transport !== `sync` && result.output !== `value`)
   )
 }
 
-// A state name leaves out the key and scalar types, so the six shapes that
-// differ only there share one state, and `minimum: 6` asks for all of them.
-const states = [
-  ...new Set(
-    typeShapes.flatMap((shape) =>
-      surfaces.flatMap((surface) =>
-        handlers.flatMap((handler) =>
-          results.map(
-            (result) =>
-              `${shape.adapter}/${shape.schema ? `schema` : `plain`}/${shape.data}/${surface}/${handler}/${result.name}`,
-          ),
-        ),
+function admissionModel(plan: Plan) {
+  const admitted = new Map(
+    plan.candidates.map((candidate) => [
+      candidate.id,
+      admitsHandler(
+        results.find((result) => result.name === candidate.result)!,
       ),
-    ),
-  ),
-]
-const reach = createOracleReach(`adapter.handler-types`, states, { minimum: 6 })
-describe(`public handler result admission`, () => {
-  afterAll(() => {
-    reach.assertReached()
-    console.info(
-      `adapter.handler-types reach`,
-      Object.fromEntries(reach.counts()),
-    )
-  })
-  test.each(typeShapes)(
-    `admits only promised handler results: %j`,
-    (shape) => {
-      reach.beginHistory()
-      const consumer = handlerConsumer(shape)
-      const diagnostics = compileHandlerConsumer(consumer.source)
-      checkHandlerAdmission(consumer.candidates, diagnostics)
-      for (const candidate of consumer.candidates)
-        reach.reach(
-          `${shape.adapter}/${shape.schema ? `schema` : `plain`}/${shape.data}/${candidate.id}`,
-        )
-    },
-    30000,
+    ]),
   )
-})
+  const { adapter, schema, data } = plan.shape
+  const reached = plan.candidates.map(
+    (candidate) =>
+      `${adapter}/${schema ? `schema` : `plain`}/${data}/${candidate.id}`,
+  )
+  return { admitted, reached }
+}
 
-// Controls alter actual compiler observations, not the expected grammar. They
-// first establish that the generated neighbor is admitted/rejected correctly.
-test.each([
-  `missing-rejection`,
-  `duplicate-rejection`,
-  `setup-error`,
-  `reject-void`,
-  `unrelated-same-code`,
-  `unrelated-promise-in-body`,
-] as const)(
-  `rejects wrong handler compiler observation: %s`,
-  (fault) => {
-    const consumer = handlerConsumer(typeShapes[0]!)
-    const diagnostics = [...compileHandlerConsumer(consumer.source)]
-    checkHandlerAdmission(consumer.candidates, diagnostics)
-    if (fault === `missing-rejection`) {
-      const line = diagnostics[0]!.file!.getLineAndCharacterOfPosition(
-        diagnostics[0]!.start!,
-      ).line
-      for (let i = diagnostics.length - 1; i >= 0; i--)
-        if (
-          diagnostics[i]!.file!.getLineAndCharacterOfPosition(
-            diagnostics[i]!.start!,
-          ).line === line
-        )
-          diagnostics.splice(i, 1)
-    }
-    if (fault === `duplicate-rejection`) diagnostics.push(diagnostics[0]!)
-    if (fault === `setup-error`)
-      diagnostics[0] = { ...diagnostics[0]!, code: 2307 }
-    if (fault === `unrelated-same-code`)
-      diagnostics[0] = {
-        ...diagnostics[0]!,
-        code: 2322,
-        messageText: `Type 'number' is not assignable to type 'string'.`,
-      }
-    if (fault === `unrelated-promise-in-body`) {
-      const candidate = consumer.candidates.find(
-        (entry) =>
-          entry.line ===
-          diagnostics[0]!.file!.getLineAndCharacterOfPosition(
-            diagnostics[0]!.start!,
-          ).line +
-            1,
-      )!
-      diagnostics[0] = {
-        ...diagnostics[0]!,
-        start: candidate.handlerEnd + 3,
-        length: 1,
-      }
-    }
-    if (fault === `reject-void`) {
-      const admitted = consumer.candidates.find(
-        (candidate) => candidate.admitted,
-      )!
-      diagnostics.push({
-        ...diagnostics[0]!,
-        start: admitted.handlerStart,
-        length: admitted.handlerEnd - admitted.handlerStart,
-      })
-    }
-    expect(() =>
-      checkHandlerAdmission(consumer.candidates, diagnostics),
-    ).toThrow()
+// ---------------------------------------------------------------------------
+// Check
+// ---------------------------------------------------------------------------
+//
+// A negative candidate owes a handler-result incompatibility inside its own
+// declaration, anchored on its CRUD property; positive neighbors owe none.
+// TypeScript may report both schema and handler overload errors for one call.
+// Keep those distinct diagnostics, reject duplicates, and compare candidate
+// membership rather than multiplicity. The Promise<void> cause prevents
+// unrelated same-code errors from substituting for the required rejection.
+// The property anchor also rejects an unrelated Promise<void> error inside the
+// callback. The laws:
+// - `candidate-diagnostics`: every diagnostic is in the generated file, on a
+//   candidate's line;
+// - `admission`: no admitted candidate has one, and the candidates rejected at
+//   their CRUD property are exactly the ones the model rejects;
+// - `diagnostic-cause`: a diagnostic has the expected code, lies inside its
+//   candidate's declaration, and names Promise<void>;
+// - `distinct-diagnostics`: no diagnostic is reported twice.
+
+function checkHandlerAdmission(
+  plan: Plan,
+  trace: ReadonlyArray<Observation>,
+  { admitted }: ReturnType<typeof admissionModel>,
+) {
+  const recorded = trace.find(({ checkpoint }) => checkpoint === `diagnostics`)
+  if (!recorded)
+    return violation(
+      `diagnostics`,
+      `the driver recorded no diagnostics`,
+      `trace`,
+    )
+  const diagnostics = recorded.value as Array<Diagnostic>
+  const rejected = new Set<string>()
+  for (const diagnostic of diagnostics) {
+    const candidate = plan.candidates.find(
+      (entry) => entry.line === diagnostic.line,
+    )
+    if (diagnostic.file !== `(generated consumer)` || !candidate)
+      return violation(
+        `diagnostics`,
+        `unexpected diagnostic in ${diagnostic.file} at line ${diagnostic.line}: TS${diagnostic.code} ${diagnostic.message}`,
+        `candidate-diagnostics`,
+      )
+    if (admitted.get(candidate.id))
+      return violation(
+        `diagnostics`,
+        `admitted handler ${candidate.id} was rejected`,
+        `admission`,
+      )
+    const codes = candidate.surface === `config` ? [2322] : [2322, 2769]
+    const end = (diagnostic.start ?? 0) + diagnostic.length
+    if (
+      !codes.includes(diagnostic.code) ||
+      diagnostic.start === undefined ||
+      diagnostic.start < candidate.start ||
+      end > candidate.end ||
+      !diagnostic.message.includes(`Promise<void>`)
+    )
+      return violation(
+        `diagnostics`,
+        `${candidate.id}: TS${diagnostic.code} at ${diagnostic.start}..${end} (declaration ${candidate.start}..${candidate.end}): ${diagnostic.message}`,
+        `diagnostic-cause`,
+      )
+    if (
+      diagnostic.start === candidate.handlerStart &&
+      end === candidate.handlerEnd
+    )
+      rejected.add(candidate.id)
+  }
+  const texts = diagnostics.map(
+    (diagnostic) =>
+      `${diagnostic.start}/${diagnostic.length}/${diagnostic.code}/${diagnostic.message}`,
+  )
+  const repeated = texts.filter((text, index) => texts.indexOf(text) !== index)
+  if (repeated.length > 0)
+    return violation(
+      `diagnostics`,
+      `${repeated.length} of ${texts.length} diagnostics were reported again: ${repeated.join(`; `)}`,
+      `distinct-diagnostics`,
+    )
+  const owed = [...admitted]
+    .filter(([, value]) => !value)
+    .map(([id]) => id)
+    .sort()
+  const seen = [...rejected].sort()
+  if (JSON.stringify(seen) !== JSON.stringify(owed))
+    return violation(
+      `diagnostics`,
+      `rejected ${JSON.stringify(seen)}, owed ${JSON.stringify(owed)}`,
+      `admission`,
+      { actual: seen, expected: owed },
+    )
+  return pass
+}
+
+// ---------------------------------------------------------------------------
+// Calibrations
+// ---------------------------------------------------------------------------
+//
+// Wrong compiler observations the check must reject: a missing rejection, a
+// duplicated one, a setup error in place of a rejection, an admitted handler
+// reported as rejected, an unrelated error with the same code, and a
+// Promise<void> error inside a callback body instead of at the property.
+
+/** Replaces the recorded diagnostics, or gives undefined when `change` does. */
+const corruptDiagnostics =
+  (
+    change: (
+      diagnostics: Array<Diagnostic>,
+      plan: Plan,
+    ) => Array<Diagnostic> | undefined,
+  ) =>
+  (trace: ReadonlyArray<Observation>, plan: Plan) => {
+    const at = trace.findIndex(({ checkpoint }) => checkpoint === `diagnostics`)
+    if (at < 0) return undefined
+    const changed = change([...(trace[at]!.value as Array<Diagnostic>)], plan)
+    if (!changed) return undefined
+    return trace.map((entry, index) =>
+      index === at ? { ...entry, value: changed } : entry,
+    )
+  }
+
+const handlerCalibrations = [
+  {
+    name: `missing rejection`,
+    law: `admission`,
+    corrupt: corruptDiagnostics((diagnostics) => {
+      const first = diagnostics[0]
+      return first
+        ? diagnostics.filter((diagnostic) => diagnostic.line !== first.line)
+        : undefined
+    }),
   },
-  30000,
-)
+  {
+    name: `duplicate rejection`,
+    law: `distinct-diagnostics`,
+    corrupt: corruptDiagnostics((diagnostics) =>
+      diagnostics[0] ? [...diagnostics, diagnostics[0]] : undefined,
+    ),
+  },
+  {
+    name: `setup error`,
+    law: `diagnostic-cause`,
+    corrupt: corruptDiagnostics((diagnostics) =>
+      diagnostics[0]
+        ? [{ ...diagnostics[0], code: 2307 }, ...diagnostics.slice(1)]
+        : undefined,
+    ),
+  },
+  {
+    name: `rejected void`,
+    law: `admission`,
+    corrupt: corruptDiagnostics((diagnostics, plan) => {
+      const model = admissionModel(plan)
+      const candidate = plan.candidates.find((entry) =>
+        model.admitted.get(entry.id),
+      )
+      return diagnostics[0] && candidate
+        ? [
+            ...diagnostics,
+            {
+              ...diagnostics[0],
+              line: candidate.line,
+              start: candidate.handlerStart,
+              length: candidate.handlerEnd - candidate.handlerStart,
+            },
+          ]
+        : undefined
+    }),
+  },
+  {
+    name: `unrelated same code`,
+    law: `diagnostic-cause`,
+    corrupt: corruptDiagnostics((diagnostics) =>
+      diagnostics[0]
+        ? [
+            {
+              ...diagnostics[0],
+              code: 2322,
+              message: `Type 'number' is not assignable to type 'string'.`,
+            },
+            ...diagnostics.slice(1),
+          ]
+        : undefined,
+    ),
+  },
+  {
+    name: `Promise<void> error inside the callback body`,
+    law: `admission`,
+    corrupt: corruptDiagnostics((diagnostics, plan) => {
+      const first = diagnostics[0]
+      const candidate =
+        first && plan.candidates.find((entry) => entry.line === first.line)
+      return first && candidate
+        ? [
+            { ...first, start: candidate.handlerEnd + 3, length: 1 },
+            ...diagnostics.slice(1),
+          ]
+        : undefined
+    }),
+  },
+]
 
-declareOracle({
-  check: [checkHandlerAdmission],
-  model: [admitsHandler],
-  grammar: [handlerConsumer, typeShapes, results],
+// No owns: the handler types this property judges belong to the Query and
+// Electric adapter packages, outside packages/db. The property's own parts
+// (the compiler driver and the admission model) are declared by oracleProperty.
+oracleProperty({
+  id: `adapter.handler-types`,
+  law: {
+    statement: `Query and Electric handlers admit exactly the results that Promise<void> accepts: a handler that returns a value, or a synchronous handler that returns, is rejected at its CRUD property with a Promise<void> diagnostic, and no other diagnostic appears.`,
+    authority: `the approved RC handler migration and the public QueryCollectionConfig and ElectricCollectionConfig types`,
+    limits: `Source entries only; built declarations, npm resolution, and application migrations are separate receivers.`,
+    owner: `RC public mutation-handler type admission`,
+  },
+  histories: typeShapes,
+  label: ({ adapter, key, scalar, schema, data }) =>
+    `${adapter} ${key} ${scalar} ${schema ? `schema` : `plain`} ${data}`,
+  resolve: (shape: TypeShape): Plan => ({ shape, ...handlerConsumer(shape) }),
+  model: admissionModel,
+  reached: (_plan, _trace, expected) => expected.reached,
+  driver: compileDriver,
+  check: checkHandlerAdmission,
+  calibrations: handlerCalibrations,
 })

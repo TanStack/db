@@ -44,7 +44,7 @@
  * compared through the same prefix identity.
  *
  * Calibration: comparing prefixes with `===` kept a cancelled `NaN`-prefixed
- * value, or threw `Mismatching prefixes`, and fails the pinned histories and
+ * value, or threw `Mismatching prefixes`, and fails the fixed histories and
  * both campaigns.
  *
  * Known omissions: `Index` joins, compaction, presence tracking, and structural
@@ -55,8 +55,11 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { Index } from '../src/indexes.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -165,7 +168,7 @@ const add = (value: Value, multiplicity: number): Addition => ({
 })
 
 // Each history cancels or merges `NaN`-prefixed values in a different layout.
-const pinnedHistories: ReadonlyArray<{
+const fixedHistories: ReadonlyArray<{
   name: string
   additions: Array<Addition>
 }> = [
@@ -234,7 +237,15 @@ function expectRefinement(
 
 // The refinement law is declared with its model, the multiset of values per
 // key, and its grammar, the generated addition histories.
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 declareOracle({
+  owns: [
+    `src/indexes.ts#Index.addValue`,
+    `src/indexes.ts#Index.get`,
+    `src/indexes.ts#Index.has`,
+    `src/indexes.ts#Index.getIterator`,
+  ],
   check: [expectRefinement],
   model: [expectedIndex],
   grammar: [historyArbitrary],
@@ -249,8 +260,9 @@ declareOracle({
 const INDEX_REFINEMENT_PROPERTY = `ivm.index-refinement`
 
 describe(`Index refinement oracle`, () => {
-  for (const { name, additions } of pinnedHistories) {
+  for (const { name, additions } of fixedHistories) {
     oracleReplayTest(it)(`matches the multiset model when ${name}`, () => {
+      oracleRoute(`fixed history`)
       expectRefinement(additions)
       expectRefinement(additions, `prefixIdentity`)
     })
@@ -259,12 +271,14 @@ describe(`Index refinement oracle`, () => {
   oracleReplayTest(it)(
     `matches the multiset model across generated additions (20260930)`,
     () => {
+      const parameters = oracleFixedSeed(20260930, { numRuns: oracleRuns(300) })
+      oracleRoute(oracleRouteOf(parameters))
       fc.assert(
         fc.property(historyArbitrary, (additions) => {
           expectRefinement(additions)
           expectRefinement(additions, `prefixIdentity`)
         }),
-        { numRuns: oracleRuns(300), seed: 20260930 },
+        parameters,
       )
     },
   )
@@ -272,12 +286,17 @@ describe(`Index refinement oracle`, () => {
   oracleReplayTest(it, INDEX_REFINEMENT_PROPERTY)(
     `matches the multiset model across generated additions (random or replayed)`,
     () => {
+      const campaignParameters = oraclePropertyOptions(
+        300,
+        INDEX_REFINEMENT_PROPERTY,
+      )
+      oracleRoute(oracleRouteOf(campaignParameters))
       fc.assert(
         fc.property(historyArbitrary, (additions) => {
           expectRefinement(additions)
           expectRefinement(additions, `prefixIdentity`)
         }),
-        oraclePropertyOptions(300, INDEX_REFINEMENT_PROPERTY),
+        campaignParameters,
       )
     },
   )
@@ -285,7 +304,11 @@ describe(`Index refinement oracle`, () => {
   // Positive execution witness: generated histories reach a NaN prefix that
   // cancels after another value joined its key.
   it(`reaches cancelled NaN-prefixed values beside other values`, () => {
-    const sample = fc.sample(historyArbitrary, { seed: 20260930, numRuns: 300 })
+    oracleRoute(`fixed seed`)
+    const sample = fc.sample(
+      historyArbitrary,
+      oracleFixedSeed(20260930, { numRuns: 300 }),
+    )
     const reached = sample.filter((additions) =>
       additions.some(
         (addition, step) =>

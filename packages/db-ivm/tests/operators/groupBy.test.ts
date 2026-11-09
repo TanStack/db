@@ -839,7 +839,7 @@ describe(`Operators`, () => {
     })
 
     test(`min and max can return the deleted instance of a hash-equal value`, () => {
-      // Current behavior, pinned so a db-ivm change alerts the compiler owner.
+      // Current behavior, fixed so a db-ivm change alerts the compiler owner.
       // The delete's retraction is the last record the shared entry gets, so
       // its instance, the deleted value, is the one that comes back, in either
       // insertion order.

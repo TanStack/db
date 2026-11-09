@@ -24,8 +24,11 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createTransaction } from '../../src'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   recordOracleReplay,
 } from '../oracle-config'
@@ -257,6 +260,7 @@ describe('settled histories', () => {
   // Reconstruction witnesses preserve all action kinds even if random sampling
   // or shrinking selects an empty history.
   it('reconstructs replacement, ownership, typed keys and restart histories', async () => {
+    oracleRoute(`fixed history`)
     await runHistory(
       kinds.flatMap((kind, i) => [
         { kind, slot: 0, key: i % 4, value: 1, optional: true },
@@ -265,12 +269,14 @@ describe('settled histories', () => {
     )
   })
   it('clears a previously confirmed update without retaining optimistic data', async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       { kind: 'write', slot: 0, key: 0, value: 0, optional: false },
       { kind: 'clear', slot: 0, key: 0, value: 0, optional: false },
     ])
   })
   it('refreshes changed imported rows while allowing identical replacements', async () => {
+    oracleRoute(`fixed history`)
     const replacement: Step = {
       kind: 'import',
       slot: 0,
@@ -285,6 +291,7 @@ describe('settled histories', () => {
     ])
   })
   it('preserves rows through authored no-op updates', async () => {
+    oracleRoute(`fixed history`)
     const repeated: Step = {
       kind: 'write',
       slot: 0,
@@ -303,6 +310,7 @@ describe('settled histories', () => {
     parameters: { numRuns: number; seed?: number; path?: string },
   ) => {
     return async () => {
+      oracleRoute(oracleRouteOf(parameters))
       console.info('indexeddb.persistence campaign', mode, parameters)
       await fc.assert(fc.asyncProperty(history, runHistory), {
         verbose: true,
@@ -325,7 +333,10 @@ describe('settled histories', () => {
   }
   oracleReplayTest(it)(
     'matches authored data through fixed histories',
-    settledCampaign(`fixed`, { numRuns: oracleRuns(30), seed: 1179001 }),
+    settledCampaign(
+      `fixed`,
+      oracleFixedSeed(1179001, { numRuns: oracleRuns(30) }),
+    ),
     30_000,
   )
   oracleReplayTest(it, settledProperty)(
@@ -355,6 +366,12 @@ function acceptOwnerInModel(
 // peer and version rows with the authored model that it keeps for the history.
 // acceptOwnerInModel is the model of the manual-acceptance test below.
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexed-db.ts#createIndexedDB',
+    'src/indexed-db.ts#indexedDBCollectionOptions',
+    'src/transactions.ts#createTransaction',
+  ],
   check: [runHistory],
   model: [acceptOwnerInModel],
 })
@@ -366,6 +383,7 @@ declareOracle({
  * same-ID Collection policy. A skipped owner must leave its rows/versions alone.
  */
 it('manual acceptance partitions mixed payloads across three Collections in every order', async () => {
+  oracleRoute(`case`)
   for (const order of [
     [0, 1, 2],
     [0, 2, 1],

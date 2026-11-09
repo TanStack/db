@@ -1,7 +1,7 @@
 // Scenario tests for the per-collection coordinator: wire and acknowledgement
 // partitioning, persisted cache generation routing, remote subset lease
 // bookkeeping, per-collection adapter routing, SQLite state, sync-ingested
-// ownership, and follower settlement across real tabs. Each test pins one
+// ownership, and follower settlement across real tabs. Each test checks one
 // scenario with hand-written expectations. The laws these scenarios touch are
 // owned by per-collection-coordinator-oracle.test.ts, which generates histories
 // and compares production with independent models.
@@ -1726,7 +1726,7 @@ describe(`follower remote-demand settlement across real tabs`, () => {
   // This topology never routes to another tab's owner, so the
   // elected-owner notice path stays with the single-runtime follower
   // generation-notice cells in persisted-oracle.test.ts. Their rotation cell
-  // is pinned as failing under the known gap #2139.
+  // is a fixed history that fails under the known limit #2139.
   it(
     `keeps a rotated follower's rows and serves its new demand from its own generation`,
     () =>

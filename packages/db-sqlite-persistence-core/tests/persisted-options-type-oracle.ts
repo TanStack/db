@@ -30,9 +30,12 @@ import fc from 'fast-check'
 import ts from 'typescript'
 import { it } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
@@ -395,7 +398,7 @@ function collectionSource(shape: Shape, cell: Cell): string {
  * A supplemental transparency relation preserves the full payload across the
  * wrapper; QueryObserverResult internals have no independent model here.
  * This single model replaces standalone fixed refetch/nonexistent-method calls.
- * Exact namespace equality pins the current API. An intentional documented
+ * Exact namespace equality checks the current API. An intentional documented
  * utility addition must update this model; closure does not prohibit additions.
  */
 function querySource(shape: Shape): string {
@@ -620,7 +623,7 @@ const utilityProperties = {
  * Every generated history crosses the structurally required forms. Reach is
  * recorded only after the generated consumer passes compilation. A replay uses
  * the shared seed/path/property interface: it runs the random campaign alone,
- * without the pinned shapes.
+ * without the fixed shapes.
  * Fixed and fresh-seed campaigns use the identical grammar, budget, and check.
  */
 export function registerPersistedOptionsTypeOracle(receiver: Receiver): void {
@@ -792,8 +795,9 @@ export function registerPersistedOptionsTypeOracle(receiver: Receiver): void {
     })
     const parameters =
       campaign === `fixed`
-        ? { numRuns: oracleRuns(12), seed: 2259 }
+        ? oracleFixedSeed(2259, { numRuns: oracleRuns(12) })
         : oraclePropertyOptions(12, propertyName)
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(property, parameters)
     // Replays use the same check but do not inflate generated reach. An
     // explicitly requested seed/path goes directly to its generated history.
@@ -874,6 +878,11 @@ export function registerPersistedUtilityAdmissionOracle(
       `inherited`,
       `schema-collision`,
     ])
+    const parameters =
+      campaign === `fixed`
+        ? oracleFixedSeed(2259, { numRuns: oracleRuns(12) })
+        : oraclePropertyOptions(12, propertyName)
+    oracleRoute(oracleRouteOf(parameters))
     fc.assert(
       fc.property(utilityAdmissionArbitrary, ({ token, extraNames, names }) => {
         reach.beginHistory()
@@ -1028,9 +1037,7 @@ export function registerPersistedUtilityAdmissionOracle(
           }
         }
       }),
-      campaign === `fixed`
-        ? { numRuns: oracleRuns(12), seed: 2259 }
-        : oraclePropertyOptions(12, propertyName),
+      parameters,
     )
     reach.assertReached()
     console.info(

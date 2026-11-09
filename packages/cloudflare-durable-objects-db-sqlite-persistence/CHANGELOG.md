@@ -1,5 +1,12 @@
 # @tanstack/cloudflare-durable-objects-db-sqlite-persistence
 
+## 1.0.0-rc.1.4
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@1.0.0-rc.1.4
+
 ## 1.0.0-rc.1.3
 
 ### Patch Changes

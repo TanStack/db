@@ -44,6 +44,7 @@ import {
   expectedIndexing,
   indexConfigurations,
 } from '../conformance/indexing-config-oracle.js'
+import { oracleRoute } from '../oracle-config.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 
@@ -72,6 +73,13 @@ function expectRankWindow(actualIds: unknown): void {
 }
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/basic-index.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/live-query-collection.ts#liveQueryCollectionOptions',
+  ],
   check: [
     expectRankWindow,
     expectMaterializedWindow,
@@ -135,6 +143,7 @@ it.each(
 )(
   `keeps bounded public rank order with $mode $path`,
   async ({ mode, path }) => {
+    oracleRoute(`case`)
     const source = makeSource(mode, path)
     let live: ReturnType<typeof createLiveQueryCollection> | undefined
     await withOracleCleanup(async () => {
@@ -171,6 +180,7 @@ it.each(
 )
 
 it(`uses a later eligible index after an unusable matching index`, async () => {
+  oracleRoute(`fixed history`)
   const requests: Array<LoadSubsetOptions> = []
   const source = makeSource(`on-demand`, `scan`, (request) =>
     requests.push(request),
@@ -238,6 +248,7 @@ it(`uses a later eligible index after an unusable matching index`, async () => {
 })
 
 it(`eager indexing creates an ordered reader when only a custom reader exists`, async () => {
+  oracleRoute(`fixed history`)
   const source = createCollection(
     mockSyncCollectionOptions<Row>({
       id: `custom-index-order-selection-eager-auto`,
@@ -363,6 +374,7 @@ function expectMaterializedWindow(
 it.each(configurations)(
   `applies output indexing: $path, mode=$autoIndex, constructor=$defaultIndexType.name`,
   async (settings) => {
+    oracleRoute(`case`)
     const expected = expectedIndexing(settings)
     const reach = createOracleReach(
       `live-query.output-indexing.${settings.path}`,
@@ -488,6 +500,7 @@ it.each(configurations)(
 it.each(
   configurations.filter((settings) => !expectedIndexing(settings).rejects),
 )(`rejects wrong output-indexing observations: %j`, (settings) => {
+  oracleRoute(`calibration`)
   const expected = expectedMaterializedIndexes(settings)
   expect(() =>
     expectMaterializedIndexes(expected.count + 1, settings),

@@ -62,10 +62,10 @@
  * the 2026-10-29 decision, in both trackers), one that skips deletions
  * loses removed fields, one that ignores whether the row owns a field drops
  * added `undefined` fields, and one that edits rows in place breaks the throw
- * and stored-draft histories; each fails a pinned history and the fixed
+ * and stored-draft histories; each fails a fixed history and the fixed
  * campaign. The proxy used to treat a field added with `undefined` as
  * reverted when another field went back to its original value, and dropped
- * the added field; the pinned history and both campaigns fail without the
+ * the added field; the fixed history and both campaigns fail without the
  * fix, because the grammar weights that run.
  *
  * Known omissions: nested objects, arrays, Dates, Maps, Sets, class
@@ -80,9 +80,12 @@ import {
   withFlatChangeTracking,
 } from '../src/proxy.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -374,7 +377,7 @@ const historyArbitrary: fc.Arbitrary<History> = fc
     }),
   )
 
-// Each witness pins a shape the trackers once disagreed on to the change
+// Each witness checks a shape the trackers once disagreed on to the change
 // set both must now report: defining a field acts as assigning it, and a
 // non-enumerable field is not row data unless the callback writes it.
 const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
@@ -583,22 +586,45 @@ function runHistory(history: History): void {
   expect(normalize(proxy), `proxy vs model`).toStrictEqual(normalize(model))
 }
 
-declareOracle({ check: [runHistory], model: [expectedChanges] })
+// What this oracle owns: the gap report judges the flat and proxy change trackers
+// (withFlatChangeTracking, withChangeTracking, withArrayChangeTracking) by this file's tests.
+declareOracle({
+  owns: [
+    `src/proxy.ts#withFlatChangeTracking`,
+    `src/proxy.ts#withChangeTracking`,
+    `src/proxy.ts#withArrayChangeTracking`,
+  ],
+  check: [runHistory],
+  model: [expectedChanges],
+})
 
 describe(`flat change tracking oracle`, () => {
   if (!oracleReplayRequested()) {
     for (const { name, history } of pinnedHistories) {
-      it(`matches the draft proxy when ${name}`, () => runHistory(history))
+      it(`matches the draft proxy when ${name}`, () => {
+        oracleRoute(`fixed history`)
+        return runHistory(history)
+      })
     }
 
-    fcTest.prop([historyArbitrary], {
-      seed: 44_502_101,
+    const historyFixedSeed = oracleFixedSeed(44_502_101, {
       numRuns: oracleRuns(200),
-    })(`matches the draft proxy (fixed)`, runHistory)
+    })
+    fcTest.prop([historyArbitrary], historyFixedSeed)(
+      `matches the draft proxy (fixed)`,
+      (...args) => {
+        oracleRoute(oracleRouteOf(historyFixedSeed))
+        return runHistory(...args)
+      },
+    )
   }
   // A path replay of this property runs its one recorded history here.
-  oracleReplayTest(fcTest, property).prop(
-    [historyArbitrary],
-    oraclePropertyOptions(200, property),
-  )(`matches the draft proxy (random)`, runHistory)
+  const historyCampaign = oraclePropertyOptions(200, property)
+  oracleReplayTest(fcTest, property).prop([historyArbitrary], historyCampaign)(
+    `matches the draft proxy (random)`,
+    (...args) => {
+      oracleRoute(oracleRouteOf(historyCampaign))
+      return runHistory(...args)
+    },
+  )
 })

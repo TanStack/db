@@ -19,7 +19,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { withChangeTracking } from '../src/proxy.js'
-import { oracleRuns } from './oracle-config.js'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from './oracle-config.js'
 import {
   cycleContainer,
   cycleKinds,
@@ -31,12 +37,19 @@ import {
   storedDataRow,
   storedRow,
 } from './proxy-detachment-fixture.js'
+import { declareOracle } from './oracle-declaration.js'
 import type { CycleRow } from './proxy-detachment-fixture.js'
+
+// What this oracle owns: the gap report judges the draft-to-stored-row copy in
+// proxy.ts by this file's tests. The fixture helpers declare the checks.
+declareOracle({ owns: [`src/proxy.ts`] })
 
 describe(`Mutation result detachment`, () => {
   // For any number of ordinary fields, one write changes only that field and
   // defines no property descriptors: a generated law over the field count.
   it(`copies ordinary fields without descriptor writes`, () => {
+    const parameters = oracleFixedSeed(20260914, { numRuns: 40 })
+    oracleRoute(oracleRouteOf(parameters))
     fc.assert(
       fc.property(fc.integer({ min: 1, max: 40 }), (count) => {
         const row = Object.fromEntries(
@@ -59,13 +72,14 @@ describe(`Mutation result detachment`, () => {
         expect(row.field0).toBe(0)
         expect(writes).toBe(0)
       }),
-      { seed: 20260914, numRuns: 40 },
+      parameters,
     )
   })
 
   it.each([`value`, `__proto__`, `constructor`, `toString`])(
     `rejects missing or prototype-changing %s data properties`,
     (key) => {
+      oracleRoute(`calibration`)
       expectOwnDataProperty(Object.fromEntries([[key, 1]]), key, 1)
       expect(() => expectOwnDataProperty({}, key, 1)).toThrow()
       const wrong = Object.fromEntries([[key, 1]])
@@ -81,6 +95,7 @@ describe(`Mutation result detachment`, () => {
   )(
     `preserves native own-property histories for $key with schema=$identitySchema`,
     async ({ key, identitySchema }) => {
+      oracleRoute(`case`)
       // Assignment to an existing data property must not invoke an inherited
       // setter, even when extraction also includes an unrelated object edit.
       for (const sibling of [false, true]) {
@@ -175,6 +190,13 @@ describe(`Mutation result detachment`, () => {
   it.each([20260914, undefined])(
     `preserves JSON data keys on assignment seed=%s`,
     (seed) => {
+      const campaignParameters = {
+        ...(seed === undefined
+          ? oraclePropertyOptions(100, `proxy.json-data-keys`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
+        examples: [[`__proto__`, 1, false]],
+      }
+      oracleRoute(oracleRouteOf(campaignParameters))
       fc.assert(
         fc.property(
           fc.constantFrom(`__proto__`, `constructor`, `toString`, `ordinary`),
@@ -201,11 +223,7 @@ describe(`Mutation result detachment`, () => {
             expect(original).toEqual({ payload: { before: true } })
           },
         ),
-        {
-          seed,
-          numRuns: oracleRuns(100),
-          examples: [[`__proto__`, 1, false]],
-        },
+        campaignParameters,
       )
     },
   )
@@ -216,6 +234,7 @@ describe(`Mutation result detachment`, () => {
   )(
     `detaches a $kind draft backedge with the scalar edit $edit assignment`,
     async ({ kind, edit }) => {
+      oracleRoute(`case`)
       const original: CycleRow = { id: 1, count: 0 }
       const collection = storedRow(original)
       let settled: Promise<unknown> | undefined
@@ -240,6 +259,7 @@ describe(`Mutation result detachment`, () => {
   )
 
   it.each(cycleKinds)(`accepts a native %s cyclic snapshot`, (kind) => {
+    oracleRoute(`case`)
     const row: CycleRow = { id: 1, count: 1 }
     row.link = cycleContainer(kind, row)
     expectCycleSnapshot(row, kind)
@@ -253,6 +273,7 @@ describe(`Mutation result detachment`, () => {
       })),
     ),
   )(`rejects $fault in a $kind cyclic snapshot`, ({ kind, fault }) => {
+    oracleRoute(`calibration`)
     const row: CycleRow = { id: 1, count: 1 }
     row.link = cycleContainer(kind, row)
     if (fault === `old-value`)
@@ -278,6 +299,7 @@ describe(`Mutation result detachment`, () => {
 // semantics; shared, resizable and detached buffers are outside this matrix.
 for (const kind of [`buffer`, `view`, `u8`, `i64`] as const) {
   it(`detaches assigned ${kind} without losing buffer bytes or view range`, () => {
+    oracleRoute(`case`)
     const bytes = Uint8Array.from({ length: 24 }, (_, index) => index)
     const value =
       kind === `buffer`

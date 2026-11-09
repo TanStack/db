@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { oracleReplayRequested } from './oracle-config.js'
+import { oracleReplayRequested, oracleRoute } from './oracle-config.js'
 import {
   checkGcObservation,
   createGcModel,
@@ -7,6 +7,12 @@ import {
 } from './collection-gc-retention-oracle.js'
 import type { GcAction } from './collection-gc-retention-oracle.js'
 
+// What this file owns: nothing in production. It is a checker calibration for
+// the shared GC retention check in collection-gc-retention-oracle.ts, which
+// declares the check and the model. Each case feeds that check a plausible
+// wrong observation, and the check must reject it. The companion's production
+// owners are the GC lifecycle and cleanup queue, judged by the property files.
+//
 // Cleanup clears public rows even while a manual transaction remains pending
 // or its handler persists. The retention fixture has no durable source rows.
 // Feed the shared comparison a plausible broken cleanup result: status and
@@ -32,6 +38,7 @@ it.skipIf(oracleReplayRequested()).each([
 ] satisfies Array<{ name: string; actions: Array<GcAction> }>)(
   `rejects leftover optimistic rows after $name`,
   ({ actions }) => {
+    oracleRoute(`calibration`)
     const model = createGcModel(100)
     for (const action of actions) stepGcModel(model, action)
     expect(model.retired).toBe(true)
@@ -58,6 +65,7 @@ it.skipIf(oracleReplayRequested()).each([
 it.skipIf(oracleReplayRequested()).each([`complete`, `fail`] as const)(
   `rejects a stale row after handler outcome %s`,
   (outcome) => {
+    oracleRoute(`calibration`)
     const model = createGcModel(100)
     stepGcModel(model, { kind: `insert`, commit: true })
     stepGcModel(model, { kind: `settle`, slot: 0, outcome })
@@ -92,6 +100,7 @@ it.skipIf(oracleReplayRequested()).each([`complete`, `fail`] as const)(
 it.skipIf(oracleReplayRequested())(
   `rejects missing, duplicate, and extra keys while transactions persist`,
   () => {
+    oracleRoute(`calibration`)
     const model = createGcModel(100)
     stepGcModel(model, { kind: `insert`, commit: true })
     stepGcModel(model, { kind: `insert`, commit: true })

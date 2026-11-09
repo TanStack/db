@@ -16,8 +16,11 @@ import {
 import { queryCollectionOptions } from '../../query-db-collection/src/query'
 import { electricCollectionOptions } from '../src/electric'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -106,15 +109,29 @@ function electricHistoryProperty<T>(
   registeredHistoryProperties.add(property)
   // A path replay of this property runs only the random campaign, from its
   // path. The fixed campaign stands aside during every path replay.
-  oracleReplayTest(fcTest).prop([arbitrary], {
-    numRuns: oracleRuns(baseRuns),
-    seed: fixedSeed,
-    examples,
-  })(`${name} (fixed)`, check, timeout)
-  oracleReplayTest(fcTest, property).prop([arbitrary], {
+  oracleReplayTest(fcTest).prop(
+    [arbitrary],
+    oracleFixedSeed(fixedSeed, { numRuns: oracleRuns(baseRuns), examples }),
+  )(
+    `${name} (fixed)`,
+    (...args) => {
+      oracleRoute(`fixed seed`)
+      return check(...args)
+    },
+    timeout,
+  )
+  const randomCampaign = {
     ...oraclePropertyOptions(baseRuns, property),
     examples,
-  })(`${name} (random)`, check, timeout)
+  }
+  oracleReplayTest(fcTest, property).prop([arbitrary], randomCampaign)(
+    `${name} (random)`,
+    (...args) => {
+      oracleRoute(oracleRouteOf(randomCampaign))
+      return check(...args)
+    },
+    timeout,
+  )
 }
 
 vi.mock(`@electric-sql/client`, async () => {
@@ -155,6 +172,7 @@ describe(`mutation outcome and confirmation`, () => {
   it.each(mutationHistories)(
     `settles a handler independently of discarded values: %j`,
     async (history) => {
+      oracleRoute(`case`)
       mutationReach.beginHistory()
       const { operation, confirmation, outcome, returned } = history
       const localReach = createOracleReach(`electric.mutation-cuts`, [
@@ -418,7 +436,8 @@ function durablePrefixPropertyOptions(mode: `fixed` | `random`): {
   seed?: number
   path?: string
 } {
-  if (mode === `fixed`) return { numRuns: oracleRuns(10), seed: 20260921 }
+  if (mode === `fixed`)
+    return oracleFixedSeed(20260921, { numRuns: oracleRuns(10) })
   return oraclePropertyOptions(10, durablePrefixProperty)
 }
 
@@ -430,7 +449,8 @@ function persistencePolicyPropertyOptions(
   seed?: number
   path?: string
 } {
-  if (mode === `fixed`) return { numRuns: oracleRuns(8), seed: 20260923 }
+  if (mode === `fixed`)
+    return oracleFixedSeed(20260923, { numRuns: oracleRuns(8) })
   return oraclePropertyOptions(8, property)
 }
 
@@ -640,10 +660,9 @@ function queuedPresencePropertyOptions(mode: `fixed` | `random`): {
   path?: string
 } {
   if (mode === `fixed`) {
-    return {
+    return oracleFixedSeed(queuedPresenceFixedSeed, {
       numRuns: oracleRuns(queuedPresenceRuns),
-      seed: queuedPresenceFixedSeed,
-    }
+    })
   }
   return oraclePropertyOptions(queuedPresenceRuns, queuedPresenceProperty)
 }
@@ -2722,8 +2741,10 @@ describe(`Electric adapter laws`, () => {
     ),
   )(
     `preserves live updates after $removals initial tagged move-outs in $syncMode mode`,
-    ({ syncMode, removals }) =>
-      checkInitialMoveOut(syncMode, removals, 1, `updated`),
+    ({ syncMode, removals }) => {
+      oracleRoute(`case`)
+      return checkInitialMoveOut(syncMode, removals, 1, `updated`)
+    },
   )
 
   electricHistoryProperty(
@@ -2758,6 +2779,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `delivers retired callbacks without advancing a failed lifecycle`,
     async () => {
+      oracleRoute(`fixed history`)
       const result = await runProcessGrammar(`process-grammar-terminal-error`, [
         {
           kind: `batch`,
@@ -2796,6 +2818,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it).each([`invalid-resume`, `cleanup`] as const)(
     `records an initial preload's %s rejection before continuing the grammar`,
     async (failure) => {
+      oracleRoute(`case`)
       const result = await runProcessGrammar(`preload-${failure}`, [
         { kind: `create`, slot: `a` },
         { kind: `import`, slot: `a`, txid: 4, resume: true },
@@ -2842,6 +2865,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `publishes an Electric source commit before its adapter persistence settles`,
     async () => {
+      oracleRoute(`case`)
       await runPublicationBeforePersistenceWitness(
         `publication-before-persistence-fixed`,
         { id: 41, name: `visible first`, stable: `stable-41` },
@@ -2853,6 +2877,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `reconstructs the queued-presence grammar and rejects ablated, out-of-range, and foreign campaigns`,
     () => {
+      oracleRoute(`fixed seed`)
       const campaigns = fc.sample(fc.tuple(...queuedPresenceArbitraries), {
         seed: queuedPresenceFixedSeed,
         numRuns: 20,
@@ -2866,6 +2891,7 @@ describe(`Electric adapter laws`, () => {
         )
       }
 
+      oracleRoute(`calibration`)
       const witness = {
         histories: [...queuedPresenceHistories],
         names: [``, `x`.repeat(12)] as [string, string],
@@ -2917,6 +2943,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `rejects named wrong answer: later callback publishes before durability`,
     () => {
+      oracleRoute(`calibration`)
       expect(() =>
         expectQueuedPresenceAtDurabilityHold(
           [
@@ -2930,12 +2957,13 @@ describe(`Electric adapter laws`, () => {
     },
   )
 
-  oracleReplayTest(fcTest).prop(
-    queuedPresenceArbitraries,
-    queuedPresencePropertyOptions(`fixed`),
-  )(
+  const randomCampaign = queuedPresencePropertyOptions(`fixed`)
+  oracleReplayTest(fcTest).prop(queuedPresenceArbitraries, randomCampaign)(
     `generated queued Electric histories preserve staged presence and reset fences (fixed)`,
-    runQueuedPresenceCampaign,
+    (...args) => {
+      oracleRoute(oracleRouteOf(randomCampaign))
+      return runQueuedPresenceCampaign(...args)
+    },
   )
 
   const publicationPolicyArbitraries: [
@@ -2950,30 +2978,36 @@ describe(`Electric adapter laws`, () => {
       800 + id,
     )
   }
-  oracleReplayTest(fcTest).prop(
-    publicationPolicyArbitraries,
-    persistencePolicyPropertyOptions(
-      `fixed`,
-      publicationBeforePersistenceProperty,
-    ),
-  )(
+  const randomCampaign2 = persistencePolicyPropertyOptions(
+    `fixed`,
+    publicationBeforePersistenceProperty,
+  )
+  oracleReplayTest(fcTest).prop(publicationPolicyArbitraries, randomCampaign2)(
     `generated Electric commits publish before adapter persistence settles (fixed)`,
-    checkPublicationPolicy,
+    (...args) => {
+      oracleRoute(oracleRouteOf(randomCampaign2))
+      return checkPublicationPolicy(...args)
+    },
+  )
+  const randomCampaign3 = persistencePolicyPropertyOptions(
+    `random`,
+    publicationBeforePersistenceProperty,
   )
   oracleReplayTest(fcTest, publicationBeforePersistenceProperty).prop(
     publicationPolicyArbitraries,
-    persistencePolicyPropertyOptions(
-      `random`,
-      publicationBeforePersistenceProperty,
-    ),
+    randomCampaign3,
   )(
     `generated Electric commits publish before adapter persistence settles (random)`,
-    checkPublicationPolicy,
+    (...args) => {
+      oracleRoute(oracleRouteOf(randomCampaign3))
+      return checkPublicationPolicy(...args)
+    },
   )
 
   oracleReplayTest(it)(
     `turns adapter rejection into a named terminal Electric persistence error`,
     async () => {
+      oracleRoute(`case`)
       await runPersistenceFailureCrashOnlyWitness(
         `terminal-persistence-error-fixed`,
         { id: 51, name: `published before failure`, stable: `stable-51` },
@@ -2997,19 +3031,30 @@ describe(`Electric adapter laws`, () => {
       { id: id + 100, name: names[1], stable: `stable-${id + 100}` },
     )
   }
-  oracleReplayTest(fcTest).prop(
-    failurePolicyArbitraries,
-    persistencePolicyPropertyOptions(`fixed`, adapterFailurePolicyProperty),
-  )(
+  const randomCampaign4 = persistencePolicyPropertyOptions(
+    `fixed`,
+    adapterFailurePolicyProperty,
+  )
+  oracleReplayTest(fcTest).prop(failurePolicyArbitraries, randomCampaign4)(
     `generated adapter failures reject publicly and admit no later Electric work (fixed)`,
-    checkFailurePolicy,
+    (...args) => {
+      oracleRoute(oracleRouteOf(randomCampaign4))
+      return checkFailurePolicy(...args)
+    },
+  )
+  const randomCampaign5 = persistencePolicyPropertyOptions(
+    `random`,
+    adapterFailurePolicyProperty,
   )
   oracleReplayTest(fcTest, adapterFailurePolicyProperty).prop(
     failurePolicyArbitraries,
-    persistencePolicyPropertyOptions(`random`, adapterFailurePolicyProperty),
+    randomCampaign5,
   )(
     `generated adapter failures reject publicly and admit no later Electric work (random)`,
-    checkFailurePolicy,
+    (...args) => {
+      oracleRoute(oracleRouteOf(randomCampaign5))
+      return checkFailurePolicy(...args)
+    },
   )
 
   electricHistoryProperty(
@@ -3052,6 +3097,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `distinguishes plausible unseen-update and reset-visibility semantics`,
     async () => {
+      oracleRoute(`case`)
       const completeUnseenUpdate: ChangeMessage<OracleRow> = {
         key: `1`,
         value: { id: 1, name: `complete`, stable: `stable-1` },
@@ -3092,6 +3138,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `keeps SDK reset callbacks separate from every neighboring message kind`,
     () => {
+      oracleRoute(`case`)
       const neighbors: Array<Message<OracleRow>> = [
         change(`insert`, 1, `row`),
         change(`update`, 1, `row`),
@@ -3124,6 +3171,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `distinguishes callback-atomic and subset publication semantics`,
     async () => {
+      oracleRoute(`case`)
       const callbackHistory = [
         [
           change(`insert`, 1, `before-control`),
@@ -3174,6 +3222,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `settles every startup, hydration, snapshot availability, persistence-apply release, and cleanup permutation`,
     async () => {
+      oracleRoute(`case`)
       const events: Array<SchedulerEvent> = [
         `startup-promise`,
         `hydration`,
@@ -3443,34 +3492,48 @@ describe(`Electric adapter laws`, () => {
 
   oracleReplayTest(it).each(publicationEpochExamples)(
     `reconstructs the authored publication-epoch history`,
-    assertPublicationEpochHistory,
+    (...args) => {
+      oracleRoute(`case`)
+      return assertPublicationEpochHistory(...args)
+    },
     30_000,
   )
 
+  const publicationEpochTokensFixedSeed = oracleFixedSeed(42714, {
+    numRuns: oracleRuns(20),
+  })
   oracleReplayTest(fcTest).prop(
     [publicationEpochTokensArbitrary, publicationEpochPartitionArbitrary],
-    {
-      seed: 42714,
-      numRuns: oracleRuns(20),
-    },
+    publicationEpochTokensFixedSeed,
   )(
     `Electric drivers converge with the denotational reference and model-fed Query projection across publication epochs (fixed)`,
-    assertPublicationEpochHistory,
+    (...args) => {
+      oracleRoute(oracleRouteOf(publicationEpochTokensFixedSeed))
+      return assertPublicationEpochHistory(...args)
+    },
     30_000,
   )
 
+  const publicationEpochTokensCampaign = oraclePropertyOptions(
+    20,
+    `electric.publication-epoch-convergence`,
+  )
   oracleReplayTest(fcTest, `electric.publication-epoch-convergence`).prop(
     [publicationEpochTokensArbitrary, publicationEpochPartitionArbitrary],
-    oraclePropertyOptions(20, `electric.publication-epoch-convergence`),
+    publicationEpochTokensCampaign,
   )(
     `Electric drivers converge with the denotational reference and model-fed Query projection across publication epochs (random or replayed)`,
-    assertPublicationEpochHistory,
+    (...args) => {
+      oracleRoute(oracleRouteOf(publicationEpochTokensCampaign))
+      return assertPublicationEpochHistory(...args)
+    },
     30_000,
   )
 
   oracleReplayTest(it)(
     `checks an authored HTTP transcript and separate complete Query snapshots`,
     async () => {
+      oracleRoute(`fixed history`)
       const { ShapeStream: RealShapeStream } = await vi.importActual<{
         ShapeStream: typeof ShapeStream
       }>(`@electric-sql/client`)
@@ -3763,19 +3826,29 @@ describe(`Electric adapter laws`, () => {
     }
   }
 
-  oracleReplayTest(fcTest).prop([reentryHistory], {
-    seed: 42713,
+  const reentryHistoryFixedSeed = oracleFixedSeed(42713, {
     numRuns: oracleRuns(10),
-  })(
+  })
+  oracleReplayTest(fcTest).prop([reentryHistory], reentryHistoryFixedSeed)(
     `replacement sync runs reject evidence from callback reentry histories (fixed)`,
-    runReentryHistory,
+    (...args) => {
+      oracleRoute(oracleRouteOf(reentryHistoryFixedSeed))
+      return runReentryHistory(...args)
+    },
+  )
+  const reentryHistoryCampaign = oraclePropertyOptions(
+    10,
+    `electric.match-reentry`,
   )
   oracleReplayTest(fcTest, `electric.match-reentry`).prop(
     [reentryHistory],
-    oraclePropertyOptions(10, `electric.match-reentry`),
+    reentryHistoryCampaign,
   )(
     `replacement sync runs reject evidence from callback reentry histories (random)`,
-    runReentryHistory,
+    (...args) => {
+      oracleRoute(oracleRouteOf(reentryHistoryCampaign))
+      return runReentryHistory(...args)
+    },
   )
 
   /**
@@ -3837,7 +3910,7 @@ describe(`Electric adapter laws`, () => {
    * client awaits the decision; and stream steps after a final failure or an
    * abort, because the stream has stopped. It also omits a second
    * up-to-date while the first snapshot's acceptance is pending. The
-   * installed-client lane cannot hold an acceptance, so this dimension runs
+   * installed-client receiving path cannot hold an acceptance, so this dimension runs
    * only here. A progressive history starts with
    * a must-refetch, so its demands wait on the established snapshot.
    *
@@ -3851,7 +3924,7 @@ describe(`Electric adapter laws`, () => {
    * defers the Collection's failure (EVID-2; maintainer decisions
    * 2026-10-30 and 2026-11-02). After cleanup a later run could supply the
    * evidence, so the late pair is not compared then. The model lives in `electric-retry-decision-model.ts`. An
-   * installed-client lane in `electric-sdk-delivery-oracle.property.test.ts`
+   * installed-client receiving path in `electric-sdk-delivery-oracle.property.test.ts`
    * drives the same model through the real Electric client and HTTP.
    */
   const retryDecisionArb = fc.constantFrom<RetryDecision>(
@@ -4199,7 +4272,7 @@ describe(`Electric adapter laws`, () => {
     },
     60_000,
     [
-      // Named replays: a retried provider error while a transaction holds the
+      // Named fixed histories: a retried provider error while a transaction holds the
       // recovered snapshot, for each wait, with and without a hold (this
       // replaces the former fixed "renews full recovery demand" case); a
       // held snapshot whose stream aborts before the hold settles; an
@@ -4448,6 +4521,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `does not advance durable Electric resume metadata past a rejected row commit`,
     async () => {
+      oracleRoute(`case`)
       await runRejectedDurablePrefixWitness(`durable-prefix-fixed`, [
         `first`,
         `second`,
@@ -4458,6 +4532,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `retains an accepted Electric source prefix when the next row commit rejects`,
     async () => {
+      oracleRoute(`case`)
       await runRejectedDurablePrefixWitness(
         `durable-prefix-after-success`,
         [`accepted`, `rejected`],
@@ -4476,22 +4551,31 @@ describe(`Electric adapter laws`, () => {
       names,
     )
   }
+  const durablePrefixCampaign = durablePrefixPropertyOptions(`fixed`)
   oracleReplayTest(fcTest).prop(
     [durablePrefixArbitrary],
-    durablePrefixPropertyOptions(`fixed`),
+    durablePrefixCampaign,
   )(
     `a rejected initial Electric row commit creates no durable source prefix (fixed)`,
-    checkDurablePrefix,
+    (...args) => {
+      oracleRoute(oracleRouteOf(durablePrefixCampaign))
+      return checkDurablePrefix(...args)
+    },
   )
-  // A shared seed reseeds this random lane; a path replay selects it by property.
+  // A shared campaign seed reseeds this random campaign; a path replay selects it by property.
+  const durablePrefixCampaign2 = durablePrefixPropertyOptions(`random`)
   oracleReplayTest(fcTest, durablePrefixProperty).prop(
     [durablePrefixArbitrary],
-    durablePrefixPropertyOptions(`random`),
+    durablePrefixCampaign2,
   )(
     `a rejected initial Electric row commit creates no durable source prefix (random)`,
-    checkDurablePrefix,
+    (...args) => {
+      oracleRoute(oracleRouteOf(durablePrefixCampaign2))
+      return checkDurablePrefix(...args)
+    },
   )
 
+  const fixedCampaign = oracleFixedSeed(20260922, { numRuns: 20 })
   oracleReplayTest(fcTest).prop(
     [
       fc.uniqueArray(fc.integer({ min: 1, max: 20 }), {
@@ -4499,8 +4583,9 @@ describe(`Electric adapter laws`, () => {
         maxLength: 6,
       }),
     ],
-    { numRuns: 20, seed: 20260922 },
+    fixedCampaign,
   )(`append-only resume judgment rejects a missing committed row`, (ids) => {
+    oracleRoute(`fixed seed`)
     const events: Array<SourceLedgerEvent> = ids.map((id) => ({
       type: `source-commit`,
       offset: `${id}_0`,
@@ -4861,9 +4946,11 @@ describe(`Electric adapter laws`, () => {
         numRuns: 20,
       })
       for (const campaign of campaigns) {
+        oracleRoute(`fixed seed`)
         expect(reconstructPersistenceInterleavingCampaign(campaign)).toEqual(
           campaign,
         )
+        oracleRoute(`calibration`)
         expect(() =>
           reconstructPersistenceInterleavingCampaign({
             names: campaign.names,
@@ -4893,6 +4980,7 @@ describe(`Electric adapter laws`, () => {
   oracleReplayTest(it)(
     `rejects named wrong answers for persistence interleavings`,
     () => {
+      oracleRoute(`calibration`)
       const names: [string, string] = [`before`, `after`]
       expect(() =>
         expectPersistenceInterleavingObservation(
@@ -4927,29 +5015,36 @@ describe(`Electric adapter laws`, () => {
     },
   )
 
-  oracleReplayTest(fcTest).prop([persistenceInterleavingCampaignArbitrary], {
-    seed: 18_530_601,
+  const persistenceInterleavingCampaignFixedSeed = oracleFixedSeed(18_530_601, {
     numRuns: oracleRuns(4),
-  })(
-    `preserves persisted Electric interleavings (fixed)`,
-    runPersistenceInterleavingCampaign,
-  )
+  })
+  oracleReplayTest(fcTest).prop(
+    [persistenceInterleavingCampaignArbitrary],
+    persistenceInterleavingCampaignFixedSeed,
+  )(`preserves persisted Electric interleavings (fixed)`, (...args) => {
+    oracleRoute(oracleRouteOf(persistenceInterleavingCampaignFixedSeed))
+    return runPersistenceInterleavingCampaign(...args)
+  })
 })
 
-// Each campaign's random lane has its own suite. An ordinary run runs it
+// Each random campaign has its own suite. An ordinary run runs it
 // beside the adapter laws. A path replay of its property runs only it.
 oracleReplayTest(describe, persistenceInterleavingProperty)(
   `persisted Electric interleaving campaign`,
   () => {
     beforeEach(resetElectricOracleMocks)
 
+    const persistenceInterleavingCampaignCampaign = oraclePropertyOptions(
+      4,
+      persistenceInterleavingProperty,
+    )
     fcTest.prop(
       [persistenceInterleavingCampaignArbitrary],
-      oraclePropertyOptions(4, persistenceInterleavingProperty),
-    )(
-      `preserves persisted Electric interleavings (random)`,
-      runPersistenceInterleavingCampaign,
-    )
+      persistenceInterleavingCampaignCampaign,
+    )(`preserves persisted Electric interleavings (random)`, (...args) => {
+      oracleRoute(oracleRouteOf(persistenceInterleavingCampaignCampaign))
+      return runPersistenceInterleavingCampaign(...args)
+    })
   },
 )
 
@@ -4958,12 +5053,13 @@ oracleReplayTest(describe, queuedPresenceProperty)(
   () => {
     beforeEach(resetElectricOracleMocks)
 
-    fcTest.prop(
-      queuedPresenceArbitraries,
-      queuedPresencePropertyOptions(`random`),
-    )(
+    const randomCampaign6 = queuedPresencePropertyOptions(`random`)
+    fcTest.prop(queuedPresenceArbitraries, randomCampaign6)(
       `generated queued Electric histories preserve staged presence and reset fences (random)`,
-      runQueuedPresenceCampaign,
+      (...args) => {
+        oracleRoute(oracleRouteOf(randomCampaign6))
+        return runQueuedPresenceCampaign(...args)
+      },
     )
   },
 )
@@ -5004,4 +5100,5 @@ declareOracle({
     queuedPresenceArbitraries,
     persistenceInterleavingCampaignArbitrary,
   ],
+  owns: [`src/electric.ts#electricCollectionOptions`],
 })

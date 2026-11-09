@@ -17,8 +17,11 @@ import { distinct } from '../src/operators/distinct.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
 import { createOracleReach } from '../../db/tests/oracle-reach.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import {
@@ -37,7 +40,10 @@ import type { Weighted } from './incrementalization-law-oracle.js'
 const PROPERTY = `ivm.distinct-representatives`
 const family = distinctCollisionFamily(hash)
 
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 declareOracle({
+  owns: [`src/operators/distinct.ts#distinct`],
   check: [checkDistinctRepresentatives],
   grammar: [distinctBucketHistory],
 })
@@ -105,6 +111,11 @@ for (const split of [false, true])
           ...DISTINCT_BUCKET_REACH_STATES,
           `fresh equal selections`,
         ])
+        const parameters =
+          campaign === `fixed`
+            ? oracleFixedSeed(2309, { numRuns: oracleRuns(100) })
+            : oraclePropertyOptions(100, PROPERTY)
+        oracleRoute(oracleRouteOf(parameters))
         fc.assert(
           fc.property(distinctBucketHistory, (worlds) => {
             reach.beginHistory()
@@ -112,9 +123,7 @@ for (const split of [false, true])
             for (const state of distinctBucketReachStates(worlds))
               reach.reach(state)
           }),
-          campaign === `fixed`
-            ? { numRuns: oracleRuns(100), seed: 2309 }
-            : oraclePropertyOptions(100, PROPERTY),
+          parameters,
         )
         reach.assertReached()
         process.stdout.write(

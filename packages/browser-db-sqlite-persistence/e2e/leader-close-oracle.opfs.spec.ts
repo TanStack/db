@@ -21,6 +21,7 @@
  */
 import { expect, test } from '@playwright/test'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { observe, openProbe } from './leader-close-probe'
 import type { BrowserContext, Page } from '@playwright/test'
 
@@ -343,22 +344,38 @@ async function runHistory(
   expect(cleanupFailures).toEqual([])
 }
 
-declareOracle({ check: [runHistory], model: [expectedHistory] })
+declareOracle({
+  owns: [`src/browser-coordinator.ts`],
+  check: [runHistory],
+  model: [expectedHistory],
+})
 
 test(`surviving OPFS source Collection accepts work after an idle leader tab closes`, async ({
   context,
-}) => runHistory(context, `none`))
+}) => {
+  oracleRoute(`fixed history`)
+  return runHistory(context, `none`)
+})
 
 for (const schedule of [`before`, `after`] as const) {
   test(`surviving OPFS source Collection reconciles a leader close ${schedule} durable application`, async ({
     context,
-  }) => runHistory(context, schedule))
+  }) => {
+    oracleRoute(`case`)
+    return runHistory(context, schedule)
+  })
 }
 
 test(`surviving OPFS source Collection retains a peer write during exact-ID reconciliation`, async ({
   context,
-}) => runHistory(context, `after-peer`))
+}) => {
+  oracleRoute(`fixed history`)
+  return runHistory(context, `after-peer`)
+})
 
 test(`surviving OPFS peers do not republish a commit after its answer is lost`, async ({
   context,
-}) => runHistory(context, `after-notify`))
+}) => {
+  oracleRoute(`fixed history`)
+  return runHistory(context, `after-notify`)
+})

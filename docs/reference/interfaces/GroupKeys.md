@@ -14,12 +14,16 @@ Aggregates such as `count` bring the grouping compiler themselves.
 
 `TContext` *extends* [`Context`](Context.md)
 
+### TKeys
+
+`TKeys` = `any`
+
 ## Properties
 
 ### callback
 
 ```ts
-callback: GroupByCallback<TContext>;
+callback: GroupByCallback<TContext, TKeys>;
 ```
 
 Defined in: [packages/db/src/query/builder/group-keys.ts:10](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/group-keys.ts#L10)
@@ -37,7 +41,7 @@ Defined in: [packages/db/src/query/builder/group-keys.ts:11](https://github.com/
 #### processGroupBy()
 
 ```ts
-processGroupBy: (pipeline, groupByClause, valueIdentity, isSourceRef, havingClauses?, selectClause?, fnHavingClauses?, aggregateCollectionId?, mainSource?, sanitizeCallbackRows) => NamespacedAndKeyedStream;
+processGroupBy: (pipeline, groupByClause, valueIdentity, isSourceRef, havingClauses?, selectClause?, fnHavingClauses?, mainSource?, sanitizeCallbackRows) => NamespacedAndKeyedStream;
 ```
 
 Processes the GROUP BY clause with optional HAVING and SELECT
@@ -74,10 +78,6 @@ Whether a ref reads a field of the query's own rows.
 ###### fnHavingClauses?
 
 (`row`) => `any`[]
-
-###### aggregateCollectionId?
-
-`string`
 
 ###### mainSource?
 

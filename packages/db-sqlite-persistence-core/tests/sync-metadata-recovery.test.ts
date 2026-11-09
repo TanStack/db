@@ -7,7 +7,7 @@ import {
   recoverySchedulesArbitrary,
   runRecoverySchedule,
 } from '../../db/tests/sync-metadata-recovery-oracle'
-import { persistedPeerOnDemandLane } from '../../db/tests/sync-metadata-session-oracle'
+import { persistedPeerOnDemandGrammar } from '../../db/tests/sync-metadata-session-oracle'
 import {
   oraclePropertyOptions,
   oracleRuns,
@@ -38,7 +38,7 @@ for (const campaign of [`fixed`, `random`] as const) {
         for (const schedule of batch) {
           reach.beginHistory()
           const observation = await runRecoverySchedule(schedule, () =>
-            createSQLiteDriver(persistedPeerOnDemandLane),
+            createSQLiteDriver(persistedPeerOnDemandGrammar),
           )
           if (
             !observation.events.includes(schedule.phase) ||
@@ -60,7 +60,7 @@ for (const campaign of [`fixed`, `random`] as const) {
     requireExecutedHistory(property, result)
     if (result.failed)
       throw new Error(
-        `${result.error}\nseed=${result.seed} path=${result.counterexamplePath}`,
+        `${String(result.errorInstance)}\nseed=${result.seed} path=${result.counterexamplePath}`,
       )
     reach.assertReached()
     console.info(

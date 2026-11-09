@@ -12,8 +12,11 @@ import { distinct } from '../src/operators/distinct.js'
 import { map } from '../src/operators/map.js'
 import { createOracleReach } from '../../db/tests/oracle-reach.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -40,7 +43,12 @@ const policy = {
   clone: (value: DistinctValue) => ({ ...value }),
 }
 
-declareOracle({ check: [assertUnaryIncrementalization, checkDistinctSnapshot] })
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [`src/operators/distinct.ts#distinct`],
+  check: [assertUnaryIncrementalization, checkDistinctSnapshot],
+})
 
 for (const mode of [`selected`, `tuple`] as const) {
   const values = distinctCollisionValues((value) =>
@@ -51,6 +59,11 @@ for (const mode of [`selected`, `tuple`] as const) {
       `preserves distinct collisions by ${mode} (${campaign})`,
       () => {
         const reach = createOracleReach(PROPERTY, DISTINCT_REACH_STATES)
+        const parameters =
+          campaign === `fixed`
+            ? oracleFixedSeed(2306, { numRuns: oracleRuns(100) })
+            : oraclePropertyOptions(100, PROPERTY)
+        oracleRoute(oracleRouteOf(parameters))
         fc.assert(
           fc.property(distinctHistory, (worlds) => {
             reach.beginHistory()
@@ -85,9 +98,7 @@ for (const mode of [`selected`, `tuple`] as const) {
             // Both successful delivery paths checked these input conditions.
             for (const state of distinctReachStates(worlds)) reach.reach(state)
           }),
-          campaign === `fixed`
-            ? { numRuns: oracleRuns(100), seed: 2306 }
-            : oraclePropertyOptions(100, PROPERTY),
+          parameters,
         )
         reach.assertReached()
         process.stdout.write(
@@ -98,6 +109,7 @@ for (const mode of [`selected`, `tuple`] as const) {
 }
 
 it(`rejects omitted, duplicate and wrong-member snapshots`, () => {
+  oracleRoute(`calibration`)
   const values = distinctCollisionValues(hash)
   const input: Weighted<DistinctValue> = values.map((value) => [value, 1])
   for (const bad of [

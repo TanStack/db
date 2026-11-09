@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -75,7 +78,12 @@ function expectPermutedHashes(
   expectEqualHashes(original, reversed, hashValue)
 }
 // The key-order law: permuting the keys of an object leaves its hash unchanged.
-declareOracle({ check: [expectPermutedHashes] })
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
+declareOracle({
+  owns: [`src/hashing/hash.ts#hash`],
+  check: [expectPermutedHashes],
+})
 
 // The reusable value laws run with identical generators and checks in a
 // fixed campaign and a random campaign. A path replay of `ivm.hash-value`
@@ -91,10 +99,14 @@ function hashProp<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
   return (name: string, check: (...values: Ts) => void): void => {
     const property = fc.property(...arbitraries, check)
     oracleReplayTest(it)(`${name} (fixed)`, () => {
-      fc.assert(property, { numRuns: oracleRuns(100), seed: 1657021 })
+      const parameters = oracleFixedSeed(1657021, { numRuns: oracleRuns(100) })
+      oracleRoute(oracleRouteOf(parameters))
+      fc.assert(property, parameters)
     })
     oracleReplayTest(it, valueProperty)(`${name} (random)`, () => {
-      fc.assert(property, oraclePropertyOptions(100, valueProperty))
+      const campaignParameters = oraclePropertyOptions(100, valueProperty)
+      oracleRoute(oracleRouteOf(campaignParameters))
+      fc.assert(property, campaignParameters)
     })
   }
 }
@@ -328,6 +340,7 @@ describe(`hash property-based tests`, () => {
 
   describe(`law checker calibration`, () => {
     it(`rejects an insertion-order-sensitive result but accepts equal structures`, () => {
+      oracleRoute(`calibration`)
       const entries: Array<[string, number]> = [
         [`key:left`, 1],
         [`key:right`, 2],
@@ -348,6 +361,7 @@ describe(`hash property-based tests`, () => {
     })
 
     it(`shrinks and replays an injected equality-law failure`, () => {
+      oracleRoute(`calibration`)
       const property = fc.property(arbitraryNonIndexEntries, (entries) => {
         let calls = 0
         expectPermutedHashes(entries, () => ++calls)

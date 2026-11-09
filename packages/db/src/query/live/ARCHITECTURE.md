@@ -366,49 +366,59 @@ have proxy semantics.
 
 Plain record results carry route metadata under a private symbol while the
 compiler moves them through recursive sources. Primitives and opaque objects,
-such as `Date`, use an internal envelope at those same edges. Namespacing and
-join adapters unwrap the value and keep its route beside it. Every functional
-callback whose source can carry route state receives a clean copy of only the
-paths that contain private state; this includes recursive and union sources,
-not only directly correlated child queries. The callback boundary removes all
-compiler-owned fields before invoking user code. The publication boundary
-applies the same copy-on-write walk while resolving facade references. Both
-paths preserve property descriptors, clean nested references, cycles,
-adversarial keys, and user-owned symbols. Discovery reads data descriptors
-directly and never invokes an accessor merely to find private state.
+such as `Date`, use an internal envelope at those edges. FROM and JOIN adapters
+extract the route before exposing a source value. Route context, include
+routing and source metadata attribution live beside the aliases on the namespace.
+Source values exposed to callbacks therefore contain no compiler-owned state.
 
-This walker also strips metadata from a correlated subquery's output before
-its parent query consumes it. Clean object and array references at that internal
-boundary are equality operands, not just render identities. Eagerly cloning
-them can make a later `eq(projected.key, parent.key)` lose a matching row.
-Relaxing cross-publication reference stability does not permit changing these
-internal matches. The public-container copy matrix crosses reference-key type,
-ordered and unordered subqueries, materialization form, and parent/child updates.
+Callbacks and result finalization strip private keys at the known row root.
+Materialization compiles a resolver for its declared include paths. It resolves
+facade references and cleans nested materialized rows along those paths only.
+Ordinary source payloads remain opaque, including in correlated queries and
+grouped HAVING. Clean values retain their references. Copies preserve property
+descriptors, prototypes and user symbols; discovering private state does not
+invoke accessors. The internal facade adapter requires an explicit resolver.
+Compiled queries supply their declared-path resolver; direct component drivers
+can supply the descriptor-preserving public-container walker.
 
-Reserved public row fields have a separate callback-input law (maintainer
-decisions, 2026-10-28 and 2026-10-30). Direct source rows and structured whole-row source
-spreads expose genuine source `$key`, `$origin`, `$hasPendingWrites`, and
-`$collectionId`, including when a spread selects conflicting reserved names.
-A subquery projection that creates its own row shape, including a new
-functional object or functional spread, exposes none of those reserved fields
-before downstream `fn.select()`, `fn.where()`, or `fn.having()` code runs.
-The October 30 decision extends the original selection-only promise to both
-functional predicates. An inline include value keeps its
-authored selected shape. Sanitizing only the eventual Collection publication
-cannot satisfy this law, because user code may already have derived an
-ordinary field from a spoofed input.
+Internal clean references can be equality operands, not just render identities.
+A cleanup copy must not change a later `eq(projected.key, parent.key)` match.
+The public-container copy matrix checks reference keys through ordered and
+unordered subqueries, materialization forms, and parent/child updates.
+The includes-work owner checks zero metadata descriptor scans inside source
+payload containers through fourteen direct and correlated receiving paths.
+This work law does not bound hashing, user code or elapsed latency.
 
-The compiler carries a callback view beside each authored selected-row
-occurrence. FROM, joined-source and union adapters transport that view.
-Functional callbacks read it without rewriting the query's authored row.
-Private callback state never crosses the callback or result boundary.
-An inline-only QueryRef and an inline child's final authored value retain
-that authored shape, including when a predicate runs without a selection.
-The selected-row normalization flag describes the output metadata view and
-is independent of callback-view transport. A two-slot cache retains authored
-and normalized compilations separately. Each ordered top-K retains its own
-window; the source loader's registered plan covers every window that shares
-that source, including subsequent moves.
+Reserved public row fields obey the boundary-only metadata rule (maintainer
+decision, 2026-11-05, superseding the October 28/30 callback-normalization
+rules). Actual Collection row roots expose genuine computed `$key`, `$origin`,
+`$hasPendingWrites` and `$collectionId`. Structured whole-source selections and
+spreads retain source attribution; functional selections retain it only when
+returning the source row directly. Joined occurrences use their computed pair
+key for `$key`, or the explicit `getKey` result. Source attribution retains
+`$origin`, `$hasPendingWrites` and `$collectionId`; a source key cannot collapse
+several joined occurrences. Inline values keep their authored `$key` and
+multiplicity. Other published projections receive their
+output Collection's metadata. An authored reserved field cannot override that
+attribution.
+
+Intermediate QueryRef projections, functional callback inputs, inline includes
+and Effect outputs keep their authored values. For example, an intermediate
+`{ id: 1, $collectionId: 'application' }` exposes `'application'` to downstream
+`fn.select`, `fn.where` and `fn.having`, and to inline consumers. Direct source
+rows already carry genuine metadata; copying them copies those fields, while
+an explicit override remains application data until Collection publication.
+Reading a projected field is not evidence of Collection attribution.
+
+The compiler transports one authored value per occurrence and a separate record
+of at most four source metadata facts. The record permits genuine publication
+attribution after an authored spread override, without keeping a second full
+callback view. Cache slots distinguish authored roots, actual Collection publication, and
+intermediate sources. An authored root owns its movable top-K independently of
+a consumer of the same QueryIR. Grouped intermediate results inherit a missing
+generated `$key`; an explicitly authored field still wins until publication. Each ordered top-K retains its own window; the source
+loader's registered plan covers every window sharing that source, including
+subsequent moves.
 
 Ordered plan aggregation also retains every joined source whose pending demand
 gates a retained plan. An outer ordered QueryRef without a join cannot erase
@@ -430,8 +440,8 @@ produce. The exported `compileQuery` receiver checks both compilation orders
 through FROM, JOIN and union placement at initial graph drain. Its raw output
 comparison is differential and supplies no independent Effect-root attribution
 policy. Optimizer cloning can prevent an original raw-key cache hit in union
-placement; that path checks propagation and transparency instead.
-Separate static receiving-type gaps remain in the
+placement; that path checks propagation and transparency instead. Separate
+static receiving-type limits remain in the
 [deferred oracle record](../../../../../docs/contributing/oracle-reviews/2026-10-29-pr-2171-deferred-oracles.md).
 
 D2 hashes enumerable symbol keys and uses exact local-symbol identity plus
@@ -692,7 +702,9 @@ select throws `IncludeOperatorRequiredError`. The include exposes one stable
 public Collection facade per active bucket in that edge:
 
 Facade rows obey the Collection virtual-field boundary. Structured whole-row
-selections and source spreads retain the selected source's metadata. Other
+selections and source spreads retain the selected source's attribution. Joined
+rows use pair keys for `$key`, preserving separate occurrences of one source
+row. The other three fields retain source attribution. Other
 projections receive the facade Collection's metadata. A functional selection
 preserves source metadata only by returning that source row directly; a new
 object, including a spread, receives its output Collection's metadata
@@ -934,6 +946,9 @@ next public batch reconciles retained subscriber rows against the installed
 state, including deletions for keys that do not return. An empty ready batch
 also reconciles an empty replacement. On-demand sources cannot infer absence
 from their partial installed state; their replay barrier owns replacement.
+A live-query observer's subscription retains no rows across cleanup: the
+observer's `cleaned-up` snapshot shows none, so every row of the next sync
+run, including one equal to a row it showed before, reaches it as new.
 
 ### Source cancellation and applied settlement
 
@@ -2083,10 +2098,10 @@ expected-failure guard for a planner or ownership defect that this graph does
 not own.
 
 Run the DB oracle set with `pnpm test:oracles` from `packages/db`. Broad
-properties use FastCheck's random seed, while structural matrices keep fixed
-seeds so each run covers the same named cells. Increase both corpora with
-`TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10 pnpm test:oracles`. Preserve FastCheck's
-reported seed and shrink path while reducing a failure. Replay a broad
+properties draw a random campaign seed, while structural matrices use fixed-seed
+campaigns so each run covers the same named cells. Increase both corpora with
+`TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10 pnpm test:oracles`. Preserve the reported
+campaign seed and shrink path while reducing a failure. Reseed a broad
 campaign with `TANSTACK_DB_ORACLE_SEED=<seed> pnpm test:oracles`, then add the
 smallest case as a deterministic regression trace.
 

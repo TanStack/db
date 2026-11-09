@@ -28,8 +28,9 @@ import {
 } from '@tanstack/db'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRuns } from '../../db/tests/oracle-config'
+import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config'
 import { convexPaginatedCollectionOptions } from '../src/index'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import {
   lazyFixture,
@@ -46,6 +47,10 @@ import {
   ordered,
 } from './lazy-paging-model-oracle'
 import type { LazyRow } from './lazy-paging-model-oracle'
+
+declareOracle({
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+})
 
 const history = fc.record({
   size: fc.integer({ min: 16, max: 32 }),
@@ -869,6 +874,7 @@ it(`keeps the newer establishing receipt through publication reentry`, async () 
 // of the production driver. Legal batch/cached and reacquisition behavior
 // carries no mandatory second-receipt or retained-tail assertion.
 it(`rejects wrong coverage and transient windows while preserving discovery freedom`, () => {
+  oracleRoute(`calibration`)
   const rows = [
     { id: `a`, rank: 1, text: `` },
     { id: `b`, rank: 1, text: `` },
@@ -898,6 +904,7 @@ it(`rejects wrong coverage and transient windows while preserving discovery free
 it.each([0, -1, 1.5, Infinity, NaN])(
   `rejects invalid lazy row caps before readiness: %s`,
   async (maxRows) => {
+    oracleRoute(`case`)
     const f = lazyFixture([], 1)
     await f.source.cleanup()
     const source = createCollection(

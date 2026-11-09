@@ -16,9 +16,12 @@ import {
 } from '../../src/query/index.js'
 import {
   oracleCalibrationTest,
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
@@ -594,7 +597,7 @@ const actionArbitrary: fc.Arbitrary<CrossFormulationAction> = fc.oneof(
   }),
 )
 
-// The three pinned examples below reconstruct the named in-range witnesses
+// The three fixed histories below reconstruct the named in-range witnesses
 // in both generated campaigns. Each coordinate has positive probability in
 // the finite record grammar; examples keep them stable if sampling changes.
 // Group controls shared vs split/moved/unmatched routes; position controls
@@ -707,6 +710,12 @@ const windowedExamples: Array<
 // each partition with a direct relation over source rows. The grouped check
 // compares a nested route's counts with the standalone grouped query.
 declareOracle({
+  owns: [
+    'src/collection/change-events.ts#createFilterFunctionFromExpression',
+    'src/collection/index.ts#createCollection',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+    'src/query/query-once.ts#queryOnce',
+  ],
   check: [
     expectFormulationsEquivalent,
     expectWindowedIncludeMatches,
@@ -731,6 +740,7 @@ describe(`includes cross-formulation oracle`, () => {
   })
 
   test(`bounded grammar axes distinguish routes, order, partitions, and windows`, () => {
+    oracleRoute(`fixed history`)
     const parents = new Map(
       partitionAndRouteScenario.parents.map((row) => [row.id, row]),
     )
@@ -821,6 +831,7 @@ describe(`includes cross-formulation oracle`, () => {
   })
 
   test(`TLP checker rejects a wrong branch even when the union is complete`, () => {
+    oracleRoute(`calibration`)
     const rows: Array<ChildRow> = [
       { id: 10, parentGroup: 0, score: null, position: 0 },
       { id: 11, parentGroup: 0, score: -1, position: 1 },
@@ -848,22 +859,30 @@ describe(`includes cross-formulation oracle`, () => {
   // The literal wrong-result and captured replay controls above distinguish
   // merged reference routes and symbol groups at their public checkpoints.
 
-  oracleReplayTest(fcTest).prop([fc.integer()], {
+  const fixedCampaign = oracleFixedSeed(1_658_001, {
     numRuns: oracleRuns(4),
-    seed: 1_658_001,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([fc.integer()], fixedCampaign)(
     `parent-context routing preserves reference-sensitive predicate values across transitions for a fixed seed`,
     async (code) => {
+      oracleRoute(oracleRouteOf(fixedCampaign))
       await checkReferenceContextRouting(code)
     },
   )
 
+  const randomCampaign = oraclePropertyOptions(
+    4,
+    `includes-cross-formulation.reference-context`,
+  )
   oracleReplayTest(fcTest, `includes-cross-formulation.reference-context`).prop(
     [fc.integer()],
-    oraclePropertyOptions(4, `includes-cross-formulation.reference-context`),
+    randomCampaign,
   )(
     `parent-context routing preserves reference-sensitive predicate values across transitions for a random or replayed seed`,
-    checkReferenceContextRouting,
+    (...args: Parameters<typeof checkReferenceContextRouting>) => {
+      oracleRoute(oracleRouteOf(randomCampaign))
+      return checkReferenceContextRouting(...args)
+    },
   )
 
   async function checkReferenceContextRouting(code: number): Promise<void> {
@@ -1032,6 +1051,7 @@ describe(`includes cross-formulation oracle`, () => {
   ])(
     `grouped includes use query equality for %s routes`,
     async (_name, createValues) => {
+      oracleRoute(`case`)
       const [parentGroup, equivalentChildGroup, unequalChildGroup] =
         createValues()
       const parents = createControlledCollection(`equality-route-parents`, [
@@ -1101,20 +1121,30 @@ describe(`includes cross-formulation oracle`, () => {
     },
   )
 
-  oracleReplayTest(fcTest).prop([fc.integer()], {
+  const fixedCampaign2 = oracleFixedSeed(1_658_002, {
     numRuns: oracleRuns(4),
-    seed: 1_658_002,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([fc.integer()], fixedCampaign2)(
     `lazy materialization matches fully loaded materialization for reference-sensitive correlation keys for a fixed seed`,
-    checkReferenceKeyRouting,
+    (...args: Parameters<typeof checkReferenceKeyRouting>) => {
+      oracleRoute(oracleRouteOf(fixedCampaign2))
+      return checkReferenceKeyRouting(...args)
+    },
   )
 
+  const randomCampaign2 = oraclePropertyOptions(
+    4,
+    `includes-cross-formulation.reference-key`,
+  )
   oracleReplayTest(fcTest, `includes-cross-formulation.reference-key`).prop(
     [fc.integer()],
-    oraclePropertyOptions(4, `includes-cross-formulation.reference-key`),
+    randomCampaign2,
   )(
     `lazy materialization matches fully loaded materialization for reference-sensitive correlation keys for a random or replayed seed`,
-    checkReferenceKeyRouting,
+    (...args: Parameters<typeof checkReferenceKeyRouting>) => {
+      oracleRoute(oracleRouteOf(randomCampaign2))
+      return checkReferenceKeyRouting(...args)
+    },
   )
 
   async function checkReferenceKeyRouting(code: number): Promise<void> {
@@ -1262,23 +1292,30 @@ describe(`includes cross-formulation oracle`, () => {
     ])
   }
 
-  oracleReplayTest(fcTest).prop([fc.integer()], {
+  const fixedCampaign3 = oracleFixedSeed(1_658_003, {
     numRuns: oracleRuns(4),
-    seed: 1_658_003,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([fc.integer()], fixedCampaign3)(
     `grouped includes agree with standalone groups for symbol routes for a fixed seed`,
-    checkSymbolGroupRouting,
+    (...args: Parameters<typeof checkSymbolGroupRouting>) => {
+      oracleRoute(oracleRouteOf(fixedCampaign3))
+      return checkSymbolGroupRouting(...args)
+    },
   )
 
+  const randomCampaign3 = oraclePropertyOptions(
+    4,
+    `includes-cross-formulation.symbol-group-route`,
+  )
   oracleReplayTest(
     fcTest,
     `includes-cross-formulation.symbol-group-route`,
-  ).prop(
-    [fc.integer()],
-    oraclePropertyOptions(4, `includes-cross-formulation.symbol-group-route`),
-  )(
+  ).prop([fc.integer()], randomCampaign3)(
     `grouped includes agree with standalone groups for symbol routes for a random or replayed seed`,
-    checkSymbolGroupRouting,
+    (...args: Parameters<typeof checkSymbolGroupRouting>) => {
+      oracleRoute(oracleRouteOf(randomCampaign3))
+      return checkSymbolGroupRouting(...args)
+    },
   )
 
   async function checkSymbolGroupRouting(code: number): Promise<void> {
@@ -1359,12 +1396,14 @@ describe(`includes cross-formulation oracle`, () => {
     }
   }
 
-  fcTest(`shared-route child deletion agrees across formulations`, () =>
-    expectFormulationsEquivalent(sharedRouteDeletionScenario),
-  )
+  fcTest(`shared-route child deletion agrees across formulations`, () => {
+    oracleRoute(`fixed history`)
+    return expectFormulationsEquivalent(sharedRouteDeletionScenario)
+  })
 
-  test(`split, merge and reactivated routes preserve all predicate partitions`, () =>
-    expectFormulationsEquivalent({
+  test(`split, merge and reactivated routes preserve all predicate partitions`, () => {
+    oracleRoute(`fixed history`)
+    return expectFormulationsEquivalent({
       parents: [
         { id: 0, group: 0, position: 1 },
         { id: 1, group: 0, position: 0 },
@@ -1391,7 +1430,8 @@ describe(`includes cross-formulation oracle`, () => {
           row: { id: 12, parentGroup: 1, score: 1, position: 0 },
         },
       ],
-    }))
+    })
+  })
 
   test.each([
     { name: `zero limit`, offset: 0, limit: 0 },
@@ -1403,8 +1443,9 @@ describe(`includes cross-formulation oracle`, () => {
     { name: `empty tail`, offset: 3, limit: 2 },
   ])(
     `preserves ordered window $name through root and child moves`,
-    ({ offset, limit }) =>
-      expectWindowedIncludeMatches(
+    ({ offset, limit }) => {
+      oracleRoute(`case`)
+      return expectWindowedIncludeMatches(
         {
           parents: [
             { id: 0, group: 0, position: 1 },
@@ -1435,12 +1476,13 @@ describe(`includes cross-formulation oracle`, () => {
         },
         offset,
         limit,
-      ),
+      )
+    },
   )
 
   // Checked direct replay witness:
   // TANSTACK_DB_ORACLE_SEED=1658004
-  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0
+  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
   // TANSTACK_DB_ORACLE_PROPERTY=includes-cross-formulation.equivalence
   // TANSTACK_DB_ORACLE_CALIBRATION=missing-parent
   // pnpm --filter @tanstack/db exec vitest --run --coverage.enabled=false
@@ -1454,6 +1496,7 @@ describe(`includes cross-formulation oracle`, () => {
   )(
     `generated equivalence rejects a missing production parent and replays its checkpoint`,
     async () => {
+      oracleRoute(`calibration`)
       // The hostile observation is injected after the real nested query is
       // captured. The same generated driver and refinement comparison execute
       // during shrinking and direct seed/path replay.
@@ -1466,20 +1509,26 @@ describe(`includes cross-formulation oracle`, () => {
         property,
         directReplay
           ? { ...oraclePropertyOptions(8, propertyId), endOnFailure: true }
-          : { seed: 1_658_004, numRuns: oracleRuns(8) },
+          : oracleFixedSeed(1_658_004, { numRuns: oracleRuns(8) }),
       )
       expect(failure.failed).toBe(true)
-      expect(failure.error).toContain(`cross-formulation checkpoint`)
-      expect(failure.error).toContain(`checkpoint":0`)
+      expect(String(failure.errorInstance)).toContain(
+        `cross-formulation checkpoint`,
+      )
+      expect(String(failure.errorInstance)).toContain(`checkpoint":0`)
       if (directReplay) {
-        expect(failure.seed).toBe(replay.replaySeed)
-        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
+        expect(failure.seed).toBe(replay.campaignSeed)
+        expect(replay.replayPath).toBe(
+          `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
+        )
         return
       }
       expect(failure.numShrinks).toBeGreaterThan(0)
       if (failure.counterexamplePath === null)
         throw new Error(`missing-parent mutant did not produce a replay path`)
-      expect(failure.counterexamplePath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
+      expect(failure.counterexamplePath).toBe(
+        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
+      )
       const replayResult = await fc.check(property, {
         seed: failure.seed,
         path: failure.counterexamplePath,
@@ -1487,15 +1536,17 @@ describe(`includes cross-formulation oracle`, () => {
         endOnFailure: true,
       })
       expect(replayResult.failed).toBe(true)
-      expect(replayResult.error).toContain(`cross-formulation checkpoint`)
-      expect(replayResult.error).toContain(`checkpoint":0`)
+      expect(String(replayResult.errorInstance)).toContain(
+        `cross-formulation checkpoint`,
+      )
+      expect(String(replayResult.errorInstance)).toContain(`checkpoint":0`)
       expect(replayResult.counterexample).toEqual(failure.counterexample)
     },
   )
 
   // Checked direct replay witness:
   // TANSTACK_DB_ORACLE_SEED=1658005
-  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
+  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
   // TANSTACK_DB_ORACLE_PROPERTY=includes-cross-formulation.ordered-window
   // TANSTACK_DB_ORACLE_CALIBRATION=extra-child
   // pnpm --filter @tanstack/db exec vitest --run --coverage.enabled=false
@@ -1509,6 +1560,7 @@ describe(`includes cross-formulation oracle`, () => {
   )(
     `generated window rejects an extra production child and replays its checkpoint`,
     async () => {
+      oracleRoute(`calibration`)
       const property = fc.asyncProperty(
         windowedScenarioArbitrary,
         async (sample) => {
@@ -1531,21 +1583,23 @@ describe(`includes cross-formulation oracle`, () => {
         property,
         directReplay
           ? { ...oraclePropertyOptions(12, propertyId), endOnFailure: true }
-          : { seed: 1_658_005, numRuns: oracleRuns(12) },
+          : oracleFixedSeed(1_658_005, { numRuns: oracleRuns(12) }),
       )
       expect(failure.failed).toBe(true)
-      expect(failure.error).toContain(`ordered-window checkpoint`)
-      expect(failure.error).toContain(`checkpoint":0`)
+      expect(String(failure.errorInstance)).toContain(
+        `ordered-window checkpoint`,
+      )
+      expect(String(failure.errorInstance)).toContain(`checkpoint":0`)
       if (directReplay) {
-        expect(failure.seed).toBe(replay.replaySeed)
-        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
+        expect(failure.seed).toBe(replay.campaignSeed)
+        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
         return
       }
       expect(failure.numShrinks).toBeGreaterThan(0)
       if (failure.counterexamplePath === null)
         throw new Error(`extra-child mutant did not produce a replay path`)
       expect(failure.counterexamplePath).toBe(
-        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
+        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
       )
       const replayResult = await fc.check(property, {
         seed: failure.seed,
@@ -1554,8 +1608,10 @@ describe(`includes cross-formulation oracle`, () => {
         endOnFailure: true,
       })
       expect(replayResult.failed).toBe(true)
-      expect(replayResult.error).toContain(`ordered-window checkpoint`)
-      expect(replayResult.error).toContain(`checkpoint":0`)
+      expect(String(replayResult.errorInstance)).toContain(
+        `ordered-window checkpoint`,
+      )
+      expect(String(replayResult.errorInstance)).toContain(`checkpoint":0`)
       expect(replayResult.counterexample).toEqual(failure.counterexample)
     },
   )
@@ -1570,24 +1626,31 @@ describe(`includes cross-formulation oracle`, () => {
         : undefined,
     )
 
-  oracleReplayTest(fcTest).prop([scenarioArbitrary], {
+  const scenarioFixedSeed = oracleFixedSeed(1_658_004, {
     numRuns: oracleRuns(8),
-    seed: 1_658_004,
     examples: scenarioExamples,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([scenarioArbitrary], scenarioFixedSeed)(
     `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a fixed seed`,
-    checkEquivalenceScenario,
+    (...args: Parameters<typeof checkEquivalenceScenario>) => {
+      oracleRoute(oracleRouteOf(scenarioFixedSeed))
+      return checkEquivalenceScenario(...args)
+    },
   )
 
+  const scenarioCampaign = {
+    ...oraclePropertyOptions(8, `includes-cross-formulation.equivalence`),
+    examples: oracleReplayRequested() ? [] : scenarioExamples,
+  }
   oracleReplayTest(fcTest, `includes-cross-formulation.equivalence`).prop(
     [scenarioArbitrary],
-    {
-      ...oraclePropertyOptions(8, `includes-cross-formulation.equivalence`),
-      examples: oracleReplayRequested() ? [] : scenarioExamples,
-    },
+    scenarioCampaign,
   )(
     `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a random or replayed seed`,
-    checkEquivalenceScenario,
+    (...args: Parameters<typeof checkEquivalenceScenario>) => {
+      oracleRoute(oracleRouteOf(scenarioCampaign))
+      return checkEquivalenceScenario(...args)
+    },
   )
 
   const checkWindowedScenario = ({
@@ -1618,23 +1681,33 @@ describe(`includes cross-formulation oracle`, () => {
         : undefined,
     )
 
-  oracleReplayTest(fcTest).prop([windowedScenarioArbitrary], {
+  const windowedScenarioFixedSeed = oracleFixedSeed(1_658_005, {
     numRuns: oracleRuns(12),
-    seed: 1_658_005,
     examples: windowedExamples,
-  })(
+  })
+  oracleReplayTest(fcTest).prop(
+    [windowedScenarioArbitrary],
+    windowedScenarioFixedSeed,
+  )(
     `matches recomputation for ordered offset and limit child windows for a fixed seed`,
-    checkWindowedScenario,
+    (...args: Parameters<typeof checkWindowedScenario>) => {
+      oracleRoute(oracleRouteOf(windowedScenarioFixedSeed))
+      return checkWindowedScenario(...args)
+    },
   )
 
+  const windowedScenarioCampaign = {
+    ...oraclePropertyOptions(12, `includes-cross-formulation.ordered-window`),
+    examples: oracleReplayRequested() ? [] : windowedExamples,
+  }
   oracleReplayTest(fcTest, `includes-cross-formulation.ordered-window`).prop(
     [windowedScenarioArbitrary],
-    {
-      ...oraclePropertyOptions(12, `includes-cross-formulation.ordered-window`),
-      examples: oracleReplayRequested() ? [] : windowedExamples,
-    },
+    windowedScenarioCampaign,
   )(
     `matches recomputation for ordered offset and limit child windows for a random or replayed seed`,
-    checkWindowedScenario,
+    (...args: Parameters<typeof checkWindowedScenario>) => {
+      oracleRoute(oracleRouteOf(windowedScenarioCampaign))
+      return checkWindowedScenario(...args)
+    },
   )
 })

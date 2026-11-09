@@ -12,11 +12,15 @@ import {
   ssrSnapshotHistoryArbitrary,
 } from '../../db/tests/ssr-snapshot-admission-oracle'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { peopleQuery } from './ssr-test-utils'
 import SsrDbApp from './SsrDbApp.svelte'
 import type { createServer } from 'vite'
@@ -199,21 +203,25 @@ async function check(
 
 describe(`Svelte real SSR handoff`, () => {
   for (const history of ssrSnapshotExamples)
-    it(`replays ${history.preparation}/${history.sourceState}/${history.rows.length} server-write=${!!history.serverWrite} browser-write=${!!history.browserWrite}`, () =>
-      check(history, makeReach()))
+    it(`replays ${history.preparation}/${history.sourceState}/${history.rows.length} server-write=${!!history.serverWrite} browser-write=${!!history.browserWrite}`, () => {
+      oracleRoute(`case`)
+      return check(history, makeReach())
+    })
   for (const campaign of [`fixed`, `random`] as const)
     it(`matches the actual browser initialization (${campaign})`, async () => {
       const reach = makeReach()
+      const parameters = {
+        ...(campaign === `fixed`
+          ? oracleFixedSeed(2229, { numRuns: oracleRuns(120) })
+          : oraclePropertyOptions(120, `svelte.ssr-handoff`)),
+        examples: ssrSnapshotExamples.map((history) => [history]),
+      }
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(ssrSnapshotHistoryArbitrary, (history) =>
           check(history, reach),
         ),
-        {
-          ...(campaign === `fixed`
-            ? { numRuns: oracleRuns(120), seed: 2229 }
-            : oraclePropertyOptions(120, `svelte.ssr-handoff`)),
-          examples: ssrSnapshotExamples.map((history) => [history]),
-        },
+        parameters,
       )
       reach.assertReached()
       console.info(
@@ -224,7 +232,7 @@ describe(`Svelte real SSR handoff`, () => {
 })
 
 /**
- * This receiving lane keeps one client's transport while native Svelte roots
+ * This receiving path keeps one client's transport while native Svelte roots
  * initialize at different times. It reuses the shared preparation judgment and
  * receiving-history grammar. Only initialization kind changes the initial-view
  * obligation: hydrate() must reproduce its server markup; mount() must read
@@ -364,7 +372,7 @@ async function checkReceivingHistory(
 
   try {
     // The real server fixture returns a JSON copy. A second copy here makes
-    // the transport boundary explicit for this receiving lane too.
+    // the transport boundary explicit for this receiving path too.
     client.hydrate(JSON.parse(JSON.stringify(rendered.state)))
     for (let index = 0; index < history.previousReaders; index++) {
       await initialize(`hydrate`, {
@@ -463,19 +471,24 @@ describe(`Svelte SSR receiving readers`, () => {
   for (const history of ssrReceivingExamples)
     it.skipIf(oracleReplayRequested())(
       `replays ${history.initializationKind} ${history.mountLocation ?? `root`} after ${history.previousReaders} readers with ${history.snapshot.sourceState}/${history.snapshot.rows.length} server rows nesting=${history.providerNesting ?? `none`}`,
-      () => checkReceivingHistory(history, makeReceivingReach()),
+      () => {
+        oracleRoute(`case`)
+        return checkReceivingHistory(history, makeReceivingReach())
+      },
     )
 
   const campaign = async (fixed: boolean) => {
     const reach = makeReceivingReach()
     try {
+      const parameters = fixed
+        ? oracleFixedSeed(2229, { numRuns: oracleRuns(120) })
+        : oraclePropertyOptions(120, `svelte.ssr-receiving-reader`)
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(ssrReceivingHistoryArbitrary, (history) =>
           checkReceivingHistory(history, reach),
         ),
-        fixed
-          ? { numRuns: oracleRuns(120), seed: 2229 }
-          : oraclePropertyOptions(120, `svelte.ssr-receiving-reader`),
+        parameters,
       )
       reach.assertReached()
     } finally {
@@ -495,4 +508,11 @@ describe(`Svelte SSR receiving readers`, () => {
     () => campaign(false),
     30_000,
   )
+})
+
+declareOracle({
+  owns: [`src/useLiveQuery.svelte.ts#useLiveQuery`],
+  model: [expectedSsrSnapshot, expectedSsrReceivingViews],
+  check: [check, checkReceivingHistory],
+  grammar: [ssrSnapshotHistoryArbitrary, ssrReceivingHistoryArbitrary],
 })

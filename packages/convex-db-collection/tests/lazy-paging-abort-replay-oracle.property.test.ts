@@ -31,12 +31,17 @@ import { createLiveQueryCollection } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import { lazyOracleRuns, receiveBothSdks } from './lazy-paging-campaign'
 import { expectedLazyRows } from './lazy-paging-model-oracle'
 import { LazyVersionModel } from './lazy-paging-version-model-oracle'
 import type { LazyRow } from './lazy-paging-model-oracle'
+
+declareOracle({
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+})
 
 const grammar = fc.record({
   size: fc.integer({ min: 12, max: 18 }),

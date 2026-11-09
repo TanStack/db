@@ -3,6 +3,7 @@ import { createCollection } from '../src/collection/index.js'
 import { withChangeTracking } from '../src/proxy.js'
 import { declareOracle } from './oracle-declaration.js'
 import { expectMembers, protocols, visit } from './proxy-iteration-fixture.js'
+import { oracleRoute } from './oracle-config.js'
 import type { Item, Protocol } from './proxy-iteration-fixture.js'
 
 /**
@@ -49,7 +50,10 @@ function nativeWrittenValues<T extends Map<unknown, Item> | Set<Item>>(
   return values
 }
 
+// What this oracle owns: the gap report judges the draft's Map, Set, and Array
+// iteration in proxy.ts by this file's tests.
 declareOracle({
+  owns: [`src/proxy.ts`],
   check: [expectNativeVisits],
   model: [nativeWrittenValues],
 })
@@ -102,6 +106,7 @@ describe(`Array draft iteration`, () => {
     it.each(edits)(
       `matches native visits and detached changes after %s`,
       (_edit, edit) => {
+        oracleRoute(`case`)
         const native = make()
         const expectedVisits = run(native.items, iterate, edit)
         let visits: Array<unknown> = []
@@ -121,6 +126,7 @@ describe.each([`Map`, `Set`] as const)(
     it.each([`mutate`, `delete-readd`, `second-entry`] as const)(
       `matches native raw-object mutation after insertion: %s`,
       (operation) => {
+        oracleRoute(`case`)
         const run = (values: Map<string, Item> | Set<Item>) => {
           const item = { x: 1 }
           if (values instanceof Map) values.set(`a`, item)
@@ -156,6 +162,7 @@ describe.each([`Map`, `Set`] as const)(`%s nested iteration laws`, (kind) => {
   it.each(protocols)(
     `%s matches native membership changes during iteration`,
     (protocol) => {
+      oracleRoute(`case`)
       const run = (values: Map<unknown, Item> | Set<Item>) => {
         const seen: Array<number> = []
         visit(values, protocol, (value) => {
@@ -195,6 +202,7 @@ describe.each([`Map`, `Set`] as const)(`%s nested iteration laws`, (kind) => {
 it.each(protocols)(
   `Set %s observes clear and re-add after an edit just like a native iterator`,
   (protocol) => {
+    oracleRoute(`case`)
     const run = (values: Set<Item>) => {
       const seen: Array<number> = []
       visit(values, protocol, (value) => {
@@ -226,6 +234,7 @@ it.each(
 )(
   `$kind $protocol writes match native values before and after persistence`,
   async ({ kind, protocol }) => {
+    oracleRoute(`case`)
     const make = () =>
       kind === `Map` ? new Map([[`a`, { x: 1 }]]) : new Set([{ x: 1 }])
     const expected = nativeWrittenValues(make(), protocol)

@@ -26,7 +26,8 @@ import { createLiveQueryCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRuns } from '../../db/tests/oracle-config'
+import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import {
@@ -38,6 +39,10 @@ import {
 } from './lazy-paging-model-oracle'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import type { LazyRow } from './lazy-paging-model-oracle'
+
+declareOracle({
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+})
 
 const drain = async () => {
   for (let i = 0; i < 30; i++) await Promise.resolve()
@@ -433,6 +438,7 @@ it(`composes native failures, shared holds, retirement and terminal restart`, as
 }, 60000)
 
 it(`rejects old graphs recovering or changing after cleanup`, () => {
+  oracleRoute(`calibration`)
   const row = { id: `one`, rank: 1, text: `authored` }
   const model = new LazyTerminalGraphModel()
   model.cleanup([row])

@@ -173,7 +173,10 @@ duplicates inside that horizon remain idempotent.
   `wa-sqlite.wasm` asset. Vite, webpack 5, and Next.js with Turbopack or
   webpack include both automatically, with no asset copying or WASM URL
   configuration required.
-- In Vite development, a pre-bundled copy of this package asks the dev server
+- In Vite 8 development, a pre-bundled copy of this package loads its own worker
+  and WASM file, so it opens in every install layout. The dev server is not
+  asked for the package by name.
+- In Vite 7 development, a pre-bundled copy of this package asks the dev server
   for its assets by package name, from the app root. Production builds drop
   this lookup:
   - If the app reaches the package only through another library or through an

@@ -13,9 +13,12 @@
  * end of a turn.
  *
  * A budget is keyed by its registered property where the code names one
- * (`oraclePropertyOptions(n, 'p')`, `oracleRandomParameters(n, _, 'p')`, or
- * `{ property: 'p', defaultRuns: n }`), and otherwise by its fixed seed
- * (`{ seed: s, numRuns: oracleRuns(n) }`). A key or count is a literal, a
+ * (`oraclePropertyOptions(n, 'p')`, `oracleRandomParameters(n, _, 'p')`,
+ * `{ property: 'p', defaultRuns: n }`, or the framework definition
+ * `oracleProperty({ id: 'p', histories: { runs: n } })`), and otherwise by its
+ * fixed seed (`{ seed: s, numRuns: oracleRuns(n) }`, its declared form
+ * `oracleFixedSeed(s, { numRuns: oracleRuns(n) })`, or a seed `s` in that
+ * definition's `fixedSeeds`, whose campaign runs the same `n`). A key or count is a literal, a
  * constant in the same file, or a constant that the file imports. An import
  * follows relative re-exports (`export { x } from`, `export * from`), so a
  * constant defined in a support module is tracked where the oracle uses it.
@@ -316,6 +319,47 @@ function runBudgets(file, revision, reader) {
         const property = value(second)
         if (typeof property === `string`)
           record(`property ${property}`, value(first))
+      }
+      // A framework definition declares its budget inside its histories.
+      if (
+        node.callee.name === `oracleProperty` &&
+        first?.type === `ObjectExpression`
+      ) {
+        const property = propertyValue(first, `id`, file, reader, revision)
+        const histories = first.properties.find(
+          (candidate) =>
+            candidate.type === `Property` &&
+            !candidate.computed &&
+            nameOf(candidate.key) === `histories`,
+        )?.value
+        if (histories?.type === `ObjectExpression`) {
+          const runs = propertyValue(histories, `runs`, file, reader, revision)
+          if (typeof property === `string`) record(`property ${property}`, runs)
+          // Each fixed-seed campaign runs the same `runs` histories.
+          const fixedSeeds = histories.properties.find(
+            (candidate) =>
+              candidate.type === `Property` &&
+              !candidate.computed &&
+              nameOf(candidate.key) === `fixedSeeds`,
+          )?.value
+          if (fixedSeeds?.type === `ArrayExpression`)
+            for (const element of fixedSeeds.elements) {
+              const seed = value(element)
+              if (typeof seed === `number`) record(`fixed seed ${seed}`, runs)
+            }
+        }
+      }
+      // A declared fixed seed: `oracleFixedSeed(s, { numRuns: n })`.
+      if (
+        node.callee.name === `oracleFixedSeed` &&
+        second?.type === `ObjectExpression`
+      ) {
+        const seed = value(first)
+        if (typeof seed === `number`)
+          record(
+            `fixed seed ${seed}`,
+            propertyValue(second, `numRuns`, file, reader, revision),
+          )
       }
       if (node.callee.name === `oracleRandomParameters`) {
         const property = value(third)

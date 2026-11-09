@@ -3,13 +3,16 @@ import {
   completedSeedReinsertReloadRegime,
   describeMismatch,
   keptMetadataDurabilityHistoriesArbitrary,
-  persistedPeerFullLane,
-  persistedPeerLane,
-  persistedPeerOnDemandLane,
+  persistedPeerFullGrammar,
+  persistedPeerGrammar,
+  persistedPeerOnDemandGrammar,
   seedReinsertReloadHistoryArbitrary,
 } from '../../db/tests/sync-metadata-session-oracle'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   recordOracleReplay,
 } from '../../db/tests/oracle-config'
@@ -17,7 +20,7 @@ import { createOracleReach } from '../../db/tests/oracle-reach'
 import { requireExecutedHistory } from './sync-metadata-campaign-result'
 import type {
   SessionAction,
-  SessionLane,
+  SessionGrammar,
   runSessionHistory,
 } from '../../db/tests/sync-metadata-session-oracle'
 
@@ -36,32 +39,37 @@ export async function runSeedReinsertReloadCampaign({
   campaign: `fixed` | `random`
   runHistory: (
     history: ReadonlyArray<SessionAction>,
-    lane: SessionLane,
+    productionPath: SessionGrammar,
   ) => ReturnType<typeof runSessionHistory>
 }): Promise<void> {
-  const lanes = [
-    persistedPeerLane,
-    persistedPeerFullLane,
-    persistedPeerOnDemandLane,
+  const productionPaths = [
+    persistedPeerGrammar,
+    persistedPeerFullGrammar,
+    persistedPeerOnDemandGrammar,
   ]
-  const states = lanes.flatMap((lane) => [
-    `${lane.name}: inner commit`,
-    `${lane.name}: row`,
-    `${lane.name}: reload`,
+  const states = productionPaths.flatMap((productionPath) => [
+    `${productionPath.name}: inner commit`,
+    `${productionPath.name}: row`,
+    `${productionPath.name}: reload`,
   ])
-  const completedStates = lanes.flatMap((lane) => [
-    `${lane.name}: completed kept bare seed reload`,
-    `${lane.name}: completed kept non-bare seed reload`,
+  const completedStates = productionPaths.flatMap((productionPath) => [
+    `${productionPath.name}: completed kept bare seed reload`,
+    `${productionPath.name}: completed kept non-bare seed reload`,
   ])
   const reach = createOracleReach(property, states)
   const completedReach = createOracleReach(property, completedStates)
+  const parameters =
+    campaign === `fixed`
+      ? oracleFixedSeed(527962096, { numRuns: oracleRuns(40) })
+      : oraclePropertyOptions(40, property)
+  oracleRoute(oracleRouteOf(parameters))
   const result = await fc.check(
     fc.asyncProperty(seedReinsertReloadHistoryArbitrary, async (history) => {
       const failures: Array<string> = []
-      for (const lane of lanes) {
+      for (const productionPath of productionPaths) {
         reach.beginHistory()
         completedReach.beginHistory()
-        const result = await runHistory(history, lane)
+        const result = await runHistory(history, productionPath)
         if (!result.mismatch && result.steps !== history.length)
           throw new Error(`constructive history skipped an authored action`)
         const last = history.at(-1)!
@@ -69,22 +77,20 @@ export async function runSeedReinsertReloadCampaign({
           (action) => action.type === `commit`,
         )
         if (result.steps > innerCommit)
-          reach.reach(`${lane.name}: inner commit`)
+          reach.reach(`${productionPath.name}: inner commit`)
         if (last.type === `peer` && result.steps === history.length)
-          reach.reach(`${lane.name}: ${last.notice}`)
+          reach.reach(`${productionPath.name}: ${last.notice}`)
         const completed = completedSeedReinsertReloadRegime(history, result)
         if (completed !== undefined)
-          completedReach.reach(`${lane.name}: ${completed}`)
+          completedReach.reach(`${productionPath.name}: ${completed}`)
         if (result.mismatch)
           failures.push(
-            `${lane.name}\n${describeMismatch(history, result.mismatch)}`,
+            `${productionPath.name}\n${describeMismatch(history, result.mismatch)}`,
           )
       }
       if (failures.length) throw new Error(failures.join(`\n\n`))
     }),
-    campaign === `fixed`
-      ? { numRuns: oracleRuns(40), seed: 527962096 }
-      : oraclePropertyOptions(40, property),
+    parameters,
   )
   recordOracleReplay(property, result)
   requireExecutedHistory(property, result)
@@ -93,7 +99,7 @@ export async function runSeedReinsertReloadCampaign({
   )
   if (result.failed)
     throw new Error(
-      `${result.error}\nseed=${result.seed} path=${result.counterexamplePath}`,
+      `${String(result.errorInstance)}\nseed=${result.seed} path=${result.counterexamplePath}`,
     )
   reach.assertReached()
   // The bare-key-1 conjunction has probability 1/24: random40 would miss it
@@ -119,68 +125,72 @@ export async function runKeptMetadataDurabilityCampaign({
   campaign: `fixed` | `random`
   runHistory: (
     history: ReadonlyArray<SessionAction>,
-    lane: SessionLane,
+    productionPath: SessionGrammar,
   ) => ReturnType<typeof runSessionHistory>
   extraStates?: ReadonlyArray<string>
   extraReached?: (
-    lane: SessionLane,
+    productionPath: SessionGrammar,
     result: Awaited<ReturnType<typeof runSessionHistory>>,
   ) => ReadonlyArray<string>
 }): Promise<void> {
-  const lanes = [
-    persistedPeerLane,
-    persistedPeerFullLane,
-    persistedPeerOnDemandLane,
+  const productionPaths = [
+    persistedPeerGrammar,
+    persistedPeerFullGrammar,
+    persistedPeerOnDemandGrammar,
   ]
   const name = (
-    lane: SessionLane,
+    productionPath: SessionGrammar,
     write: string,
     bare: boolean,
     metadata: boolean,
     notice: string,
   ) =>
-    `${lane.name}: ${write}: ${bare ? `bare` : `metadata`} seed: ${metadata ? `explicit` : `implicit`}: ${notice}`
-  const states = lanes.flatMap((lane) =>
+    `${productionPath.name}: ${write}: ${bare ? `bare` : `metadata`} seed: ${metadata ? `explicit` : `implicit`}: ${notice}`
+  const states = productionPaths.flatMap((productionPath) =>
     [`update`, `reinsert`, `inner-reinsert`].flatMap((write) =>
       [false, true].flatMap((bare) =>
         [false, true].flatMap((metadata) =>
           [`none`, `row`, `reload`].map((notice) =>
-            name(lane, write, bare, metadata, notice),
+            name(productionPath, write, bare, metadata, notice),
           ),
         ),
       ),
     ),
   )
   const reach = createOracleReach(property, [...states, ...extraStates])
+  const campaignParameters =
+    campaign === `fixed`
+      ? oracleFixedSeed(2220031, { numRuns: oracleRuns(8) })
+      : oraclePropertyOptions(8, property)
+  oracleRoute(oracleRouteOf(campaignParameters))
   const result = await fc.check(
     fc.asyncProperty(
       keptMetadataDurabilityHistoriesArbitrary,
       async (batch) => {
         const failures: Array<string> = []
-        for (const lane of lanes) {
+        for (const productionPath of productionPaths) {
           for (const { write, bare, metadata, notice, history } of batch) {
             reach.beginHistory()
-            const result = await runHistory(history, lane)
+            const result = await runHistory(history, productionPath)
             if (result.mismatch)
               failures.push(
-                `${lane.name}\n${describeMismatch(history, result.mismatch)}`,
+                `${productionPath.name}\n${describeMismatch(history, result.mismatch)}`,
               )
             else {
               if (result.steps !== history.length)
                 throw new Error(
                   `constructive history skipped an authored action`,
                 )
-              reach.reach(name(lane, write, bare, metadata, notice))
-              for (const state of extraReached(lane, result)) reach.reach(state)
+              reach.reach(name(productionPath, write, bare, metadata, notice))
+              for (const state of extraReached(productionPath, result))
+                reach.reach(state)
             }
           }
         }
         if (failures.length) throw new Error(failures.join(`\n\n`))
       },
     ),
-    campaign === `fixed`
-      ? { numRuns: oracleRuns(8), seed: 2220031 }
-      : oraclePropertyOptions(8, property),
+    campaignParameters,
   )
   recordOracleReplay(property, result)
   requireExecutedHistory(property, result)
@@ -189,7 +199,7 @@ export async function runKeptMetadataDurabilityCampaign({
   )
   if (result.failed)
     throw new Error(
-      `${result.error}\nseed=${result.seed} path=${result.counterexamplePath}`,
+      `${String(result.errorInstance)}\nseed=${result.seed} path=${result.counterexamplePath}`,
     )
   reach.assertReached()
 }

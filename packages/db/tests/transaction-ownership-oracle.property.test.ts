@@ -3,7 +3,13 @@ import * as fc from 'fast-check'
 import { createCollection } from '../src/collection/index.js'
 import { createTransaction } from '../src/transactions.js'
 import { DuplicateTransactionIdError } from '../src/errors.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import {
   captureCreatedTransactions,
@@ -742,24 +748,35 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
 
 const history = fc.array(step, { minLength: 1, maxLength: 24 })
 
-declareOracle({ check: [runHistory], model: [OwnershipModel] })
+// What this oracle owns: the gap report judges the transaction's settlement
+// and the Collection's tracking of it, by this file's tests.
+declareOracle({
+  owns: [`src/transactions.ts`, `src/collection/state.ts`],
+  check: [runHistory],
+  model: [OwnershipModel],
+})
 
 describe(`settled transactions leave every Collection that tracked them`, () => {
   it(`generated histories with a fixed seed`, async () => {
+    const parameters = oracleFixedSeed(2080, { numRuns: oracleRuns(200) })
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(history, (steps) => runHistory(steps)),
-      { numRuns: oracleRuns(200), seed: 2080 },
+      parameters,
     )
   }, 300_000)
 
   it(`generated histories with a random or replayed seed`, async () => {
+    const campaignParameters = oraclePropertyOptions(200, PROPERTY)
+    oracleRoute(oracleRouteOf(campaignParameters))
     await fc.assert(
       fc.asyncProperty(history, (steps) => runHistory(steps)),
-      oraclePropertyOptions(200, PROPERTY),
+      campaignParameters,
     )
   }, 300_000)
 
-  it(`pinned: a subscriber throws during an asynchronous success and failure settlement`, async () => {
+  it(`fixed history: a subscriber throws during an asynchronous success and failure settlement`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 3 },
@@ -774,7 +791,8 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
     ])
   })
 
-  it(`pinned: a merged-away pair, a conflicting rollback that throws, and a truncate rollback`, async () => {
+  it(`fixed history: a merged-away pair, a conflicting rollback that throws, and a truncate rollback`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       { type: `open`, reuse: undefined },
       { type: `cancel`, tx: 0, on: `A` },
@@ -792,7 +810,8 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
     ])
   })
 
-  it(`pinned: a rolled-back transaction does not remove a live one that shares its id`, async () => {
+  it(`fixed history: a rolled-back transaction does not remove a live one that shares its id`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },
@@ -807,7 +826,8 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
     ])
   })
 
-  it(`pinned: a second live transaction with a tracked id is rejected`, async () => {
+  it(`fixed history: a second live transaction with a tracked id is rejected`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },
@@ -816,7 +836,8 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
     ])
   })
 
-  it(`pinned: conflicting rollbacks that throw settle every transaction and rethrow one subscriber error`, async () => {
+  it(`fixed history: conflicting rollbacks that throw settle every transaction and rethrow one subscriber error`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },
@@ -830,7 +851,8 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
     ])
   })
 
-  it(`pinned: a failed commit whose rollback subscriber throws keeps the mutation error`, async () => {
+  it(`fixed history: a failed commit whose rollback subscriber throws keeps the mutation error`, async () => {
+    oracleRoute(`fixed history`)
     await runHistory([
       { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },

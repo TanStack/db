@@ -16,12 +16,17 @@ import { createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it } from 'vitest'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
-import { oracleRuns } from '../../db/tests/oracle-config'
+import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config'
+import { declareOracle } from '../../db/tests/oracle-declaration'
 import { withTestCleanup } from './helpers'
 import { lazyFixture } from './lazy-paging-driver'
 import { LazyReceiptModel } from './lazy-paging-receipt-model'
 import { ordered } from './lazy-paging-model-oracle'
 import type { LazyRow } from './lazy-paging-model-oracle'
+
+declareOracle({
+  owns: [`src/paginated-options.ts#convexPaginatedCollectionOptions`],
+})
 
 const turns = async () => {
   for (let i = 0; i < 25; i++) await Promise.resolve()
@@ -296,6 +301,7 @@ it(`refines the same receipt model through native uniquely establishing batches`
 }, 60000)
 
 it(`rejects a native receiver borrowing the applied startup receipt`, async () => {
+  oracleRoute(`calibration`)
   await expect(
     nativeHistory(
       {

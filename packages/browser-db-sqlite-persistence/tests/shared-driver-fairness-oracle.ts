@@ -46,14 +46,14 @@ import { declareOracle } from '../../db/tests/oracle-declaration.js'
  * let an additional persist through or change the interleaving. The scheduler
  * trace records hydrate scope ends and barrier settlement, so a test can
  * check that the barrier waited for the work queued before it and not for
- * later work. Two hostile controls take a scheduler turn instead:
+ * later work. Two mutant controls take a scheduler turn instead:
  * `empty-hydrate` enqueues an empty hydrate scope, which K=1 counts as a
  * hydrate, and `empty-regular` enqueues an empty regular task, which K=1
  * counts as the persist slot after a hydrate.
  *
  * Challenge and replay: the named persist-first FIFO wrong answer must violate
  * the same K=1 checker while using the public/core/driver path. The generated
- * property has fixed-seed and seedless-random lanes. Supplying both
+ * property has fixed-seed and seedless-random campaigns. Supplying both
  * TANSTACK_DB_DRIVER_FAIRNESS_SEED and TANSTACK_DB_DRIVER_FAIRNESS_PATH runs
  * only their checked oracle replay. Tail-order ablation must lose the legal
  * hydrate-before-later-persist cell. The grammar also reconstructs that known
@@ -155,9 +155,9 @@ export type SharedDriverFairnessViolation = {
 }
 
 export type SharedDriverFairnessOptions = {
-  /** Test-only hostile control that preserves the current global FIFO fault. */
+  /** Test-only mutant control that preserves the current global FIFO fault. */
   schedulingFault?: `persist-first-fifo`
-  /** Test-only hostile barriers that take a scheduler turn K=1 counts. */
+  /** Test-only mutant barriers that take a scheduler turn K=1 counts. */
   barrierFault?: `empty-hydrate` | `empty-regular`
 }
 
@@ -296,7 +296,7 @@ class ObservedDatabase implements BrowserWASQLiteDatabase {
 }
 
 /**
- * A test-only hostile scheduler. It admits calls through the same public/core/
+ * A test-only mutant scheduler. It admits calls through the same public/core/
  * BrowserWASQLiteDriver path but serializes them in global admission order, so
  * a future fair production driver cannot accidentally make this control pass.
  */
@@ -659,7 +659,7 @@ export function findSharedDriverFairnessLawViolations(
   return violations
 }
 
-/** Checker calibration only; the executable hostile control uses the fixture. */
+/** Checker calibration only; the executable mutant control uses the fixture. */
 export function createPersistFirstFaultObservation(
   scenario: SharedDriverFairnessScenario,
 ): SharedDriverFairnessObservation {
@@ -965,6 +965,8 @@ export async function observeSharedDriverFairness(
   return observation
 }
 
+// Owns nothing: this module holds the model and check only. The production
+// path is driven by shared-driver-fairness-oracle.test.ts, which declares the owned entry.
 declareOracle({
   check: [
     findSharedDriverFairnessViolation,

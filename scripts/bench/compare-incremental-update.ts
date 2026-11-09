@@ -37,6 +37,8 @@ type RunResult = {
   mutationMode: string
   // Older reports may lack cold hydrate data.
   coldHydrateMs?: number
+  coldHydrateSamplesMs?: Array<number>
+  writeMedianSamplesMs?: Array<number>
   writeSummary: Summary
 }
 
@@ -48,6 +50,7 @@ type Report = {
     gitSha: string
     iterations: number
     warmup: number
+    repetitions?: number
   }
   results: Array<RunResult>
 }
@@ -67,15 +70,15 @@ type Comparison = {
 
 /**
  * A per-case timing that the report compares. Writes use the per-write median
- * of many samples. Cold hydrate is one sample per case, so same-code runs vary
- * by up to about ±50% on small cases; its flags need a larger relative change
- * and a larger absolute floor.
+ * of many samples. Cold hydrate is noisier on shared runners; its diagnostic
+ * flags need a larger relative change and a larger absolute floor.
  */
 type Metric = {
   label: string
   floorMs: number
   minRelativeThreshold: number
   value: (result: RunResult) => number | undefined
+  samples: (result: RunResult) => Array<number> | undefined
 }
 
 // Relative change below which a result is considered noise, and an absolute
@@ -90,12 +93,14 @@ const writeMetric: Metric = {
   floorMs: absoluteFloorMs,
   minRelativeThreshold: 0,
   value: (result) => result.writeSummary.medianMs,
+  samples: (result) => result.writeMedianSamplesMs,
 }
 const coldMetric: Metric = {
   label: `cold hydrate time`,
   floorMs: coldAbsoluteFloorMs,
   minRelativeThreshold: coldRelativeThreshold,
   value: (result) => result.coldHydrateMs,
+  samples: (result) => result.coldHydrateSamplesMs,
 }
 
 const args = parseArgs(process.argv.slice(2))
@@ -103,24 +108,74 @@ const args = parseArgs(process.argv.slice(2))
 const base = readReport(args.base)
 const candidate = readReport(args.candidate)
 
-const comparisons = compareReports(base, candidate)
-const markdown = formatMarkdown(base, candidate, comparisons, args.threshold)
+const matchedComparisons = compareReports(base, candidate)
+if (
+  args.failOnRegression &&
+  matchedComparisons.some(
+    ({ base: baseResult, candidate: candidateResult }) =>
+      baseResult.coldHydrateMs === undefined ||
+      candidateResult.coldHydrateMs === undefined,
+  )
+)
+  throw new Error(`CI requires cold hydrate timings for every benchmark case`)
+const markdown = formatMarkdown(
+  base,
+  candidate,
+  matchedComparisons,
+  args.threshold,
+)
 
 if (args.outFile) {
   writeFileSync(args.outFile, markdown)
 }
 console.log(markdown)
 
-const regressions = comparisons.filter((comparison) =>
-  isRegression(comparison, args.threshold),
-)
+const regressions = regressionFailures(matchedComparisons, args.threshold)
 if (args.failOnRegression && regressions.length > 0) {
-  console.error(`\n${regressions.length} benchmark regression(s) found`)
+  console.error(
+    `\nBenchmark regression gate failed:\n${regressions.join(`\n`)}`,
+  )
   process.exit(1)
 }
 
 function readReport(path: string): Report {
-  return JSON.parse(readFileSync(path, `utf8`)) as Report
+  const report = JSON.parse(readFileSync(path, `utf8`)) as Report
+  if (!Array.isArray(report.results) || report.results.length === 0)
+    throw new Error(`${path}: report has no benchmark results`)
+  const repetitions = report.metadata.repetitions
+  if (
+    repetitions !== undefined &&
+    (!Number.isInteger(repetitions) || repetitions < 1)
+  )
+    throw new Error(`${path}: invalid repetition count`)
+  const seen = new Set<string>()
+  for (const result of report.results) {
+    const key = resultKey(result)
+    if (seen.has(key)) throw new Error(`${path}: duplicate case ${key}`)
+    seen.add(key)
+    for (const metric of [writeMetric, coldMetric]) {
+      const value = metric.value(result)
+      const samples = metric.samples(result)
+      if (
+        (value !== undefined && (!Number.isFinite(value) || value < 0)) ||
+        (samples !== undefined &&
+          (samples.length === 0 ||
+            samples.some((sample) => !Number.isFinite(sample) || sample < 0)))
+      )
+        throw new Error(`${path}: invalid ${metric.label} for ${key}`)
+      if (metric === writeMetric && value === undefined)
+        throw new Error(`${path}: missing write timing for ${key}`)
+      if (
+        repetitions !== undefined &&
+        value !== undefined &&
+        samples?.length !== repetitions
+      )
+        throw new Error(
+          `${path}: missing ${metric.label} repetitions for ${key}`,
+        )
+    }
+  }
+  return report
 }
 
 function resultKey(result: RunResult): string {
@@ -148,7 +203,7 @@ function compareReports(
   for (const result of candidateReport.results) {
     const key = resultKey(result)
     const baseResult = baseByKey.get(key)
-    if (!baseResult) continue
+    if (!baseResult) throw new Error(`Candidate case missing from base: ${key}`)
 
     matched.push({
       key,
@@ -167,6 +222,17 @@ function compareReports(
     })
   }
 
+  if (matched.length !== baseByKey.size)
+    throw new Error(`Candidate report omits base benchmark cases`)
+  for (const comparison of matched) {
+    if (
+      (comparison.base.coldHydrateMs === undefined) !==
+      (comparison.candidate.coldHydrateMs === undefined)
+    )
+      throw new Error(
+        `Cold hydrate timing missing on one side: ${comparison.key}`,
+      )
+  }
   return matched
 }
 
@@ -243,16 +309,67 @@ function geomeanRatio(
   group: Array<Comparison>,
   metric: Metric = writeMetric,
 ): number {
-  const finite = group
+  const ratios = group
     .map((comparison) => metricRatio(comparison, metric))
-    .filter(
-      (value): value is number =>
-        value !== undefined && Number.isFinite(value) && value > 0,
-    )
-  if (finite.length === 0) return 1
+    .filter((value): value is number => value !== undefined && value >= 0)
+  if (ratios.length === 0) return 1
+  if (ratios.includes(Number.POSITIVE_INFINITY)) return Number.POSITIVE_INFINITY
+  if (ratios.includes(0)) return 0
   return Math.exp(
-    finite.reduce((sum, value) => sum + Math.log(value), 0) / finite.length,
+    ratios.reduce((sum, value) => sum + Math.log(value), 0) / ratios.length,
   )
+}
+
+/** CI policy calibrated against paired CI runs; see scripts/bench/README.md.
+ * Query geomeans catch distributed shifts without allowing improvements in
+ * another query or metric to hide them. Case ranges catch localized regressions.
+ * Single-run reports retain rollup gating but cannot claim repeat consistency.
+ */
+function regressionFailures(
+  comparisons: Array<Comparison>,
+  threshold: number,
+): Array<string> {
+  const failures: Array<string> = []
+  const byQuery = new Map<string, Array<Comparison>>()
+  for (const comparison of comparisons) {
+    const group = byQuery.get(comparison.query) ?? []
+    group.push(comparison)
+    byQuery.set(comparison.query, group)
+  }
+  for (const metric of [writeMetric, coldMetric]) {
+    const queryThreshold = Math.max(
+      threshold,
+      metric === coldMetric ? 0.5 : 0.3,
+    )
+    for (const [query, group] of byQuery) {
+      if (geomeanRatio(group, metric) > 1 + queryThreshold)
+        failures.push(
+          `${query}: ${metric.label} geomean exceeds +${queryThreshold * 100}%`,
+        )
+    }
+    for (const comparison of comparisons) {
+      const baseSamples = metric.samples(comparison.base)
+      const candidateSamples = metric.samples(comparison.candidate)
+      if (
+        !baseSamples ||
+        !candidateSamples ||
+        baseSamples.length < 3 ||
+        candidateSamples.length < 3
+      )
+        continue
+      const bestCandidate = Math.min(...candidateSamples)
+      const worstBase = Math.max(...baseSamples)
+      const caseThreshold = Math.max(queryThreshold, 0.5)
+      if (
+        bestCandidate > worstBase &&
+        isSignificant(worstBase, bestCandidate, caseThreshold, metric.floorMs)
+      )
+        failures.push(
+          `${comparison.key}: every ${metric.label} repetition exceeds the base range by +${caseThreshold * 100}% and ${metric.floorMs}ms`,
+        )
+    }
+  }
+  return failures
 }
 
 function formatRatio(value: number): string {
@@ -275,7 +392,7 @@ function formatMarkdown(
   lines.push(
     `Comparing \`${candidateReport.metadata.gitSha}\` (this PR) against \`${baseReport.metadata.gitSha}\` (base). ` +
       `Write times are per-write medians over ${candidateReport.metadata.iterations} iterations ` +
-      `(${candidateReport.metadata.warmup} warmup writes). Cold hydrate is one timed first load of each query.`,
+      `(${candidateReport.metadata.warmup} warmup writes). Timings use the median of ${candidateReport.metadata.repetitions ?? 1} fresh fixture repetition(s).`,
   )
   lines.push(``)
   const coldSummary =
@@ -300,6 +417,13 @@ function formatMarkdown(
     )
   }
   lines.push(``)
+  const gateFailures = regressionFailures(allComparisons, threshold)
+  lines.push(
+    `CI regression gate: **${gateFailures.length === 0 ? `PASS` : `FAIL`}**. Query geometric means: >+${Math.max(30, threshold * 100)}% writes or >+${Math.max(50, threshold * 100)}% cold. A case also fails when every repetition exceeds the entire base range by >+${Math.max(50, threshold * 100)}% and the metric's absolute floor.`,
+  )
+  if (gateFailures.length > 0)
+    lines.push(``, ...gateFailures.map((failure) => `- ${failure}`))
+  lines.push(``)
   lines.push(
     `<sub>Per-case flags are noisy on shared runners. Read the geometric means first.</sub>`,
   )
@@ -323,9 +447,8 @@ function formatMarkdown(
     lines.push(``)
   }
   lines.push(
-    `Each row aggregates the ${allComparisons.length / byQuery.size || 0} ` +
-      `scale/index/write-mode configurations of that query; per-configuration ` +
-      `tables below.`,
+    `Each row aggregates that query's scale/index/write-mode configurations; ` +
+      `per-configuration tables below.`,
   )
   lines.push(``)
 

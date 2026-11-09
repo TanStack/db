@@ -4,10 +4,10 @@ title: length
 ---
 
 ```ts
-function length<T>(arg): NumericFunctionReturnType<T>;
+function length<T>(arg): WithAggregate<NumericFunctionReturnType<T>, T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:299](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L299)
+Defined in: [packages/db/src/query/builder/functions.ts:379](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L379)
 
 ## Type Parameters
 
@@ -23,4 +23,4 @@ Defined in: [packages/db/src/query/builder/functions.ts:299](https://github.com/
 
 ## Returns
 
-`NumericFunctionReturnType`\<`T`\>
+`WithAggregate`\<`NumericFunctionReturnType`\<`T`\>, `T`\>

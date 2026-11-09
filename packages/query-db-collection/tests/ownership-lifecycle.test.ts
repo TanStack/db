@@ -7010,10 +7010,11 @@ describe(`query collection ownership lifecycle`, () => {
    * A silent cancellation that replaces a Query fetch lets public Collection
    * refetch callers follow the successor, as Query Core does for its own
    * `cancelRefetch` path. The reference is the successor's applied row at
-   * both public refetch settlements. A raw QueryClient `fetchQuery` waiter
-   * holds the retryer promise instead and may receive `CancelledError`; that
-   * is Query Core's separate boundary. Holding the first fetch distinguishes
+   * both public refetch settlements. Query Core also lets `fetchQuery` callers
+   * follow the successor; the raw `Query.promise` still receives
+   * `CancelledError`. Holding the first fetch distinguishes
    * a synchronous replacement from a cancellation awaited before replacement.
+   * See https://github.com/TanStack/query/pull/12489 for the upstream boundary.
    */
   it(`settles overlapping explicit refetch callers on the replacement`, async () => {
     type Row = { id: string; name: string }
@@ -7057,6 +7058,10 @@ describe(`query collection ownership lifecycle`, () => {
       },
     )
     await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    const raw = queryClient
+      .getQueryCache()
+      .find({ queryKey: [id] })!
+      .promise!.catch((error: unknown) => error)
     let externalOutcome = `pending`
     const external = queryClient
       .fetchQuery({ queryKey: [id], queryFn, staleTime: 0 })
@@ -7078,7 +7083,8 @@ describe(`query collection ownership lifecycle`, () => {
     replacement.resolve([{ id: `x`, name: `Server` }])
     await later
     expect(await earlier).toEqual({ outcome: `resolved`, row: `Server` })
-    expect(await external).toEqual({ outcome: `cancelled`, row: undefined })
+    expect(await external).toEqual({ outcome: `resolved`, row: `Server` })
+    expect(isCancelledError(await raw)).toBe(true)
     expect(collection.get(`x`)?.name).toBe(`Server`)
   })
 

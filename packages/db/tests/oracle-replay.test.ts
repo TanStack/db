@@ -5,7 +5,6 @@ import { dirname, join, resolve } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { stripVTControlCharacters } from 'node:util'
-import fc from 'fast-check'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { oracleReplayManifest } from './oracle-replay-manifest.js'
 import { oracleReplayReporter } from './oracle-replay-witness.js'
@@ -98,7 +97,7 @@ describe(`guarded oracle replay`, () => {
     expect(result.output).not.toContain(`unrelated fixed campaign ran`)
   }, 40_000)
 
-  it(`intersects a caller alternation with the named replay lane`, () => {
+  it(`intersects a caller alternation with the named replay campaign`, () => {
     const result = runReplay([
       fixture,
       `-t`,
@@ -157,7 +156,7 @@ describe(`guarded oracle replay`, () => {
       ),
     ),
   ] as const)(
-    `selects only the requested %s replay lane`,
+    `selects only the requested %s replay campaign`,
     (property, file, expectedTests) => {
       const result = runReplay([file], undefined, property)
       expect(result.status, result.output).toBe(0)
@@ -344,7 +343,7 @@ describe(`oracle replay reporting`, () => {
   it(`runs a path replay once, and only for its selected property`, () => {
     vi.stubEnv(`TANSTACK_DB_ORACLE_REPLAY_WITNESS`, undefined)
     const replay = {
-      replaySeed: 42,
+      campaignSeed: 42,
       replayPath: `3`,
       replayProperty: `oracle-replay.calibration`,
     }
@@ -357,50 +356,43 @@ describe(`oracle replay reporting`, () => {
     })
   })
 
-  it.each([false, true])(
-    `preserves native async failure formatting and cause=%s`,
-    async (errorWithCause) => {
-      directory = mkdtempSync(join(tmpdir(), `oracle-reporter-test-`))
-      const channel = join(directory, `witness.jsonl`)
-      vi.stubEnv(`TANSTACK_DB_ORACLE_REPLAY_WITNESS`, channel)
-      vi.stubEnv(`TANSTACK_DB_ORACLE_PROPERTY`, `oracle-replay.calibration`)
-      vi.stubEnv(`TANSTACK_DB_ORACLE_SEED`, `42`)
-      vi.stubEnv(`TANSTACK_DB_ORACLE_PATH`, `0`)
-      const sentinel = new Error(`native cause sentinel`)
-      const value = {
-        [fc.asyncToStringMethod]: () => Promise.resolve(`async replay value`),
-      }
-      const property = fc.asyncProperty(fc.constant(value), () =>
-        Promise.reject(sentinel),
-      )
-      const options = { seed: 42, path: `0`, numRuns: 1, errorWithCause }
-      async function failure(instrumented: boolean): Promise<Error> {
-        try {
-          await fc.assert(property, {
-            ...options,
-            ...(instrumented
-              ? oracleReplayReporter(`oracle-replay.calibration`, 42, `0`)
-              : {}),
-          })
-        } catch (error) {
-          if (error instanceof Error) return error
-          throw error
-        }
-        throw new Error(`expected property failure`)
-      }
-      const native = await failure(false)
-      const instrumented = await failure(true)
-      expect(instrumented.message).toBe(native.message)
-      expect(instrumented.message).toContain(`async replay value`)
-      expect(Object.getOwnPropertyDescriptor(instrumented, `cause`)).toEqual(
-        Object.getOwnPropertyDescriptor(native, `cause`),
-      )
-      expect(JSON.parse(readFileSync(channel, `utf8`))).toMatchObject({
-        numRuns: 1,
-        failed: true,
-      })
-    },
-  )
+  // fast-check 4 always attaches the property's error as the cause. The
+  // framework reads the replay environment once, at configuration, so the
+  // comparison runs in a child process that starts with that environment.
+  it(`preserves native async failure formatting and cause`, () => {
+    directory = mkdtempSync(join(tmpdir(), `oracle-reporter-test-`))
+    const channel = join(directory, `witness.jsonl`)
+    const result = spawnSync(
+      process.execPath,
+      [
+        `--import`,
+        `tsx`,
+        join(packageDirectory, `tests/replay-reporter-format.fixture.ts`),
+      ],
+      {
+        cwd: packageDirectory,
+        env: {
+          ...process.env,
+          TANSTACK_DB_ORACLE_REPLAY_WITNESS: channel,
+          TANSTACK_DB_ORACLE_PROPERTY: `oracle-replay.calibration`,
+          TANSTACK_DB_ORACLE_SEED: `42`,
+          TANSTACK_DB_ORACLE_PATH: `0`,
+        },
+        encoding: `utf8`,
+        timeout: 30_000,
+      },
+    )
+    if (result.error) throw result.error
+    expect(result.status, result.stderr).toBe(0)
+    const { native, instrumented, witness } = JSON.parse(
+      result.stdout.trim().split(`\n`).at(-1)!,
+    )
+    expect(instrumented.message).toBe(native.message)
+    expect(instrumented.message).toContain(`async replay value`)
+    expect(native.cause).toMatchObject({ sentinel: true })
+    expect(instrumented.cause).toEqual(native.cause)
+    expect(witness).toMatchObject({ numRuns: 1, failed: true })
+  }, 40_000)
 })
 
 describe(`named oracle replay manifest`, () => {
@@ -570,6 +562,25 @@ describe(`named oracle replay manifest`, () => {
           expect(source).toContain(
             `windowHistoryProperty(driver, \`${family}\`)`,
           )
+      } else if (entry.property.startsWith(`electric.sdk-resume-checkpoint.`)) {
+        const [, , tagged, consumer, emptySecond, delivery] =
+          entry.property.split(`.`)
+        expect(entry.property.split(`.`)).toHaveLength(6)
+        expect([`false`, `true`]).toContain(tagged)
+        expect([`direct`, `live-query`, `cursor`]).toContain(consumer)
+        expect([`false`, `true`]).toContain(emptySecond)
+        expect([`apply`, `hold`, `reject`]).toContain(delivery)
+        if (consumer === `cursor`) expect(delivery).toBe(`hold`)
+        expect(source).toContain(`for (const tagged of [false, true])`)
+        expect(source).toContain(`for (const emptySecond of [false, true])`)
+        expect(source).toContain('[`direct`, `live-query`, `cursor`] as const')
+        expect(source).toContain('[`apply`, `hold`, `reject`] as const')
+        expect(source).toContain(
+          'if (consumer === `cursor` && delivery !== `hold`) continue',
+        )
+        expect(source).toContain(
+          'electric.sdk-resume-checkpoint.${tagged}.${consumer}.${emptySecond}.${delivery}',
+        )
       } else if (entry.property.startsWith(`react.ssr-effects-`)) {
         const [runtime, ...parts] = entry.property
           .slice(`react.ssr-effects-`.length)
@@ -682,12 +693,12 @@ describe(`named oracle replay manifest`, () => {
     ).toEqual([])
   })
 
-  it(`replays a property without a shrink path from its seed alone`, () => {
+  it(`reseeds a property from its campaign seed alone`, () => {
     // The LIKE oracle draws its cases from its own seeded generator, so the
     // guarded runner, which witnesses a seed and a path, cannot witness it.
     expect(
       oracleReplayManifest
-        .filter(({ status }) => status === `seed-replay`)
+        .filter(({ status }) => status === `reseeded-campaign`)
         .map(({ property, command, environment }) => ({
           property,
           command,

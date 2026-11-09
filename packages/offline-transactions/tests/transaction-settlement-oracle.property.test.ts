@@ -1,11 +1,21 @@
 import fc from 'fast-check'
 import { createCollection, createTransaction } from '@tanstack/db'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 import { NonRetriableError } from '../src/types'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import {
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -19,8 +29,9 @@ import {
   atOracleCheckpoint,
   captureUnhandledRejections,
   cleanupOfflineOracle,
+  useControlledClock,
 } from './oracle-lifecycle'
-import { oracleLaneOptions, readOfflineOracleConfig } from './oracle-config'
+import { oracleCampaignOptions, readOfflineOracleConfig } from './oracle-config'
 import type { TestItem } from './harness'
 import type { Transaction } from '@tanstack/db'
 import type { OfflineConfig } from '../src/types'
@@ -65,7 +76,7 @@ import type { OfflineConfig } from '../src/types'
  * generated. When nobody reads an auto-commit's receipt, the Collection that
  * tracks the transaction owns its rejection; every generated transaction
  * writes to one. A caller may also register its completion waiter before the
- * transaction is admitted. Pinned examples
+ * transaction is admitted. Fixed histories
  * reconstruct all-success, middle-failure, all-failure, and alternating
  * outcomes. Shared keys distinguish sibling rollback from disjoint-key
  * survival. Width distinguishes complete optimistic state for several rows
@@ -73,6 +84,12 @@ import type { OfflineConfig } from '../src/types'
  * settlement from a global failure. Two transactions and one row are
  * the marginal peer and width cases. Fresh production IDs exclude duplicate-ID
  * histories; an outcome-less provider call is not a completed history here.
+ *
+ * Every history runs on a controlled clock: timers and `Date` are virtual,
+ * and macrotask turns stay real, so in-memory work finishes between clock
+ * steps. A checkpoint fails once virtual time passes its bound, so work left
+ * waiting on a retry backoff or a timer fails at once rather than after real
+ * seconds.
  *
  * Gates expose each provider boundary. The real executor, Collection, and
  * outbox are the driver. At each held-provider checkpoint, the refinement
@@ -94,13 +111,13 @@ import type { OfflineConfig } from '../src/types'
  * crash windows around the phase write. The controlled provider and fake
  * storage establish this executor boundary, not real server acknowledgement
  * timing, native storage completion, or multiple-owner leadership. A normal
- * run pairs fixed and seedless campaigns.
+ * run pairs fixed and random campaigns.
  * A permanent named mutation function failure uses a separate rejection-pending
  * marker. The original caller promise rejects with that failure. A storage
  * failure also rejects the executor batch promise and stops further work. An
  * offline executor restart removes a marked outbox entry without another named
  * mutation function call or restoration of optimistic state.
- * Direct executor checks pin the storage error, FIFO peer hold, and refusal of
+ * Direct executor checks cover the storage error, FIFO peer hold, and refusal of
  * further attempts. Outbox replay can invoke the named mutation function after
  * a crash if the marker write failed.
  * The `shouldRetry` option changes only the decision after a named mutation
@@ -155,6 +172,15 @@ import type { OfflineConfig } from '../src/types'
  * campaign's property (`offline.settlement.*`). The other campaigns in this
  * file stand aside.
  */
+
+// Every history runs on the controlled clock (see the opening prose).
+let releaseClock: (() => void) | undefined
+beforeEach(() => {
+  releaseClock = useControlledClock()
+})
+afterEach(() => {
+  releaseClock?.()
+})
 
 // Each campaign is its own replay property, because a recorded path belongs to
 // one generator. A path replay of a campaign's property runs only that campaign.
@@ -397,6 +423,232 @@ const settlementTransaction = fc
   )
 
 const checkSettlement = async (seed: number | undefined): Promise<void> => {
+  const parameters = {
+    ...oracleCampaignOptions(settlementOracle, seed),
+    examples: [
+      [
+        {
+          sharedKeys: true,
+          width: 1,
+          transactions: [
+            {
+              succeeds: true,
+              commit: `manual`,
+              readReceipt: true,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: true,
+            },
+            {
+              succeeds: true,
+              commit: `manual`,
+              readReceipt: true,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: true,
+            },
+          ],
+        },
+      ],
+      [
+        {
+          sharedKeys: false,
+          width: 2,
+          transactions: [
+            {
+              succeeds: true,
+              commit: `manual`,
+              readReceipt: true,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: true,
+            },
+            {
+              succeeds: false,
+              commit: `manual`,
+              readReceipt: true,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: true,
+            },
+            {
+              succeeds: true,
+              commit: `manual`,
+              readReceipt: true,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: true,
+            },
+          ],
+        },
+      ],
+      [
+        {
+          sharedKeys: true,
+          width: 2,
+          transactions: [
+            {
+              succeeds: false,
+              commit: `manual`,
+              readReceipt: true,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: true,
+            },
+            {
+              succeeds: false,
+              commit: `manual`,
+              readReceipt: true,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: true,
+            },
+            {
+              succeeds: false,
+              commit: `manual`,
+              readReceipt: true,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: true,
+            },
+          ],
+        },
+      ],
+      [
+        {
+          sharedKeys: true,
+          width: 1,
+          transactions: [
+            {
+              succeeds: false,
+              commit: `manual`,
+              readReceipt: true,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: true,
+            },
+            {
+              succeeds: true,
+              commit: `manual`,
+              readReceipt: true,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: true,
+            },
+            {
+              succeeds: false,
+              commit: `manual`,
+              readReceipt: true,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: true,
+            },
+          ],
+        },
+      ],
+      [
+        {
+          sharedKeys: true,
+          width: 1,
+          transactions: [
+            {
+              succeeds: false,
+              commit: `auto`,
+              readReceipt: false,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: false,
+            },
+            {
+              succeeds: true,
+              commit: `manual`,
+              readReceipt: true,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: true,
+            },
+            {
+              succeeds: false,
+              commit: `auto`,
+              readReceipt: true,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: false,
+            },
+          ],
+        },
+      ],
+      // A failed auto-commit with the default option, and a failed
+      // action, settle through when('settled') only.
+      [
+        {
+          sharedKeys: false,
+          width: 1,
+          transactions: [
+            {
+              succeeds: false,
+              commit: `default`,
+              readReceipt: false,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: false,
+            },
+            {
+              succeeds: false,
+              commit: `action`,
+              readReceipt: true,
+              emptyBefore: false,
+              rolledBackBefore: false,
+              waitBefore: false,
+            },
+          ],
+        },
+      ],
+      // Empty transactions on every commit path complete without the
+      // provider, before and between real ones.
+      [
+        {
+          sharedKeys: false,
+          width: 1,
+          transactions: [
+            {
+              succeeds: true,
+              commit: `manual`,
+              readReceipt: true,
+              emptyBefore: true,
+              rolledBackBefore: true,
+              waitBefore: false,
+            },
+            {
+              succeeds: false,
+              commit: `auto`,
+              readReceipt: false,
+              emptyBefore: true,
+              rolledBackBefore: true,
+              waitBefore: false,
+            },
+            {
+              succeeds: true,
+              commit: `default`,
+              readReceipt: true,
+              emptyBefore: true,
+              rolledBackBefore: true,
+              waitBefore: false,
+            },
+            {
+              succeeds: true,
+              commit: `action`,
+              readReceipt: true,
+              emptyBefore: true,
+              rolledBackBefore: true,
+              waitBefore: false,
+            },
+          ],
+        },
+      ],
+    ],
+  }
+  oracleRoute(oracleRouteOf(parameters))
   await fc.assert(
     fc.asyncProperty(
       // One record per transaction, so every commit path and an unread
@@ -746,231 +998,7 @@ const checkSettlement = async (seed: number | undefined): Promise<void> => {
         }
       },
     ),
-    {
-      ...oracleLaneOptions(settlementOracle, seed),
-      examples: [
-        [
-          {
-            sharedKeys: true,
-            width: 1,
-            transactions: [
-              {
-                succeeds: true,
-                commit: `manual`,
-                readReceipt: true,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: true,
-              },
-              {
-                succeeds: true,
-                commit: `manual`,
-                readReceipt: true,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: true,
-              },
-            ],
-          },
-        ],
-        [
-          {
-            sharedKeys: false,
-            width: 2,
-            transactions: [
-              {
-                succeeds: true,
-                commit: `manual`,
-                readReceipt: true,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: true,
-              },
-              {
-                succeeds: false,
-                commit: `manual`,
-                readReceipt: true,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: true,
-              },
-              {
-                succeeds: true,
-                commit: `manual`,
-                readReceipt: true,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: true,
-              },
-            ],
-          },
-        ],
-        [
-          {
-            sharedKeys: true,
-            width: 2,
-            transactions: [
-              {
-                succeeds: false,
-                commit: `manual`,
-                readReceipt: true,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: true,
-              },
-              {
-                succeeds: false,
-                commit: `manual`,
-                readReceipt: true,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: true,
-              },
-              {
-                succeeds: false,
-                commit: `manual`,
-                readReceipt: true,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: true,
-              },
-            ],
-          },
-        ],
-        [
-          {
-            sharedKeys: true,
-            width: 1,
-            transactions: [
-              {
-                succeeds: false,
-                commit: `manual`,
-                readReceipt: true,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: true,
-              },
-              {
-                succeeds: true,
-                commit: `manual`,
-                readReceipt: true,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: true,
-              },
-              {
-                succeeds: false,
-                commit: `manual`,
-                readReceipt: true,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: true,
-              },
-            ],
-          },
-        ],
-        [
-          {
-            sharedKeys: true,
-            width: 1,
-            transactions: [
-              {
-                succeeds: false,
-                commit: `auto`,
-                readReceipt: false,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: false,
-              },
-              {
-                succeeds: true,
-                commit: `manual`,
-                readReceipt: true,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: true,
-              },
-              {
-                succeeds: false,
-                commit: `auto`,
-                readReceipt: true,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: false,
-              },
-            ],
-          },
-        ],
-        // A failed auto-commit with the default option, and a failed
-        // action, settle through when('settled') only.
-        [
-          {
-            sharedKeys: false,
-            width: 1,
-            transactions: [
-              {
-                succeeds: false,
-                commit: `default`,
-                readReceipt: false,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: false,
-              },
-              {
-                succeeds: false,
-                commit: `action`,
-                readReceipt: true,
-                emptyBefore: false,
-                rolledBackBefore: false,
-                waitBefore: false,
-              },
-            ],
-          },
-        ],
-        // Empty transactions on every commit path complete without the
-        // provider, before and between real ones.
-        [
-          {
-            sharedKeys: false,
-            width: 1,
-            transactions: [
-              {
-                succeeds: true,
-                commit: `manual`,
-                readReceipt: true,
-                emptyBefore: true,
-                rolledBackBefore: true,
-                waitBefore: false,
-              },
-              {
-                succeeds: false,
-                commit: `auto`,
-                readReceipt: false,
-                emptyBefore: true,
-                rolledBackBefore: true,
-                waitBefore: false,
-              },
-              {
-                succeeds: true,
-                commit: `default`,
-                readReceipt: true,
-                emptyBefore: true,
-                rolledBackBefore: true,
-                waitBefore: false,
-              },
-              {
-                succeeds: true,
-                commit: `action`,
-                readReceipt: true,
-                emptyBefore: true,
-                rolledBackBefore: true,
-                waitBefore: false,
-              },
-            ],
-          },
-        ],
-      ],
-    },
+    parameters,
   )
 }
 
@@ -1033,6 +1061,8 @@ describe(`restored snapshots and independent outbox settlement`, () => {
   it.each(restoredHistories)(
     `restores whole snapshots through independent outcomes: %j`,
     async (history) => {
+      // An enumerated history: a reproducible route for the gap report.
+      oracleRoute(`case`)
       reach.beginHistory()
       const rows = restoredRows(history)
       const storage = new FakeStorageAdapter()
@@ -1231,6 +1261,7 @@ it.each([
   `early-peer`,
   `missing-row`,
 ] as const)(`rejects a wrong restored observation: %s`, (fault) => {
+  oracleRoute(`calibration`)
   const history: RestoredHistory = {
     layout: `shared`,
     width: 2,
@@ -1368,6 +1399,11 @@ function retryDecisionProviderError(kind: RetryErrorKind): Error {
 // every fixed cell. A seed-and-path replay runs only its requested history.
 async function checkRetryDecision(seed: number | undefined): Promise<void> {
   const reachedCases = new Set<string>()
+  const campaignParameters = {
+    ...oracleCampaignOptions(retryDecisionOracle, seed),
+    examples: retryDecisionExamples,
+  }
+  oracleRoute(oracleRouteOf(campaignParameters))
   await fc.assert(
     fc.asyncProperty(
       fc.constantFrom(...retryDecisionCases),
@@ -1611,10 +1647,7 @@ async function checkRetryDecision(seed: number | undefined): Promise<void> {
         }
       },
     ),
-    {
-      ...oracleLaneOptions(retryDecisionOracle, seed),
-      examples: retryDecisionExamples,
-    },
+    campaignParameters,
   )
   if (!oracleReplayRequested())
     expect([...reachedCases].sort()).toEqual(
@@ -1681,6 +1714,7 @@ it.each([
 ] as const)(
   `settles a started peer across %s hook failure and %s write`,
   async (failureKind, peerWriteCase) => {
+    oracleRoute(`case`)
     const providerError = new Error(`HTTP 401 Unauthorized`)
     const hookError = new Error(`retry decision failed`)
     const storageError = new Error(`peer outbox write failed`)
@@ -1984,6 +2018,11 @@ it.each([
 // The fixture does not generate a duplicate ID or a successful retry-record
 // write, because neither has this failure premise.
 async function checkRetryRecordFailure(seed: number | undefined) {
+  const runParameters = {
+    ...oracleCampaignOptions(retryRecordOracle, seed),
+    examples: [[2], [5]],
+  }
+  oracleRoute(oracleRouteOf(runParameters))
   await fc.assert(
     fc.asyncProperty(fc.integer({ min: 2, max: 5 }), async (count) => {
       const storageError = new Error(`retry record unavailable`)
@@ -2098,10 +2137,7 @@ async function checkRetryRecordFailure(seed: number | undefined) {
         )
       }
     }),
-    {
-      ...oracleLaneOptions(retryRecordOracle, seed),
-      examples: [[2], [5]],
-    },
+    runParameters,
   )
 }
 
@@ -2115,10 +2151,15 @@ oracleReplayTest(it, RETRY_RECORD_PROPERTY).each([undefined])(
 )
 
 // The failed durable write can be first, middle, or last among three distinct
-// IDs. All positions are pinned, so the conditional failure premise is reached
+// IDs. All positions are fixed, so the conditional failure premise is reached
 // at each boundary. Removing the two admitted peers would hide accidental
 // global rejection. A duplicate ID is outside this legal admission grammar.
 async function checkDurableAdmissionFailure(seed: number | undefined) {
+  const parameters = {
+    ...oracleCampaignOptions(admissionOracle, seed),
+    examples: [[0], [1], [2]],
+  }
+  oracleRoute(oracleRouteOf(parameters))
   await fc.assert(
     fc.asyncProperty(fc.integer({ min: 0, max: 2 }), async (failedIndex) => {
       const storageError = new Error(`admission unavailable`)
@@ -2210,10 +2251,7 @@ async function checkDurableAdmissionFailure(seed: number | undefined) {
         )
       }
     }),
-    {
-      ...oracleLaneOptions(admissionOracle, seed),
-      examples: [[0], [1], [2]],
-    },
+    parameters,
   )
 }
 
@@ -2231,7 +2269,18 @@ oracleReplayTest(it, ADMISSION_PROPERTY).each([undefined])(
 // retry decision table and FIFO local rows, and the visibility and provider
 // eligibility of a started peer. Fixed scenarios whose expectations are
 // written by hand are not oracle tests; they live in transaction-settlement.test.ts.
+// What this oracle owns: the gap report judges these entries, and their
+// reference trees within the package, by this file's tests.
 declareOracle({
+  owns: [
+    `src/OfflineExecutor.ts#startOfflineExecutor`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.createOfflineAction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.waitForTransactionCompletion`,
+    `src/OfflineExecutor.ts#OfflineExecutor.rejectTransaction`,
+    `src/OfflineExecutor.ts#OfflineExecutor.peekOutbox`,
+    `src/OfflineExecutor.ts#OfflineExecutor.dispose`,
+  ],
   check: [
     checkSettlement,
     checkRetryDecision,

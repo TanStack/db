@@ -885,7 +885,7 @@ describe(`BrowserCollectionCoordinator`, () => {
      *
      * Checkpoints: before the request (premise: no term while the read is
      * held), after bounded turns with the read still held (term and route), and
-     * after release (settlement and RPC count). Hostile mutants that skip any
+     * after release (settlement and RPC count). Mutants that skip any
      * need mark fail the held-read checkpoint or the settlement deadline.
      *
      * Per-election cells: a follower takes over from a leader that served an
@@ -3375,7 +3375,7 @@ describe(`BrowserCollectionCoordinator`, () => {
           }
         }
 
-        // Reach witnesses above distinguish an RPC crossover from ordinary
+        // Reach checks above distinguish an RPC crossover from ordinary
         // leadership transfer. The exact-ID answer must settle the wrapper's
         // first receipt without cleanup or a second sync run.
         const actual = {

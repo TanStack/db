@@ -5,7 +5,7 @@ import { mockSyncCollectionOptions, withExpectedRejection } from './utils.js'
 
 /**
  * A row read with virtual props is a copy, cached so repeated reads and
- * publications share one object. These laws pin what that cache must keep:
+ * publications share one object. These laws fix what that cache must keep:
  * the value a change publishes is the row later reads return, for every
  * subscriber, and a key that leaves the collection leaves the cache. A sync
  * source that reuses a row object and changes it in place still reads its new

@@ -13,6 +13,7 @@ import {
   persistedCollectionOptions,
 } from '../src/index.js'
 import { declareOracle } from '../../db/tests/oracle-declaration'
+import { oracleRoute } from '../../db/tests/oracle-config'
 import { createSerializedNodeSqliteDriver as createDriver } from './helpers/node-sqlite-driver.js'
 import {
   drain,
@@ -88,7 +89,7 @@ import type { SQLiteDriver } from '../src/index.js'
  * with the generated campaign and every receiving driver,
  * `tests/persisted-demand-coverage-model-oracle.ts`. They record the
  * source's log and each query's loads and observation, and state no expected
- * answer (ORC-016). Two pinned checks whose laws other owners hold live in
+ * answer (ORC-016). Two fixed regressions whose laws other owners hold live in
  * `persisted-demand-coverage-supplemental.test.ts`.
  *
  * Limits: Electric, Query DB, React, and Solid have receiving witnesses in
@@ -2379,6 +2380,7 @@ afterEach(() => {
 })
 
 declareOracle({
+  owns: [`src/persisted.ts`],
   check: [coverageViolations, firstMismatch, sameObservation],
   model: [expectedTrace],
   grammar: [ALL_CELLS],
@@ -2393,6 +2395,7 @@ describe(`persisted demand coverage oracle`, () => {
   // -------------------------------------------------------------------------
 
   it(`rejects wrong observations at a checkpoint`, () => {
+    oracleRoute(`calibration`)
     const ready = {
       queryStatus: `ready`,
       preload: `resolved`,
@@ -2561,6 +2564,7 @@ describe(`persisted demand coverage oracle`, () => {
   it.each(wrongDesigns.map((entry) => [entry.design.name, entry] as const))(
     `distinguishes the law from the wrong design: %s`,
     (_name, { design, witness }) => {
+      oracleRoute(`calibration`)
       expect(ALL_CELLS).toContainEqual(witness)
       expect(
         firstMismatch(expectedTrace(witness), expectedTrace(witness, design)),
@@ -2569,6 +2573,7 @@ describe(`persisted demand coverage oracle`, () => {
   )
 
   it(`enumerates every declared cell once`, () => {
+    oracleRoute(`case`)
     const names = ALL_CELLS.map(cellName)
     expect(new Set(names).size).toBe(names.length)
     expect(names).toHaveLength(
@@ -2583,6 +2588,7 @@ describe(`persisted demand coverage oracle`, () => {
   it.each(ALL_CELLS.map((cell) => [cellName(cell), cell] as const))(
     `refines the model: %s`,
     async (_name, cell) => {
+      oracleRoute(`case`)
       quietConsole()
       const actual = await runCell(cell)
       expect(firstMismatch(expectedTrace(cell), actual)).toBeUndefined()
@@ -2594,6 +2600,7 @@ describe(`persisted demand coverage oracle`, () => {
   // -------------------------------------------------------------------------
 
   it(`gives each load of a covered demand its own wait and keeps coverage across release`, async () => {
+    oracleRoute(`fixed history`)
     quietConsole()
     const records = await runLifecycle()
     judge(records)
@@ -2626,6 +2633,7 @@ describe(`persisted demand coverage oracle`, () => {
   ])(
     `makes a joined query ready only when its on-demand demands settle: %s, %s`,
     async (history, shape) => {
+      oracleRoute(`case`)
       quietConsole()
       const records = await runJoined(history, shape)
       judge(records)
@@ -2668,6 +2676,7 @@ describe(`persisted demand coverage oracle`, () => {
       () => runClaimExpiredBeforeCheck([]),
     ],
   ] as const)(`judges a reset in the same session: %s`, async (_name, run) => {
+    oracleRoute(`case`)
     quietConsole()
     judge(await run())
   })
@@ -2704,6 +2713,7 @@ describe(`persisted demand coverage oracle`, () => {
       () => runHeldPastTheWait(`claim renewal`),
     ],
   ] as const)(`judges coverage bookkeeping: %s`, async (_name, run) => {
+    oracleRoute(`case`)
     quietConsole()
     judge(await run())
   })
@@ -2711,6 +2721,7 @@ describe(`persisted demand coverage oracle`, () => {
   it.each(Object.keys(WINDOW_HISTORIES) as Array<WindowHistory>)(
     `settles an ordered window from SQLite only while its demands are covered: %s`,
     async (history) => {
+      oracleRoute(`case`)
       quietConsole()
       judge(await runWindow(history))
     },
@@ -2724,6 +2735,7 @@ describe(`persisted demand coverage oracle`, () => {
   ] as const)(
     `moves a window offline to a page only when that page is covered (session 1 loaded page 2: %s, indexed: %s)`,
     async (session1LoadsPageTwo, indexed) => {
+      oracleRoute(`case`)
       quietConsole()
       judge(await runNextPage(session1LoadsPageTwo, indexed))
     },

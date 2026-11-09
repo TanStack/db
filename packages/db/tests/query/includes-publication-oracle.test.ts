@@ -11,7 +11,12 @@ import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
 import { runTrace } from '../trace-runner.js'
-import { oraclePropertyOptions, readOracleRunConfig } from '../oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  readOracleRunConfig,
+} from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
@@ -582,6 +587,13 @@ function expectedHeldPublicationRows(
 }
 
 declareOracle({
+  owns: [
+    'src/collection/index.ts#createCollection',
+    'src/indexes/basic-index.ts',
+    'src/indexes/btree-index.ts',
+    'src/query/effect.ts#createEffect',
+    'src/query/live-query-collection.ts#createLiveQueryCollection',
+  ],
   check: [expectPublicationMatches],
   model: [recomputeRows, expectedHeldPublicationRows],
 })
@@ -597,7 +609,7 @@ function publicationCampaigns(baseRuns: number, property: string) {
   if (replay.replayPath !== undefined && replay.replayProperty !== property)
     return []
   const options = oraclePropertyOptions(baseRuns, property)
-  if (replay.replaySeed !== undefined) return [{ name: `replay`, options }]
+  if (replay.campaignSeed !== undefined) return [{ name: `replay`, options }]
   return [
     {
       name: `fixed seed ${fixedPublicationSeed}`,
@@ -624,6 +636,7 @@ describe(`layered-query publication oracle`, () => {
   for (const q1Shape of q1Shapes) {
     for (const q2Shape of q2Shapes) {
       it(`observes every plain write before yielding through ${q1Shape}/${q2Shape}`, async () => {
+        oracleRoute(`case`)
         const actions: Array<PublicationAction> = [
           { type: `parentScalar`, value: 7 },
           { type: `childScalar`, value: 8 },
@@ -664,6 +677,7 @@ describe(`layered-query publication oracle`, () => {
       })
 
       it(`rejects a transient layered tear through ${q1Shape}/${q2Shape}`, async () => {
+        oracleRoute(`case`)
         const run = (observeInsideAction: boolean) => {
           let transient = false
           const driver = createPublicationDriver(q1Shape, q2Shape)
@@ -702,6 +716,7 @@ describe(`layered-query publication oracle`, () => {
       })
 
       it(`rejects a callback-only tear before reads recover through ${q1Shape}/${q2Shape}`, async () => {
+        oracleRoute(`case`)
         const driver = createPublicationDriver(q1Shape, q2Shape)
         let reached = 0
         const context = await driver.setup()
@@ -744,6 +759,7 @@ describe(`layered-query publication oracle`, () => {
       })
 
       it(`checks both sides of confirmation through ${q1Shape}/${q2Shape}`, async () => {
+        oracleRoute(`case`)
         for (const fault of [`none`, `optimistic`, `confirmed`] as const) {
           const driver = createPublicationDriver(q1Shape, q2Shape)
           let phase: `initial` | `optimistic` | `confirmed` = `initial`
@@ -792,6 +808,7 @@ describe(`layered-query publication oracle`, () => {
         fcTest.prop([changedValueArbitrary], campaign.options)(
           `publishes parent scalar updates through a ${q1Shape} Q1 and ${q2Shape} Q2 (${campaign.name})`,
           async (value) => {
+            oracleRoute(oracleRouteOf(campaign.options))
             await expectPublicationMatches(
               { type: `parentScalar`, value },
               q1Shape,
@@ -811,6 +828,7 @@ describe(`layered-query publication oracle`, () => {
         )(
           `recovers a ${q1Shape} Q1 and ${q2Shape} Q2 after a child update (${campaign.name})`,
           async (parentValue, childValue) => {
+            oracleRoute(oracleRouteOf(campaign.options))
             await expectPublicationMatches(
               { type: `parentThenChild`, parentValue, childValue },
               q1Shape,
@@ -827,6 +845,7 @@ describe(`layered-query publication oracle`, () => {
         fcTest.prop([changedValueArbitrary], campaign.options)(
           `publishes optimistic state before and after confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2 (${campaign.name})`,
           async (value) => {
+            oracleRoute(oracleRouteOf(campaign.options))
             await expectPublicationMatches(
               { type: `optimisticConfirm`, value },
               q1Shape,
@@ -844,6 +863,7 @@ describe(`layered-query publication oracle`, () => {
   ])(
     `rejects missing $phase callbacks at the public checkpoint`,
     async ({ cut, checkpoint: expectedCheckpoint }) => {
+      oracleRoute(`case`)
       const driver = createPublicationDriver(`direct`, `passThrough`)
       let reachedCuts = 0
       let previousCallbackCount = 0
@@ -880,6 +900,7 @@ describe(`layered-query publication oracle`, () => {
     fcTest.prop([changedChildValueArbitrary], campaign.options)(
       `publishes child-only scalar updates through both layers (${campaign.name})`,
       async (value) => {
+        oracleRoute(oracleRouteOf(campaign.options))
         await expectPublicationMatches({ type: `childScalar`, value })
       },
     )
@@ -892,6 +913,7 @@ describe(`layered-query publication oracle`, () => {
     fcTest.prop([fc.constantFrom(20, 30)], campaign.options)(
       `compares route transitions at both query layers (${campaign.name})`,
       async (group) => {
+        oracleRoute(oracleRouteOf(campaign.options))
         await expectPublicationMatches({ type: `parentRoute`, group })
       },
     )
@@ -912,6 +934,7 @@ describe(`layered-query publication oracle`, () => {
     )(
       `compares atomic parent replacements at both query layers (${campaign.name})`,
       async (row) => {
+        oracleRoute(oracleRouteOf(campaign.options))
         await expectPublicationMatches({ type: `atomicReplace`, ...row })
       },
     )
@@ -924,6 +947,7 @@ describe(`layered-query publication oracle`, () => {
     fcTest.prop([changedValueArbitrary], campaign.options)(
       `publishes restored state after optimistic rollback (${campaign.name})`,
       async (value) => {
+        oracleRoute(oracleRouteOf(campaign.options))
         await expectPublicationMatches({
           type: `optimisticRollback`,
           value,
@@ -950,6 +974,7 @@ describe(`held include publication`, () => {
   ])(
     `compares the final $intermediate to $final row with the last public snapshot`,
     async ({ intermediate, final }) => {
+      oracleRoute(`case`)
       type Row = { id: number; rank: number; value: string }
       const sourceRows = new Map<number, Row>([
         [1, { id: 1, rank: 1, value: `A` }],
