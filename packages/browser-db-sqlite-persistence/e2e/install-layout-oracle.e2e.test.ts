@@ -454,7 +454,8 @@ async function openInLayout(
   }
   // The consumer runs the Vite major that the case names.
   const vite = (layoutCase.vite === 7 ? vite7 : vite8) as typeof vite8
-  let developmentServer: Awaited<ReturnType<typeof vite.createServer>> | undefined
+  let developmentServer:
+    Awaited<ReturnType<typeof vite.createServer>> | undefined
   let productionServer: Awaited<ReturnType<typeof vite.preview>> | undefined
   if (layoutCase.server === `production`) {
     await buildForProduction(
