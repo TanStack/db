@@ -117,9 +117,10 @@ function expectedOutcome(
 ): LayoutOutcome {
   if (layoutCase.server === `production`) return { opens: true, workers: 1 }
   // Authority: maintainer decision on TanStack/db#2371 (2026-11-08). Under Vite
-  // 8 the dependency optimizer keeps a moved copy's worker and WASM beside it,
-  // so the copy loads its own assets and never asks the dev server for the
-  // package by name. Every layout therefore opens with the imported copy.
+  // 8 the moved copy's asset URLs point at the original install, so the copy
+  // loads its own worker and WASM and the dev server is not asked for the
+  // package by name. Every development layout therefore opens with the imported
+  // copy, whatever the cache directory or exclusion.
   if (layoutCase.vite === 8) {
     return { opens: true, workers: 1, worker: `imported copy` }
   }
@@ -186,18 +187,13 @@ const layoutCasesForOneVite: Array<Omit<LayoutCase, `vite`>> = [
     server: `production` as const,
   })),
 ]
-// Every history runs against a Vite 7 consumer. Under Vite 8 the model ignores
-// the cache directory and the exclusion, so the Vite 8 rows keep only the
-// layouts without them: development and production, which still tell the Vite
-// 8 rule and the production build apart from a mutant.
+// Every history runs against a consumer on each Vite major. The Vite 8 model
+// ignores the cache directory and the exclusion in development, but production
+// builds read both, so every row stays: each one is a cheap witness that a Vite
+// 8 install opens in every layout the README names.
 const layoutCases: Array<LayoutCase> = [
   ...layoutCasesForOneVite.map((layoutCase) => ({ ...layoutCase, vite: 7 as const })),
-  ...layoutCasesForOneVite
-    .filter(
-      (layoutCase) =>
-        layoutCase.cache === `default` && layoutCase.exclusion === `none`,
-    )
-    .map((layoutCase) => ({ ...layoutCase, vite: 8 as const })),
+  ...layoutCasesForOneVite.map((layoutCase) => ({ ...layoutCase, vite: 8 as const })),
 ]
 
 // The outcomes each Vite major's rows promise to reach. Declared with the
