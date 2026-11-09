@@ -567,8 +567,8 @@ describe(`comparison law controls`, () => {
   )
 
   fcTest(`fixed campaign reaches a changed byte in every case`, () => {
-    const parameters = { seed: 20260911, numRuns: 100 }
-    oracleRoute(`fixed seed`)
+    const parameters = oracleFixedSeed(20260911, { numRuns: 100 })
+    oracleRoute(oracleRouteOf(parameters))
     const result = fc.check(
       fc.property(arbitraryChangedBytes, (sample) => {
         assertChangedBytes(sample, areValuesEqual)

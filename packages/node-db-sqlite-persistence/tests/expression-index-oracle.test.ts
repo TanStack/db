@@ -1148,7 +1148,7 @@ describe(`SQLite expression-index oracle`, () => {
       oracleRoute(`calibration`)
       const details = await fc.check(
         generatedScenarioProperty({ ablateKind: kind }),
-        { seed: DEFAULT_ORACLE_SEED, numRuns: 1, verbose: 2 },
+        oracleFixedSeed(DEFAULT_ORACLE_SEED, { numRuns: 1, verbose: 2 }),
       )
       const evidence = JSON.stringify({
         seed: details.seed,
@@ -1169,10 +1169,10 @@ describe(`SQLite expression-index oracle`, () => {
     `reconstructs the retained generated grammar and rejects a nearby duplicate axis`,
     () => {
       oracleRoute(`calibration`)
-      const [matrix] = fc.sample(generatedScenarioMatrixArbitrary, {
-        seed: DEFAULT_ORACLE_SEED,
-        numRuns: 1,
-      })
+      const [matrix] = fc.sample(
+        generatedScenarioMatrixArbitrary,
+        oracleFixedSeed(DEFAULT_ORACLE_SEED, { numRuns: 1 }),
+      )
       if (!matrix) throw new Error(`fixed grammar witness was not generated`)
       assertGeneratedScenarioGrammar(matrix)
       expect(GENERATED_SCENARIO_FAULTS.map(({ kind }) => kind)).toEqual(
@@ -1194,7 +1194,7 @@ describe(`SQLite expression-index oracle`, () => {
       oracleRoute(`calibration`)
       const details = await fc.check(
         generatedScenarioProperty({ faultKind: kind }),
-        { seed: DEFAULT_ORACLE_SEED, numRuns: 1, verbose: 2 },
+        oracleFixedSeed(DEFAULT_ORACLE_SEED, { numRuns: 1, verbose: 2 }),
       )
       const evidence = JSON.stringify({
         seed: details.seed,

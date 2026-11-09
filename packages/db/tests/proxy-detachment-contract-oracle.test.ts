@@ -48,8 +48,8 @@ describe(`Mutation result detachment`, () => {
   // For any number of ordinary fields, one write changes only that field and
   // defines no property descriptors: a generated law over the field count.
   it(`copies ordinary fields without descriptor writes`, () => {
-    const parameters = { seed: 20260914, numRuns: 40 }
-    oracleRoute(`fixed seed`)
+    const parameters = oracleFixedSeed(20260914, { numRuns: 40 })
+    oracleRoute(oracleRouteOf(parameters))
     fc.assert(
       fc.property(fc.integer({ min: 1, max: 40 }), (count) => {
         const row = Object.fromEntries(

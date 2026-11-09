@@ -305,7 +305,10 @@ describe(`Index refinement oracle`, () => {
   // cancels after another value joined its key.
   it(`reaches cancelled NaN-prefixed values beside other values`, () => {
     oracleRoute(`fixed seed`)
-    const sample = fc.sample(historyArbitrary, { seed: 20260930, numRuns: 300 })
+    const sample = fc.sample(
+      historyArbitrary,
+      oracleFixedSeed(20260930, { numRuns: 300 }),
+    )
     const reached = sample.filter((additions) =>
       additions.some(
         (addition, step) =>

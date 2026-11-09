@@ -298,8 +298,8 @@ describe(`deepEquals property-based tests`, () => {
       (cells) => expectRingLaw(cells),
     )
     it(`runs a fixed mixed-ring campaign without skipped antecedents`, () => {
-      const parameters = { seed: 101301, numRuns: 100 }
-      oracleRoute(`fixed seed`)
+      const parameters = oracleFixedSeed(101301, { numRuns: 100 })
+      oracleRoute(oracleRouteOf(parameters))
       const result = fc.check(
         fc.property(ringArbitrary, (cells) => expectRingLaw(cells)),
         parameters,
@@ -517,8 +517,8 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
     it(`fixed campaign reaches an extra property in every case`, () => {
-      const campaignParameters = { seed: 20260911, numRuns: 100 }
-      oracleRoute(`fixed seed`)
+      const campaignParameters = oracleFixedSeed(20260911, { numRuns: 100 })
+      oracleRoute(oracleRouteOf(campaignParameters))
       const result = fc.check(
         fc.property(arbitraryExtraProperty, (sample) => {
           assertExtraProperty(sample, deepEquals)

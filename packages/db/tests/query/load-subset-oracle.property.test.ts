@@ -319,10 +319,10 @@ describe(`exact loadSubset demand oracle`, () => {
 
   it(`generates repeated, cursor, empty, and unbounded exact demands`, () => {
     oracleRoute(`fixed seed`)
-    const traces = fc.sample(exactDemandTraceArbitrary, {
-      seed: 1656,
-      numRuns: 200,
-    })
+    const traces = fc.sample(
+      exactDemandTraceArbitrary,
+      oracleFixedSeed(1656, { numRuns: 200 }),
+    )
     const demands = traces.flat()
 
     expect(

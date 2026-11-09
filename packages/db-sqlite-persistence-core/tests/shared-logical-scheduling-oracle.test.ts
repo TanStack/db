@@ -48,13 +48,20 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { createSQLiteCorePersistenceAdapter } from '../src'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import {
+  oracleFixedSeed,
+  oracleRoute,
+  oracleRouteOf,
+} from '../../db/tests/oracle-config'
 import { PromiseBrandedFirstQueryGatedDriver } from './shared-logical-scheduling-support'
 
 describe(`shared logical scheduling`, () => {
   it(`keeps generated promise-discovered hydrate units non-preemptible`, async () => {
-    const parameters = { seed: 1868, numRuns: 12, endOnFailure: true }
-    oracleRoute(`fixed seed`)
+    const parameters = oracleFixedSeed(1868, {
+      numRuns: 12,
+      endOnFailure: true,
+    })
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(
         fc.record({

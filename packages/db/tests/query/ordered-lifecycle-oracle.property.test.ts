@@ -2433,7 +2433,10 @@ describe(`nullable multi-term lifecycle product`, () => {
 
   it(`generates the nullable value and lifecycle dimensions`, () => {
     oracleRoute(`fixed seed`)
-    const sample = fc.sample(arbitrary, { seed: 93472, numRuns: 100 })
+    const sample = fc.sample(
+      arbitrary,
+      oracleFixedSeed(93472, { numRuns: 100 }),
+    )
     expect(new Set(sample.map((scenario) => scenario.acquisitionPath))).toEqual(
       new Set([`prefix`, `boundary`, `full-source`]),
     )

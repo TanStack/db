@@ -1846,7 +1846,7 @@ describe(`aggregate select shapes`, () => {
       // Keep the literal budget/seed binding visible to the run-budget audit.
       // runCampaign registers the route of the parameters, which declare the
       // seed fixed.
-      const options = { numRuns: oracleRuns(160), seed: 2094 }
+      const options = oracleFixedSeed(2094, { numRuns: oracleRuns(160) })
       await runCampaign(
         `fixed`,
         oracleFixedSeed(

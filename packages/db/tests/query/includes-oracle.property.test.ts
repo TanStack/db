@@ -3485,7 +3485,7 @@ describe(`includes recompute oracle`, () => {
           )
           const [generated] = fc.sample(
             transitionHistoryScenariosArbitrary(depth, first, second, 0),
-            { seed: 1725, numRuns: 1 },
+            oracleFixedSeed(1725, { numRuns: 1 }),
           )
           expect(generated).toHaveLength(placements.length)
           for (const [index, scenario] of generated!.entries()) {
@@ -3730,7 +3730,7 @@ describe(`includes recompute oracle`, () => {
       for (const sourceBranch of [0, 1] as const) {
         const [split] = fc.sample(
           rekeyRouteReuseScenarioArbitrary(depth, sourceBranch),
-          { seed: 1726, numRuns: 1 },
+          oracleFixedSeed(1726, { numRuns: 1 }),
         )
         const [atomic] = fc.sample(
           rekeyRouteReuseScenarioArbitrary(
@@ -3738,7 +3738,7 @@ describe(`includes recompute oracle`, () => {
             sourceBranch,
             createIntraBatchRekeyRouteReuseScenarios,
           ),
-          { seed: 1733, numRuns: 1 },
+          oracleFixedSeed(1733, { numRuns: 1 }),
         )
         expect(split).toBeDefined()
         expect(atomic).toBeDefined()
@@ -3778,7 +3778,7 @@ describe(`includes recompute oracle`, () => {
             targetLevel,
             sourceBranch,
           ),
-          { seed: 1727, numRuns: 1 },
+          oracleFixedSeed(1727, { numRuns: 1 }),
         )
         for (const order of branchDeliveryOrders) {
           const pair = mirrors![order]

@@ -1553,10 +1553,10 @@ declareOracle({
 describe(`CollectionSubscription replay oracle`, () => {
   it(`generates shared, failed, stale, released, and post-replay histories`, () => {
     oracleRoute(`fixed seed`)
-    const scenarios = fc.sample(replayScenarioArbitrary, {
-      seed: 1755,
-      numRuns: 300,
-    })
+    const scenarios = fc.sample(
+      replayScenarioArbitrary,
+      oracleFixedSeed(1755, { numRuns: 300 }),
+    )
 
     expect(scenarios.some(({ demandIds }) => demandIds.length > 1)).toBe(true)
     expect(scenarios.some(({ attempts }) => attempts.length > 1)).toBe(true)

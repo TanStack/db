@@ -22,6 +22,7 @@ import { describe, expect, onTestFinished } from 'vitest'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
 import { BetterSqlite3SQLiteDriver } from '../../node-db-sqlite-persistence/src/node-driver'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
   oracleRuns,
@@ -232,7 +233,10 @@ describe(`reload class oracle (Electron driver)`, () => {
     30_000,
   )
 
-  fcTest.prop([reloadHistoryArb], { seed: 2205, numRuns: oracleRuns(12) })(
+  fcTest.prop(
+    [reloadHistoryArb],
+    oracleFixedSeed(2205, { numRuns: oracleRuns(12) }),
+  )(
     `keeps generated reloads lawful (fixed seed)`,
     (history) => {
       oracleRoute(`fixed seed`)

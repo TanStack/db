@@ -154,12 +154,11 @@ function expectAliasGrammar<TAlias extends string>(
   ]
   const observed = new Set<string>()
 
-  const parameters = {
-    seed: FIXED_ALIAS_ORACLE_SEED,
+  const parameters = oracleFixedSeed(FIXED_ALIAS_ORACLE_SEED, {
     numRuns: 50,
     examples: witnesses.map((aliases) => [aliases]),
-  }
-  oracleRoute(`fixed seed`)
+  })
+  oracleRoute(oracleRouteOf(parameters))
   fc.assert(
     fc.property(arbitrary, (aliases) => {
       expect(isLegalAliasSequence(aliases, allowedAliases)).toBe(true)

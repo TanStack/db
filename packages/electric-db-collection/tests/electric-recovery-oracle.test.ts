@@ -889,7 +889,10 @@ describe(`persisted Electric recovery laws`, () => {
     oracleRoute(`fixed seed`)
     const combinations = new Set(
       fc
-        .sample(publicationHistoryArbitrary, { seed: 1659, numRuns: 20 })
+        .sample(
+          publicationHistoryArbitrary,
+          oracleFixedSeed(1659, { numRuns: 20 }),
+        )
         .flat()
         .map(({ deleted, fullReload }) => `${deleted}:${fullReload}`),
     )

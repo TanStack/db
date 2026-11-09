@@ -29,7 +29,7 @@ import {
   getQueryIdentity,
 } from '../../src/query/ir-stable-identity.js'
 import { Func, IncludesSubquery, PropRef, Value } from '../../src/query/ir.js'
-import { oracleRoute, oracleRuns } from '../oracle-config.js'
+import { oracleFixedSeed, oracleRoute, oracleRuns } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import {
   createAlphaRenamedIncludesQuery,
@@ -473,7 +473,7 @@ describe(`stable QueryIR identity smoke test`, () => {
     }
   })
 
-  const outputProgramFixedSeed = { seed: 715031, numRuns: 200 }
+  const outputProgramFixedSeed = oracleFixedSeed(715031, { numRuns: 200 })
   fcTest.prop([outputProgramArbitrary], outputProgramFixedSeed)(
     `matches output denotation through composed contexts with a fixed seed`,
     (program) => {

@@ -19,6 +19,7 @@ import { join } from 'node:path'
 import { fc } from '@fast-check/vitest'
 import { expect, it, vi } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplaySkips,
@@ -304,8 +305,8 @@ it('replays only the selected history after the original failure is repaired', a
   // This shrink path has a later sibling. fast-check check() continues into
   // that sibling when the selected counterexample passes, despite numRuns: 1.
   const arbitrary = fc.integer({ min: 0, max: 100 })
-  const parameters = { seed: 11792027, numRuns: 30 }
-  oracleRoute(`fixed seed`)
+  const parameters = oracleFixedSeed(11792027, { numRuns: 30 })
+  oracleRoute(oracleRouteOf(parameters))
   const original = fc.check(
     fc.property(arbitrary, (value) => value < 10),
     parameters,

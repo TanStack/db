@@ -972,7 +972,10 @@ describe(`draft revert oracle`, () => {
   // change made only under a nested symbol key.
   it(`reaches every operation and both revert outcomes in the fixed campaign`, () => {
     oracleRoute(`fixed seed`)
-    const sample = fc.sample(historyArb, { seed: FIXED_SEED, numRuns: 400 })
+    const sample = fc.sample(
+      historyArb,
+      oracleFixedSeed(FIXED_SEED, { numRuns: 400 }),
+    )
     const reached = new Set<string>()
     let partial = 0
     let full = 0
@@ -1045,7 +1048,10 @@ describe(`draft revert oracle`, () => {
     oracleRoute(`fixed seed`)
     let urlWrites = 0
     let keylessWrites = 0
-    const sample = fc.sample(classWriteArb, { seed: FIXED_SEED, numRuns: 200 })
+    const sample = fc.sample(
+      classWriteArb,
+      oracleFixedSeed(FIXED_SEED, { numRuns: 200 }),
+    )
     for (const { original, ops } of sample) {
       let state: Root = { ...original }
       for (const generated of ops) {
@@ -1588,10 +1594,10 @@ describe(`draft revert oracle: native mutators mixed with assignments`, () => {
   // that an assignment then replaces, and a mutator through a detached handle.
   it(`reaches replaced native writes and detached handles in the fixed campaign`, () => {
     oracleRoute(`fixed seed`)
-    const sample = fc.sample(nativeHistoryArb, {
-      seed: FIXED_SEED,
-      numRuns: 400,
-    })
+    const sample = fc.sample(
+      nativeHistoryArb,
+      oracleFixedSeed(FIXED_SEED, { numRuns: 400 }),
+    )
     const replaced = sample.filter((h) => {
       const first = h.ops.findIndex((o) =>
         [`push`, `pop`, `reverse`].includes(o.op),

@@ -4,7 +4,11 @@ import { IR } from '@tanstack/db'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { makePgClient } from '../../db-collection-e2e/support/global-setup'
 import { compileSQL } from '../src/sql-compiler'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import {
+  oracleFixedSeed,
+  oracleRoute,
+  oracleRouteOf,
+} from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import type { Client } from 'pg'
 
@@ -295,8 +299,7 @@ describe(`Electric predicate compiler semantics`, () => {
     const version = await client.query<{ server_version: string }>(
       `SHOW server_version`,
     )
-    const parameters = {
-      seed: 1814,
+    const parameters = oracleFixedSeed(1814, {
       numRuns: 50,
       examples: [
         ...([`eq`, `in`, `isNull`] as const).map(
@@ -331,8 +334,8 @@ describe(`Electric predicate compiler semantics`, () => {
           { type: `compare`, op: `eq`, column: `label`, value: `O'Reilly` },
         ],
       ],
-    }
-    oracleRoute(`fixed seed`)
+    })
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(
         rows,

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { serialize } from '../src/pg-serializer'
 import {
+  oracleFixedSeed,
   oracleReplayTest,
   oracleRoute,
   oracleRuns,
@@ -366,7 +367,10 @@ describe(`pg-serializer property-based tests`, () => {
         fc.array(fc.boolean(), { minLength: 1, maxLength: 10 }),
         (input) => expectFiniteArrayContents(input, `{}`),
       )
-      const failure = fc.check(property, { seed: 90701, numRuns: 25 })
+      const failure = fc.check(
+        property,
+        oracleFixedSeed(90701, { numRuns: 25 }),
+      )
       expect(failure.failed).toBe(true)
       if (!failure.failed || failure.counterexamplePath === null) {
         throw new Error(`omission fault did not produce a replayable failure`)

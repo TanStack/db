@@ -896,10 +896,10 @@ describe(`sync metadata session grammar ablation`, () => {
       oracleRoute(`fixed seed`)
       const count = (filter: (action: SessionAction) => boolean) =>
         fc
-          .sample(sessionHistoryArbitrary(grammar), {
-            seed: 2_220_100,
-            numRuns: 200,
-          })
+          .sample(
+            sessionHistoryArbitrary(grammar),
+            oracleFixedSeed(2_220_100, { numRuns: 200 }),
+          )
           .filter((history) =>
             historyRegimes(grammar, history.filter(filter)).has(regime),
           ).length
@@ -908,10 +908,10 @@ describe(`sync metadata session grammar ablation`, () => {
           ? nestedGrammar
           : grammar
       const full = fc
-        .sample(sessionHistoryArbitrary(fullGrammar), {
-          seed: 2_220_100,
-          numRuns: 200,
-        })
+        .sample(
+          sessionHistoryArbitrary(fullGrammar),
+          oracleFixedSeed(2_220_100, { numRuns: 200 }),
+        )
         .filter((history) =>
           historyRegimes(fullGrammar, history).has(regime),
         ).length

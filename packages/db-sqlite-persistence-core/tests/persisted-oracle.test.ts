@@ -4811,8 +4811,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
   it(`keeps generated crossed-leadership index RPC histories outside local hydration scopes`, async () => {
     let run = 0
-    const campaignParameters = { seed: 1868, numRuns: 8, endOnFailure: true }
-    oracleRoute(`fixed seed`)
+    const campaignParameters = oracleFixedSeed(1868, {
+      numRuns: 8,
+      endOnFailure: true,
+    })
+    oracleRoute(oracleRouteOf(campaignParameters))
     await fc.assert(
       fc.asyncProperty(
         fc.record({

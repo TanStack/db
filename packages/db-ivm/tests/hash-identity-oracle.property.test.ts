@@ -852,7 +852,10 @@ describe(`hash identity oracle`, () => {
   // and every mutation, with both verdicts.
   it(`reaches every kind, mutation, and verdict in the fixed campaign`, () => {
     oracleRoute(`fixed seed`)
-    const sample = fc.sample(pairArb, { seed: FIXED_SEED, numRuns: 300 })
+    const sample = fc.sample(
+      pairArb,
+      oracleFixedSeed(FIXED_SEED, { numRuns: 300 }),
+    )
     const kinds = new Set<string>()
     for (const { left } of sample)
       for (const [node] of nodes(left))

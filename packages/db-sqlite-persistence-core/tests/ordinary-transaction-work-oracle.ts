@@ -1042,10 +1042,10 @@ export function runOrdinaryTransactionWorkOracle(): void {
     )
 
     it('reconstructs the bounded generated action-history axes', () => {
-      const samples = fc.sample(generatedHistoryArbitrary, {
-        seed: 1992,
-        numRuns: 120,
-      })
+      const samples = fc.sample(
+        generatedHistoryArbitrary,
+        oracleFixedSeed(1992, { numRuns: 120 }),
+      )
       expect(new Set(samples.map((sample) => sample.scenario))).toEqual(
         new Set<GeneratedScenario>([
           'repeated-key',
@@ -1089,10 +1089,10 @@ export function runOrdinaryTransactionWorkOracle(): void {
     })
 
     it('reconstructs independent-key work shapes and host caps', () => {
-      const samples = fc.sample(independentWorkArbitrary, {
-        seed: 31992,
-        numRuns: 120,
-      })
+      const samples = fc.sample(
+        independentWorkArbitrary,
+        oracleFixedSeed(31992, { numRuns: 120 }),
+      )
       expect(new Set(samples.map((sample) => sample.shape))).toEqual(
         new Set<IndependentWorkCase['shape']>([
           'insert-later-metadata',

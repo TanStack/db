@@ -819,10 +819,10 @@ describe(`SQLite resume snapshots`, () => {
 
   it(`fixed startup corpus reaches every baseline size and transition`, () => {
     oracleRoute(`fixed history`)
-    const histories = fc.sample(startupHistoryArbitrary, {
-      seed: 1659,
-      numRuns: 12,
-    })
+    const histories = fc.sample(
+      startupHistoryArbitrary,
+      oracleFixedSeed(1659, { numRuns: 12 }),
+    )
     expect(new Set(histories.map(({ baselineSize }) => baselineSize))).toEqual(
       new Set([1, 2, 3]),
     )

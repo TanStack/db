@@ -6,6 +6,7 @@ import { OutboxManager } from '../src/outbox/OutboxManager'
 import { TransactionSerializer } from '../src/outbox/TransactionSerializer'
 import { runOracleCampaign } from '../../db/tests/oracle-campaign'
 import {
+  oracleFixedSeed,
   oracleReplayTest,
   oracleRoute,
   oracleRouteOf,
@@ -436,14 +437,13 @@ it.each([`modified`, `original`, `changes`] as const)(
     })
     const serializer = new TransactionSerializer({ rows: collection })
     try {
-      const parameters = {
-        seed: 20260914,
+      const parameters = oracleFixedSeed(20260914, {
         numRuns: 100,
         examples: [undefined, null, 1, `text`, false, []].map(
           (value): [typeof value, Array<boolean>] => [value, []],
         ),
-      }
-      oracleRoute(`fixed seed`)
+      })
+      oracleRoute(oracleRouteOf(parameters))
       fc.assert(
         fc.property(
           fc.constantFrom(undefined, null, 1, `text`, false, []),

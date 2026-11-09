@@ -7,7 +7,11 @@ import { registerOpaqueHash } from '../../src/hashing/hash.js'
 import { topKBatch } from '../../src/operators/topKState.js'
 import { D2 } from '../../src/d2.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
-import { oracleRoute } from '../../../db/tests/oracle-config.js'
+import {
+  oracleFixedSeed,
+  oracleRoute,
+  oracleRouteOf,
+} from '../../../db/tests/oracle-config.js'
 import { output } from '../../src/operators/index.js'
 import { declareOracle } from '../../../db/tests/oracle-declaration'
 
@@ -207,8 +211,8 @@ it.each(
   `preserves $name cancellation (large group $largeGroup, collision $collision)`,
   ({ pair, largeGroup, collision }) => {
     if (collision) vi.spyOn(hashing, `hash`).mockReturnValue(7)
-    const parameters = { seed: 409033, numRuns: 25 }
-    oracleRoute(`fixed seed`)
+    const parameters = oracleFixedSeed(409033, { numRuns: 25 })
+    oracleRoute(oracleRouteOf(parameters))
     fc.assert(
       fc.property(
         fc.integer({ min: 0, max: 254 }),
@@ -278,8 +282,8 @@ it.each([true, false])(
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, `File`)
     if (!available) Reflect.deleteProperty(globalThis, `File`)
     try {
-      const parameters = { seed: 409039, numRuns: 25 }
-      oracleRoute(`fixed seed`)
+      const parameters = oracleFixedSeed(409039, { numRuns: 25 })
+      oracleRoute(oracleRouteOf(parameters))
       fc.assert(
         fc.property(fc.integer(), fc.boolean(), (rank, retractFirst) => {
           const graph = new D2()
@@ -319,8 +323,8 @@ it.each([true, false])(
 
 it(`compares shared subtrees without expanding every path`, () => {
   vi.spyOn(hashing, `hash`).mockReturnValue(7)
-  const campaignParameters = { seed: 409034, numRuns: 25 }
-  oracleRoute(`fixed seed`)
+  const campaignParameters = oracleFixedSeed(409034, { numRuns: 25 })
+  oracleRoute(oracleRouteOf(campaignParameters))
   fc.assert(
     fc.property(fc.integer({ min: 0, max: 20 }), (depth) => {
       let reads = 0
@@ -351,8 +355,8 @@ it(`compares shared subtrees without expanding every path`, () => {
 })
 
 it(`short-circuits replacements without hashing unrelated payloads`, () => {
-  const runParameters = { seed: 409035, numRuns: 25 }
-  oracleRoute(`fixed seed`)
+  const runParameters = oracleFixedSeed(409035, { numRuns: 25 })
+  oracleRoute(oracleRouteOf(runParameters))
   fc.assert(
     fc.property(fc.integer({ min: 1, max: 100 }), (count) => {
       let reads = 0
@@ -375,8 +379,8 @@ it(`short-circuits replacements without hashing unrelated payloads`, () => {
 })
 
 it(`cancels long same-key histories with independently allocated values`, () => {
-  const parameters = { seed: 409037, numRuns: 25 }
-  oracleRoute(`fixed seed`)
+  const parameters = oracleFixedSeed(409037, { numRuns: 25 })
+  oracleRoute(oracleRouteOf(parameters))
   fc.assert(
     fc.property(fc.integer({ min: 10, max: 150 }), (count) => {
       const make = (value: number) => ({ value })

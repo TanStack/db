@@ -798,7 +798,10 @@ it(`attributes a source reinsert after a confirmed delete to the source`, async 
 
 it(`writes source inserts and deletes in the fixed campaign`, async () => {
   oracleRoute(`fixed seed`)
-  const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 40 })
+  const histories = fc.sample(
+    optimisticHistory,
+    oracleFixedSeed(86103, { numRuns: 40 }),
+  )
   let inserts = 0
   let deletes = 0
   let absentDeletes = 0
@@ -815,7 +818,10 @@ it(`writes source inserts and deletes in the fixed campaign`, async () => {
 
 it(`writes distinguishing partial updates in the fixed partial campaign`, async () => {
   oracleRoute(`fixed seed`)
-  const histories = fc.sample(partialHistory, { seed: 86104, numRuns: 40 })
+  const histories = fc.sample(
+    partialHistory,
+    oracleFixedSeed(86104, { numRuns: 40 }),
+  )
   let distinguishing = 0
   for (const { initial, steps } of histories) {
     const counts = await runOptimisticHistory(initial, steps, undefined, {
@@ -831,7 +837,10 @@ it(`writes distinguishing partial updates in the fixed partial campaign`, async 
 // deep equality without signed zeros sees that change.
 it(`writes zero-sign edits over in-flight writes in the fixed campaign`, async () => {
   oracleRoute(`fixed seed`)
-  const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 40 })
+  const histories = fc.sample(
+    optimisticHistory,
+    oracleFixedSeed(86103, { numRuns: 40 }),
+  )
   let zeroSignEdits = 0
   for (const { initial, steps } of histories) {
     const counts = await runOptimisticHistory(initial, steps)

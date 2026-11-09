@@ -474,10 +474,10 @@ function executedReplayReach(steps: ReadonlyArray<ReconciliationStep>): number {
 
 it(`executes changed down-state sources and checks their restart replay`, () => {
   oracleRoute(`fixed seed`)
-  const histories = fc.sample(reconciliationHistoryArbitrary, {
-    seed: 1780,
-    numRuns: 500,
-  })
+  const histories = fc.sample(
+    reconciliationHistoryArbitrary,
+    oracleFixedSeed(1780, { numRuns: 500 }),
+  )
 
   // Run every history, not just the first syntax match. Each accepted restart
   // has already passed tracker and signed-relation assertions above.

@@ -4575,7 +4575,7 @@ describe(`Electric adapter laws`, () => {
     },
   )
 
-  const fixedCampaign = { seed: 20260922, numRuns: 20 }
+  const fixedCampaign = oracleFixedSeed(20260922, { numRuns: 20 })
   oracleReplayTest(fcTest).prop(
     [
       fc.uniqueArray(fc.integer({ min: 1, max: 20 }), {

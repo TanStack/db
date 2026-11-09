@@ -197,8 +197,8 @@ describe(`eager live-source conformance: per-change commits`, () => {
     `the per-change reference adapter conforms`,
     async () => {
       const perChange = referenceDriver(undefined, { perChange: true })
-      const parameters = { seed: 2118, numRuns: runs }
-      oracleRoute(`fixed seed`)
+      const parameters = oracleFixedSeed(2118, { numRuns: runs })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(eagerLiveSourceProperty(perChange), parameters)
     },
     campaignTimeoutMs,
@@ -239,8 +239,8 @@ describe(`eager live-source conformance: outage threshold, client values`, () =>
         reachStatesFor(thresholdDriver),
         { minimum: 5 },
       )
-      const campaignParameters = { seed: 2118, numRuns: runs }
-      oracleRoute(`fixed seed`)
+      const campaignParameters = oracleFixedSeed(2118, { numRuns: runs })
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         eagerLiveSourceProperty(thresholdDriver, reach),
         campaignParameters,
@@ -616,8 +616,8 @@ describe(`eager live-source grammar controls`, () => {
       const reach = createOracleReach(`${property}.ablation`, states, {
         replaying: false,
       })
-      const runParameters = { seed: 2118, numRuns: 100 }
-      oracleRoute(`fixed seed`)
+      const runParameters = oracleFixedSeed(2118, { numRuns: 100 })
+      oracleRoute(oracleRouteOf(runParameters))
       await fc.assert(
         fc.asyncProperty(
           historyArb.map((history) =>
@@ -649,8 +649,8 @@ describe(`eager live-source grammar controls`, () => {
         id: row.id,
         title: row.title,
       })
-      const parameters = { seed: 2118, numRuns: 100 }
-      oracleRoute(`fixed seed`)
+      const parameters = oracleFixedSeed(2118, { numRuns: 100 })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           historyArb.map((history) =>
@@ -695,8 +695,8 @@ describe(`eager live-source grammar controls`, () => {
         reachStatesFor(driver),
         { replaying: false },
       )
-      const parameters = { seed: 2118, numRuns: 100 }
-      oracleRoute(`fixed seed`)
+      const parameters = oracleFixedSeed(2118, { numRuns: 100 })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           historyArb.map((history) =>
@@ -740,8 +740,8 @@ describe(`eager live-source grammar controls`, () => {
         reachStatesFor(driver),
         { replaying: false },
       )
-      const parameters = { seed: 2118, numRuns: 100 }
-      oracleRoute(`fixed seed`)
+      const parameters = oracleFixedSeed(2118, { numRuns: 100 })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           historyArb.map((history) =>
