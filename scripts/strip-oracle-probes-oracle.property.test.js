@@ -392,7 +392,9 @@ const constructedPrograms = () => [
 // is named for the placement, the form, or the guard variant it exercises.
 const STATES = [
   ...TOP_WEIGHTS.map(([, top]) => `guard-top-${top}`),
-  ...UNIT_WEIGHTS.map(([, kind]) => `unit-${kind}`),
+  ...UNIT_WEIGHTS.filter(([, kind]) => !REJECTED_UNITS.has(kind)).map(
+    ([, kind]) => `unit-${kind}`,
+  ),
   ...PROBE_FORMS.map((form) => `form-${form}`),
 ]
 
