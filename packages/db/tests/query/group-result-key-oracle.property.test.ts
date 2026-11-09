@@ -261,30 +261,56 @@ async function runHistory(
       n: (row as { n: number }).n,
     })),
   })
-  await withOracleCleanup(
-    async () => {
-      await live.preload()
-      observe(`after preload`, snapshot())
-      for (const [index, step] of plan.steps.entries()) {
-        source.utils.begin()
-        if (step.kind === `insert`)
-          source.utils.write({ type: `insert`, value: { ...step.row } })
-        else if (step.kind === `update`)
-          source.utils.write({ type: `update`, value: { ...step.row } })
-        else if (step.kind === `delete`)
-          source.utils.write({ type: `delete`, value: { ...step.row } })
-        source.utils.commit()
-        observe(`after change ${index} (${step.kind})`, snapshot())
-      }
-    },
-    [() => live.cleanup(), () => source.cleanup()],
-  )
+  // A production error raised while publishing a checkpoint is itself an
+  // observation at that checkpoint, so the check names the law it breaks
+  // instead of the run failing as a setup error.
+  let checkpoint = `after preload`
+  try {
+    await withOracleCleanup(
+      async () => {
+        await live.preload()
+        observe(checkpoint, snapshot())
+        for (const [index, step] of plan.steps.entries()) {
+          checkpoint = `after change ${index} (${step.kind})`
+          source.utils.begin()
+          if (step.kind === `insert`)
+            source.utils.write({ type: `insert`, value: { ...step.row } })
+          else if (step.kind === `update`)
+            source.utils.write({ type: `update`, value: { ...step.row } })
+          else if (step.kind === `delete`)
+            source.utils.write({ type: `delete`, value: { ...step.row } })
+          source.utils.commit()
+          observe(checkpoint, snapshot())
+        }
+      },
+      [() => live.cleanup(), () => source.cleanup()],
+    )
+  } catch (error) {
+    observe(checkpoint, { error: errorData(error) })
+  }
+}
+
+function isErrorData(
+  value: unknown,
+): value is { error: { name: string; message: string } } {
+  return typeof value === `object` && value !== null && `error` in value
+}
+
+// Collection ids carry a per-process serial, so the message is stripped of it;
+// otherwise two runs of one history would record different traces.
+function errorData(error: unknown): { name: string; message: string } {
+  const name = error instanceof Error ? error.name : `non-error`
+  const message = String(
+    error instanceof Error ? error.message : error,
+  ).replace(/(live-query|group-key-source)-\d+/g, `$1`)
+  return { name, message }
 }
 
 const LAW_KEY_TYPE = `grouped keys are strings or numbers`
 const LAW_GROUPS = `each published group has its owed count`
 const LAW_DISTINCT = `no two groups share a key, and the key count is the group count`
 const LAW_KEPT = `a group that survives a change keeps its key`
+const LAW_PUBLISHES = `publishing a valid grouped change raises no error`
 
 declareOracle({
   owns: [`src/query/live-query-collection.ts#createLiveQueryCollection`],
@@ -371,6 +397,15 @@ oracleProperty<History, Array<Array<[string, number]>>, Plan>({
     let previous = new Map<string, unknown>()
     for (const [index, observation] of observations.entries()) {
       const { checkpoint, value } = observation
+      if (isErrorData(value)) {
+        const { name, message } = value.error
+        return violation(
+          checkpoint,
+          `production raised ${name}: ${message}`,
+          LAW_PUBLISHES,
+          { actual: name, expected: `no error` },
+        )
+      }
       const snapshot = value as Snapshot
       for (const row of snapshot.rows) {
         if (row.keyType !== `string` && row.keyType !== `number`)
