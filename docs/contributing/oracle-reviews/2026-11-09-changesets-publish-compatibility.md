@@ -90,7 +90,7 @@ Hostile controls use only a scratch publisher and restore it afterward:
 Normal command:
 
 ```sh
-TANSTACK_DB_ORACLE_STATISTICS=1 vitest run \
+TANSTACK_DB_ORACLE_STATISTICS=1 pnpm exec vitest run \
   --config scripts/oracle-scripts.vitest.config.mjs \
   scripts/publish-http-oracle.property.test.js \
   scripts/publish-history-oracle.property.test.js \

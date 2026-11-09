@@ -28,6 +28,10 @@ correction, which does not change its emitted JavaScript. Tests
 were extended and formatted during review; test identity follows the final
 repair commit rather than an earlier uncommitted test fingerprint.
 
+A later review adds an invariant comment beside Solid's revision bump.
+TypeScript emission with comments removed matches the repair commit exactly.
+The fingerprints above continue to identify the named repair commit.
+
 Local package installation remained shared and unchanged. Exact upgraded
 Solid/Electric distribution files, retrieved through the authorized CI
 artifact, were extracted under `/tmp/dependency-compat-runtimes`. Scratch Vite
@@ -223,7 +227,7 @@ selection and are not included in the 448 checkpoint total.
 | --- | --- |
 | Original production after correcting the HTTP persistence fixture | 52 failed, 45 skipped: all 48 fixed/random registrations for the first 24 checkpoint lanes plus four existing persisted-launch tests fail intended metadata/premise assertions. `/tmp/electric-upgraded-oracle-red-v3.log`. Earlier setup-error attempts are not RED evidence. |
 | Repaired candidate, same selection | 52 passed, 45 skipped. `/tmp/electric-upgraded-oracle-green-v3.log`. |
-| Final 28 checkpoint lanes plus existing rotation campaigns | 58 passed, 32 skipped; 56 checkpoint tests supply the 448 histories above. `/tmp/electric-checkpoint-neighbors-green-v3.log`; selector `persists each completed|releases retired SDK resources`. |
+| Final 28 checkpoint lanes plus existing rotation campaigns | 58 passed, 32 skipped; 56 checkpoint tests supply the 448 histories above. `/tmp/electric-checkpoint-neighbors-green-v3.log`; selector `persists each completed\|releases retired SDK resources`. |
 | Final full Electric package | 898 passed in 21 files, 131.16 seconds. `/tmp/electric-final-package-green.log`. An earlier full run passed 890 tests before adding the four cursor lanes. |
 | Await metadata application inside the physical request tail | Rejected by progress timeout at `next physical snapshot while checkpoint is held`, after the held-checkpoint premise; one selected random test fails. `/tmp/electric-queue-await-mutant.log`. This is a progress failure, not a row assertion. |
 | Remove scoped/fresh-generation reset protection | Intended assertion: actual `kind: resume`, expected `kind: reset` after the tagged fresh-launch demand. `/tmp/electric-scoped-reset-mutant.log`. |

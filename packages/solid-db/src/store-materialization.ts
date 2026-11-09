@@ -178,6 +178,8 @@ export function createRowStore<T extends object>(source: T) {
                   previousReserved?.enumerable !== nextReserved?.enumerable ||
                   !!previousReserved !== !!nextReserved
                 )
+                  // The facade tracks this same unwrap(row) target. A missing
+                  // signal means no reader registered an observer yet.
                   ownFieldRevisions.get(current)?.[1](
                     (revision) => revision + 1,
                   )
