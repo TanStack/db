@@ -52,10 +52,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import * as vite8 from 'vite'
-import * as vite7 from 'vite-7'
 import { declareOracle } from '../../db/tests/oracle-declaration'
-import { buildForProduction } from './packaged-consumer'
+import { buildForProduction, consumerVite } from './packaged-consumer'
 import type { Browser } from '@playwright/test'
 import type { BrowserWASQLiteDatabase } from '../src'
 
@@ -188,12 +186,20 @@ const layoutCasesForOneVite: Array<Omit<LayoutCase, `vite`>> = [
   })),
 ]
 // Every history runs against a consumer on each Vite major. The Vite 8 model
-// ignores the cache directory and the exclusion in development, but production
-// builds read both, so every row stays: each one is a cheap witness that a Vite
-// 8 install opens in every layout the README names.
+// says the cache directory and the exclusion do not change a development
+// install's outcome. The development rows for each cache and exclusion are the
+// witnesses for that claim. Production rows use the default cache and no
+// exclusion, because a production build does not pre-bundle; they witness that
+// each layout builds and opens.
 const layoutCases: Array<LayoutCase> = [
-  ...layoutCasesForOneVite.map((layoutCase) => ({ ...layoutCase, vite: 7 as const })),
-  ...layoutCasesForOneVite.map((layoutCase) => ({ ...layoutCase, vite: 8 as const })),
+  ...layoutCasesForOneVite.map((layoutCase) => ({
+    ...layoutCase,
+    vite: 7 as const,
+  })),
+  ...layoutCasesForOneVite.map((layoutCase) => ({
+    ...layoutCase,
+    vite: 8 as const,
+  })),
 ]
 
 // The outcomes each Vite major's rows promise to reach. Declared with the
@@ -265,9 +271,7 @@ it.each(layoutCases)(
 for (const vite of [7, 8] as const) {
   it(`covers every promised layout outcome under Vite ${vite}`, () => {
     expect([...coveredOutcomes[vite]].sort()).toEqual(
-      promisedOutcomes[vite]
-        .map((outcome) => JSON.stringify(outcome))
-        .sort(),
+      promisedOutcomes[vite].map((outcome) => JSON.stringify(outcome)).sort(),
     )
   })
 }
@@ -449,7 +453,7 @@ async function openInLayout(
           },
   }
   // The consumer runs the Vite major that the case names.
-  const vite = (layoutCase.vite === 7 ? vite7 : vite8) as typeof vite8
+  const vite = consumerVite(layoutCase.vite)
   let developmentServer:
     Awaited<ReturnType<typeof vite.createServer>> | undefined
   let productionServer: Awaited<ReturnType<typeof vite.preview>> | undefined

@@ -26,15 +26,20 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import * as vite8 from 'vite'
-import * as vite7 from 'vite-7'
 import {
   describeHistory,
   expectOpenOutcome,
   openHistories,
   reachedOutcomes,
 } from '../tests/opfs-open-outcome-oracle'
-import { createPackagedConsumer, probeWorkers } from './packaged-consumer'
+import {
+  
+  consumerVite,
+  createPackagedConsumer,
+  probeWorkers 
+} from './packaged-consumer'
+import type {ConsumerVite, ProbeGlobal 
+} from './packaged-consumer';
 import type { Browser } from '@playwright/test'
 import type { ViteDevServer } from 'vite'
 import type {
@@ -46,7 +51,6 @@ import type {
   WasmLoad,
 } from '../tests/opfs-open-outcome-oracle'
 import type { BrowserWASQLiteDatabase } from '../src'
-import type { ProbeGlobal } from './packaged-consumer'
 
 const chromiumReach: OpenDriverReach = {
   lookup: [`resolves`, `held`, `fails`],
@@ -93,6 +97,8 @@ const premises: {
   heldSteps: Array<() => void>
   heldLookupPath?: string
   onHeld?: () => void
+  // Settles when the dev server has finished sending a held WASM response.
+  wasmFinished?: Promise<void>
 } = {
   lookup: `resolves`,
   workerScript: `loads`,
@@ -111,10 +117,8 @@ let server: ViteDevServer | undefined
 const consumerDirectory = join(temporaryDirectory, `consumer`)
 
 // Starts a dev server for the consumer under one Vite major.
-async function startServer(
-  createDevServer: typeof vite8.createServer,
-): Promise<void> {
-  server = await createDevServer({
+async function startServer(major: ConsumerVite): Promise<void> {
+  server = await consumerVite(major).createServer({
     configFile: false,
     root: consumerDirectory,
     base: `/nested/`,
@@ -155,6 +159,13 @@ async function startServer(
               // A held fetch waits until the driver interrupts the open and
               // releases it, so the worker's initialization is pending.
               if (premises.wasm === `held`) {
+                // An interrupted open cancels its fetch, so the response
+                // closes without finishing; either event means the response
+                // has left the dev server.
+                premises.wasmFinished = new Promise<void>((resolve) => {
+                  response.once(`finish`, () => resolve())
+                  response.once(`close`, () => resolve())
+                })
                 premises.heldSteps.push(next)
                 premises.onHeld?.()
                 return
@@ -222,6 +233,12 @@ function holdDeadlineTimers(heldDelay: number): void {
 let historyIndex = 0
 
 // The middleware sets this during a history, after the driver reset it.
+// Read through a function: the premise is reset in the same history, so a
+// direct read would narrow to undefined.
+function readWasmFinished(): Promise<void> | undefined {
+  return premises.wasmFinished
+}
+
 function readHeldLookupPath(): string | undefined {
   return premises.heldLookupPath
 }
@@ -234,8 +251,7 @@ async function awaitHeldStep(stepHeld: Promise<void>): Promise<void> {
       stepHeld,
       new Promise<never>((_, reject) => {
         timer = setTimeout(
-          () =>
-            reject(new Error(`the held step never reached the dev server`)),
+          () => reject(new Error(`the held step never reached the dev server`)),
           heldStepWaitMs,
         )
       }),
@@ -254,6 +270,7 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
   premises.wasmFileRequests = 0
   premises.heldSteps = []
   premises.heldLookupPath = undefined
+  premises.wasmFinished = undefined
   const stepHeld = new Promise<void>((resolve) => {
     premises.onHeld = resolve
   })
@@ -328,7 +345,16 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
 
     // Checkpoint: let every held step complete in the page, then wait one task
     // so every continuation of the interrupted open has run.
+    const wasmFinished = readWasmFinished()
     for (const release of premises.heldSteps.splice(0)) release()
+    // A released WASM fetch has arrived once the dev server finishes its
+    // response; one page task after that, the worker has handled it.
+    if (wasmFinished) {
+      await awaitHeldStep(wasmFinished)
+      await page.evaluate(
+        `new Promise((resolve) => { const channel = new MessageChannel(); channel.port1.onmessage = () => resolve(); channel.port2.postMessage(null) })`,
+      )
+    }
     const heldLookupPath = readHeldLookupPath()
     if (heldLookupPath) {
       const lookupUrl = new URL(heldLookupPath, baseUrl).href
@@ -386,14 +412,13 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
 // One block per consumer Vite major. Each runs its histories against a dev
 // server of that major.
 function describeOpenOutcomes(
-  major: 7 | 8,
-  createDevServer: typeof vite8.createServer,
+  major: ConsumerVite,
   reached: ReadonlyArray<string>,
 ): void {
   const histories = historiesByVite[major]
   describe(`vite ${major} OPFS open outcome oracle (Chromium driver)`, () => {
     beforeAll(async () => {
-      await startServer(createDevServer)
+      await startServer(major)
     }, 120_000)
     // Closes only the server this block started; a failed start leaves none.
     afterAll(async () => {
@@ -416,7 +441,7 @@ function describeOpenOutcomes(
   })
 }
 
-describeOpenOutcomes(7, vite7.createServer as unknown as typeof vite8.createServer, [
+describeOpenOutcomes(7, [
   `lookup: AbortError`,
   `lookup: PersistenceUnavailableError`,
   `lookup: TimeoutError`,
@@ -426,7 +451,7 @@ describeOpenOutcomes(7, vite7.createServer as unknown as typeof vite8.createServ
   `wasm: TimeoutError`,
   `worker start: PersistenceUnavailableError`,
 ])
-describeOpenOutcomes(8, vite8.createServer, [
+describeOpenOutcomes(8, [
   `none: opened`,
   `wasm: AbortError`,
   `wasm: PersistenceUnavailableError`,

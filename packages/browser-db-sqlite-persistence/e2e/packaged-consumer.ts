@@ -13,7 +13,8 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { build } from 'vite'
+import * as vite8 from 'vite'
+import * as vite7 from 'vite-7'
 import type { InlineConfig } from 'vite'
 import type {
   BrowserWASQLiteDatabase,
@@ -22,6 +23,20 @@ import type {
 
 export const packageDirectory = fileURLToPath(new URL(`../`, import.meta.url))
 
+/** The consumer's Vite major, named by the decision on TanStack/db#2371. */
+export type ConsumerVite = 7 | 8
+
+/**
+ * The Vite module a consumer on the given major runs. Every e2e file selects
+ * its Vite through this one helper. Vite 7 and Vite 8 expose the same
+ * `createServer`, `preview`, and `build` calls that the harness uses; the
+ * TypeScript declarations differ only in the internal resolved-config types,
+ * so the module is typed as Vite 8 here, once, rather than at each call site.
+ */
+export function consumerVite(major: ConsumerVite): typeof vite8 {
+  return (major === 7 ? vite7 : vite8) as unknown as typeof vite8
+}
+
 /**
  * Runs `vite build` as an app's build script does. That runs with NODE_ENV
  * unset, which Vite treats as production; Vitest sets it to `test`, which
@@ -29,7 +44,7 @@ export const packageDirectory = fileURLToPath(new URL(`../`, import.meta.url))
  */
 export async function buildForProduction(
   config: InlineConfig,
-  viteBuild: typeof build = build,
+  viteBuild: typeof vite8.build = vite8.build,
 ): Promise<void> {
   const nodeEnv = process.env.NODE_ENV
   process.env.NODE_ENV = `production`
