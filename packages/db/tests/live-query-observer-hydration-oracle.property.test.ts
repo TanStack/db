@@ -732,12 +732,17 @@ const replays: ReadonlyArray<
 // What this oracle owns: the gap report judges every function in
 // src/live-query-observer.ts and DbClient.hydrate by this file's generated
 // hydration-terminal histories, which end a seed's sync run in every way. It
-// also judges the cleanup of the observer's Collection subscription
-// (CollectionSubscription.handleCollectionCleanup and the functions it calls),
-// where the observer's `discardsRowsOnCleanup` drops the rows it showed before
-// cleanup (law 3's restart claim, #2334). A whole-file entry does not follow
-// calls into another file, and no Collection subscription owner subscribes
-// with that option.
+// also judges CollectionSubscription.handleCollectionCleanup, where the
+// observer's `discardsRowsOnCleanup` drops the rows it showed before cleanup
+// (law 3's restart claim, #2334). The two kinds of entry differ. A whole-file
+// entry owns the functions defined in that file and nothing it refers to in
+// another file, so `src/live-query-observer.ts` alone never reached the
+// subscription. A `#function` entry owns that function's text and, by the
+// gap report's ownership rule (owners.mjs in @tanstack/oracles, maintainer
+// decision 2026-11-08), every package function its text refers to, so this
+// entry also owns discardTruncateReplay, setReadyIfIdle, and
+// cancelAcquisition, which its ownership analysis lists. No Collection
+// subscription owner subscribes with the option.
 
 declareOracle({
   owns: [
