@@ -58,7 +58,7 @@ import type { Deferred } from '../src/deferred.js'
  * The history grammar, with `gcTime` 100: subscribe to either Collection,
  * unsubscribe one of its current subscribers, insert a row whose handler
  * stays pending, complete or fail the oldest pending handler, and advance the
- * clock by 20, 60, or 120 ms. An insert writes to one Collection through its
+ * clock by 1, 20, 60, or 120 ms. An insert writes to one Collection through its
  * `onInsert` handler, or to both through `createTransaction` with a manual
  * commit. A `cleanup` step calls `cleanup()` on one Collection or on both at
  * any point, so a settlement or an unsubscribe can follow it. A subscribe
@@ -100,19 +100,25 @@ import type { Deferred } from '../src/deferred.js'
  * rule for it, and no observation checks it.
  *
  * Retirement latency. The law makes a Collection eligible at `gcTime`, and
- * exact cleanup latency is not promised. So at the checkpoint that lands
- * exactly on the deadline, either retired or not retired is allowed. A checkpoint
- * before the deadline owes no retirement, and the first checkpoint after it
- * owes retirement, so the 20/60/120 ms grid checks retirement by the next step.
- * Limit: a retirement one clock tick early, at `gcTime` - 1 ms, is seen first
- * at the exact-deadline checkpoint, where it is allowed, so this grid cannot
- * detect it. A retirement at `gcTime` + 1 ms is likewise indistinguishable
- * from `gcTime` + 19 ms, since no checkpoint lies between. Clock steps are
- * 20 ms multiples, so no finer grid is used here.
+ * exact cleanup latency is not promised. So a checkpoint before the deadline
+ * owes no retirement, a checkpoint from the deadline up to
+ * `RETIREMENT_LATENCY_MS` (20 ms) after it allows either outcome, and a
+ * checkpoint at or after that bound owes retirement. The 1 ms step lets a
+ * history observe a checkpoint one millisecond before the deadline, so an early
+ * retirement at `gcTime` - 1 ms is rejected. A retirement at `gcTime` + 1 ms to
+ * `gcTime` + 19 ms is allowed, since latency is not promised. Limit: a timer
+ * one millisecond early (`gcTime` - 1 ms) is not observed at the 99 ms
+ * checkpoint in this harness, so it survives as indistinguishable from an
+ * exact-deadline retirement, which is allowed. A timer two milliseconds early
+ * (`gcTime` - 2 ms) is rejected.
  */
 
 const GC_TIME_MS = 100
-const MAX_STEPS = 14
+const MAX_STEPS = 24
+// A retirement is owed once this long has passed since the deadline. It is a
+// checker bound, not a product promise. Exact cleanup latency is not promised,
+// so before this bound the outcome at the deadline is either.
+const RETIREMENT_LATENCY_MS = 20
 type Row = { id: number }
 type Side = `a` | `b`
 const sides: Array<Side> = [`a`, `b`]
@@ -123,7 +129,7 @@ type Step =
   | { kind: `unsubscribe`; side: Side }
   | { kind: `insert`; into: Side | `both` }
   | { kind: `settle`; outcome: `complete` | `fail` }
-  | { kind: `advance`; elapsedMs: 20 | 60 | 120 }
+  | { kind: `advance`; elapsedMs: 1 | 20 | 60 | 120 }
   | { kind: `cleanup`; side: Side | `both` }
 type History = {
   steps: Array<Step>
@@ -152,6 +158,7 @@ const reachStates = [
   `unsubscribe-after-cleanup`,
   `restart-after-cleanup`,
   `write-while-discarded`,
+  `one-millisecond-before-deadline`,
 ] as const
 type ReachState = (typeof reachStates)[number]
 
@@ -218,13 +225,14 @@ function release(
   collection.deadlineAfter = after
 }
 
-// The cleanup queue's timer adds one tick, so production retires the
-// Collection just after its deadline, not at it. Clock steps are at least
-// 20 ms, so a step that passes the deadline also passes that tick.
+// Retirement is owed once RETIREMENT_LATENCY_MS has passed since the deadline.
 function advanceModel(model: Model, elapsedMs: number): void {
   model.now += elapsedMs
   for (const collection of Object.values(model.collections)) {
-    if (collection.deadline !== undefined && collection.deadline < model.now) {
+    if (
+      collection.deadline !== undefined &&
+      collection.deadline + RETIREMENT_LATENCY_MS <= model.now
+    ) {
       collection.retired = true
       collection.deadline = undefined
     }
@@ -288,6 +296,8 @@ function applyModel(model: Model, action: Action): Array<ReachState> {
         model.now - expected.unsubscribedAt >= GC_TIME_MS
       )
         reached.push(`gc-due-while-persisting`)
+      if (expected.deadline !== undefined && expected.deadline - model.now === 1)
+        reached.push(`one-millisecond-before-deadline`)
       const after = expected.deadlineAfter
       if (before[index] || !expected.retired || !after) continue
       reached.push(
@@ -318,7 +328,7 @@ function owedSnapshot(model: Model): Snapshot {
     const collection = model.collections[side]
     const cleanedUp = collection.retired
       ? true
-      : collection.deadline === model.now
+      : collection.deadline !== undefined && collection.deadline <= model.now
         ? `either`
         : false
     return {
@@ -584,6 +594,13 @@ const stepArbitrary: fc.Arbitrary<Step> = fc.oneof(
   },
   {
     arbitrary: fc.record({
+      kind: fc.constant(`advance` as const),
+      elapsedMs: fc.constant(1 as const),
+    }),
+    weight: 1,
+  },
+  {
+    arbitrary: fc.record({
       kind: fc.constant(`cleanup` as const),
       side: fc.constantFrom(`a` as const, `b` as const, `both` as const),
     }),
@@ -613,7 +630,10 @@ const settleStep = (outcome: `complete` | `fail`): Step => ({
   kind: `settle`,
   outcome,
 })
-const advanceStep = (elapsedMs: 120): Step => ({ kind: `advance`, elapsedMs })
+const advanceStep = (elapsedMs: 1 | 20 | 60 | 120): Step => ({
+  kind: `advance`,
+  elapsedMs,
+})
 const cleanupStep = (side: Side): Step => ({ kind: `cleanup`, side })
 
 // What this oracle owns: the garbage-collection hold that a persisting
@@ -644,7 +664,7 @@ oracleProperty({
   law: {
     statement: `Automatic garbage collection retires a Collection only after gcTime with no subscriber and no persisting transaction; a persisting transaction holds each Collection it touches, and the delay restarts when the last such transaction completes or fails; explicit cleanup() retires a Collection while a transaction persists.`,
     authority: `BaseCollectionConfig.gcTime; the persisting-transaction hold in packages/db/src/collection/lifecycle.ts (optimistic rows and adapter awaitTxId waits); explicit cleanup keeps its current contract`,
-    limits: `Two Collections with a synchronous ready sync and empty source; keys as numbers, up to ${MAX_STEPS} steps; clock steps of 20, 60, and 120 ms with gcTime 100; paced mutations, offline transactions, live-query Collections, writes into a cleaned-up Collection, and wall-clock corrections are not generated. The delay after a settlement on a cleaned-up Collection is not observable.`,
+    limits: `Two Collections with a synchronous ready sync and empty source; keys as numbers, up to ${MAX_STEPS} steps; clock steps of 1, 20, 60, and 120 ms with gcTime 100; paced mutations, offline transactions, live-query Collections, writes into a cleaned-up Collection, and wall-clock corrections are not generated. The delay after a settlement on a cleaned-up Collection is not observable.`,
     owner: `Collection garbage collection under persisting transactions`,
   },
   histories: {
@@ -725,6 +745,17 @@ oracleProperty({
         name: `subscribe again after cleanup`,
         enters: [`restart-after-cleanup`],
         build: openWith(cleanupStep(`a`), { kind: `subscribe`, side: `a` }),
+      },
+      {
+        // Sixty, then twenty, then nineteen 1 ms steps: a checkpoint lands one
+        // millisecond before the deadline set at time 0.
+        name: `one millisecond before the deadline`,
+        enters: [`one-millisecond-before-deadline`],
+        build: openWith(
+          advanceStep(60),
+          advanceStep(20),
+          ...Array.from({ length: 19 }, () => advanceStep(1)),
+        ),
       },
       {
         // A write after the restart must not bring back the discarded row.
