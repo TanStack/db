@@ -2,10 +2,12 @@ import { DiffTriggerOperation } from '@powersync/common'
 import type { ExtractColumnValueType, Table } from '@powersync/common'
 
 /**
- * All PowerSync table records include a UUID `id` column.
+ * All PowerSync table records include an `id` column. SQLite stores it as
+ * text; a deserialization schema may convert it to a number, as for a
+ * backend with integer primary keys.
  */
 export type PowerSyncRecord = {
-  id: string
+  id: string | number
   [key: string]: unknown
 }
 
@@ -64,14 +66,7 @@ export type OptionalExtractedTable<TTable extends Table> = OptionalIfUndefined<{
  */
 export type AnyTableColumnType<TTable extends Table> = {
   [K in keyof ExtractedTableColumns<TTable>]: unknown
-} & { id: string }
-
-export function asPowerSyncRecord(record: any): PowerSyncRecord {
-  if (typeof record.id !== `string`) {
-    throw new Error(`Record must have a string id field`)
-  }
-  return record as PowerSyncRecord
-}
+} & { id: string | number }
 
 /**
  * Maps {@link DiffTriggerOperation} to TanstackDB operations

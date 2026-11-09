@@ -4,7 +4,7 @@ import { compileSQLite } from './sqlite-compiler'
 import { PendingOperationStore } from './PendingOperationStore'
 import { PowerSyncTransactor } from './PowerSyncTransactor'
 import { DEFAULT_BATCH_SIZE } from './definitions'
-import { asPowerSyncRecord, mapOperation } from './helpers'
+import { mapOperation } from './helpers'
 import { convertTableToSchema } from './schema'
 import { serializeForSQLite } from './serialization'
 import type {
@@ -25,6 +25,7 @@ import type {
   ConfigWithSQLiteInputType,
   ConfigWithSQLiteTypes,
   EnhancedPowerSyncCollectionConfig,
+  InferPowerSyncKey,
   InferPowerSyncOutputType,
   PowerSyncCollectionConfig,
   PowerSyncCollectionUtils,
@@ -267,6 +268,7 @@ function createPowerSyncCollectionConfig<
 
   // The collection output type
   type OutputType = InferPowerSyncOutputType<TTable, TSchema>
+  type PowerSyncKey = InferPowerSyncKey<OutputType>
 
   const { viewName, trackMetadata: metadataIsTracked } = table
 
@@ -323,7 +325,7 @@ function createPowerSyncCollectionConfig<
    * Notice that this describes the Sync between the local SQLite table
    * and the in-memory tanstack-db collection.
    */
-  const sync: SyncConfig<OutputType, string> = {
+  const sync: SyncConfig<OutputType, PowerSyncKey> = {
     sync: (params) => {
       const {
         begin,
@@ -428,7 +430,7 @@ function createPowerSyncCollectionConfig<
           // holds.
           snapshot?: boolean
           when: Record<DiffTriggerOperation, string>
-          writeType: (rowId: string) => OperationType
+          writeType: (key: PowerSyncKey) => OperationType
           batchQuery: (
             lockContext: LockContext,
             batchSize: number,
@@ -456,10 +458,10 @@ function createPowerSyncCollectionConfig<
               const apply = () => {
                 begin({ snapshot })
                 for (const row of batches.splice(0).flat()) {
-                  write({
-                    type: writeType(row.id),
-                    value: deserializeSyncRow(row),
-                  })
+                  // The key comes from the deserialized row: a schema may
+                  // convert SQLite's text id to a number.
+                  const value = deserializeSyncRow(row)
+                  write({ type: writeType(getKey(value)), value })
                 }
                 appliedReceipts.push(commit())
               }
@@ -633,7 +635,7 @@ function createPowerSyncCollectionConfig<
                 [DiffTriggerOperation.UPDATE]: `TRUE`,
                 [DiffTriggerOperation.DELETE]: `TRUE`,
               },
-              writeType: (_rowId: string) => `insert`,
+              writeType: () => `insert`,
               batchQuery: (
                 lockContext: LockContext,
                 batchSize: number,
@@ -814,22 +816,19 @@ function createPowerSyncCollectionConfig<
                       [DiffTriggerOperation.UPDATE]: `(${newDataWhenClause}) OR (${oldDataWhenClause})`,
                       [DiffTriggerOperation.DELETE]: oldDataWhenClause,
                     },
-                    writeType: (rowId: string) =>
-                      collection.has(rowId) ? `update` : `insert`,
+                    writeType: (key) => {
+                      missing?.delete(key)
+                      return collection.has(key) ? `update` : `insert`
+                    },
                     batchQuery: (
                       lockContext: LockContext,
                       batchSize: number,
                       cursor: number,
                     ) =>
-                      lockContext
-                        .getAll<TableType>(
-                          `SELECT * FROM ${viewName} WHERE ${viewWhereClause} LIMIT ? OFFSET ?`,
-                          [batchSize, cursor],
-                        )
-                        .then((rows) => {
-                          for (const row of rows) missing?.delete(row.id)
-                          return rows
-                        }),
+                      lockContext.getAll<TableType>(
+                        `SELECT * FROM ${viewName} WHERE ${viewWhereClause} LIMIT ? OFFSET ?`,
+                        [batchSize, cursor],
+                      ),
                   },
                   appliedReceipts,
                 )
@@ -1013,14 +1012,14 @@ function createPowerSyncCollectionConfig<
         ): Promise<void> => {
           const compiledDeparting = compileSQLite({ where: options.where })
           const departingWhereSQL = toInlinedWhereClause(compiledDeparting)
-          let rowsToEvict: Array<{ id: string }>
+          let rowsToEvict: Array<TableType>
           for (;;) {
             if (stopped) return
             const revision = trackingRevision
             const active = activeWhereExpressions()
             let evictionSQL: string
             if (active.length === 0) {
-              evictionSQL = `SELECT id FROM ${viewName} WHERE ${departingWhereSQL}`
+              evictionSQL = `SELECT * FROM ${viewName} WHERE ${departingWhereSQL}`
             } else {
               const combinedRemaining =
                 active.length === 1
@@ -1030,18 +1029,18 @@ function createPowerSyncCollectionConfig<
                 where: combinedRemaining,
               })
               const remainingWhereSQL = toInlinedWhereClause(compiledRemaining)
-              evictionSQL = `SELECT id FROM ${viewName} WHERE (${departingWhereSQL}) AND NOT (${remainingWhereSQL})`
+              evictionSQL = `SELECT * FROM ${viewName} WHERE (${departingWhereSQL}) AND NOT (${remainingWhereSQL})`
             }
 
-            rowsToEvict = await database.getAll<{ id: string }>(evictionSQL)
+            rowsToEvict = await database.getAll<TableType>(evictionSQL)
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cleanup can run during the query
             if (stopped) return
             if (trackingRevision === revision) break
           }
           if (rowsToEvict.length > 0) {
             begin()
-            for (const { id } of rowsToEvict) {
-              write({ type: `delete`, key: id })
+            for (const row of rowsToEvict) {
+              write({ type: `delete`, key: getKey(deserializeSyncRow(row)) })
             }
             void commit()
           }
@@ -1182,7 +1181,13 @@ function createPowerSyncCollectionConfig<
     getSyncMetadata: undefined,
   }
 
-  const getKey = (record: OutputType) => asPowerSyncRecord(record).id
+  const getKey = (record: OutputType): PowerSyncKey => {
+    const { id } = record as { id?: unknown }
+    if (typeof id !== `string` && typeof id !== `number`) {
+      throw new Error(`Record must have a string or number id field`)
+    }
+    return id as PowerSyncKey
+  }
 
   // Keep adapter hooks and serialization options out of the core config.
   const {

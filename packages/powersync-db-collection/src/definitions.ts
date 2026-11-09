@@ -27,6 +27,16 @@ export type InferPowerSyncOutputType<
   : InferSchemaOutput<TSchema>
 
 /**
+ * The collection key: the type of the output row's `id`. It is a string
+ * unless a schema converts `id`, for example to a number.
+ */
+export type InferPowerSyncKey<TOutput> = TOutput extends { id: infer TId }
+  ? TId extends number
+    ? number
+    : string
+  : string
+
+/**
  * A mapping type for custom serialization of object properties to SQLite-compatible values.
  *
  * This type allows you to override, for keys in the input object (`TOutput`), a function that transforms
@@ -208,7 +218,7 @@ export type BasePowerSyncCollectionConfig<
 > = Omit<
   BaseCollectionConfig<
     InferPowerSyncOutputType<TTable, TSchema>,
-    string,
+    InferPowerSyncKey<InferPowerSyncOutputType<TTable, TSchema>>,
     TSchema
   >,
   `onInsert` | `onUpdate` | `onDelete` | `getKey` | `syncMode`
@@ -306,7 +316,7 @@ export type EnhancedPowerSyncCollectionConfig<
   TSchema extends StandardSchemaV1 = never,
 > = CollectionConfig<
   OutputType,
-  string,
+  InferPowerSyncKey<OutputType>,
   TSchema,
   PowerSyncCollectionUtils<TTable>
 > & {

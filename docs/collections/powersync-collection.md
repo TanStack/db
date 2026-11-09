@@ -399,6 +399,33 @@ const task = tasksCollection.get("task-1")
 task.due_date.getTime() // OK - TypeScript knows this is a Date
 ```
 
+### Integer Primary Keys
+
+SQLite stores every PowerSync `id` as text. If your backend uses integer primary keys, convert `id` to a number in `deserializationSchema`. The collection key is then a number, so integer foreign keys match it, for example in `eq(part.id, line.partId)`.
+
+```typescript
+const productSchema = z.object({
+  id: z.coerce.number(), // SQLite TEXT '5' to the key 5
+  name: z.string().nullable(),
+})
+
+const products = createCollection(
+  powerSyncCollectionOptions({
+    database: db,
+    table: APP_SCHEMA.props.products,
+    schema: productSchema,
+    deserializationSchema: productSchema,
+    onDeserializationError: (error) => {
+      // Present fatal error
+    },
+  })
+)
+
+products.get(5)
+```
+
+Updates and deletes write the key back as text. The PowerSync service converts integer `id` columns to text the same way when it syncs them.
+
 ### Optimistic Updates
 
 Updates to the collection are applied optimistically to the local state first, then synchronized with PowerSync and the backend. If an error occurs during sync, the changes are automatically rolled back.
