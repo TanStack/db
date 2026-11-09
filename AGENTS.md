@@ -129,8 +129,10 @@ includes this block:
 
 ### Lint feedback while you work
 
-The `oracle/` lint rules in `scripts/eslint-plugin-oracle/` report the
-shortcuts that a syntactic check can see. The repository's agent hooks
+The `oracle/` lint rules report the shortcuts that a syntactic check can see.
+They come from the `@tanstack/eslint-plugin-oracles` package (TanStack/oracles),
+and `scripts/oracle-lint-settings.mjs` holds this repository's settings for
+them. The repository's agent hooks
 (`.claude/`, `.codex/`, `.gemini/`, and `.github/hooks/`) return the reports
 after each edit and at the end of each turn. A hook sees only the edits that
 the harness's own edit tools make. After an edit through a shell command, or
@@ -145,7 +147,7 @@ Restore it, or explain the reason in the pull request.
 Fix a report. Do not turn the rule off. The hooks, `pnpm lint:changed`, the
 pre-commit hook, and CI ignore `eslint-disable` comments for these rules. A
 true exception needs a maintainer to change the rule in a reviewed pull
-request.
+request to TanStack/oracles.
 
 ## Required reading: live-query materialization
 

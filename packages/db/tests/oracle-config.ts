@@ -110,8 +110,6 @@ const staticOracleProperties = [
   `react.window-render`,
   `react.window-retry-ownership`,
   `preact.window-render`,
-  `lint.part-reach`,
-  `lint.probe-form`,
   `scripts.lint-scope`,
   `scripts.run-budget`,
   `scripts.release-version`,

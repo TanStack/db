@@ -4,9 +4,11 @@
  * the pre-commit hook. An oracle file's result depends on the test modules that
  * it reaches through relative imports and re-exports: its companions, support
  * modules, drivers, and other oracle files. The rule does not read production
- * source, so an edit to production code selects nothing. A change to the
- * rule's own sources changes every oracle result, so it selects every oracle
- * file. An oracle file is any file in the working tree whose name contains
+ * source, so an edit to production code selects nothing. The rules come from
+ * the @tanstack/eslint-plugin-oracles dependency, which pnpm-lock.yaml pins,
+ * under the settings in scripts/oracle-lint-settings.mjs. A change to either
+ * file, the lint configuration, changes every oracle result, so it selects
+ * every oracle file. An oracle file is any file in the working tree whose name contains
  * `oracle`, in TypeScript or JavaScript, tracked or new and untracked: an
  * agent's new oracle file is linted like any other.
  *
@@ -14,8 +16,8 @@
  * run the script of the checkout where the session started, while the agent
  * works in a worktree nested under that checkout's `.worktrees/`. The hook
  * input's `cwd` names the agent's checkout, so the hooks select and lint that
- * checkout's files, with that checkout's own copy of the script and the rule,
- * as CI does for its branch. A directory under `.worktrees/` that is not a
+ * checkout's files, with that checkout's own copy of the script, its settings,
+ * and its installed plugin, as CI does for its branch. A directory under `.worktrees/` that is not a
  * checkout, such as a scratch copy, is never one of the launch checkout's
  * changed files.
  *
@@ -27,10 +29,10 @@
  * worktree's branch, a plain directory under `.worktrees/` produces no report,
  * and `pnpm lint:changed` in a worktree lints that worktree. AGENTS.md "Name oracle
  * files for discovery" defines an oracle file by its name. The rule's header
- * contract (scripts/eslint-plugin-oracle/rules/no-unit-test.js) states that the
+ * contract (@tanstack/eslint-plugin-oracles/rules/no-unit-test) states that the
  * rule follows relative imports of test modules and does not follow production
- * source. The rule-source case follows from the same reports: the oracle
- * results are a function of the rule's code.
+ * source. The configuration case follows from the same reports: the oracle
+ * results are a function of the installed rule's code and its settings.
  *
  * Limits. The grammar draws up to three oracle files, two or three support
  * modules, one driver, and one production module, with relative imports and
@@ -48,7 +50,9 @@
  * one scratch directory. The hooks always pass `cwd`, and the hook process runs
  * in the launch checkout: a hook input without `cwd` is not generated, and
  * neither is a worktree outside the launch checkout or one whose branch has no
- * copy of the script. The repository's own `.gitignore` is copied into each
+ * copy of the script. A plugin change is a lockfile edit together with the
+ * session checkout's own installed copy of the plugin, as an install leaves
+ * them; a settings edit changes no report. The repository's own `.gitignore` is copied into each
  * temporary repository, so its rules are part of what is tested.
  *
  * Structure:
@@ -61,7 +65,8 @@
  *      named scope, and its edit-hook and stop-hook forms. A crashed CLI is a
  *      failure, not an empty selection.
  *   4. The comparison checks that each observed selection equals the prediction,
- *      and that every report came from the session checkout's own rule.
+ *      and that every report came from the session checkout's own installed
+ *      rule.
  *   5. Reach counts the graph states that the campaign enters, and the
  *      campaigns run the same predicate with a fixed seed and a random seed.
  */
@@ -71,6 +76,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -95,7 +101,14 @@ const BASE_RUNS = 24
 const PRODUCTION = `src/prod.ts`
 const repoRoot = fileURLToPath(new URL(`../`, import.meta.url))
 const APP = `packages/app`
-const RULE = `scripts/eslint-plugin-oracle/rules/no-unit-test.js`
+// The lint configuration: the lockfile, which pins the plugin, and the
+// settings module. Editing either selects every oracle file.
+const LOCKFILE = `pnpm-lock.yaml`
+const SETTINGS = `scripts/oracle-lint-settings.mjs`
+const CONFIGURATION = [LOCKFILE, SETTINGS]
+// The installed plugin's rule that reports the generated files.
+const PLUGIN = join(`node_modules`, `@tanstack`, `eslint-plugin-oracles`)
+const RULE_SOURCE = join(PLUGIN, `src`, `rules`, `no-unit-test.js`)
 
 // -- 1. Grammar ---------------------------------------------------------------
 //
@@ -106,7 +119,7 @@ const RULE = `scripts/eslint-plugin-oracle/rules/no-unit-test.js`
 // is a legal edge. A star re-export is an import whose names the module passes
 // on. An edit adds a line to a module, so its text differs from the base
 // commit. An untracked oracle file exists only in the working tree, so nothing
-// imports it. The edit hook names one module, or the rule's source.
+// imports it. The edit hook names one module, or a lint configuration file.
 
 const moduleEdit = fc.boolean()
 
@@ -171,11 +184,14 @@ const programArbitrary = fc
       targets: fc.array(fc.nat({ max: 9 }), { maxLength: 2 }),
     }),
     production: fc.record({ edited: moduleEdit }),
+    // The lint configuration file that the branch edits, if any: the lockfile
+    // with a new installed plugin, or the settings module.
     ruleEdited: fc.oneof(
-      { weight: 3, arbitrary: fc.constant(false) },
-      { weight: 1, arbitrary: fc.constant(true) },
+      { weight: 6, arbitrary: fc.constant(false) },
+      { weight: 1, arbitrary: fc.constant(LOCKFILE) },
+      { weight: 1, arbitrary: fc.constant(SETTINGS) },
     ),
-    // The edit hook names a module of this kind, or the rule's source.
+    // The edit hook names a module of this kind, or a configuration file.
     hookKind: fc.oneof(
       { weight: 2, arbitrary: fc.constant(`oracle`) },
       { weight: 2, arbitrary: fc.constant(`support`) },
@@ -378,7 +394,7 @@ function buildProgram(skeleton) {
   const hookTarget =
     skeleton.hookName ??
     (ofKind.length === 0
-      ? RULE
+      ? CONFIGURATION[skeleton.hookIndex % CONFIGURATION.length]
       : ofKind[skeleton.hookIndex % ofKind.length].name)
   return {
     oracles,
@@ -409,7 +425,7 @@ function editedByScope(program) {
   const untracked = program.modules
     .filter((module) => module.untracked)
     .map((module) => module.name)
-  const rule = program.ruleEdited ? [RULE] : []
+  const rule = program.ruleEdited ? [program.ruleEdited] : []
   return {
     changed: [...tracked, ...untracked, ...rule],
     named: [...tracked, ...rule],
@@ -426,11 +442,11 @@ function editedByScope(program) {
 // an edge into an affected module. Production is never affected, because the
 // rule never reads it, so an edge into production carries nothing. The oracle
 // files in the affected set are the ones to lint. When the edited files
-// include the rule's own source, every oracle file must be linted.
+// include a lint configuration file, every oracle file must be linted.
 
 /** The oracle files that a lint of `edited` must cover, as sorted basenames. */
 function predictSelected(program, edited) {
-  if (edited.includes(RULE))
+  if (edited.some((name) => CONFIGURATION.includes(name)))
     return program.oracles.map((oracle) => oracle.name).sort()
   const affected = new Set(edited.filter((name) => name !== PRODUCTION))
   let grew = true
@@ -450,15 +466,16 @@ function predictSelected(program, edited) {
     .sort()
 }
 
-// Each checkout is linted by its own copy of the rule. The driver marks the
-// message of the rule copy that a branch edits, and only that copy, so a report
-// carries the mark exactly when the session checkout's branch edited the rule.
-// The launch checkout's copy is unmarked in a worktree session, so a report
-// that the launch checkout's rule makes for a worktree carries no mark.
+// Each checkout is linted by its own installed copy of the rule. The driver
+// marks the message of the copy that a branch's lockfile edit installs, and
+// only that copy, so a report carries the mark exactly when the session
+// checkout's branch changed the plugin. The launch checkout's copy is unmarked
+// in a worktree session, so a report that the launch checkout's rule makes for
+// a worktree carries no mark. A settings edit installs nothing.
 
 /** Whether the session checkout's reports carry the edited rule's mark. */
 function predictRuleMarked(program) {
-  return program.ruleEdited
+  return program.ruleEdited === LOCKFILE
 }
 
 // -- 3. Driver ----------------------------------------------------------------
@@ -512,7 +529,8 @@ function moduleText(program, module, edited) {
 const UNDECLARED_TEST = `it('reads one value', () => { expect(1).toBe(1) })`
 
 let work
-let pluginDir
+let pluginPackage
+let settingsFile
 let feedbackScript
 let runCountScript
 let gitignoreFile
@@ -522,7 +540,8 @@ beforeAll(() => {
   // other's repositories. The real path keeps the file names that the driver
   // passes in the spelling that the script's repository root uses.
   work = realpathSync(mkdtempSync(join(tmpdir(), `lint-scope-oracle-`)))
-  pluginDir = join(repoRoot, `scripts`, `eslint-plugin-oracle`)
+  pluginPackage = realpathSync(join(repoRoot, PLUGIN))
+  settingsFile = join(repoRoot, SETTINGS)
   // A mutant is run from a copy: LINT_SCOPE_SCRIPT names the copy of the
   // script under test, and LINT_SCOPE_GITIGNORE the copy of `.gitignore`.
   feedbackScript =
@@ -551,9 +570,38 @@ function gitIn(cwd, ...args) {
   )
 }
 
+/**
+ * Installs the repository's dependencies in a launch checkout: a link to each
+ * package, and a copy of the oracle lint plugin, which the checkout owns.
+ */
+function installDependencies(checkout) {
+  const modules = join(repoRoot, `node_modules`)
+  mkdirSync(join(checkout, `node_modules`, `@tanstack`), { recursive: true })
+  for (const entry of readdirSync(modules)) {
+    if (entry !== `@tanstack`)
+      symlinkSync(join(modules, entry), join(checkout, `node_modules`, entry))
+  }
+  for (const entry of readdirSync(join(modules, `@tanstack`))) {
+    if (entry !== `eslint-plugin-oracles`)
+      symlinkSync(
+        join(modules, `@tanstack`, entry),
+        join(checkout, `node_modules`, `@tanstack`, entry),
+      )
+  }
+  installPlugin(checkout)
+}
+
+/** Copies the installed plugin's sources into a checkout's node_modules. */
+function installPlugin(checkout) {
+  cpSync(pluginPackage, join(checkout, PLUGIN), {
+    recursive: true,
+    filter: (source) => !source.includes(`${pluginPackage}/node_modules`),
+  })
+}
+
 /** The path of a module in a checkout. */
 function modulePath(checkout, name) {
-  if (name === RULE) return join(checkout, RULE)
+  if (CONFIGURATION.includes(name)) return join(checkout, name)
   if (name === PRODUCTION) return join(checkout, APP, `src`, `prod.ts`)
   return join(checkout, APP, `tests`, name)
 }
@@ -578,12 +626,10 @@ function repositoryOf(program) {
     join(launch, APP, `package.json`),
     JSON.stringify({ name: `app` }),
   )
-  // The plugin's sources, without its tests: its own oracle file would be an
-  // oracle file of this repository too.
-  cpSync(pluginDir, join(launch, `scripts`, `eslint-plugin-oracle`), {
-    recursive: true,
-    filter: (source) => !source.endsWith(`.test.js`),
-  })
+  // The lint configuration: the settings module and a lockfile.
+  mkdirSync(join(launch, `scripts`), { recursive: true })
+  writeFileSync(join(launch, SETTINGS), readFileSync(settingsFile, `utf8`))
+  writeFileSync(join(launch, LOCKFILE), `lockfileVersion: '9.0'\n`)
   writeFileSync(
     join(launch, `scripts`, `agent-lint-feedback.mjs`),
     readFileSync(feedbackScript, `utf8`),
@@ -602,12 +648,13 @@ function repositoryOf(program) {
   gitIn(launch, `add`, `-A`)
   gitIn(launch, `commit`, `-q`, `-m`, `base`)
   // A worktree nested in the launch checkout finds these packages by walking
-  // up from its own files.
-  symlinkSync(join(repoRoot, `node_modules`), join(launch, `node_modules`))
+  // up from its own files. Each checkout has its own installed plugin.
+  installDependencies(launch)
   let checkout = launch
   if (program.session === `worktree`) {
     gitIn(launch, `worktree`, `add`, `-q`, `-b`, `feature`, WORKTREE)
     checkout = join(launch, WORKTREE)
+    installPlugin(checkout)
   }
   if (program.scratch) {
     mkdirSync(dirname(join(launch, SCRATCH)), { recursive: true })
@@ -621,13 +668,22 @@ function repositoryOf(program) {
       )
   }
   if (program.ruleEdited) {
-    const rule = modulePath(checkout, RULE)
+    // An edit to a configuration file adds a line to it.
+    const edited = modulePath(checkout, program.ruleEdited)
+    writeFileSync(
+      edited,
+      `${readFileSync(edited, `utf8`)}${program.ruleEdited === LOCKFILE ? `#` : `//`} edited\n`,
+    )
+  }
+  if (program.ruleEdited === LOCKFILE) {
+    // The new lockfile installs a changed plugin in the session checkout.
+    const rule = join(checkout, RULE_SOURCE)
     const text = readFileSync(rule, `utf8`)
     if (!text.includes(RULE_MESSAGE))
       throw new Error(`the rule no longer has the message ${RULE_MESSAGE}`)
     writeFileSync(
       rule,
-      `${text.replace(RULE_MESSAGE, `${RULE_MESSAGE} ${RULE_MARK}`)}\n// edited\n`,
+      text.replace(RULE_MESSAGE, `${RULE_MESSAGE} ${RULE_MARK}`),
     )
   }
   return {
@@ -758,15 +814,18 @@ function compareRuleSource(marks, marked) {
 //   oracle-edit: an oracle file that is itself edited.
 //   unrelated-edit: an edited test module that no oracle file reaches.
 //   production-boundary: an edited production module that an oracle file reaches.
-//   rule-edit: the rule's sources changed, so every oracle file is selected.
+//   rule-edit: the lockfile changed, with a new installed plugin, so every
+//     oracle file is selected.
+//   settings-edit: the settings module changed, so every oracle file is
+//     selected.
 //   untracked-dependent: an untracked oracle file reaches the hook's file.
 //   js-oracle: a JavaScript oracle file is selected.
 //   hook-oracle, hook-support, hook-driver, hook-production, hook-rule: the
-//     kind of file that the edit hook names.
+//     kind of file that the edit hook names; `rule` is a configuration file.
 //   worktree-session: the session works in a worktree, and the hooks run the
 //     launch checkout's script.
-//   worktree-own-rule: the worktree's branch edited the rule, so its reports
-//     must come from its own copy.
+//   worktree-own-rule: the worktree's branch changed the plugin, so its reports
+//     must come from its own installed copy.
 //   scratch-directory: a launch session's checkout holds a scratch directory
 //     under `.worktrees/`.
 
@@ -779,6 +838,7 @@ const STATES = [
   `unrelated-edit`,
   `production-boundary`,
   `rule-edit`,
+  `settings-edit`,
   `untracked-dependent`,
   `js-oracle`,
   `hook-oracle`,
@@ -826,7 +886,8 @@ function recordStates(program) {
   const states = new Set()
   const { changed, hook } = editedByScope(program)
   const edited = new Set(changed)
-  if (program.ruleEdited) states.add(`rule-edit`)
+  if (program.ruleEdited === LOCKFILE) states.add(`rule-edit`)
+  if (program.ruleEdited === SETTINGS) states.add(`settings-edit`)
   const reached = new Set()
   for (const oracle of program.oracles) {
     if (oracle.edited) states.add(`oracle-edit`)
@@ -891,7 +952,7 @@ function recordStates(program) {
   states.add(`hook-${target?.kind ?? `rule`}`)
   if (program.session === `worktree`) {
     states.add(`worktree-session`)
-    if (program.ruleEdited) states.add(`worktree-own-rule`)
+    if (program.ruleEdited === LOCKFILE) states.add(`worktree-own-rule`)
   } else if (program.scratch) {
     states.add(`scratch-directory`)
   }

@@ -123,16 +123,6 @@ const ownerGroups: ReadonlyArray<
       `ssr-effects-current-standalone ssr-effects-current-supplied`,
     ].join(` `),
   ],
-  [
-    `../scripts/eslint-plugin-oracle/part-reach-oracle.property.test.js`,
-    `lint`,
-    `part-reach`,
-  ],
-  [
-    `../scripts/eslint-plugin-oracle/probe-form-oracle.property.test.js`,
-    `lint`,
-    `probe-form`,
-  ],
   [`../scripts/run-budget-oracle.property.test.js`, `scripts`, `run-budget`],
   [`../scripts/lint-scope-oracle.property.test.js`, `scripts`, `lint-scope`],
   [

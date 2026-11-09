@@ -4284,42 +4284,41 @@ also covers the checkout rule from #2280. A session works in the launch
 checkout or in a worktree nested under its `.worktrees/`. The hooks run the
 launch checkout's script with the session checkout as the input's `cwd`. They
 must select that checkout's files, and they must report through that
-checkout's own copy of the rule. A plain scratch directory under `.worktrees/`
-must produce no report. The repository's `.gitignore` is part of the tested
-configuration. It does not draw `.js` support modules or drivers, although the
-rule now resolves a `.js` test module when no TypeScript source exists for it
-(the part-reach oracle owns that resolution). It passes file names in their
+checkout's own installed copy of the rule. The rules come from
+`@tanstack/eslint-plugin-oracles` under `scripts/oracle-lint-settings.mjs`, so
+the lint configuration is the lockfile, which pins the plugin, and that
+settings module: an edit to either selects every oracle file. A plugin change
+is drawn as a lockfile edit together with a changed installed copy in the
+session checkout's `node_modules`, as an install leaves them; a settings edit is
+drawn as a change that alters no report. A plain scratch directory under
+`.worktrees/` must produce no report. The repository's `.gitignore` is part of
+the tested configuration. It does not draw `.js` support modules or drivers,
+although the rule now resolves a `.js` test module when no TypeScript source
+exists for it (the plugin's part-reach oracle, in TanStack/oracles, owns that
+resolution). It does not draw an edit to `package.json` without a lockfile
+change. It passes file names in their
 real-path spelling: a name given through a symlinked path is not covered. It
 does not generate a hook input without `cwd`, a worktree outside the launch
 checkout, or a worktree branch that has no copy of the script. In that last
 case the launch checkout's rule lints the worktree.
 
-`scripts/eslint-plugin-oracle/probe-form-oracle.property.test.js`
-(`lint.probe-form`) owns the state-probe form (`oracle/probe-form`). In production
-source (`packages/*/src`), a probe is one expression statement,
-`probing && globalThis.__oracleProbe?.(name, condition)`, whose `probing`
-resolves to `const probing = typeof process === 'undefined' ? false : process.env.NODE_ENV !== 'production'`
-at the top of the probe's nearest enclosing function, and every other mention
-of `__oracleProbe` is reported. esbuild inlines that function-local constant
-after a bundler sets `NODE_ENV`, so the probes ship no bytes; it keeps a
-module-level constant in a module that imports anything, and it keeps the
-`&&` initializer's `typeof` test, so those forms are near-misses. Its grammar
-draws the declaration (legal, nine near-misses of its form or placement,
-including module level, or none) and each site form: the legal probe, a probe
-in an arrow that declares its own `probing`, and one near-miss per broken part:
-a missing, negated, shadowed, outer-function, block-declared, or different
-guard (including the bare `NODE_ENV` comparison), an `if` or ternary wrapper, a one-, three-, or spread argument, a non-optional call,
-a bad name, a forbidden form in the condition at any depth, a foreign receiver or
-cast, an alias, and a declared type key. The model predicts the reports from the
-drawn kinds, and the reports come from the plugin's production config through
-`Linter`. The root config's enablement is checked with `calculateConfigForFile`,
-which reads no file. Owner: `scripts/eslint-plugin-oracle`. Limits: a call in a
-condition is allowed, because a syntactic rule cannot prove that a call is pure;
-the rule does not run typed rules or write scratch files; `pnpm lint:changed`
-selects only oracle files, so production reports appear in `pnpm lint`, not in
-the edit hook. Authority: the maintainer's probe-form decision, the decision of
-2026-11-08 (option B) that replaces the bare `NODE_ENV` guard with the
-`probing` constant, and the glossary's state probe entry.
+The oracle lint rules (`oracle/no-disabled`, `oracle/no-unit-test`,
+`oracle/pure-model`, `oracle/replayable-seed`, and `oracle/probe-form`) are
+`@tanstack/eslint-plugin-oracles`, from the TanStack/oracles repository, and
+their self-tests moved there with them: the probe-form oracle (formerly
+`lint.probe-form`, which owns the state-probe form
+`probing && globalThis.__oracleProbe?.(name, condition)` under the
+function-local `probing` guard of the 2026-11-08 decision, option B), the
+part-reach oracle (formerly `lint.part-reach`), the replay-observation
+oracle, and the rules' example tests, under
+`packages/eslint-plugin-oracles/tests/`. Their ids left TanStack DB's property
+registry, and their limits are recorded with them. TanStack DB keeps its
+settings for the plugin in `scripts/oracle-lint-settings.mjs` (its environment
+prefix and its replay implementation and witness modules), which
+`eslint.config.js` and `scripts/agent-lint-feedback.mjs` both pass, and it
+keeps `scripts/agent-lint-feedback.mjs` and
+`scripts/check-oracle-run-counts.mjs`, whose oracles are
+`scripts.lint-scope` and `scripts.run-budget` above.
 
 The oracle framework's own laws moved to `@tanstack/oracles` in
 TanStack/oracles#1, with the self-tests that judge them. In the TanStack/oracles
@@ -6931,8 +6930,10 @@ standalone recorder checks in `packages/db/tests/oracle-replay.test.ts`; the
 needed witness is an explicit writer-failure policy comparison for that older
 API. The finite wrapper's guarantee does not settle that policy conflict.
 
-The lint observation owner is
-`scripts/eslint-plugin-oracle/replay-observation-oracle.test.js`. Its independent
+The lint observation owner was
+`scripts/eslint-plugin-oracle/replay-observation-oracle.test.js`; it moved with
+the lint rules to `packages/eslint-plugin-oracles/tests/` in TanStack/oracles,
+where its current limits are recorded. At that move, its independent
 source-intent model and actual ESLint receiver distinguish typed completed-run
 output from literal generated-run budgets. All 3,848 source programs and two
 checker controls pass; 1,924 states each reach twice. With ordinary rule/harness

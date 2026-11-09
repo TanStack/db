@@ -42,7 +42,7 @@
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import tsParser from '@typescript-eslint/parser'
@@ -159,21 +159,27 @@ function reachesEdited(oracle, edited) {
   return false
 }
 
-const pluginSources = join(root, `scripts`, `eslint-plugin-oracle`) + sep
+// The lint configuration: the lockfile pins @tanstack/eslint-plugin-oracles,
+// and the settings module configures it for this repository.
+const lintConfiguration = new Set([
+  join(root, `pnpm-lock.yaml`),
+  join(root, `scripts`, `oracle-lint-settings.mjs`),
+])
 
 /**
  * The oracle files that a lint of `files` must cover. The rule reads relative
  * imports of test modules, so an oracle file is covered when it is named, or
  * when it reaches a named file through test modules. Production files select
- * nothing, because the rule does not follow them. A change to the rule's own
- * sources changes every oracle result, so it selects every oracle file.
+ * nothing, because the rule does not follow them. A change to the lint
+ * configuration (the plugin's version in the lockfile, or the settings)
+ * changes every oracle result, so it selects every oracle file.
  */
 function affectedOracleFiles(files) {
   const edited = new Set(files)
   const oracles = new Set(
     [...oracleFilesInTree(), ...files].filter((file) => isOracleFile(file)),
   )
-  if ([...edited].some((file) => file.startsWith(pluginSources)))
+  if ([...edited].some((file) => lintConfiguration.has(file)))
     return [...oracles]
   return [...oracles].filter((oracle) => reachesEdited(oracle, edited))
 }
