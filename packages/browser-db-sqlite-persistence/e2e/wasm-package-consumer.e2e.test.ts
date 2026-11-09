@@ -231,57 +231,59 @@ type OpenOutcome =
  */
 for (const major of [7, 8] as const) {
   it(`opens packaged SQLite from an about:srcdoc frame under Vite ${major} development`, async () => {
-  const browser = await chromium.launch({ headless: true })
-  const developmentServer = await (major === 7 ? createVite7Server : createServer)({
-    configFile: false,
-    root: consumerDirectory,
-    base: consumerBase,
-    logLevel: `error`,
-    server: developmentServerOptions,
-  })
+    const browser = await chromium.launch({ headless: true })
+    const developmentServer = await (
+      major === 7 ? createVite7Server : createServer
+    )({
+      configFile: false,
+      root: consumerDirectory,
+      base: consumerBase,
+      logLevel: `error`,
+      server: developmentServerOptions,
+    })
 
-  try {
-    await developmentServer.listen()
-    const page = await browser.newPage()
-    await page.addInitScript(probeWorkers, { refuseWorkers: false })
-    await page.goto(developmentServer.resolvedUrls!.local[0]!)
-    const frameAttached = page.waitForEvent(`frameattached`)
-    await page.evaluate((base) => {
-      const frame = document.createElement(`iframe`)
-      frame.srcdoc = `<script type="module" src="${base}@vite/client"></script><script type="module" src="${base}main.js"></script>`
-      document.body.append(frame)
-    }, consumerBase)
-    const frame = await frameAttached
-    await frame.waitForFunction(
-      () => typeof (globalThis as ProbeGlobal).openDatabase === `function`,
-    )
-    const outcome = await frame.evaluate(async (): Promise<OpenOutcome> => {
-      const probe = globalThis as ProbeGlobal
-      try {
-        const database = await probe.openDatabase({
-          databaseName: `consumer-srcdoc.sqlite`,
-          timeoutMs: 0,
-        })
+    try {
+      await developmentServer.listen()
+      const page = await browser.newPage()
+      await page.addInitScript(probeWorkers, { refuseWorkers: false })
+      await page.goto(developmentServer.resolvedUrls!.local[0]!)
+      const frameAttached = page.waitForEvent(`frameattached`)
+      await page.evaluate((base) => {
+        const frame = document.createElement(`iframe`)
+        frame.srcdoc = `<script type="module" src="${base}@vite/client"></script><script type="module" src="${base}main.js"></script>`
+        document.body.append(frame)
+      }, consumerBase)
+      const frame = await frameAttached
+      await frame.waitForFunction(
+        () => typeof (globalThis as ProbeGlobal).openDatabase === `function`,
+      )
+      const outcome = await frame.evaluate(async (): Promise<OpenOutcome> => {
+        const probe = globalThis as ProbeGlobal
         try {
+          const database = await probe.openDatabase({
+            databaseName: `consumer-srcdoc.sqlite`,
+            timeoutMs: 0,
+          })
+          try {
+            return {
+              rows: await database.execute(`SELECT 42 AS value`),
+              startedWorkers: probe.startedWorkers,
+            }
+          } finally {
+            await database.close?.()
+          }
+        } catch (error) {
           return {
-            rows: await database.execute(`SELECT 42 AS value`),
+            name: `${(error as Error).name}: ${(error as Error).message}`,
             startedWorkers: probe.startedWorkers,
           }
-        } finally {
-          await database.close?.()
         }
-      } catch (error) {
-        return {
-          name: `${(error as Error).name}: ${(error as Error).message}`,
-          startedWorkers: probe.startedWorkers,
-        }
-      }
-    })
-    expect(outcome).toEqual({ rows: [{ value: 42 }], startedWorkers: 1 })
-  } finally {
-    await developmentServer.close()
-    await browser.close()
-  }
+      })
+      expect(outcome).toEqual({ rows: [{ value: 42 }], startedWorkers: 1 })
+    } finally {
+      await developmentServer.close()
+      await browser.close()
+    }
   }, 120_000)
 }
 
@@ -293,54 +295,56 @@ for (const major of [7, 8] as const) {
  */
 for (const major of [7, 8] as const) {
   it(`reports unavailable persistence when the page and Vite ${major} server origins differ`, async () => {
-  const browser = await chromium.launch({ headless: true })
-  const developmentServer = await (major === 7 ? createVite7Server : createServer)({
-    configFile: false,
-    root: consumerDirectory,
-    base: consumerBase,
-    logLevel: `error`,
-    server: developmentServerOptions,
-  })
+    const browser = await chromium.launch({ headless: true })
+    const developmentServer = await (
+      major === 7 ? createVite7Server : createServer
+    )({
+      configFile: false,
+      root: consumerDirectory,
+      base: consumerBase,
+      logLevel: `error`,
+      server: developmentServerOptions,
+    })
 
-  const applicationServer = createHttpServer()
+    const applicationServer = createHttpServer()
 
-  try {
-    await developmentServer.listen()
-    const viteUrl = developmentServer.resolvedUrls!.local[0]!
-    applicationServer.on(`request`, (_request, response) => {
-      response.setHeader(`content-type`, `text/html`)
-      response.end(
-        `<script type="module" src="${viteUrl}@vite/client"></script><script type="module" src="${viteUrl}main.js"></script>`,
+    try {
+      await developmentServer.listen()
+      const viteUrl = developmentServer.resolvedUrls!.local[0]!
+      applicationServer.on(`request`, (_request, response) => {
+        response.setHeader(`content-type`, `text/html`)
+        response.end(
+          `<script type="module" src="${viteUrl}@vite/client"></script><script type="module" src="${viteUrl}main.js"></script>`,
+        )
+      })
+      await new Promise<void>((resolve) =>
+        applicationServer.listen(0, `localhost`, resolve),
       )
-    })
-    await new Promise<void>((resolve) =>
-      applicationServer.listen(0, `localhost`, resolve),
-    )
-    const { port } = applicationServer.address() as AddressInfo
-    const page = await browser.newPage()
-    await page.addInitScript(probeWorkers, { refuseWorkers: false })
-    await page.goto(`http://localhost:${port}/`)
-    await page.waitForFunction(
-      () => typeof (globalThis as ProbeGlobal).openDatabase === `function`,
-    )
-    const outcome = await page.evaluate(async (): Promise<OpenOutcome> => {
-      const probe = globalThis as ProbeGlobal
-      try {
-        const database = await probe.openDatabase({ timeoutMs: 0 })
-        await database.close?.()
-        return { rows: [], startedWorkers: probe.startedWorkers }
-      } catch (error) {
-        return {
-          name: (error as Error).name,
-          startedWorkers: probe.startedWorkers,
+      const { port } = applicationServer.address() as AddressInfo
+      const page = await browser.newPage()
+      await page.addInitScript(probeWorkers, { refuseWorkers: false })
+      await page.goto(`http://localhost:${port}/`)
+      await page.waitForFunction(
+        () => typeof (globalThis as ProbeGlobal).openDatabase === `function`,
+      )
+      const outcome = await page.evaluate(async (): Promise<OpenOutcome> => {
+        const probe = globalThis as ProbeGlobal
+        try {
+          const database = await probe.openDatabase({ timeoutMs: 0 })
+          await database.close?.()
+          return { rows: [], startedWorkers: probe.startedWorkers }
+        } catch (error) {
+          return {
+            name: (error as Error).name,
+            startedWorkers: probe.startedWorkers,
+          }
         }
-      }
-    })
-    expect(outcome).toMatchObject({ name: `PersistenceUnavailableError` })
-  } finally {
-    applicationServer.close()
-    await developmentServer.close()
-    await browser.close()
-  }
+      })
+      expect(outcome).toMatchObject({ name: `PersistenceUnavailableError` })
+    } finally {
+      applicationServer.close()
+      await developmentServer.close()
+      await browser.close()
+    }
   }, 120_000)
 }

@@ -234,8 +234,7 @@ async function awaitHeldStep(stepHeld: Promise<void>): Promise<void> {
       stepHeld,
       new Promise<never>((_, reject) => {
         timer = setTimeout(
-          () =>
-            reject(new Error(`the held step never reached the dev server`)),
+          () => reject(new Error(`the held step never reached the dev server`)),
           heldStepWaitMs,
         )
       }),
@@ -416,16 +415,20 @@ function describeOpenOutcomes(
   })
 }
 
-describeOpenOutcomes(7, vite7.createServer as unknown as typeof vite8.createServer, [
-  `lookup: AbortError`,
-  `lookup: PersistenceUnavailableError`,
-  `lookup: TimeoutError`,
-  `none: opened`,
-  `wasm: AbortError`,
-  `wasm: PersistenceUnavailableError`,
-  `wasm: TimeoutError`,
-  `worker start: PersistenceUnavailableError`,
-])
+describeOpenOutcomes(
+  7,
+  vite7.createServer as unknown as typeof vite8.createServer,
+  [
+    `lookup: AbortError`,
+    `lookup: PersistenceUnavailableError`,
+    `lookup: TimeoutError`,
+    `none: opened`,
+    `wasm: AbortError`,
+    `wasm: PersistenceUnavailableError`,
+    `wasm: TimeoutError`,
+    `worker start: PersistenceUnavailableError`,
+  ],
+)
 describeOpenOutcomes(8, vite8.createServer, [
   `none: opened`,
   `wasm: AbortError`,

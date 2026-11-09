@@ -192,8 +192,14 @@ const layoutCasesForOneVite: Array<Omit<LayoutCase, `vite`>> = [
 // builds read both, so every row stays: each one is a cheap witness that a Vite
 // 8 install opens in every layout the README names.
 const layoutCases: Array<LayoutCase> = [
-  ...layoutCasesForOneVite.map((layoutCase) => ({ ...layoutCase, vite: 7 as const })),
-  ...layoutCasesForOneVite.map((layoutCase) => ({ ...layoutCase, vite: 8 as const })),
+  ...layoutCasesForOneVite.map((layoutCase) => ({
+    ...layoutCase,
+    vite: 7 as const,
+  })),
+  ...layoutCasesForOneVite.map((layoutCase) => ({
+    ...layoutCase,
+    vite: 8 as const,
+  })),
 ]
 
 // The outcomes each Vite major's rows promise to reach. Declared with the
@@ -265,9 +271,7 @@ it.each(layoutCases)(
 for (const vite of [7, 8] as const) {
   it(`covers every promised layout outcome under Vite ${vite}`, () => {
     expect([...coveredOutcomes[vite]].sort()).toEqual(
-      promisedOutcomes[vite]
-        .map((outcome) => JSON.stringify(outcome))
-        .sort(),
+      promisedOutcomes[vite].map((outcome) => JSON.stringify(outcome)).sort(),
     )
   })
 }
