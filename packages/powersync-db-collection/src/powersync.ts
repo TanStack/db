@@ -452,16 +452,22 @@ function createPowerSyncCollectionConfig<
               // A load of every row is one snapshot transaction: during a
               // reload it replaces the kept rows, so a row the table no
               // longer has goes. A subset load commits each batch. A
-              // transaction begins only once its rows are read, so a batch
-              // that fails leaves none open.
+              // transaction begins only once its rows are read and
+              // deserialized, so a batch that fails leaves none open.
               const batches: Array<Array<TableType>> = []
               const apply = () => {
+                // The key comes from the deserialized row: a schema may
+                // convert SQLite's text id to a number.
+                const entries = batches
+                  .splice(0)
+                  .flat()
+                  .map((row) => {
+                    const value = deserializeSyncRow(row)
+                    return [getKey(value), value] as const
+                  })
                 begin({ snapshot })
-                for (const row of batches.splice(0).flat()) {
-                  // The key comes from the deserialized row: a schema may
-                  // convert SQLite's text id to a number.
-                  const value = deserializeSyncRow(row)
-                  write({ type: writeType(getKey(value)), value })
+                for (const [key, value] of entries) {
+                  write({ type: writeType(key), value })
                 }
                 appliedReceipts.push(commit())
               }
@@ -1038,10 +1044,13 @@ function createPowerSyncCollectionConfig<
             if (trackingRevision === revision) break
           }
           if (rowsToEvict.length > 0) {
+            // Derive every key before the transaction opens: a row that fails
+            // deserialization must not leave it open.
+            const keys = rowsToEvict.map((row) =>
+              getKey(deserializeSyncRow(row)),
+            )
             begin()
-            for (const row of rowsToEvict) {
-              write({ type: `delete`, key: getKey(deserializeSyncRow(row)) })
-            }
+            for (const key of keys) write({ type: `delete`, key })
             void commit()
           }
           await rebuildTracking()

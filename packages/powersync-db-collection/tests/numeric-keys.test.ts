@@ -161,3 +161,79 @@ describe(`numeric collection keys`, () => {
     }
   })
 })
+
+// Deriving a key deserializes the row, and deserialization can fail. A sync
+// transaction opens only after every key is derived, so a failing row leaves
+// no open transaction behind.
+describe(`a row that fails deserialization`, () => {
+  function createGatedCollection(db: PowerSyncDatabase) {
+    const gate = { valid: true }
+    const gated = row.extend({
+      id: z.coerce.number().refine(() => gate.valid),
+    })
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        schema: gated,
+        deserializationSchema: gated,
+        onDeserializationError: () => {},
+        syncMode: `on-demand`,
+      }),
+    )
+    const openTransactions = () =>
+      collection._state.pendingSyncedTransactions.filter(
+        (transaction) => !transaction.committed,
+      ).length
+    return { collection, gate, openTransactions }
+  }
+
+  it(`fails a load without leaving a sync transaction open`, async () => {
+    const { db } = await createDatabase()
+    const { collection, gate, openTransactions } = createGatedCollection(db)
+    try {
+      gate.valid = false
+      await expect(
+        Promise.resolve(
+          collection._sync.loadSubset({ where: categoryEquals(`x`) }),
+        ),
+      ).rejects.toThrow()
+      expect(openTransactions()).toBe(0)
+      expect(collection.size).toBe(0)
+
+      gate.valid = true
+      await collection._sync.loadSubset({ where: categoryEquals(`x`) })
+      expect([...collection.keys()].sort()).toEqual([1, 2])
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`retries an eviction without leaving a sync transaction open`, async () => {
+    vi.useFakeTimers()
+    const { db, errors } = await createDatabase()
+    const { collection, gate, openTransactions } = createGatedCollection(db)
+    const first = { where: categoryEquals(`x`) }
+    try {
+      await collection._sync.loadSubset(first)
+      gate.valid = false
+      collection._sync.unloadSubset(first)
+      await vi.waitFor(() =>
+        expect(errors).toContainEqual(
+          expect.stringContaining(`Could not release subset tracking`),
+        ),
+      )
+      expect(openTransactions()).toBe(0)
+      expect([...collection.keys()].sort()).toEqual([1, 2])
+
+      gate.valid = true
+      await vi.advanceTimersByTimeAsync(1_000)
+      await vi.waitFor(() => expect(collection.size).toBe(0))
+      expect(openTransactions()).toBe(0)
+    } finally {
+      await collection.cleanup()
+      await vi.runOnlyPendingTimersAsync()
+      vi.useRealTimers()
+    }
+  })
+})
