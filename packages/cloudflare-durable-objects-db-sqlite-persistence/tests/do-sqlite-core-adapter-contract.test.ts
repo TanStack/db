@@ -35,7 +35,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   }
 }
 
-describe(`do-sqlite-core-adapter-contract.test`, () => {
+describe(`Durable Object SQLite core adapter satisfies the shared SQLite core adapter contract`, () => {
   runSQLiteCoreAdapterContractSuite(
     `SQLiteCorePersistenceAdapter (cloudflare do sqlite driver harness)`,
     createHarness,

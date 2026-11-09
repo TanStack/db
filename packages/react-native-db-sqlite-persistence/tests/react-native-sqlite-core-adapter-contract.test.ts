@@ -35,7 +35,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   }
 }
 
-describe(`react-native-sqlite-core-adapter-contract.test`, () => {
+describe(`React Native SQLite core adapter satisfies the shared SQLite core adapter contract`, () => {
   runSQLiteCoreAdapterContractSuite(
     `SQLiteCorePersistenceAdapter (react-native op-sqlite driver harness)`,
     createHarness,

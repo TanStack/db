@@ -27,6 +27,6 @@ function createDriverHarness(): SQLiteDriverContractHarness {
   }
 }
 
-describe(`expo-sqlite-driver-contract.test`, () => {
+describe(`expo-sqlite driver satisfies the shared SQLite driver contract`, () => {
   runSQLiteDriverContractSuite(`expo sqlite driver`, createDriverHarness)
 })

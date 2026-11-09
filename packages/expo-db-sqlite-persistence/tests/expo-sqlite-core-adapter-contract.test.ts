@@ -31,7 +31,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   }
 }
 
-describe(`expo-sqlite-core-adapter-contract.test`, () => {
+describe(`expo-sqlite core adapter satisfies the shared SQLite core adapter contract`, () => {
   runSQLiteCoreAdapterContractSuite(
     `SQLiteCorePersistenceAdapter (expo-sqlite driver harness)`,
     createHarness,

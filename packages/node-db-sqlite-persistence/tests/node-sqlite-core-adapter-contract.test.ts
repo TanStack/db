@@ -29,7 +29,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   }
 }
 
-describe(`node-sqlite-core-adapter-contract.test`, () => {
+describe(`better-sqlite3 node driver satisfies the shared SQLite core adapter contract`, () => {
   runSQLiteCoreAdapterContractSuite(
     `SQLiteCorePersistenceAdapter (better-sqlite3 node driver)`,
     createHarness,

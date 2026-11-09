@@ -32,7 +32,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   }
 }
 
-describe(`tauri-sqlite-core-adapter-contract.test`, () => {
+describe(`Tauri SQLite core adapter satisfies the shared SQLite core adapter contract`, () => {
   runSQLiteCoreAdapterContractSuite(
     `SQLiteCorePersistenceAdapter (tauri sqlite driver harness)`,
     createHarness,

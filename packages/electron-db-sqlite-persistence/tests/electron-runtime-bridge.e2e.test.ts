@@ -85,7 +85,7 @@ const createHarness: RuntimeBridgeE2EContractHarnessFactory = () => {
   return harness
 }
 
-describe(`electron-runtime-bridge.e2e.test`, () => {
+describe(`Electron runtime bridge satisfies the shared runtime bridge contract end to end`, () => {
   runRuntimeBridgeE2EContractSuite(
     `electron runtime bridge e2e (real main/renderer IPC)`,
     createHarness,

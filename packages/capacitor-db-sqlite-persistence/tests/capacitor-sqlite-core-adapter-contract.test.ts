@@ -31,7 +31,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   }
 }
 
-describe(`capacitor-sqlite-core-adapter-contract.test`, () => {
+describe(`Capacitor SQLite core adapter satisfies the shared SQLite core adapter contract`, () => {
   runSQLiteCoreAdapterContractSuite(
     `SQLiteCorePersistenceAdapter (capacitor sqlite driver harness)`,
     createHarness,

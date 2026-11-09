@@ -25,6 +25,6 @@ function createDriverHarness(): SQLiteDriverContractHarness {
   }
 }
 
-describe(`tauri-sql-driver-contract.test`, () => {
+describe(`Tauri SQL plugin driver satisfies the shared SQLite driver contract`, () => {
   runSQLiteDriverContractSuite(`tauri sqlite driver`, createDriverHarness)
 })

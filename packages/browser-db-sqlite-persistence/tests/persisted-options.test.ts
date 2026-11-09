@@ -6,7 +6,7 @@ import {
   registerPersistedUtilityAdmissionOracle,
 } from '../../db-sqlite-persistence-core/tests/persisted-options-type-oracle.js'
 
-describe(`persisted-options.test`, () => {
+describe(`persisted collection options keep caller contracts through the browser entry`, () => {
   registerPersistedOptionsTypeOracle(`browser`)
   registerPersistedUtilityAdmissionOracle(`browser`, persistedCollectionOptions)
 })

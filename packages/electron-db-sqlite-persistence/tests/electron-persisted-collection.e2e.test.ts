@@ -356,7 +356,7 @@ const conformanceMode = isElectronFullE2EEnabled()
   ? `real electron ipc`
   : `in-process invoke`
 
-describe(`electron-persisted-collection.e2e.test`, () => {
+describe(`Electron persisted collection satisfies the shared persisted collection conformance contract`, () => {
   runPersistedCollectionConformanceSuite(
     `electron persisted collection conformance (${conformanceMode})`,
     getConfig,

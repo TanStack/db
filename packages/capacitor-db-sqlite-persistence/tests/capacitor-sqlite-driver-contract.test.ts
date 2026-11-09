@@ -25,6 +25,6 @@ function createDriverHarness(): SQLiteDriverContractHarness {
   }
 }
 
-describe(`capacitor-sqlite-driver-contract.test`, () => {
+describe(`Capacitor SQLite driver satisfies the shared SQLite driver contract`, () => {
   runSQLiteDriverContractSuite(`capacitor sqlite driver`, createDriverHarness)
 })

@@ -7,7 +7,7 @@ import {
   registerPersistedUtilityAdmissionOracle,
 } from './persisted-options-type-oracle.js'
 
-describe(`persisted-options.test`, () => {
+describe(`persisted collection options keep caller contracts through the core entry`, () => {
   registerPersistedOptionsTypeOracle(`core`)
   registerPersistedUtilityAdmissionOracle(`core`, persistedCollectionOptions)
 })

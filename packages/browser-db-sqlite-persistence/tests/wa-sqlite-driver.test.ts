@@ -25,6 +25,6 @@ function createDriverHarness(): SQLiteDriverContractHarness {
   }
 }
 
-describe(`wa-sqlite-driver.test`, () => {
+describe(`wa-sqlite driver satisfies the shared SQLite driver contract`, () => {
   runSQLiteDriverContractSuite(`browser wa-sqlite driver`, createDriverHarness)
 })

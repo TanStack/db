@@ -100,7 +100,7 @@ const electronContractMode = isElectronFullE2EEnabled()
   ? `real electron e2e invoke`
   : `in-process invoke`
 
-describe(`electron-sqlite-core-adapter-contract.test`, () => {
+describe(`Electron SQLite core adapter satisfies the shared SQLite core adapter contract`, () => {
   runSQLiteCoreAdapterContractSuite(
     `SQLiteCorePersistenceAdapter contract over electron IPC bridge (${electronContractMode})`,
     createHarness,
