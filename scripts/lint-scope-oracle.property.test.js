@@ -108,6 +108,8 @@ import { declareOracle } from '../packages/db/tests/oracle-declaration.js'
 import {
   oracleFixedSeed,
   oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   withOracleFixedHistories,
 } from '../packages/db/tests/oracle-config.js'
@@ -1193,22 +1195,23 @@ function campaign(name) {
     const parameters = oracleFixedSeed(FIXED_SEED, {
       numRuns: oracleRuns(BASE_RUNS),
     })
-    await fc.assert(
-      fc.asyncProperty(programArbitrary, predicate),
-      withOracleFixedHistories(parameters, constructedPrograms(FIXED_SEED)),
+    const options = withOracleFixedHistories(
+      parameters,
+      constructedPrograms(FIXED_SEED),
     )
+    oracleRoute(oracleRouteOf(options))
+    await fc.assert(fc.asyncProperty(programArbitrary, predicate), options)
   }, 1_200_000)
   it(`${name}: random-seed campaign`, async () => {
     // The constructed histories are drawn from the campaign's seed, so the
     // options come first.
     const parameters = oraclePropertyOptions(BASE_RUNS, PROPERTY)
-    await fc.assert(
-      fc.asyncProperty(programArbitrary, predicate),
-      withOracleFixedHistories(
-        parameters,
-        constructedPrograms(parameters.seed),
-      ),
+    const options = withOracleFixedHistories(
+      parameters,
+      constructedPrograms(parameters.seed),
     )
+    oracleRoute(oracleRouteOf(options))
+    await fc.assert(fc.asyncProperty(programArbitrary, predicate), options)
   }, 1_200_000)
 }
 
