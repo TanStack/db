@@ -6,9 +6,13 @@
  * modules, drivers, and other oracle files. The rule does not read production
  * source, so an edit to production code selects nothing. The rules come from
  * the @tanstack/eslint-plugin-oracles dependency, which pnpm-lock.yaml pins,
- * under the settings in scripts/oracle-lint-settings.mjs. A change to either
- * file, the lint configuration, changes every oracle result, so it selects
- * every oracle file. An oracle file is any file in the working tree whose name contains
+ * under the settings in scripts/oracle-lint-settings.mjs. A change to the lint
+ * configuration changes every oracle result, so it selects every oracle file:
+ * any edit to the settings module, and a lockfile whose entries for the plugin
+ * (its importer entry, its resolution, and its snapshot with its resolved
+ * dependencies) differ from the merge-base's. Any other lockfile edit, such as
+ * an unrelated dependency bump, installs the same rule, so it selects nothing,
+ * as a production edit does. An oracle file is any file in the working tree whose name contains
  * `oracle`, in TypeScript or JavaScript, tracked or new and untracked: an
  * agent's new oracle file is linted like any other.
  *
@@ -32,7 +36,10 @@
  * contract (@tanstack/eslint-plugin-oracles/rules/no-unit-test) states that the
  * rule follows relative imports of test modules and does not follow production
  * source. The configuration case follows from the same reports: the oracle
- * results are a function of the installed rule's code and its settings.
+ * results are a function of the installed rule's code and its settings, so a
+ * lockfile edit that leaves the plugin's resolved entries as they were cannot
+ * change one (round-1 review of PR #2378, finding B1-10, which asked that an
+ * unrelated dependency bump stop re-linting every oracle file).
  *
  * Limits. The grammar draws up to three oracle files, two or three support
  * modules, one driver, and one production module, with relative imports and
@@ -52,7 +59,13 @@
  * neither is a worktree outside the launch checkout or one whose branch has no
  * copy of the script. A plugin change is a lockfile edit together with the
  * session checkout's own installed copy of the plugin, as an install leaves
- * them; a settings edit changes no report. The repository's own `.gitignore` is copied into each
+ * them; it changes one part of the plugin's entries: its version (all three
+ * entries), its integrity, or one resolved dependency of its snapshot. An
+ * unrelated lockfile edit bumps another package that nothing depends on. A
+ * change deeper in the plugin's dependency tree, which leaves its own entries
+ * alone, is not drawn, and the script would not select it. The lockfile is a
+ * small hand-written pnpm v9 file, not one pnpm wrote. A settings edit changes
+ * no report. The repository's own `.gitignore` is copied into each
  * temporary repository, so its rules are part of what is tested.
  *
  * Structure:
@@ -102,10 +115,20 @@ const PRODUCTION = `src/prod.ts`
 const repoRoot = fileURLToPath(new URL(`../`, import.meta.url))
 const APP = `packages/app`
 // The lint configuration: the lockfile, which pins the plugin, and the
-// settings module. Editing either selects every oracle file.
+// settings module. Editing the settings, or the plugin's entries in the
+// lockfile, selects every oracle file.
 const LOCKFILE = `pnpm-lock.yaml`
 const SETTINGS = `scripts/oracle-lint-settings.mjs`
 const CONFIGURATION = [LOCKFILE, SETTINGS]
+// The configuration edits a branch can make: one part of the plugin's
+// lockfile entries, with a new installed plugin (its version in all three
+// entries, its integrity, or one resolved dependency of its snapshot);
+// another package's lockfile entries; or the settings module.
+const PLUGIN_EDITS = [`plugin-version`, `plugin-integrity`, `plugin-dependency`]
+const LOCKFILE_EDIT = `lockfile`
+const SETTINGS_EDIT = `settings`
+const isPluginEdit = (edit) => PLUGIN_EDITS.includes(edit)
+const fileOfEdit = (edit) => (edit === SETTINGS_EDIT ? SETTINGS : LOCKFILE)
 // The installed plugin's rule that reports the generated files.
 const PLUGIN = join(`node_modules`, `@tanstack`, `eslint-plugin-oracles`)
 const RULE_SOURCE = join(PLUGIN, `src`, `rules`, `no-unit-test.js`)
@@ -136,84 +159,120 @@ const singleOrManyTargets = fc.oneof(
   },
 )
 
-const programArbitrary = fc
-  .record({
-    // Random draws reach three shapes too rarely, so a share of the programs
-    // take each of them. See the shape functions below.
-    shape: fc.oneof(
-      { weight: 2, arbitrary: fc.constant(`free`) },
-      { weight: 2, arbitrary: fc.constant(`re-export chain`) },
-      { weight: 2, arbitrary: fc.constant(`oracle chain`) },
-      { weight: 1, arbitrary: fc.constant(`untracked dependent`) },
-    ),
-    oracles: fc.array(
-      fc.record({
-        edited: moduleEdit,
-        targets: singleOrManyTargets,
-        style: fc.nat({ max: 1 }),
-        extension: fc.oneof(
-          { weight: 2, arbitrary: fc.constant(`ts`) },
-          { weight: 1, arbitrary: fc.constant(`js`) },
-        ),
-        untracked: fc.oneof(
-          { weight: 3, arbitrary: fc.constant(false) },
-          { weight: 1, arbitrary: fc.constant(true) },
-        ),
-      }),
-      { minLength: 1, maxLength: 3 },
-    ),
-    // Two supports or more let a chain form, and a single target keeps a
-    // re-export on the only route to an edited module.
-    supports: fc.array(
-      fc.record({
-        edited: moduleEdit,
-        targets: singleOrManyTargets,
-        reexport: fc.array(
-          fc.oneof(
-            { weight: 3, arbitrary: fc.constant(true) },
-            { weight: 1, arbitrary: fc.constant(false) },
-          ),
-          { minLength: 1, maxLength: 2 },
-        ),
-      }),
-      { minLength: 2, maxLength: 3 },
-    ),
-    driver: fc.record({
-      present: fc.boolean(),
+const skeletonArbitrary = fc.record({
+  // Random draws reach three shapes too rarely, so a share of the programs
+  // take each of them. See the shape functions below.
+  shape: fc.oneof(
+    { weight: 2, arbitrary: fc.constant(`free`) },
+    { weight: 2, arbitrary: fc.constant(`re-export chain`) },
+    { weight: 2, arbitrary: fc.constant(`oracle chain`) },
+    { weight: 1, arbitrary: fc.constant(`untracked dependent`) },
+  ),
+  oracles: fc.array(
+    fc.record({
       edited: moduleEdit,
-      targets: fc.array(fc.nat({ max: 9 }), { maxLength: 2 }),
+      targets: singleOrManyTargets,
+      style: fc.nat({ max: 1 }),
+      extension: fc.oneof(
+        { weight: 2, arbitrary: fc.constant(`ts`) },
+        { weight: 1, arbitrary: fc.constant(`js`) },
+      ),
+      untracked: fc.oneof(
+        { weight: 3, arbitrary: fc.constant(false) },
+        { weight: 1, arbitrary: fc.constant(true) },
+      ),
     }),
-    production: fc.record({ edited: moduleEdit }),
-    // The lint configuration file that the branch edits, if any: the lockfile
-    // with a new installed plugin, or the settings module.
-    ruleEdited: fc.oneof(
-      { weight: 6, arbitrary: fc.constant(false) },
-      { weight: 1, arbitrary: fc.constant(LOCKFILE) },
-      { weight: 1, arbitrary: fc.constant(SETTINGS) },
-    ),
-    // The edit hook names a module of this kind, or a configuration file.
-    hookKind: fc.oneof(
-      { weight: 2, arbitrary: fc.constant(`oracle`) },
-      { weight: 2, arbitrary: fc.constant(`support`) },
-      { weight: 2, arbitrary: fc.constant(`driver`) },
-      { weight: 1, arbitrary: fc.constant(`production`) },
-      { weight: 2, arbitrary: fc.constant(`rule`) },
-    ),
-    hookIndex: fc.nat({ max: 9 }),
-    // The checkout that the session works in: the one where it started, or a
-    // worktree nested in it.
-    session: fc.constantFrom(`launch`, `worktree`),
-    // A plain directory under the launch checkout's `.worktrees/`, holding an
-    // oracle-named file that the rule reports.
-    scratch: fc.boolean(),
+    { minLength: 1, maxLength: 3 },
+  ),
+  // Two supports or more let a chain form, and a single target keeps a
+  // re-export on the only route to an edited module.
+  supports: fc.array(
+    fc.record({
+      edited: moduleEdit,
+      targets: singleOrManyTargets,
+      reexport: fc.array(
+        fc.oneof(
+          { weight: 3, arbitrary: fc.constant(true) },
+          { weight: 1, arbitrary: fc.constant(false) },
+        ),
+        { minLength: 1, maxLength: 2 },
+      ),
+    }),
+    { minLength: 2, maxLength: 3 },
+  ),
+  driver: fc.record({
+    present: fc.boolean(),
+    edited: moduleEdit,
+    targets: fc.array(fc.nat({ max: 9 }), { maxLength: 2 }),
+  }),
+  production: fc.record({ edited: moduleEdit }),
+  // The lint configuration edit that the branch makes, if any.
+  ruleEdited: fc.oneof(
+    { weight: 5, arbitrary: fc.constant(false) },
+    ...PLUGIN_EDITS.map((edit) => ({
+      weight: 1,
+      arbitrary: fc.constant(edit),
+    })),
+    { weight: 1, arbitrary: fc.constant(LOCKFILE_EDIT) },
+    { weight: 1, arbitrary: fc.constant(SETTINGS_EDIT) },
+  ),
+  // The edit hook names a module of this kind, or a configuration file.
+  hookKind: fc.oneof(
+    { weight: 2, arbitrary: fc.constant(`oracle`) },
+    { weight: 2, arbitrary: fc.constant(`support`) },
+    { weight: 2, arbitrary: fc.constant(`driver`) },
+    { weight: 1, arbitrary: fc.constant(`production`) },
+    { weight: 2, arbitrary: fc.constant(`rule`) },
+  ),
+  hookIndex: fc.nat({ max: 9 }),
+  // The checkout that the session works in: the one where it started, or a
+  // worktree nested in it.
+  session: fc.constantFrom(`launch`, `worktree`),
+  // A plain directory under the launch checkout's `.worktrees/`, holding an
+  // oracle-named file that the rule reports.
+  scratch: fc.boolean(),
+})
+
+function programOf({ shape, ...skeleton }) {
+  const drawn =
+    skeleton.hookKind === `driver`
+      ? { ...skeleton, driver: { ...skeleton.driver, present: true } }
+      : skeleton
+  return buildProgram(shapes[shape](drawn))
+}
+
+const programArbitrary = skeletonArbitrary.map(programOf)
+
+/**
+ * Constructed histories. Each configuration edit, and an edit hook that names
+ * the lockfile while the plugin's entries stay as they were, is a declared
+ * state that 24 random draws can miss. So every campaign also runs, before its
+ * random histories, one generated skeleton per state with the one field that
+ * enters it fixed. The skeletons are drawn from the campaign's seed, so they
+ * are members of the grammar and vary with the seed.
+ */
+const constructions = [
+  ...[...PLUGIN_EDITS, LOCKFILE_EDIT, SETTINGS_EDIT].map(
+    (edit) => (skeleton) => ({ ...skeleton, ruleEdited: edit }),
+  ),
+  (skeleton) => ({
+    ...skeleton,
+    shape: `free`,
+    ruleEdited: false,
+    hookKind: `rule`,
+    hookIndex: CONFIGURATION.indexOf(LOCKFILE),
+  }),
+]
+
+function constructedPrograms(seed) {
+  const skeletons = fc.sample(skeletonArbitrary, {
+    seed,
+    numRuns: constructions.length,
   })
-  .map(({ shape, ...skeleton }) => {
-    const drawn =
-      skeleton.hookKind === `driver`
-        ? { ...skeleton, driver: { ...skeleton.driver, present: true } }
-        : skeleton
-    return buildProgram(shapes[shape](drawn))
-  })
+  return constructions.map((construct, index) => [
+    programOf(construct(skeletons[index])),
+  ])
+}
 
 const shapes = {
   free: (skeleton) => skeleton,
@@ -425,7 +484,7 @@ function editedByScope(program) {
   const untracked = program.modules
     .filter((module) => module.untracked)
     .map((module) => module.name)
-  const rule = program.ruleEdited ? [program.ruleEdited] : []
+  const rule = program.ruleEdited ? [fileOfEdit(program.ruleEdited)] : []
   return {
     changed: [...tracked, ...untracked, ...rule],
     named: [...tracked, ...rule],
@@ -442,11 +501,18 @@ function editedByScope(program) {
 // an edge into an affected module. Production is never affected, because the
 // rule never reads it, so an edge into production carries nothing. The oracle
 // files in the affected set are the ones to lint. When the edited files
-// include a lint configuration file, every oracle file must be linted.
+// include the settings module, or the lockfile of a branch that changed the
+// plugin's entries, every oracle file must be linted. The model knows which
+// edit the branch drew; it does not read the lockfile. A lockfile that the
+// branch left alone, or edited only for another package, is like production:
+// no test module imports it, so it affects nothing.
 
 /** The oracle files that a lint of `edited` must cover, as sorted basenames. */
 function predictSelected(program, edited) {
-  if (edited.some((name) => CONFIGURATION.includes(name)))
+  if (
+    edited.includes(SETTINGS) ||
+    (edited.includes(LOCKFILE) && isPluginEdit(program.ruleEdited))
+  )
     return program.oracles.map((oracle) => oracle.name).sort()
   const affected = new Set(edited.filter((name) => name !== PRODUCTION))
   let grew = true
@@ -475,7 +541,7 @@ function predictSelected(program, edited) {
 
 /** Whether the session checkout's reports carry the edited rule's mark. */
 function predictRuleMarked(program) {
-  return program.ruleEdited === LOCKFILE
+  return isPluginEdit(program.ruleEdited)
 }
 
 // -- 3. Driver ----------------------------------------------------------------
@@ -505,6 +571,65 @@ const SCRATCH = `.worktrees/scratch/${APP}/tests/scratch-oracle.test.ts`
 // copy of the rule adds to it.
 const RULE_MESSAGE = `registers tests and declares no oracle part.`
 const RULE_MARK = `[branch rule]`
+
+/**
+ * A pnpm v9 lockfile that pins the plugin and one unrelated package. The
+ * plugin has entries in the importers, packages, and snapshots sections, and
+ * its snapshot lists one resolved dependency. A plugin edit changes one of
+ * `plugin`'s parts; an unrelated edit changes `other`, which nothing else
+ * depends on.
+ */
+function lockfileText({ plugin = {}, other = `1.0.0` } = {}) {
+  const {
+    version = `1.0.0`,
+    integrity = `sha512-plugin`,
+    dependency = `8.0.0`,
+  } = plugin
+  const name = `@tanstack/eslint-plugin-oracles`
+  return [
+    `lockfileVersion: '9.0'`,
+    ``,
+    `importers:`,
+    ``,
+    `  .:`,
+    `    devDependencies:`,
+    `      '${name}':`,
+    `        specifier: ${version}`,
+    `        version: ${version}`,
+    `      left-pad:`,
+    `        specifier: ${other}`,
+    `        version: ${other}`,
+    ``,
+    `packages:`,
+    ``,
+    `  '${name}@${version}':`,
+    `    resolution: {integrity: ${integrity}}`,
+    ``,
+    `  left-pad@${other}:`,
+    `    resolution: {integrity: sha512-left-pad-${other}}`,
+    ``,
+    `snapshots:`,
+    ``,
+    `  '${name}@${version}':`,
+    `    dependencies:`,
+    `      '@typescript-eslint/utils': ${dependency}`,
+    ``,
+    `  left-pad@${other}: {}`,
+    ``,
+  ].join(`\n`)
+}
+
+/** The edited lockfile for a configuration edit. */
+function editedLockfile(program) {
+  if (program.ruleEdited === LOCKFILE_EDIT)
+    return lockfileText({ other: `1.0.1` })
+  const plugin = {
+    'plugin-version': { version: `1.0.1` },
+    'plugin-integrity': { integrity: `sha512-plugin-rebuilt` },
+    'plugin-dependency': { dependency: `8.0.1` },
+  }[program.ruleEdited]
+  return lockfileText({ plugin })
+}
 
 /** The text of one module, with or without its edit. */
 function moduleText(program, module, edited) {
@@ -629,7 +754,7 @@ function repositoryOf(program) {
   // The lint configuration: the settings module and a lockfile.
   mkdirSync(join(launch, `scripts`), { recursive: true })
   writeFileSync(join(launch, SETTINGS), readFileSync(settingsFile, `utf8`))
-  writeFileSync(join(launch, LOCKFILE), `lockfileVersion: '9.0'\n`)
+  writeFileSync(join(launch, LOCKFILE), lockfileText())
   writeFileSync(
     join(launch, `scripts`, `agent-lint-feedback.mjs`),
     readFileSync(feedbackScript, `utf8`),
@@ -667,15 +792,14 @@ function repositoryOf(program) {
         moduleText(program, module, true),
       )
   }
-  if (program.ruleEdited) {
-    // An edit to a configuration file adds a line to it.
-    const edited = modulePath(checkout, program.ruleEdited)
-    writeFileSync(
-      edited,
-      `${readFileSync(edited, `utf8`)}${program.ruleEdited === LOCKFILE ? `#` : `//`} edited\n`,
-    )
+  if (program.ruleEdited === SETTINGS_EDIT) {
+    // A settings edit adds a line to the module.
+    const edited = modulePath(checkout, SETTINGS)
+    writeFileSync(edited, `${readFileSync(edited, `utf8`)}// edited\n`)
+  } else if (program.ruleEdited) {
+    writeFileSync(modulePath(checkout, LOCKFILE), editedLockfile(program))
   }
-  if (program.ruleEdited === LOCKFILE) {
+  if (isPluginEdit(program.ruleEdited)) {
     // The new lockfile installs a changed plugin in the session checkout.
     const rule = join(checkout, RULE_SOURCE)
     const text = readFileSync(rule, `utf8`)
@@ -814,10 +938,15 @@ function compareRuleSource(marks, marked) {
 //   oracle-edit: an oracle file that is itself edited.
 //   unrelated-edit: an edited test module that no oracle file reaches.
 //   production-boundary: an edited production module that an oracle file reaches.
-//   rule-edit: the lockfile changed, with a new installed plugin, so every
-//     oracle file is selected.
+//   plugin-version-edit, plugin-integrity-edit, plugin-dependency-edit: the
+//     lockfile changed one part of the plugin's entries, with a new installed
+//     plugin, so every oracle file is selected.
+//   lockfile-edit: the lockfile changed only another package's entries, so it
+//     selects nothing.
 //   settings-edit: the settings module changed, so every oracle file is
 //     selected.
+//   hook-lockfile-same-plugin: the edit hook names the lockfile, and the
+//     plugin's entries are the merge-base's, so the hook selects nothing.
 //   untracked-dependent: an untracked oracle file reaches the hook's file.
 //   js-oracle: a JavaScript oracle file is selected.
 //   hook-oracle, hook-support, hook-driver, hook-production, hook-rule: the
@@ -837,8 +966,12 @@ const STATES = [
   `oracle-edit`,
   `unrelated-edit`,
   `production-boundary`,
-  `rule-edit`,
+  `plugin-version-edit`,
+  `plugin-integrity-edit`,
+  `plugin-dependency-edit`,
+  `lockfile-edit`,
   `settings-edit`,
+  `hook-lockfile-same-plugin`,
   `untracked-dependent`,
   `js-oracle`,
   `hook-oracle`,
@@ -886,8 +1019,9 @@ function recordStates(program) {
   const states = new Set()
   const { changed, hook } = editedByScope(program)
   const edited = new Set(changed)
-  if (program.ruleEdited === LOCKFILE) states.add(`rule-edit`)
-  if (program.ruleEdited === SETTINGS) states.add(`settings-edit`)
+  if (program.ruleEdited) states.add(`${program.ruleEdited}-edit`)
+  if (program.hookTarget === LOCKFILE && !isPluginEdit(program.ruleEdited))
+    states.add(`hook-lockfile-same-plugin`)
   const reached = new Set()
   for (const oracle of program.oracles) {
     if (oracle.edited) states.add(`oracle-edit`)
@@ -952,7 +1086,7 @@ function recordStates(program) {
   states.add(`hook-${target?.kind ?? `rule`}`)
   if (program.session === `worktree`) {
     states.add(`worktree-session`)
-    if (program.ruleEdited === LOCKFILE) states.add(`worktree-own-rule`)
+    if (isPluginEdit(program.ruleEdited)) states.add(`worktree-own-rule`)
   } else if (program.scratch) {
     states.add(`scratch-directory`)
   }
@@ -979,16 +1113,21 @@ function campaign(name) {
     }
   }
   it(`${name}: fixed-seed campaign`, async () => {
+    const examples = constructedPrograms(FIXED_SEED)
     await fc.assert(fc.asyncProperty(programArbitrary, predicate), {
-      numRuns: oracleRuns(BASE_RUNS),
+      // The constructed histories run first, on top of the random ones.
+      numRuns: oracleRuns(BASE_RUNS) + examples.length,
       seed: FIXED_SEED,
+      examples,
     })
   }, 1_200_000)
   it(`${name}: random-seed campaign`, async () => {
-    await fc.assert(
-      fc.asyncProperty(programArbitrary, predicate),
-      oraclePropertyOptions(BASE_RUNS, PROPERTY),
-    )
+    const options = oraclePropertyOptions(BASE_RUNS, PROPERTY)
+    await fc.assert(fc.asyncProperty(programArbitrary, predicate), {
+      ...options,
+      examples: constructedPrograms(options.seed),
+      numRuns: options.numRuns + constructions.length,
+    })
   }, 1_200_000)
 }
 
@@ -1006,5 +1145,5 @@ describe(`lint selection after an edit`, () => {
 declareOracle({
   model: [predictSelected, predictRuleMarked],
   check: [compareSelected, compareRuleSource],
-  grammar: [programArbitrary],
+  grammar: [programArbitrary, constructedPrograms],
 })

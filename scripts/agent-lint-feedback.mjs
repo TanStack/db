@@ -159,27 +159,63 @@ function reachesEdited(oracle, edited) {
   return false
 }
 
-// The lint configuration: the lockfile pins @tanstack/eslint-plugin-oracles,
-// and the settings module configures it for this repository.
-const lintConfiguration = new Set([
-  join(root, `pnpm-lock.yaml`),
-  join(root, `scripts`, `oracle-lint-settings.mjs`),
-])
+// The lint configuration: the settings module configures the plugin for this
+// repository, and the lockfile pins @tanstack/eslint-plugin-oracles.
+const lintSettings = join(root, `scripts`, `oracle-lint-settings.mjs`)
+const lockfile = join(root, `pnpm-lock.yaml`)
+const pluginName = `@tanstack/eslint-plugin-oracles`
+
+/**
+ * The lockfile's entries for the plugin: each line that names it, with the
+ * lines indented under it. They are its importer entry, its resolution, and
+ * its snapshot with its resolved dependencies, so they change exactly when an
+ * install would put another copy of the plugin or of its direct dependencies
+ * in place.
+ */
+function pluginEntries(text) {
+  const lines = (text ?? ``).split(`\n`)
+  const entries = []
+  for (let index = 0; index < lines.length; index++) {
+    if (!lines[index].includes(pluginName)) continue
+    const indent = lines[index].search(/\S/)
+    entries.push(lines[index])
+    while (lines[index + 1]?.search(/\S/) > indent) entries.push(lines[++index])
+  }
+  return entries.join(`\n`)
+}
+
+/** Whether the plugin's lockfile entries differ from the merge-base's. */
+function pluginChanged() {
+  let base
+  try {
+    base = execFileSync(`git`, [`show`, `${mergeBase(root)}:pnpm-lock.yaml`], {
+      cwd: root,
+      encoding: `utf8`,
+      stdio: [`ignore`, `pipe`, `ignore`],
+    })
+  } catch {
+    // The merge-base has no lockfile.
+  }
+  const current = existsSync(lockfile) ? readFileSync(lockfile, `utf8`) : ``
+  return pluginEntries(base) !== pluginEntries(current)
+}
 
 /**
  * The oracle files that a lint of `files` must cover. The rule reads relative
  * imports of test modules, so an oracle file is covered when it is named, or
  * when it reaches a named file through test modules. Production files select
  * nothing, because the rule does not follow them. A change to the lint
- * configuration (the plugin's version in the lockfile, or the settings)
- * changes every oracle result, so it selects every oracle file.
+ * configuration changes every oracle result, so it selects every oracle file:
+ * an edit to the settings, or a lockfile whose plugin entries differ from the
+ * merge-base's. Another lockfile edit, such as an unrelated dependency bump,
+ * installs the same rule, so it selects nothing.
  */
 function affectedOracleFiles(files) {
   const edited = new Set(files)
   const oracles = new Set(
     [...oracleFilesInTree(), ...files].filter((file) => isOracleFile(file)),
   )
-  if ([...edited].some((file) => lintConfiguration.has(file)))
+  if (edited.has(lintSettings) || (edited.has(lockfile) && pluginChanged()))
     return [...oracles]
   return [...oracles].filter((oracle) => reachesEdited(oracle, edited))
 }
