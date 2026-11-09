@@ -67,8 +67,8 @@ jobs:
       - name: Run benchmark on PR
         if: steps.inputs.outputs.changed == 'true'
         run: |
-          pnpm --filter @tanstack/db-ivm build
-          pnpm exec tsx scripts/bench/incremental-update.ts \
+          pnpm --filter @tanstack/db-ivm --filter @tanstack/db build
+          node scripts/bench/production.mjs scripts/bench/incremental-update.ts \
             --iterations=100 --warmup=20 --repetitions=3 \
             --outFile="$RUNNER_TEMP/candidate.json"
       - name: Run benchmark on base
@@ -83,8 +83,8 @@ jobs:
           # Run the exact same benchmark code on both sides
           git checkout "$HEAD_SHA" -- scripts/bench
           pnpm install --frozen-lockfile
-          pnpm --filter @tanstack/db-ivm build
-          pnpm exec tsx scripts/bench/incremental-update.ts \
+          pnpm --filter @tanstack/db-ivm --filter @tanstack/db build
+          node scripts/bench/production.mjs scripts/bench/incremental-update.ts \
             --iterations=100 --warmup=20 --repetitions=3 \
             --outFile="$RUNNER_TEMP/base.json"
       - name: Compare results

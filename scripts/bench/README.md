@@ -1,14 +1,21 @@
 # Incremental query benchmark
 
-Run `pnpm --filter @tanstack/db-ivm build`, then:
+Run `pnpm --filter @tanstack/db-ivm --filter @tanstack/db build`, then:
 
 ```sh
-node --import tsx scripts/bench/incremental-update.ts \
+node scripts/bench/production.mjs scripts/bench/incremental-update.ts \
   --iterations=100 --warmup=20 --repetitions=3 --outFile=candidate.json
 node --import tsx scripts/bench/compare-incremental-update.ts \
   --base=base.json --candidate=candidate.json --failOnRegression=true
 node --test scripts/bench/compare-incremental-update.test.mjs
 ```
+
+The benchmark measures TanStack DB as production apps run it.
+`production.mjs` bundles the benchmark against the built `dist` of db and
+db-ivm, minified, with `process.env.NODE_ENV` set to `production`, as the
+size scenarios do. Development-only code, such as full error messages and
+oracle probes, is absent, and db's private members carry their mangled names.
+The runner refuses a `dist` that is older than its package's sources.
 
 Each repetition creates fresh fixtures and queries, times their first preload,
 and measures writes after warmup. Reports retain all cold-load times and
@@ -52,6 +59,10 @@ See the [repair evidence](../../docs/contributing/oracle-reviews/2026-11-05-nest
 for source controls, validation and limits.
 
 ## CI variation measured on 2026-11-05
+
+These runs measured db's source in development mode, before the benchmark moved
+to a production bundle. Their spread is evidence about the runners, not a
+calibration of the production-bundle timings.
 
 The [measurement table](ci-variation-2026-11-05.csv) contains query rollups from
 ten paired runs with no changes to `packages/db/src` or `packages/db-ivm/src`.
