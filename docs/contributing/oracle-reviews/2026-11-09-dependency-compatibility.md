@@ -264,6 +264,28 @@ releases the held durable gate, queries, Collections and HTTP resources, then
 checks no active HTTP remains. Retained primary errors and cleanup diagnostics
 are separate. Successful path replays do not supply normal campaign reach.
 
+## Query Core: public callers follow silent-cancellation replacements
+
+Query Core 5.107.1 includes upstream
+[PR #12489](https://github.com/TanStack/query/pull/12489). Its stated contract
+makes imperative fetch callers follow a replacement after silent cancellation,
+while preserving cancellation of the raw `Query.promise`. An ordinary ownership
+test required the earlier `fetchQuery` rejection. The Collection callers already
+passed their unchanged pending and applied-row assertions.
+
+The unchanged test fails at that external-caller assertion with the exact
+5.107.1 tagged sources, matching final-head CI, and passes with installed
+5.90.20. The corrected test requires the replacement row for `fetchQuery` and
+also checks that the raw promise rejects with `CancelledError`. This retains
+a cancellation witness rather than accepting either outcome. No adapter,
+oracle model, history grammar, comparison, or run budget changes.
+
+The complete ordinary and oracle ownership files pass 496 tests with the
+5.107.1 tagged-source receiver and Vitest 3.2.4. Restoring the old Query Core
+runtime makes the updated external-caller assertion fail. These are provider
+compatibility controls, not a newly discovered Collection defect. Final CI
+must still receive the published distribution with the upgraded runner.
+
 ## Electron: preserve the Node participant during an Electron rebuild
 
 The original external finding is that pnpm shares the native package with
