@@ -627,23 +627,27 @@ function expressionsEqual(expr1: any, expr2: any): boolean {
 }
 
 /** The value a min or max compares: strings, numbers, Dates, and bigints keep
- * their type, and anything else becomes a number. */
+ * their type, nullish is left out, and anything else becomes a number. */
 function minMaxInput(
   compiledExpr: (row: NamespacedRow) => unknown,
-): (entry: [string, NamespacedRow]) => string | number | bigint | Date {
+): (
+  entry: [string, NamespacedRow],
+) => string | number | bigint | Date | undefined {
   return ([, namespacedRow]) => {
     const value = compiledExpr(namespacedRow)
     if (
-      typeof value === `number` ||
       typeof value === `string` ||
       typeof value === `bigint` ||
       value instanceof Date
     ) {
       return value
     }
-    return value != null ? Number(value) : 0
+    return value != null ? Number(value) : undefined
   }
 }
+
+/** A group with no value has no minimum or maximum. */
+const nullWithoutValue = (result: unknown) => result ?? null
 
 /**
  * Helper function to get an aggregate function based on the Agg expression
@@ -655,11 +659,8 @@ function getAggregateFunction(aggExpr: Aggregate) {
   // Create a value extractor function for the expression to aggregate
   const valueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
     const value = compiledExpr(namespacedRow)
-    // Ensure we return a number for numeric aggregate functions
-    if (typeof value === `number`) {
-      return value
-    }
-    return value != null ? Number(value) : 0
+    // A nullish value is left out of the aggregate
+    return value != null ? Number(value) : undefined
   }
 
   const valueExtractorForMinMax = minMaxInput(compiledExpr)
@@ -682,9 +683,9 @@ function getAggregateFunction(aggExpr: Aggregate) {
     case `avg`:
       return avg(valueExtractor)
     case `min`:
-      return min(valueExtractorForMinMax)
+      return { ...min(valueExtractorForMinMax), postMap: nullWithoutValue }
     case `max`:
-      return max(valueExtractorForMinMax)
+      return { ...max(valueExtractorForMinMax), postMap: nullWithoutValue }
     default:
       throw new UnsupportedAggregateFunctionError(aggExpr.name)
   }

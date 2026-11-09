@@ -437,6 +437,35 @@ function groupedMean(input: Weighted<Keyed>): Weighted<GroupedMeanOutput> {
   ])
 }
 
+/** A nullish input is not a value: 0 reads as null and 1 as undefined. */
+const nullishWhenSmall = (value: number): number | null | undefined =>
+  value === 0 ? null : value === 1 ? undefined : value
+
+/**
+ * The per-bucket mean when some inputs are nullish: the weighted total of the
+ * values over their weighted number, 0 for a bucket with no value.
+ */
+function groupedMeanOfValues(
+  input: Weighted<Keyed>,
+): Weighted<GroupedMeanOutput> {
+  const groups = new Map<number, { total: number; count: number }>()
+  for (const [[key, value], weight] of keyedIdentity(input)) {
+    const current = groups.get(key % 2) ?? { total: 0, count: 0 }
+    const present = value !== 0 && value !== 1
+    groups.set(key % 2, {
+      total: current.total + (present ? value * weight : 0),
+      count: current.count + (present ? weight : 0),
+    })
+  }
+  return [...groups].map(([bucket, { total, count }]) => [
+    [
+      JSON.stringify({ bucket }),
+      { bucket, mean: count === 0 ? 0 : total / count },
+    ],
+    1,
+  ])
+}
+
 /** Per-bucket string extrema of both parts, recomputed from plain rows. */
 function groupedTextExtrema(
   input: Weighted<Keyed>,
@@ -645,6 +674,22 @@ describe(`DBSP incrementalization laws`, () => {
                     }),
                   ),
                 evaluate: groupedMean,
+              })
+              reach.unary({
+                name: `groupBy mean over nullish values`,
+                initial: worlds[0]!,
+                batches,
+                inputPolicy: keyedPolicy,
+                outputPolicy: groupedMeanPolicy,
+                build: (input) =>
+                  input.pipe(
+                    groupBy(([key]) => ({ bucket: key % 2 }), {
+                      mean: groupByOperators.avg(([, value]) =>
+                        nullishWhenSmall(value),
+                      ),
+                    }),
+                  ),
+                evaluate: groupedMeanOfValues,
               })
               reach.unary({
                 name: `groupBy string extrema`,

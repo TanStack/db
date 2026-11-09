@@ -141,10 +141,11 @@ export function groupBy<
  * Creates a sum aggregate function
  */
 export function sum<T>(
-  valueExtractor: (value: T) => number = (v) => v as unknown as number,
+  valueExtractor: (value: T) => number | null | undefined = (v) =>
+    v as unknown as number,
 ): AggregateFunction<T, number, number> {
   return {
-    preMap: (data: T) => valueExtractor(data),
+    preMap: (data: T) => valueExtractor(data) ?? 0,
     reduce: (values: Array<[number, number]>) => {
       let total = 0
       for (const [value, multiplicity] of values) {
@@ -178,19 +179,20 @@ export function count<T>(
  * Creates an average aggregate function
  */
 export function avg<T>(
-  valueExtractor: (value: T) => number = (v) => v as unknown as number,
+  valueExtractor: (value: T) => number | null | undefined = (v) =>
+    v as unknown as number,
 ): AggregateFunction<T, number, { sum: number; count: number }> {
   return {
-    preMap: (data: T) => ({
-      sum: valueExtractor(data),
-      count: 0,
-    }),
+    preMap: (data: T) => {
+      const value = valueExtractor(data)
+      return { sum: value ?? 0, count: value == null ? 0 : 1 }
+    },
     reduce: (values: Array<[{ sum: number; count: number }, number]>) => {
       let totalSum = 0
       let totalCount = 0
       for (const [value, multiplicity] of values) {
         totalSum += value.sum * multiplicity
-        totalCount += multiplicity
+        totalCount += value.count * multiplicity
       }
       return {
         sum: totalSum,
@@ -198,7 +200,7 @@ export function avg<T>(
       }
     },
     postMap: (result: { sum: number; count: number }) => {
-      return result.sum / result.count
+      return result.sum / (result.count || 1)
     },
   }
 }
@@ -215,10 +217,10 @@ export function min<T extends CanMinMax>(): AggregateFunction<
   T | undefined
 >
 export function min<T, V extends CanMinMax>(
-  valueExtractor: (value: T) => V,
+  valueExtractor: (value: T) => V | undefined,
 ): AggregateFunction<T, V | undefined, V | undefined>
 export function min<T, V extends CanMinMax>(
-  valueExtractor?: (value: T) => V,
+  valueExtractor?: (value: T) => V | undefined,
 ): AggregateFunction<T, V | undefined, V | undefined> {
   const extractor = valueExtractor ?? ((v: T) => v as unknown as V)
   return {
@@ -248,10 +250,10 @@ export function max<T extends CanMinMax>(): AggregateFunction<
   T | undefined
 >
 export function max<T, V extends CanMinMax>(
-  valueExtractor: (value: T) => V,
+  valueExtractor: (value: T) => V | undefined,
 ): AggregateFunction<T, V | undefined, V | undefined>
 export function max<T, V extends CanMinMax>(
-  valueExtractor?: (value: T) => V,
+  valueExtractor?: (value: T) => V | undefined,
 ): AggregateFunction<T, V | undefined, V | undefined> {
   const extractor = valueExtractor ?? ((v: T) => v as unknown as V)
   return {

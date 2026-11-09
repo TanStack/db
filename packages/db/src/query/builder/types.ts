@@ -985,7 +985,9 @@ export type RefLeaf<T = any, Nullable extends boolean = false> = {
 } & ([Nullable] extends [true] ? { readonly [NullableBrand]?: true } : {})
 
 // Detect NullableBrand by checking for the key's presence
-type IsNullableRef<T> = typeof NullableBrand extends keyof T ? true : false
+export type IsNullableRef<T> = typeof NullableBrand extends keyof T
+  ? true
+  : false
 
 // Remove brands per union member so Omit preserves discriminant-specific fields.
 type WithoutRefBrand<T> = T extends unknown
