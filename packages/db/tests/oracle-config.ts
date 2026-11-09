@@ -112,6 +112,7 @@ const staticOracleProperties = [
   `preact.window-render`,
   `scripts.lint-scope`,
   `scripts.run-budget`,
+  `scripts.strip-oracle-probes`,
   `scripts.release-version`,
   `scripts.release-seed-failure`,
   `react.ssr-effects-react18-ordinary-provider`,

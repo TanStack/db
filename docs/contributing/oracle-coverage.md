@@ -4269,6 +4269,17 @@ keys and the fixed seed 271828 as removed, although both campaigns still run in
 the oracle file. Owner: `scripts.run-budget`. Needed witness: a campaign whose
 budget a helper computes and passes in as parameters.
 
+`scripts/strip-oracle-probes-oracle.property.test.js` owns the build-time removal of the
+oracle state probes from published builds (`scripts.strip-oracle-probes`, maintainer decision of
+2026-11-09). Its grammar draws one-function programs with the guard in the placements that the
+probe-form rule admits (function top, blocks, switch cases, sibling declarators, parenthesized forms,
+unbraced and loop bodies, labels) and hostile or rule-rejected uses of `probing` and `__oracleProbe`.
+The rule decides admission, and the model must agree with it on every draw. The reference is esbuild
+with `process.env.NODE_ENV` defined as production. The production path is the plugin's transform, then
+esbuild's type stripping. Both outputs run with a recording probe that must never be called. Owner:
+`scripts.strip-oracle-probes`. Limits: one exported function per program, no imports, JSX, or bundler;
+the host `process` is a stub with one environment value.
+
 The gap report (`pnpm gap-report`) is the `oracle-gaps` CLI of
 `@tanstack/oracles`. Its own oracles (`oracle-gaps.report`, and the static and
 classify oracles) and their limits live in the TanStack/oracles repository,
