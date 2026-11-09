@@ -4,6 +4,11 @@ import { createCollection } from '../src/collection/index'
 import { createChangeProxy, withChangeTracking } from '../src/proxy'
 import { makeFrozenRow, makeStoredRow } from './proxy-native-rows'
 import { oracleRoute } from './oracle-config'
+import {
+  asProductionError,
+  errorViolation,
+  isErrorObservation,
+} from './oracle-error-observation'
 import { declareOracle } from './oracle-declaration'
 import { differs, oracleProperty, pass, violation } from './oracle-property'
 import type { Observation, Verdict } from './oracle-property'
@@ -121,33 +126,36 @@ function initialRow(values: Array<number>): CallbackRow {
 }
 
 // Production side: one draft row, run step by step. It records what the draft
-// exposes and decides nothing. A production error is itself an observation.
+// exposes and decides nothing. An error raised by a draft call is the
+// observation of its step, and it stops the history.
 function driveArrayCallbacks(
   history: CallbackHistory,
   observe: (checkpoint: string, value: unknown) => void,
 ): void {
   const original = copyCallbackRow(initialRow(history.values))
   const { proxy, getChanges } = createChangeProxy(original)
-  let checkpoint = `step 0`
-  try {
-    for (const [index, step] of history.steps.entries()) {
-      checkpoint = `step ${index}`
-      const call = runArrayCallback(proxy, step)
-      const changes = getChanges()
-      observe(checkpoint, {
-        call,
-        row: copyCallbackRow({ ...original, ...changes }),
-        changes: {
-          ...changes,
-          ...(changes.items !== undefined
-            ? { items: changes.items.map((item: object) => ({ ...item })) }
-            : {}),
-        },
-        original: copyCallbackRow(original),
-      })
+  for (const [index, step] of history.steps.entries()) {
+    const checkpoint = `step ${index}`
+    let call: ReturnType<typeof runArrayCallback>
+    let changes: Record<string, any>
+    try {
+      call = runArrayCallback(proxy, step)
+      changes = getChanges()
+    } catch (error) {
+      observe(checkpoint, asProductionError(error))
+      return
     }
-  } catch (error) {
-    observe(checkpoint, { error: errorData(error) })
+    observe(checkpoint, {
+      call,
+      row: copyCallbackRow({ ...original, ...changes }),
+      changes: {
+        ...changes,
+        ...(changes.items !== undefined
+          ? { items: changes.items.map((item: object) => ({ ...item })) }
+          : {}),
+      },
+      original: copyCallbackRow(original),
+    })
   }
 }
 
@@ -177,6 +185,8 @@ const LAW_CALL = `a draft's callback makes the native call: the same visits and 
 const LAW_ROW = `the row rebuilt from the draft's recorded changes is the native row`
 const LAW_CHANGES = `the recorded changes are the native changes`
 const LAW_BASELINE = `the input row is never changed by a callback`
+const LAW_NO_ERROR = `a draft's callback raises no error`
+const LAW_OBSERVED = `every step of a history is observed`
 
 // The comparison shared by the campaign and the fixed examples.
 function judgeStep(
@@ -192,6 +202,9 @@ function judgeStep(
   )
 }
 
+// The array-callback comparison: each observed step against the model's view
+// of that step. A missing step, or an error that stops the history, is a
+// violation too.
 function judgeCallbacks(
   _history: CallbackHistory,
   observations: ReadonlyArray<Observation>,
@@ -199,15 +212,13 @@ function judgeCallbacks(
 ): Verdict {
   for (const [index, observation] of observations.entries()) {
     const value = observation.value
-    if (isErrorData(value)) {
-      const { name, message } = value.error
-      return violation(
+    if (isErrorObservation(value))
+      return errorViolation(
         observation.checkpoint,
-        `production raised ${name}: ${message}`,
-        LAW_CALL,
-        { actual: name, expected: `no error` },
+        LAW_NO_ERROR,
+        value,
+        `no error`,
       )
-    }
     const verdict = judgeStep(
       observation.checkpoint,
       value as CallbackView,
@@ -215,66 +226,14 @@ function judgeCallbacks(
     )
     if (verdict) return verdict
   }
-  return pass
-}
-
-function isErrorData(
-  value: unknown,
-): value is { error: { name: string; message: string } } {
-  return typeof value === `object` && value !== null && `error` in value
-}
-
-function errorData(error: unknown): { name: string; message: string } {
-  return {
-    name: error instanceof Error ? error.name : `non-error`,
-    message: String(error instanceof Error ? error.message : error),
-  }
-}
-
-// Fixed examples and the baseline test use these cut-shaped helpers, which run
-// the same driver, model, and comparison as the campaign.
-function observeArrayCallbacks(
-  values: Array<number>,
-  steps: Array<CallbackStep>,
-) {
-  const history = { values, steps }
-  const views: Array<CallbackView> = []
-  driveArrayCallbacks(history, (_checkpoint, value) => {
-    views.push(value as CallbackView)
-  })
-  const expected = modelArrayCallbacks(history)
-  return views.map((view, index) => ({
-    expectedCall: expected[index]!.call,
-    actualCall: view.call,
-    expectedRow: expected[index]!.row,
-    actualRow: view.row,
-    expectedChanges: expected[index]!.changes,
-    actualChanges: view.changes,
-    initial: initialRow(values),
-    original: view.original,
-  }))
-}
-
-function assertArrayCallbacks(cuts: ReturnType<typeof observeArrayCallbacks>) {
-  for (const [index, cut] of cuts.entries()) {
-    const verdict = judgeStep(
-      `step ${index}`,
-      {
-        call: cut.actualCall,
-        row: cut.actualRow,
-        changes: cut.actualChanges,
-        original: cut.original,
-      },
-      {
-        call: cut.expectedCall,
-        row: cut.expectedRow,
-        changes: cut.expectedChanges,
-        original: cut.initial,
-      },
+  if (observations.length !== expected.length)
+    return violation(
+      `end of history`,
+      `observed ${observations.length} of ${expected.length} steps`,
+      LAW_OBSERVED,
+      { actual: observations.length, expected: expected.length },
     )
-    if (verdict?.kind === `violation`)
-      throw new Error(`${verdict.law}: ${verdict.difference}`)
-  }
+  return pass
 }
 
 /**
@@ -331,8 +290,9 @@ const callbackHistory = fc.record({
   steps: fc.tuple(step, step),
 })
 
-// Reach: a step left an item whose value differs from its start only by the
-// sign of a zero. The model's views say so; production is not consulted.
+// Reach describes the history, not production: some step of the model's views
+// leaves an item that differs from its start only by the sign of a zero. The
+// model is independent of the draft, so reach does not depend on production.
 function reachedStates(
   history: CallbackHistory,
   _trace: ReadonlyArray<Observation>,
@@ -376,7 +336,36 @@ oracleProperty<CallbackHistory, Array<CallbackView>>({
     states: [`zero-sign-write`],
     runs: 200,
     fixedSeeds: [2026103],
-    // The first step makes a zero change sign and leaves its magnitude; the
+    // Fixed histories the framework runs in every campaign: the input row stays
+    // unchanged across two callback steps, and each callback method runs over
+    // several targets and delta pairs with the native result as the owed value.
+    fixed: [
+      {
+        name: `keeps the input row unchanged across two callback steps`,
+        history: {
+          values: [1, 2],
+          steps: [
+            { method: `forEach`, target: 0, delta: 3 },
+            { method: `forEach`, target: 0, delta: -3 },
+          ],
+        },
+      },
+      ...callbackMethods.flatMap((method) =>
+        [0, 1, 2].flatMap((target) =>
+          [
+            [0, 0],
+            [3, 5],
+            [3, -3],
+          ].map((deltas) => ({
+            name: `matches native ${method} reads, writes and reverts (target ${target}, deltas ${deltas.join(`, `)})`,
+            history: {
+              values: [4, -2, 7],
+              steps: deltas.map((delta) => ({ method, target, delta })),
+            },
+          })),
+        ),
+      ),
+    ], // The first step makes a zero change sign and leaves its magnitude; the
     // second step stays random, so the states after the write are explored.
     constructed: [
       {
@@ -385,7 +374,7 @@ oracleProperty<CallbackHistory, Array<CallbackView>>({
         build: (generated) => ({
           values: [-0, ...generated.values.slice(0, 5)],
           steps: [
-            { method: `forEach`, target: 0, delta: 0 },
+            { ...generated.steps[0]!, target: 0, delta: 0 },
             generated.steps[1]!,
           ],
         }),
@@ -405,10 +394,9 @@ oracleProperty<CallbackHistory, Array<CallbackView>>({
       corrupt: (trace) =>
         replaceFirstView(trace, (view) => {
           const baseline = copyCallbackRow(view.original)
-          return differs(`lost write`, LAW_ROW, view.row, baseline) ===
-            undefined
-            ? undefined
-            : { ...view, row: baseline }
+          return differs(`lost write`, LAW_ROW, view.row, baseline)
+            ? { ...view, row: baseline }
+            : undefined
         }),
     },
     {
@@ -419,6 +407,11 @@ oracleProperty<CallbackHistory, Array<CallbackView>>({
           ...view,
           call: { ...view.call, visits: [...view.call.visits, 0] },
         })),
+    },
+    {
+      name: `last step dropped`,
+      law: LAW_OBSERVED,
+      corrupt: (trace) => (trace.length === 0 ? undefined : trace.slice(0, -1)),
     },
     {
       name: `wrong peer`,
@@ -433,24 +426,6 @@ oracleProperty<CallbackHistory, Array<CallbackView>>({
 })
 
 describe(`native array callback oracle`, () => {
-  it(`keeps the shared baseline independent of every captured actual cut`, () => {
-    oracleRoute(`fixed history`)
-    const cuts = observeArrayCallbacks(
-      [1, 2],
-      [
-        { method: `forEach`, target: 0, delta: 3 },
-        { method: `forEach`, target: 0, delta: -3 },
-      ],
-    )
-    assertArrayCallbacks(cuts)
-    cuts[0]!.actualRow.items[0]!.value = 99
-    cuts[0]!.original.items[0]!.value = 98
-    expect(cuts[0]!.initial.items[0]!.value).toBe(1)
-    expect(cuts[0]!.expectedRow.items[0]!.value).toBe(4)
-    expect(cuts[1]!.actualRow.items[0]!.value).toBe(1)
-    expect(cuts[1]!.original.items[0]!.value).toBe(1)
-    expect(() => assertArrayCallbacks(cuts)).toThrow()
-  })
   it.each(accessPaths)(
     `preserves native writes through the %s access path`,
     async (path) => {
@@ -495,26 +470,6 @@ describe(`native array callback oracle`, () => {
           expect({ id: saved.id, items: saved.items }).toStrictEqual(expected)
         } finally {
           await collection.cleanup()
-        }
-      }
-    },
-  )
-  it.each(callbackMethods)(
-    `matches native %s reads, writes and reverts`,
-    (method) => {
-      oracleRoute(`case`)
-      for (const target of [0, 1, 2]) {
-        for (const deltas of [
-          [0, 0],
-          [3, 5],
-          [3, -3],
-        ]) {
-          assertArrayCallbacks(
-            observeArrayCallbacks(
-              [4, -2, 7],
-              deltas.map((delta) => ({ method, target, delta })),
-            ),
-          )
         }
       }
     },
