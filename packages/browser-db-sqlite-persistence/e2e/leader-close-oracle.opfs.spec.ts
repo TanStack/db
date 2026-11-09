@@ -344,7 +344,11 @@ async function runHistory(
   expect(cleanupFailures).toEqual([])
 }
 
-declareOracle({ owns: [`src/browser-coordinator.ts`], check: [runHistory], model: [expectedHistory] })
+declareOracle({
+  owns: [`src/browser-coordinator.ts`],
+  check: [runHistory],
+  model: [expectedHistory],
+})
 
 test(`surviving OPFS source Collection accepts work after an idle leader tab closes`, async ({
   context,

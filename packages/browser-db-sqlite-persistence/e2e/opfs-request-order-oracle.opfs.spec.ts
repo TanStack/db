@@ -22,7 +22,10 @@ function expectRequestOrderLawsHold(result: {
   ).toEqual([])
 }
 
-declareOracle({ owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`], check: [expectRequestOrderLawsHold] })
+declareOracle({
+  owns: [`src/opfs-database.ts#openBrowserWASQLiteOPFSDatabase`],
+  check: [expectRequestOrderLawsHold],
+})
 
 test(`real Chromium OPFS connection answers requests in order and closes after them`, async ({
   page,

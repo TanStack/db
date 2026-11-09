@@ -24,7 +24,10 @@ function expectReloadClassLawsHold(
   ).toEqual([])
 }
 
-declareOracle({ owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`], check: [expectReloadClassLawsHold] })
+declareOracle({
+  owns: [`src/browser-coordinator.ts`, `src/browser-persistence.ts`],
+  check: [expectReloadClassLawsHold],
+})
 
 test(`real Chromium OPFS reload is free of avoidable work ahead of its reads`, async ({
   page,

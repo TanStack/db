@@ -227,7 +227,11 @@ const permanentBeforePeer = `permanent failure before a peer`
 const phaseWriteFault = `phase write fault`
 const faultBeforePeer = `fault before a queued peer`
 const deletionFault = `deletion fault`
-const measuredStates = [`retried head`, `retried tail`, `queue drained`] as const
+const measuredStates = [
+  `retried head`,
+  `retried tail`,
+  `queue drained`,
+] as const
 
 /**
  * Which probe-bound states a history enters, from its plans alone. The

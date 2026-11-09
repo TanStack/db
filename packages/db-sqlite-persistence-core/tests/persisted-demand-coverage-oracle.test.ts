@@ -2379,7 +2379,9 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-declareOracle({ owns: [`src/persisted.ts`],   check: [coverageViolations, firstMismatch, sameObservation],
+declareOracle({
+  owns: [`src/persisted.ts`],
+  check: [coverageViolations, firstMismatch, sameObservation],
   model: [expectedTrace],
   grammar: [ALL_CELLS],
 })

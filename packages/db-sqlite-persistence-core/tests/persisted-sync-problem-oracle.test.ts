@@ -596,4 +596,8 @@ describe(`persisted sync problem oracle`, () => {
   })
 })
 
-declareOracle({ owns: [`src/persisted.ts`], model: [expected], grammar: [histories] })
+declareOracle({
+  owns: [`src/persisted.ts`],
+  model: [expected],
+  grammar: [histories],
+})

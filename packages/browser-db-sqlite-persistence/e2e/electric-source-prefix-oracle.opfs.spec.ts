@@ -89,7 +89,11 @@ const observe = (page: Page) =>
 const rowIds = async (page: Page) =>
   (await observe(page)).rows.map(({ id }) => id)
 
-declareOracle({ owns: [`src/browser-persistence.ts`], check: [sourceHeadViolation], grammar: [cells] })
+declareOracle({
+  owns: [`src/browser-persistence.ts`],
+  check: [sourceHeadViolation],
+  grammar: [cells],
+})
 for (const cell of cells) {
   test(`recovers ${cell.present ? `lost` : `resurrected`} rows after ${cell.advance} advancement${cell.drain ? ` with peer drain` : ``}${cell.legacy ? ` from legacy progress` : ``}${cell.callerCursor !== `none` ? ` with explicit ${cell.callerCursor}` : ``}${cell.interrupted ? ` after interrupted recovery` : ``}`, async ({
     context,

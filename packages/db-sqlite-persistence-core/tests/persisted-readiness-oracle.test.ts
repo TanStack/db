@@ -426,4 +426,8 @@ function describe_(events: ReadonlyArray<Event>): string {
     .join(` > `)
 }
 
-declareOracle({ owns: [`src/persisted.ts`], model: [expected], grammar: [histories] })
+declareOracle({
+  owns: [`src/persisted.ts`],
+  model: [expected],
+  grammar: [histories],
+})
