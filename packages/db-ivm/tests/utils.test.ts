@@ -267,7 +267,7 @@ describe(`hash`, () => {
       const depth = 11
       const shared = Array.from(
         { length: depth + 1 },
-        (_, level): Record<string, unknown> => ({ level }),
+        (_, level) => ({ level }) as Record<string, unknown>,
       )
       const left = Array.from({ length: depth }, (_, level) => ({
         side: `left`,
@@ -292,7 +292,7 @@ describe(`hash`, () => {
 
       const ring = Array.from(
         { length: 600 },
-        (_, value): { value: number; next?: unknown } => ({ value }),
+        (_, value) => ({ value }) as { value: number; next?: unknown },
       )
       for (let index = 0; index < ring.length; index++) {
         ring[index]!.next = ring[(index + 1) % ring.length]
@@ -345,7 +345,7 @@ describe(`hash`, () => {
       const createGraph = (size: number) => {
         const nodes = Array.from(
           { length: size },
-          (_, value): Record<string, unknown> => ({ value }),
+          (_, value) => ({ value }) as Record<string, unknown>,
         )
         for (let index = 0; index < size; index++) {
           const next = nodes[(index + 1) % size]!
@@ -416,12 +416,10 @@ describe(`hash`, () => {
 
         const adoptionLeaves = Array.from({ length: 20 }, () => createLeaf())
         const createAdoptionGraph = () => {
-          const nodes = adoptionLeaves.map(
-            (leaf, value): Record<string, unknown> => ({
-              value,
-              leaf,
-            }),
-          )
+          const nodes = adoptionLeaves.map((leaf, value) => ({
+            value,
+            leaf,
+          })) as Array<Record<string, unknown>>
           for (let index = 0; index < nodes.length; index++) {
             const next = nodes[index + 1]
             nodes[index]!.left = { next }
@@ -441,7 +439,7 @@ describe(`hash`, () => {
       })
       const ring = Array.from(
         { length: 800 },
-        (_, value): { value: number; next?: unknown } => ({ value }),
+        (_, value) => ({ value }) as { value: number; next?: unknown },
       )
       for (let index = 0; index < ring.length; index++) {
         ring[index]!.next = ring[(index + 1) % ring.length]

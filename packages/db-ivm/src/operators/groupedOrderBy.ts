@@ -1,6 +1,6 @@
 import { groupedTopKWithFractionalIndex } from './groupedTopKWithFractionalIndex.js'
 import { orderedWindow } from './ordered-window.js'
-import type { KeyValue } from '../types.js'
+import type { IStreamBuilder, KeyValue } from '../types.js'
 import type { OrderedTopK } from './ordered-window.js'
 
 export interface GroupedOrderByOptions<Ve> {
@@ -50,9 +50,14 @@ export function groupedOrderByWithFractionalIndex<
     T extends KeyValue<unknown, infer V> ? V : never
   >,
 ) {
+  type KeyType = T extends KeyValue<infer K, unknown> ? K : never
+  type ValueType = T extends KeyValue<unknown, infer V> ? V : never
+
   return orderedWindow<T, Ve>(
     valueExtractor,
     options,
     groupedTopKWithFractionalIndex as OrderedTopK<T>,
-  )
+  ) as (
+    stream: IStreamBuilder<T>,
+  ) => IStreamBuilder<[KeyType, [ValueType, string]]>
 }

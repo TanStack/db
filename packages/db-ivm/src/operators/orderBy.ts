@@ -1,6 +1,6 @@
 import { topKWithFractionalIndex } from './topKWithFractionalIndex.js'
 import { orderedWindow } from './ordered-window.js'
-import type { KeyValue } from '../types.js'
+import type { IStreamBuilder, KeyValue } from '../types.js'
 import type { OrderedTopK } from './ordered-window.js'
 import type { SetSizeCallback } from './topKWithFractionalIndex.js'
 
@@ -35,9 +35,14 @@ export function orderByWithFractionalIndex<
   ) => Ve,
   options?: OrderByWithFractionalIndexOptions<Ve>,
 ) {
+  type KeyType = T extends KeyValue<infer K, unknown> ? K : never
+  type ValueType = T extends KeyValue<unknown, infer V> ? V : never
+
   return orderedWindow<T, Ve>(
     valueExtractor,
     options,
     topKWithFractionalIndex as OrderedTopK<T>,
-  )
+  ) as (
+    stream: IStreamBuilder<T>,
+  ) => IStreamBuilder<[KeyType, [ValueType, string]]>
 }

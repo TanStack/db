@@ -1,0 +1,44 @@
+name: Dependency refresh preparation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lockfiles:
+    if: github.head_ref == 'codex/dependency-upgrades'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version-file: .nvmrc
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - name: Resolve workspace dependency upgrades
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+        run: pnpm install --lockfile-only --ignore-scripts --no-frozen-lockfile
+      - name: Refresh standalone example lockfiles
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+        run: |
+          for example in examples/react/projects examples/react/todo examples/solid/todo; do
+            pnpm --dir "$example" install --ignore-workspace --lockfile-only --ignore-scripts --no-frozen-lockfile
+          done
+      - name: Upload generated lockfiles
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: refreshed-lockfiles
+          path: |
+            pnpm-lock.yaml
+            examples/react/projects/pnpm-lock.yaml
+            examples/react/todo/pnpm-lock.yaml
+            examples/solid/todo/pnpm-lock.yaml
