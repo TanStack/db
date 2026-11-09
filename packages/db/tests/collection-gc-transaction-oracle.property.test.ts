@@ -79,16 +79,16 @@ import type { Deferred } from '../src/deferred.js'
  * wall-clock corrections are not generated. A transaction that never settles
  * holds its Collections for as long as it persists.
  *
- * Retirement latency. Retirement before `gcTime` is a violation. After the
- * deadline, the grid accepts a retirement only when the next checkpoint shows
- * it, so the 20/60/120 ms grid checks retirement by the next step. Exact
- * wall-clock cleanup latency is not promised (coverage map, GC retention
- * boundaries entry). A retirement at `gcTime` + 1 ms therefore cannot be told
- * apart from one at `gcTime` + 19 ms on this grid, and a mutant with that
- * delay is indistinguishable here. The model compares strictly at the
- * deadline, so a checkpoint at exactly `gcTime` owes no retirement. The law
- * forbids only retirement before `gcTime`. Whether a retirement exactly at
- * `gcTime` is legal is a maintainer decision that this oracle does not settle.
+ * Retirement latency. The law makes a Collection eligible at `gcTime`, and
+ * exact cleanup latency is not promised. So at the checkpoint that lands
+ * exactly on the deadline, either retired or not retired is allowed. A checkpoint
+ * before the deadline owes no retirement, and the first checkpoint after it
+ * owes retirement, so the 20/60/120 ms grid checks retirement by the next step.
+ * Limit: a retirement one clock tick early, at `gcTime` - 1 ms, is seen first
+ * at the exact-deadline checkpoint, where it is allowed, so this grid cannot
+ * detect it. A retirement at `gcTime` + 1 ms is likewise indistinguishable
+ * from `gcTime` + 19 ms, since no checkpoint lies between. Clock steps are
+ * 20 ms multiples, so no finer grid is used here.
  */
 
 const GC_TIME_MS = 100
@@ -149,7 +149,8 @@ type Model = {
 
 // What the two Collections show after an action: cleaned up, and the rows
 // they hold. Both the model and the driver produce this shape.
-type Visible = { cleanedUp: boolean; keys: Array<number> }
+// At its deadline a Collection may or may not be retired yet: `either`.
+type Visible = { cleanedUp: boolean | `either`; keys: Array<number> }
 type Snapshot = Record<Side, Visible>
 type Checkpoint = { checkpoint: string; value: Snapshot }
 type Expected = { checkpoints: Array<Checkpoint>; reached: Array<ReachState> }
@@ -264,11 +265,19 @@ function applyModel(model: Model, action: Action): Array<ReachState> {
   return reached
 }
 
+// Exactly at the deadline, the law makes the Collection eligible, and exact
+// cleanup latency is not promised, so either outcome is owed. A later
+// checkpoint owes retirement, and one before the deadline owes none.
 function owedSnapshot(model: Model): Snapshot {
   const view = (side: Side): Visible => {
     const collection = model.collections[side]
+    const cleanedUp = collection.retired
+      ? true
+      : collection.deadline === model.now
+        ? `either`
+        : false
     return {
-      cleanedUp: collection.retired,
+      cleanedUp,
       keys: collection.retired ? [] : [...collection.persisting].sort(byId),
     }
   }
@@ -340,6 +349,17 @@ const expectedOf = (plan: ReadonlyArray<Action>): Expected => {
 const LAW = `retirement`
 const DIFFERENCE = `the Collection's cleaned-up status or visible rows differ from the owed retirement and visibility`
 
+// Where the owed state allows either retirement outcome, the observed state
+// takes the owed value, so only the rows and the other Collection are compared.
+const admitting = (owed: Snapshot, observed: Snapshot): Snapshot => {
+  const side = (name: Side): Visible => ({
+    cleanedUp:
+      owed[name].cleanedUp === `either` ? `either` : observed[name].cleanedUp,
+    keys: observed[name].keys,
+  })
+  return { a: side(`a`), b: side(`b`) }
+}
+
 // Judges the recorded checkpoints in order, then whether the trace is complete.
 const check = (
   _plan: ReadonlyArray<Action>,
@@ -358,7 +378,7 @@ const check = (
     const verdict = differs(
       owed.checkpoint,
       LAW,
-      observed.value,
+      admitting(owed.value, observed.value as Snapshot),
       owed.value,
       DIFFERENCE,
     )
