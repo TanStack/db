@@ -92,6 +92,8 @@ type CollectionSubscriptionOptions = {
   onResumeAcquisition?: () => () => void
   /** The live query or Effect this subscription reads for. */
   owner?: CollectionDependent
+  /** The subscriber drops its rows when the Collection is cleaned up. */
+  discardsRowsOnCleanup?: boolean
 }
 
 type TruncateReplayPublicationControl = NonNullable<
@@ -381,7 +383,16 @@ export class CollectionSubscription
     this.truncateReplacementPending = holdReplacement
     // Cleanup discards the rows without publishing deletes, so the published
     // rows go stale. A reload keeps the rows: only rows already stale stay so.
-    if (!reload) this.stalePublishedRows = new Map(this.publishedRows)
+    // A subscriber that drops its rows with the Collection, as a live-query
+    // observer's `cleaned-up` view does, holds none: a later write of an
+    // equal row is new to it, not a duplicate of its last publication.
+    if (!reload) {
+      if (this.options.discardsRowsOnCleanup) {
+        this.publishedRows = new Map()
+        this.sentKeys = new Set()
+      }
+      this.stalePublishedRows = new Map(this.publishedRows)
+    }
     this.pendingLoadSubsetParticipants.clear()
 
     for (const demand of [...this.subsetDemands]) {
