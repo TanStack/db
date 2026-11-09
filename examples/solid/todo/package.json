@@ -37,7 +37,7 @@
     "pg": "^8.20.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.2",
-    "vite": "^8.3.5",
+    "vite": "^7.0.0",
     "vite-plugin-solid": "^2.11.15"
   },
   "scripts": {
