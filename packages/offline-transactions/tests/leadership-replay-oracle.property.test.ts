@@ -4,7 +4,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import { OfflineExecutor } from '../src/OfflineExecutor'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
-import { oracleReplayTest, oracleRoute } from '../../db/tests/oracle-config'
+import {
+  oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
+} from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   FakeStorageAdapter,
@@ -205,6 +209,8 @@ async function checkStartup({
   boundary,
   seed,
 }: ReturnType<typeof startupCases>[number]): Promise<void> {
+  const parameters = oracleCampaignOptions(startupOracle, seed)
+  oracleRoute(oracleRouteOf(parameters))
   await fc.assert(
     fc.asyncProperty(fc.integer({ min: 1, max: 4 }), async (count) => {
       const pending = gate()
@@ -310,7 +316,7 @@ async function checkStartup({
         )
       }
     }),
-    oracleCampaignOptions(startupOracle, seed),
+    parameters,
   )
 }
 
@@ -339,6 +345,8 @@ async function checkSerialWork({
   boundary,
   seed,
 }: ReturnType<typeof serialWorkCases>[number]): Promise<void> {
+  const campaignParameters = oracleCampaignOptions(serialWorkOracle, seed)
+  oracleRoute(oracleRouteOf(campaignParameters))
   await fc.assert(
     fc.asyncProperty(
       fc.integer({ min: 2, max: 5 }),
@@ -508,7 +516,7 @@ async function checkSerialWork({
         }
       },
     ),
-    oracleCampaignOptions(serialWorkOracle, seed),
+    campaignParameters,
   )
 }
 
@@ -533,6 +541,21 @@ async function checkReport({
   boundary,
   seed,
 }: ReturnType<typeof reportCases>[number]): Promise<void> {
+  const runParameters = {
+    ...oracleCampaignOptions(leadershipReportOracle, seed),
+    examples: [
+      [
+        {
+          pendingReports: 1,
+          settledReports: 1,
+          separateTurns: true,
+          regainLeadership: true,
+          value: `payload`,
+        },
+      ],
+    ],
+  }
+  oracleRoute(oracleRouteOf(runParameters))
   await fc.assert(
     fc.asyncProperty(
       fc.record({
@@ -696,20 +719,7 @@ async function checkReport({
         }
       },
     ),
-    {
-      ...oracleCampaignOptions(leadershipReportOracle, seed),
-      examples: [
-        [
-          {
-            pendingReports: 1,
-            settledReports: 1,
-            separateTurns: true,
-            regainLeadership: true,
-            value: `payload`,
-          },
-        ],
-      ],
-    },
+    runParameters,
   )
 }
 
@@ -725,6 +735,11 @@ oracleReplayTest(it, REPORT_PROPERTY).each(reportCases(undefined))(
 // The fixed campaign stands aside during any path replay. The random campaign runs in
 // ordinary and reseeded campaigns, and it is the replay of STALE_READ_PROPERTY.
 async function checkStaleRead(seed: number | undefined): Promise<void> {
+  const parameters = {
+    ...oracleCampaignOptions(staleReadOracle, seed),
+    examples: [[{ count: 3, removedPrefix: 1 }]],
+  }
+  oracleRoute(oracleRouteOf(parameters))
   await fc.assert(
     fc.asyncProperty(
       fc.record({
@@ -798,10 +813,7 @@ async function checkStaleRead(seed: number | undefined): Promise<void> {
         }
       },
     ),
-    {
-      ...oracleCampaignOptions(staleReadOracle, seed),
-      examples: [[{ count: 3, removedPrefix: 1 }]],
-    },
+    parameters,
   )
 }
 
@@ -835,6 +847,28 @@ it(`append-only replay judgment rejects stale admission after durable removal`, 
 // The fixed campaign stands aside during any path replay. The random campaign runs in
 // ordinary and reseeded campaigns, and it is the replay of DELAYED_READ_PROPERTY.
 async function checkDelayedRead(seed: number | undefined): Promise<void> {
+  const parameters = {
+    ...oracleCampaignOptions(delayedReadOracle, seed),
+    examples: [
+      [
+        {
+          peers: 1,
+          scans: 1,
+          afterAcknowledgment: true,
+          payload: `witness`,
+        },
+      ],
+      [
+        {
+          peers: 1,
+          scans: 1,
+          afterAcknowledgment: false,
+          payload: `control`,
+        },
+      ],
+    ],
+  }
+  oracleRoute(oracleRouteOf(parameters))
   await fc.assert(
     fc.asyncProperty(
       fc.record({
@@ -971,27 +1005,7 @@ async function checkDelayedRead(seed: number | undefined): Promise<void> {
         }
       },
     ),
-    {
-      ...oracleCampaignOptions(delayedReadOracle, seed),
-      examples: [
-        [
-          {
-            peers: 1,
-            scans: 1,
-            afterAcknowledgment: true,
-            payload: `witness`,
-          },
-        ],
-        [
-          {
-            peers: 1,
-            scans: 1,
-            afterAcknowledgment: false,
-            payload: `control`,
-          },
-        ],
-      ],
-    },
+    parameters,
   )
 }
 
@@ -1013,6 +1027,8 @@ async function checkStorageFailure({
   operation,
   seed,
 }: ReturnType<typeof storageFailureCases>[number]): Promise<void> {
+  const parameters = oracleCampaignOptions(storageFailureOracle, seed)
+  oracleRoute(oracleRouteOf(parameters))
   await fc.assert(
     fc.asyncProperty(fc.integer({ min: 1, max: 3 }), async (count) => {
       const error = new Error(`stored work unavailable`)
@@ -1062,7 +1078,7 @@ async function checkStorageFailure({
         )
       }
     }),
-    oracleCampaignOptions(storageFailureOracle, seed),
+    parameters,
   )
 }
 

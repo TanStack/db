@@ -15,9 +15,11 @@ import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
 import {
@@ -662,17 +664,18 @@ function optimisticProperty(
   const options = oraclePropertyOptions(12, property)
   // Both campaigns use the same arbitrary, driver, checker, and budget. A path
   // replay of this property runs only the random campaign, from its path.
-  oracleReplayTest(fcTest).prop([routeValuesArbitrary], {
-    ...options,
-    seed: 1_658_013,
-  })(`${name} (fixed seed)`, (...args: Parameters<typeof run>) => {
-    oracleRoute(`fixed seed`)
-    return run(...args)
-  })
+  const routeValuesFixedSeed = oracleFixedSeed(1_658_013, { ...options })
+  oracleReplayTest(fcTest).prop([routeValuesArbitrary], routeValuesFixedSeed)(
+    `${name} (fixed seed)`,
+    (...args: Parameters<typeof run>) => {
+      oracleRoute(oracleRouteOf(routeValuesFixedSeed))
+      return run(...args)
+    },
+  )
   oracleReplayTest(fcTest, property).prop([routeValuesArbitrary], options)(
     `${name} (random seed)`,
     (...args: Parameters<typeof run>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(options))
       return run(...args)
     },
   )

@@ -16,10 +16,12 @@ import {
 } from '../../src/query/index.js'
 import {
   oracleCalibrationTest,
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
@@ -857,24 +859,28 @@ describe(`includes cross-formulation oracle`, () => {
   // The literal wrong-result and captured replay controls above distinguish
   // merged reference routes and symbol groups at their public checkpoints.
 
-  oracleReplayTest(fcTest).prop([fc.integer()], {
+  const fixedCampaign = oracleFixedSeed(1_658_001, {
     numRuns: oracleRuns(4),
-    seed: 1_658_001,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([fc.integer()], fixedCampaign)(
     `parent-context routing preserves reference-sensitive predicate values across transitions for a fixed seed`,
     async (code) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(fixedCampaign))
       await checkReferenceContextRouting(code)
     },
   )
 
+  const randomCampaign = oraclePropertyOptions(
+    4,
+    `includes-cross-formulation.reference-context`,
+  )
   oracleReplayTest(fcTest, `includes-cross-formulation.reference-context`).prop(
     [fc.integer()],
-    oraclePropertyOptions(4, `includes-cross-formulation.reference-context`),
+    randomCampaign,
   )(
     `parent-context routing preserves reference-sensitive predicate values across transitions for a random or replayed seed`,
     (...args: Parameters<typeof checkReferenceContextRouting>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(randomCampaign))
       return checkReferenceContextRouting(...args)
     },
   )
@@ -1115,24 +1121,28 @@ describe(`includes cross-formulation oracle`, () => {
     },
   )
 
-  oracleReplayTest(fcTest).prop([fc.integer()], {
+  const fixedCampaign2 = oracleFixedSeed(1_658_002, {
     numRuns: oracleRuns(4),
-    seed: 1_658_002,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([fc.integer()], fixedCampaign2)(
     `lazy materialization matches fully loaded materialization for reference-sensitive correlation keys for a fixed seed`,
     (...args: Parameters<typeof checkReferenceKeyRouting>) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(fixedCampaign2))
       return checkReferenceKeyRouting(...args)
     },
   )
 
+  const randomCampaign2 = oraclePropertyOptions(
+    4,
+    `includes-cross-formulation.reference-key`,
+  )
   oracleReplayTest(fcTest, `includes-cross-formulation.reference-key`).prop(
     [fc.integer()],
-    oraclePropertyOptions(4, `includes-cross-formulation.reference-key`),
+    randomCampaign2,
   )(
     `lazy materialization matches fully loaded materialization for reference-sensitive correlation keys for a random or replayed seed`,
     (...args: Parameters<typeof checkReferenceKeyRouting>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(randomCampaign2))
       return checkReferenceKeyRouting(...args)
     },
   )
@@ -1282,27 +1292,28 @@ describe(`includes cross-formulation oracle`, () => {
     ])
   }
 
-  oracleReplayTest(fcTest).prop([fc.integer()], {
+  const fixedCampaign3 = oracleFixedSeed(1_658_003, {
     numRuns: oracleRuns(4),
-    seed: 1_658_003,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([fc.integer()], fixedCampaign3)(
     `grouped includes agree with standalone groups for symbol routes for a fixed seed`,
     (...args: Parameters<typeof checkSymbolGroupRouting>) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(fixedCampaign3))
       return checkSymbolGroupRouting(...args)
     },
   )
 
+  const randomCampaign3 = oraclePropertyOptions(
+    4,
+    `includes-cross-formulation.symbol-group-route`,
+  )
   oracleReplayTest(
     fcTest,
     `includes-cross-formulation.symbol-group-route`,
-  ).prop(
-    [fc.integer()],
-    oraclePropertyOptions(4, `includes-cross-formulation.symbol-group-route`),
-  )(
+  ).prop([fc.integer()], randomCampaign3)(
     `grouped includes agree with standalone groups for symbol routes for a random or replayed seed`,
     (...args: Parameters<typeof checkSymbolGroupRouting>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(randomCampaign3))
       return checkSymbolGroupRouting(...args)
     },
   )
@@ -1498,7 +1509,7 @@ describe(`includes cross-formulation oracle`, () => {
         property,
         directReplay
           ? { ...oraclePropertyOptions(8, propertyId), endOnFailure: true }
-          : { seed: 1_658_004, numRuns: oracleRuns(8) },
+          : oracleFixedSeed(1_658_004, { numRuns: oracleRuns(8) }),
       )
       expect(failure.failed).toBe(true)
       expect(String(failure.errorInstance)).toContain(
@@ -1572,7 +1583,7 @@ describe(`includes cross-formulation oracle`, () => {
         property,
         directReplay
           ? { ...oraclePropertyOptions(12, propertyId), endOnFailure: true }
-          : { seed: 1_658_005, numRuns: oracleRuns(12) },
+          : oracleFixedSeed(1_658_005, { numRuns: oracleRuns(12) }),
       )
       expect(failure.failed).toBe(true)
       expect(String(failure.errorInstance)).toContain(
@@ -1615,28 +1626,29 @@ describe(`includes cross-formulation oracle`, () => {
         : undefined,
     )
 
-  oracleReplayTest(fcTest).prop([scenarioArbitrary], {
+  const scenarioFixedSeed = oracleFixedSeed(1_658_004, {
     numRuns: oracleRuns(8),
-    seed: 1_658_004,
     examples: scenarioExamples,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([scenarioArbitrary], scenarioFixedSeed)(
     `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a fixed seed`,
     (...args: Parameters<typeof checkEquivalenceScenario>) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(scenarioFixedSeed))
       return checkEquivalenceScenario(...args)
     },
   )
 
+  const scenarioCampaign = {
+    ...oraclePropertyOptions(8, `includes-cross-formulation.equivalence`),
+    examples: oracleReplayRequested() ? [] : scenarioExamples,
+  }
   oracleReplayTest(fcTest, `includes-cross-formulation.equivalence`).prop(
     [scenarioArbitrary],
-    {
-      ...oraclePropertyOptions(8, `includes-cross-formulation.equivalence`),
-      examples: oracleReplayRequested() ? [] : scenarioExamples,
-    },
+    scenarioCampaign,
   )(
     `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a random or replayed seed`,
     (...args: Parameters<typeof checkEquivalenceScenario>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(scenarioCampaign))
       return checkEquivalenceScenario(...args)
     },
   )
@@ -1669,28 +1681,32 @@ describe(`includes cross-formulation oracle`, () => {
         : undefined,
     )
 
-  oracleReplayTest(fcTest).prop([windowedScenarioArbitrary], {
+  const windowedScenarioFixedSeed = oracleFixedSeed(1_658_005, {
     numRuns: oracleRuns(12),
-    seed: 1_658_005,
     examples: windowedExamples,
-  })(
+  })
+  oracleReplayTest(fcTest).prop(
+    [windowedScenarioArbitrary],
+    windowedScenarioFixedSeed,
+  )(
     `matches recomputation for ordered offset and limit child windows for a fixed seed`,
     (...args: Parameters<typeof checkWindowedScenario>) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(windowedScenarioFixedSeed))
       return checkWindowedScenario(...args)
     },
   )
 
+  const windowedScenarioCampaign = {
+    ...oraclePropertyOptions(12, `includes-cross-formulation.ordered-window`),
+    examples: oracleReplayRequested() ? [] : windowedExamples,
+  }
   oracleReplayTest(fcTest, `includes-cross-formulation.ordered-window`).prop(
     [windowedScenarioArbitrary],
-    {
-      ...oraclePropertyOptions(12, `includes-cross-formulation.ordered-window`),
-      examples: oracleReplayRequested() ? [] : windowedExamples,
-    },
+    windowedScenarioCampaign,
   )(
     `matches recomputation for ordered offset and limit child windows for a random or replayed seed`,
     (...args: Parameters<typeof checkWindowedScenario>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(windowedScenarioCampaign))
       return checkWindowedScenario(...args)
     },
   )

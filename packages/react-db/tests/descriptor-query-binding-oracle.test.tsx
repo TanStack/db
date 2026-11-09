@@ -114,8 +114,10 @@ import {
 } from '../../db/tests/ssr-snapshot-admission-oracle'
 import { ssrStreamHydrationMismatches } from '../../db/tests/ssr-stream-view-oracle'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -521,7 +523,6 @@ describe(`descriptor error handoff at React commit`, () => {
     for (const observation of [`error-surface`, `ownership`] as const) {
       for (const campaign of [`fixed`, `random`] as const) {
         it(`${hook} ${observation} after descriptor failure (${campaign})`, async () => {
-          oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
           const reach = createOracleReach(`react-error-handoff-${hook}`, [
             `fail-before-release`,
             `fail-during-release`,
@@ -529,6 +530,21 @@ describe(`descriptor error handoff at React commit`, () => {
             `throw-during-release`,
             `undefined-cause`,
           ])
+          const parameters =
+            campaign === `fixed`
+              ? oracleFixedSeed(2229, { numRuns: oracleRuns(30) })
+              : oraclePropertyOptions(30, properties[observation], {
+                  examples: ([`fail`, `throw`] as const).flatMap((outcome) =>
+                    ([`error`, `undefined`] as const).flatMap((cause) =>
+                      ([`before-release`, `during-release`] as const).map(
+                        (timing): [ErrorHandoffHistory] => [
+                          { outcome, cause, timing },
+                        ],
+                      ),
+                    ),
+                  ),
+                })
+          oracleRoute(oracleRouteOf(parameters))
           await fc.assert(
             fc.asyncProperty(
               fc.record<ErrorHandoffHistory>({
@@ -662,19 +678,7 @@ describe(`descriptor error handoff at React commit`, () => {
             // The random campaign runs every one of the eight histories first,
             // so its reach does not depend on the seed: 30 biased draws over
             // eight histories can miss one.
-            campaign === `fixed`
-              ? { numRuns: oracleRuns(30), seed: 2229 }
-              : oraclePropertyOptions(30, properties[observation], {
-                  examples: ([`fail`, `throw`] as const).flatMap((outcome) =>
-                    ([`error`, `undefined`] as const).flatMap((cause) =>
-                      ([`before-release`, `during-release`] as const).map(
-                        (timing): [ErrorHandoffHistory] => [
-                          { outcome, cause, timing },
-                        ],
-                      ),
-                    ),
-                  ),
-                }),
+            parameters,
           )
           reach.assertReached()
           console.info(
@@ -968,18 +972,19 @@ describe(`SSR snapshot admission`, () => {
     }
     for (const campaign of [`fixed`, `random`] as const) {
       it(`${hook} admits reproducible SSR snapshots (${campaign})`, async () => {
-        oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
         const reach = makeReach()
+        const campaignParameters = {
+          ...(campaign === `fixed`
+            ? oracleFixedSeed(2229, { numRuns: oracleRuns(120) })
+            : oraclePropertyOptions(120, properties[hook])),
+          examples: ssrSnapshotExamples.map((history) => [history]),
+        }
+        oracleRoute(oracleRouteOf(campaignParameters))
         await fc.assert(
           fc.asyncProperty(ssrSnapshotHistoryArbitrary, (history) =>
             checkHistory(history, reach),
           ),
-          {
-            ...(campaign === `fixed`
-              ? { numRuns: oracleRuns(120), seed: 2229 }
-              : oraclePropertyOptions(120, properties[hook])),
-            examples: ssrSnapshotExamples.map((history) => [history]),
-          },
+          campaignParameters,
         )
         reach.assertReached()
         console.info(
@@ -1420,9 +1425,13 @@ describe(`stream render snapshot cut`, () => {
     })
   for (const campaign of [`fixed`, `random`] as const)
     it(`transports the rendered view (${campaign})`, async () => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createStreamReach()
       try {
+        const parameters =
+          campaign === `fixed`
+            ? oracleFixedSeed(2229, { numRuns: oracleRuns(40) })
+            : oraclePropertyOptions(40, `react.ssr-stream-cut`)
+        oracleRoute(oracleRouteOf(parameters))
         await fc.assert(
           fc.asyncProperty(
             fc
@@ -1456,9 +1465,7 @@ describe(`stream render snapshot cut`, () => {
               }),
             (history) => checkStreamCut(history, reach),
           ),
-          campaign === `fixed`
-            ? { numRuns: oracleRuns(40), seed: 2229 }
-            : oraclePropertyOptions(40, `react.ssr-stream-cut`),
+          parameters,
         )
       } finally {
         // Keep reached premises visible when the first refinement check fails.

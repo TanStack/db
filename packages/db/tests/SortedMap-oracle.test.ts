@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { SortedMap } from '../src/SortedMap'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config'
 import { createOracleReach } from './oracle-reach'
@@ -377,7 +379,6 @@ describe.each([`key`, `ascending`, `descending`] as const)(
     it.each([20260912, undefined])(
       `agrees with full recomputation (seed %s)`,
       async (seed) => {
-        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
         const reach = createOracleReach(
           property,
           [
@@ -388,6 +389,13 @@ describe.each([`key`, `ascending`, `descending`] as const)(
           ],
           { minimum: 5 },
         )
+        const parameters = {
+          ...(seed === undefined
+            ? oraclePropertyOptions(100, property)
+            : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
+          examples: fixedHistories.map((history) => [history]),
+        }
+        oracleRoute(oracleRouteOf(parameters))
         await fc.assert(
           fc.asyncProperty(
             fc
@@ -422,12 +430,7 @@ describe.each([`key`, `ascending`, `descending`] as const)(
               return Promise.resolve()
             },
           ),
-          {
-            ...(seed === undefined
-              ? oraclePropertyOptions(100, property)
-              : { seed, numRuns: oracleRuns(100) }),
-            examples: fixedHistories.map((history) => [history]),
-          },
+          parameters,
         )
         if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
           console.log(property, seed ?? `random`, [...reach.counts()])

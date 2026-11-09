@@ -20,9 +20,11 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   recordOracleReplay,
 } from '../../db/tests/oracle-config.js'
@@ -50,7 +52,9 @@ import type {
   Todo,
 } from './sqlite-core-adapter-support'
 
-declareOracle({ owns: [`src/sqlite-core-adapter.ts`],   check: [expectResetResumeLaw, violation],
+declareOracle({
+  owns: [`src/sqlite-core-adapter.ts`],
+  check: [expectResetResumeLaw, violation],
   model: [expectedResetResumeMetadata, expectedBindingRows],
 })
 
@@ -1005,6 +1009,7 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
           )
         }
       })
+      oracleRoute(oracleRouteOf(parameters))
       const details = await fc.check(property, parameters)
       recordOracleReplay(BINDING_PROPERTY, details)
       const reduced = details.counterexample?.[0]
@@ -1028,18 +1033,18 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
     bindingFixedIt(
       `preserves exact rows across fixed-seed binding histories`,
       async () => {
-        oracleRoute(`fixed seed`)
-        await campaign(`fixed seed`, {
-          numRuns: oracleRuns(BINDING_RUNS),
-          seed: BINDING_FIXED_SEED,
-        })
+        await campaign(
+          `fixed seed`,
+          oracleFixedSeed(BINDING_FIXED_SEED, {
+            numRuns: oracleRuns(BINDING_RUNS),
+          }),
+        )
       },
     )
     // Runs in ordinary and reseeded campaigns, and as the replay of its property.
     oracleReplayTest(it, BINDING_PROPERTY)(
       `preserves exact rows across random-seed binding histories`,
       async () => {
-        oracleRoute(`random seed`)
         await campaign(
           `random seed`,
           oraclePropertyOptions(BINDING_RUNS, BINDING_PROPERTY),

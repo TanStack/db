@@ -14,7 +14,11 @@ import {
   createBrowserWASQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
-import { oracleRoute } from '../../db/tests/oracle-config'
+import {
+  oracleFixedSeed,
+  oracleRoute,
+  oracleRouteOf,
+} from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
 import {
@@ -86,17 +90,6 @@ type CoordinatorOracleCampaign = {
 
 const { runs: RUNS, replay: REPLAY } = readCoordinatorOracleConfig()
 
-// The gap report reads a campaign's route here: the fixed seed, a seedless random run, or a replayed path.
-function routeCampaign(campaign: CoordinatorOracleCampaign): void {
-  oracleRoute(
-    campaign.mode === `fixed`
-      ? `fixed seed`
-      : campaign.mode === `random`
-        ? `random seed`
-        : `fixed history`,
-  )
-}
-
 function coordinatorOracleCampaigns(
   property: CoordinatorOracleProperty,
 ): Array<CoordinatorOracleCampaign> {
@@ -117,7 +110,7 @@ function coordinatorOracleCampaigns(
   return [
     {
       mode: `fixed`,
-      parameters: { numRuns: RUNS, seed: FIXED_SEED },
+      parameters: oracleFixedSeed(FIXED_SEED, { numRuns: RUNS }),
     },
     { mode: `random`, parameters: { numRuns: RUNS } },
   ]
@@ -1261,7 +1254,6 @@ describe(`remote subset ownership lease oracle`, () => {
   async function runRemoteLeaseCampaign(
     campaign: CoordinatorOracleCampaign,
   ): Promise<void> {
-    routeCampaign(campaign)
     let originalHistory: RemoteLeaseHistory | undefined
     let originalViolation: RemoteLeaseTakeoverViolation | undefined
     let targetDiscriminant: string | undefined
@@ -1276,6 +1268,21 @@ describe(`remote subset ownership lease oracle`, () => {
     let run = 0
 
     try {
+      const campaignParameters = {
+        ...campaign.parameters,
+        examples: [
+          [
+            {
+              siblingCount: 2,
+              releasePrefix: 1,
+              identical: true,
+              duplicateRelease: true,
+              reverseFinalRelease: true,
+            },
+          ],
+        ],
+      }
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(remoteLeaseHistoryArbitrary, async (history) => {
           const firstOwner = new RemoteLeaseOwnerLedger()
@@ -1476,20 +1483,7 @@ describe(`remote subset ownership lease oracle`, () => {
           )
           if (semanticFailure !== NO_PRIMARY_FAILURE) throw semanticFailure
         }),
-        {
-          ...campaign.parameters,
-          examples: [
-            [
-              {
-                siblingCount: 2,
-                releasePrefix: 1,
-                identical: true,
-                duplicateRelease: true,
-                reverseFinalRelease: true,
-              },
-            ],
-          ],
-        },
+        campaignParameters,
       )
     } catch (error) {
       propertyFailure = error
@@ -2348,7 +2342,6 @@ describe(`generated collection-route histories`, () => {
   async function runRoutingCampaign(
     campaign: CoordinatorOracleCampaign,
   ): Promise<void> {
-    routeCampaign(campaign)
     let originalFailingTrace: RoutingHistory | undefined
     let originalViolation: RouteViolation | undefined
     let targetDiscriminant: string | undefined
@@ -2362,6 +2355,7 @@ describe(`generated collection-route histories`, () => {
       NO_PRIMARY_FAILURE
 
     try {
+      oracleRoute(oracleRouteOf(campaign.parameters))
       await fc.assert(
         fc.asyncProperty(routingHistoryArbitrary, async (history) => {
           const plan = routingGrammarPlan(history)

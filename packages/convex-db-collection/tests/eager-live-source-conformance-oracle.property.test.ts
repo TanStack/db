@@ -1,9 +1,11 @@
 import { fc } from '@fast-check/vitest'
 import { describe, it } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -50,6 +52,7 @@ async function campaign(
   const reach = createOracleReach(name, reachStatesFor(checked), {
     minimum: 5,
   })
+  oracleRoute(oracleRouteOf(options))
   await fc.assert(eagerLiveSourceProperty(checked, reach), options)
   return reach
 }
@@ -58,8 +61,9 @@ describe(`eager live-source conformance: Convex`, () => {
   oracleReplayTest(it)(
     `conforms on a fixed-seed campaign`,
     async () => {
-      oracleRoute(`fixed seed`)
-      const reach = await campaign({ seed: 2118, numRuns: oracleRuns(runs) })
+      const reach = await campaign(
+        oracleFixedSeed(2118, { numRuns: oracleRuns(runs) }),
+      )
       reach.assertReached()
     },
     campaignTimeoutMs,
@@ -68,8 +72,6 @@ describe(`eager live-source conformance: Convex`, () => {
   oracleReplayTest(it, property)(
     `conforms on a random campaign or a replayed seed`,
     async () => {
-      // oraclePropertyOptions registers this test's route: `random seed`, or
-      // `fixed history` on a path replay.
       const reach = await campaign(oraclePropertyOptions(runs, property))
       reach.assertReached()
     },
@@ -80,9 +82,8 @@ describe(`eager live-source conformance: Convex`, () => {
   oracleReplayTest(it)(
     `conforms over the React client on a fixed-seed campaign`,
     async () => {
-      oracleRoute(`fixed seed`)
       const reach = await campaign(
-        { seed: 2118, numRuns: oracleRuns(runs) },
+        oracleFixedSeed(2118, { numRuns: oracleRuns(runs) }),
         convexConformanceDriver({ client: `react` }),
         `${property}.react`,
       )
@@ -96,9 +97,8 @@ describe(`eager live-source conformance: Convex`, () => {
   oracleReplayTest(it)(
     `conforms over a wrapped JavaScript client on a fixed-seed campaign`,
     async () => {
-      oracleRoute(`fixed seed`)
       const reach = await campaign(
-        { seed: 2118, numRuns: oracleRuns(runs) },
+        oracleFixedSeed(2118, { numRuns: oracleRuns(runs) }),
         convexConformanceDriver({ client: `wrapped` }),
         `${property}.wrapped`,
       )

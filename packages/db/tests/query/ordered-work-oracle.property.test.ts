@@ -12,8 +12,10 @@ import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { eq, gte, isUndefined, not } from '../../src/query/builder/functions.js'
 import {
+  oracleFixedSeed,
   oracleRandomParameters,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -3471,21 +3473,24 @@ describe(`ordered source work oracle`, () => {
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 20 * multiplier
 
-  fcTest.prop([scenarioArbitrary], { numRuns: runs, seed: 17801 })(
+  const scenarioFixedSeed = oracleFixedSeed(17801, { numRuns: runs })
+  fcTest.prop([scenarioArbitrary], scenarioFixedSeed)(
     `keeps rows, request traces, batches, errors, and liveness equal for a fixed seed`,
     async (scenario) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(scenarioFixedSeed))
       await assertConsumerParity(scenario)
     },
   )
 
-  fcTest.prop(
-    [scenarioArbitrary],
-    oracleRandomParameters(runs, replay, `ordered-work.consumer-parity`),
-  )(
+  const scenarioCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `ordered-work.consumer-parity`,
+  )
+  fcTest.prop([scenarioArbitrary], scenarioCampaign)(
     `keeps rows, request traces, batches, errors, and liveness equal for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(scenarioCampaign))
       await assertConsumerParity(scenario)
     },
   )
@@ -7652,21 +7657,24 @@ describe(`eager indexed ordered windows`, () => {
     },
   )
 
-  fcTest.prop([eagerCase], { numRuns: runs, seed: 2044 })(
+  const eagerCaseFixedSeed = oracleFixedSeed(2044, { numRuns: runs })
+  fcTest.prop([eagerCase], eagerCaseFixedSeed)(
     `keeps rows and per-change work bounded for a fixed seed`,
     async (scenario) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(eagerCaseFixedSeed))
       await checkEagerWindow(scenario)
     },
   )
 
-  fcTest.prop(
-    [eagerCase],
-    oracleRandomParameters(runs, replay, `ordered-work.eager-indexed-window`),
-  )(
+  const eagerCaseCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `ordered-work.eager-indexed-window`,
+  )
+  fcTest.prop([eagerCase], eagerCaseCampaign)(
     `keeps rows and per-change work bounded for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(eagerCaseCampaign))
       await checkEagerWindow(scenario)
     },
   )
@@ -7680,10 +7688,10 @@ describe(`eager indexed ordered windows`, () => {
     oracleRoute(`fixed seed`)
     let rootless = 0
     let mixedNullGroup = 0
-    for (const [testCase] of fc.sample(fc.tuple(eagerFullJoinCase), {
-      numRuns: runs,
-      seed: FULL_JOIN_SEED,
-    })) {
+    for (const [testCase] of fc.sample(
+      fc.tuple(eagerFullJoinCase),
+      oracleFixedSeed(FULL_JOIN_SEED, { numRuns: runs }),
+    )) {
       const roots = [
         ...fillerRows(testCase.direction, testCase.fillers),
         ...testCase.initial,
@@ -7717,21 +7725,26 @@ describe(`eager indexed ordered windows`, () => {
     expect(mixedNullGroup).toBeGreaterThanOrEqual(5)
   })
 
-  fcTest.prop([eagerFullJoinCase], { numRuns: runs, seed: FULL_JOIN_SEED })(
+  const eagerFullJoinCaseFixedSeed = oracleFixedSeed(FULL_JOIN_SEED, {
+    numRuns: runs,
+  })
+  fcTest.prop([eagerFullJoinCase], eagerFullJoinCaseFixedSeed)(
     `keeps a full-join window to the first result rows for a fixed seed`,
     async (scenario) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(eagerFullJoinCaseFixedSeed))
       await checkEagerWindow(scenario)
     },
   )
 
-  fcTest.prop(
-    [eagerFullJoinCase],
-    oracleRandomParameters(runs, replay, `ordered-work.eager-full-join`),
-  )(
+  const eagerFullJoinCaseCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `ordered-work.eager-full-join`,
+  )
+  fcTest.prop([eagerFullJoinCase], eagerFullJoinCaseCampaign)(
     `keeps a full-join window to the first result rows for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(eagerFullJoinCaseCampaign))
       await checkEagerWindow(scenario)
     },
   )
@@ -7743,20 +7756,20 @@ describe(`eager indexed ordered windows`, () => {
   // Reconstruction: the fixed campaign must reach the proven-report law, so
   // a loader that repairs every report fails it.
   it(`starts no repair for reports a window's own first page proves for a fixed seed`, async () => {
-    oracleRoute(`fixed seed`)
     const PROVEN_SEED = 2091
     let proven = 0
+    const parameters = oracleFixedSeed(PROVEN_SEED, { numRuns: runs })
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(eagerProvenReportCase, async (testCase) => {
         proven += (await runEagerWindow(testCase)).ignoredProvenReports
       }),
-      { numRuns: runs, seed: PROVEN_SEED },
+      parameters,
     )
     expect(proven, `reports a first page proved`).toBeGreaterThan(0)
   })
 
   it(`starts no repair for reports a window's own first page proves for a random or replayed seed`, async () => {
-    oracleRoute(`random seed`)
     const options = oracleRandomParameters(
       runs,
       replay,
@@ -7765,6 +7778,7 @@ describe(`eager indexed ordered windows`, () => {
     const reach = createOracleReach(`ordered-work.eager-proven-report`, [
       `ignoredProvenReports`,
     ] as const)
+    oracleRoute(oracleRouteOf(options))
     await fc.assert(
       fc.asyncProperty(eagerProvenReportCase, async (testCase) => {
         reach.beginHistory()
@@ -7798,13 +7812,19 @@ describe(`eager indexed ordered windows`, () => {
     }))
   for (const campaign of [`fixed`, `random`] as const) {
     it(`grows a short unindexed prefix instead of reading the full source after a signalling refetch (${campaign} campaign)`, async () => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const property = `ordered-work.eager-unindexed-refetch`
       const reach = createOracleReach(
         property,
         [`unindexedRefetchChecks`, `shortUnindexedRefills`] as const,
         { minimum: 5 },
       )
+      const campaignParameters =
+        campaign === `fixed`
+          ? // This seed kills a loader that repairs every report with a
+            // full-source read; about half of seeds do.
+            oracleFixedSeed(2094, { numRuns: runs })
+          : oracleRandomParameters(runs, replay, property)
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(eagerUnindexedRefetchCase, async (testCase) => {
           reach.beginHistory()
@@ -7816,35 +7836,32 @@ describe(`eager indexed ordered windows`, () => {
             if (observed[state] > 0) reach.reach(state)
           }
         }),
-        campaign === `fixed`
-          ? // This seed kills a loader that repairs every report with a
-            // full-source read; about half of seeds do.
-            { numRuns: runs, seed: 2094 }
-          : oracleRandomParameters(runs, replay, property),
+        campaignParameters,
       )
       reach.assertReached()
     })
   }
 
   it(`keeps a window whose loads answer between live changes for a fixed seed`, async () => {
-    oracleRoute(`fixed seed`)
     // Chosen for reach after nullish ranks joined the row generator.
     const HELD_SEED = 2083
     const heldReach = new Map<
       string,
       Awaited<ReturnType<typeof runEagerWindow>>
     >()
+    const runParameters = oracleFixedSeed(HELD_SEED, { numRuns: runs })
+    oracleRoute(oracleRouteOf(runParameters))
     await fc.assert(
       fc.asyncProperty(eagerHeldCase, async (testCase) => {
         heldReach.set(fc.stringify(testCase), await runEagerWindow(testCase))
       }),
-      { numRuns: runs, seed: HELD_SEED },
+      runParameters,
     )
     // Reconstruction: sampling the arbitrary with the same seed and run
     // count yields the executed cases.
     const executed = new Set(
       fc
-        .sample(eagerHeldCase, { numRuns: runs, seed: HELD_SEED })
+        .sample(eagerHeldCase, oracleFixedSeed(HELD_SEED, { numRuns: runs }))
         .map((testCase) => fc.stringify(testCase)),
     )
     expect(
@@ -7876,13 +7893,15 @@ describe(`eager indexed ordered windows`, () => {
     ).toBeGreaterThanOrEqual(1)
   })
 
-  fcTest.prop(
-    [eagerHeldCase],
-    oracleRandomParameters(runs, replay, `ordered-work.eager-held-load`),
-  )(
+  const eagerHeldCaseCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `ordered-work.eager-held-load`,
+  )
+  fcTest.prop([eagerHeldCase], eagerHeldCaseCampaign)(
     `keeps a window whose loads answer between live changes for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(eagerHeldCaseCampaign))
       await checkEagerWindow(scenario)
     },
   )
@@ -7927,40 +7946,46 @@ describe(`eager indexed ordered windows`, () => {
     })
   })
 
-  fcTest.prop([eagerJoinedGapCase], { numRuns: runs, seed: 2063 })(
+  const eagerJoinedGapCaseFixedSeed = oracleFixedSeed(2063, { numRuns: runs })
+  fcTest.prop([eagerJoinedGapCase], eagerJoinedGapCaseFixedSeed)(
     `keeps a joined-filter window whose row leaves only through the join for a fixed seed`,
     async (scenario) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(eagerJoinedGapCaseFixedSeed))
       await checkEagerWindow(scenario)
     },
   )
 
-  fcTest.prop(
-    [eagerJoinedGapCase],
-    oracleRandomParameters(runs, replay, `ordered-work.eager-joined-gap`),
-  )(
+  const eagerJoinedGapCaseCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `ordered-work.eager-joined-gap`,
+  )
+  fcTest.prop([eagerJoinedGapCase], eagerJoinedGapCaseCampaign)(
     `keeps a joined-filter window whose row leaves only through the join for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(eagerJoinedGapCaseCampaign))
       await checkEagerWindow(scenario)
     },
   )
 
-  fcTest.prop([eagerJoinedCase], { numRuns: runs, seed: 2059 })(
+  const eagerJoinedCaseFixedSeed = oracleFixedSeed(2059, { numRuns: runs })
+  fcTest.prop([eagerJoinedCase], eagerJoinedCaseFixedSeed)(
     `keeps a joined-filter window to the first eligible rows for a fixed seed`,
     async (scenario) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(eagerJoinedCaseFixedSeed))
       await checkEagerWindow(scenario)
     },
   )
 
-  fcTest.prop(
-    [eagerJoinedCase],
-    oracleRandomParameters(runs, replay, `ordered-work.eager-joined-window`),
-  )(
+  const eagerJoinedCaseCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `ordered-work.eager-joined-window`,
+  )
+  fcTest.prop([eagerJoinedCase], eagerJoinedCaseCampaign)(
     `keeps a joined-filter window to the first eligible rows for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(eagerJoinedCaseCampaign))
       await checkEagerWindow(scenario)
     },
   )

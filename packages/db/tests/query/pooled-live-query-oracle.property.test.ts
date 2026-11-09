@@ -92,10 +92,12 @@ import {
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -1125,13 +1127,16 @@ describe(`pooled live query oracle`, () => {
         return runHistory(history)
       })
     }
-    fcTest.prop([historyArbitrary], {
-      seed: 44_502_001,
+    const historyFixedSeed = oracleFixedSeed(44_502_001, {
       numRuns: oracleRuns(80),
-    })(`matches the live-query Collection (fixed)`, (history) => {
-      oracleRoute(`fixed seed`)
-      return runGenerated(history)
     })
+    fcTest.prop([historyArbitrary], historyFixedSeed)(
+      `matches the live-query Collection (fixed)`,
+      (history) => {
+        oracleRoute(oracleRouteOf(historyFixedSeed))
+        return runGenerated(history)
+      },
+    )
     afterAll(() => {
       if (generatedRan) {
         process.stdout.write(
@@ -1142,11 +1147,12 @@ describe(`pooled live query oracle`, () => {
     })
   }
 
-  oracleReplayTest(fcTest, property).prop(
-    [historyArbitrary],
-    oraclePropertyOptions(80, property),
-  )(`matches the live-query Collection (random)`, (history) => {
-    oracleRoute(`random seed`)
-    return runGenerated(history)
-  })
+  const historyCampaign = oraclePropertyOptions(80, property)
+  oracleReplayTest(fcTest, property).prop([historyArbitrary], historyCampaign)(
+    `matches the live-query Collection (random)`,
+    (history) => {
+      oracleRoute(oracleRouteOf(historyCampaign))
+      return runGenerated(history)
+    },
+  )
 })

@@ -25,7 +25,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
-import { oracleRoute, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oracleFixedSeed,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
   SHARED_DRIVER_FAIRNESS_BOUND,
@@ -525,21 +530,16 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
   it.each(fairnessPropertyModes)(
     `bounds persist completions for generated ordered cold-hydrate/persist histories in $label mode`,
     async (mode) => {
-      oracleRoute(
-        mode.path !== undefined
-          ? `fixed history`
-          : mode.seed === undefined
-            ? `random seed`
-            : `fixed seed`,
-      )
+      const parameters = {
+        numRuns: oracleRuns(GENERATED_RUNS),
+        verbose: 2 as const,
+        ...(mode.seed === undefined ? {} : oracleFixedSeed(mode.seed)),
+        ...(mode.path === undefined ? {} : { path: mode.path }),
+      }
+      oracleRoute(oracleRouteOf(parameters))
       const executionsBefore = generatedPropertyExecutions
       const failuresBefore = generatedFailureRecords.length
-      const result = await fc.check(generatedFairnessProperty, {
-        numRuns: oracleRuns(GENERATED_RUNS),
-        verbose: 2,
-        ...(mode.seed === undefined ? {} : { seed: mode.seed }),
-        ...(mode.path === undefined ? {} : { path: mode.path }),
-      })
+      const result = await fc.check(generatedFairnessProperty, parameters)
       if (result.failed) {
         const failures = generatedFailureRecords.slice(failuresBefore)
         const original = failures[0]

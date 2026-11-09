@@ -5,9 +5,11 @@ import { ShapeStream } from '@electric-sql/client'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -693,11 +695,9 @@ sdkCampaigns(
     snapshotReach = createSnapshotReach()
     const options = {
       ...oraclePropertyOptions(40, `electric.sdk-snapshot-delivery`),
-      ...(seed === undefined ? {} : { seed }),
+      ...(seed === undefined ? {} : oracleFixedSeed(seed)),
     }
-    // oraclePropertyOptions registers `random seed` when it runs inside a test,
-    // so the route for this campaign is registered after its options are built.
-    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+    oracleRoute(oracleRouteOf(options))
     await fc.assert(snapshotProperty, options)
     snapshotReach.assertReached()
   },
@@ -962,11 +962,9 @@ sdkCampaigns(
   (seed) => {
     const options = {
       ...oraclePropertyOptions(12, `electric.sdk-dnf-membership`),
-      ...(seed === undefined ? {} : { seed }),
+      ...(seed === undefined ? {} : oracleFixedSeed(seed)),
     }
-    // oraclePropertyOptions registers `random seed` when it runs inside a test,
-    // so the route for this campaign is registered after its options are built.
-    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+    oracleRoute(oracleRouteOf(options))
     return fc.assert(membershipProperty, options)
   },
 )
@@ -1596,11 +1594,9 @@ sdkCampaigns(
     rotationReach = createRotationReach()
     const options = {
       ...oraclePropertyOptions(40, `electric.sdk-rotation-release`),
-      ...(seed === undefined ? {} : { seed }),
+      ...(seed === undefined ? {} : oracleFixedSeed(seed)),
     }
-    // oraclePropertyOptions registers `random seed` when it runs inside a test,
-    // so the route for this campaign is registered after its options are built.
-    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+    oracleRoute(oracleRouteOf(options))
     await fc.assert(
       fc.asyncProperty(
         fc.array(
@@ -1936,11 +1932,9 @@ sdkCampaigns(
     releaseReach = createReleaseReach()
     const options = {
       ...oraclePropertyOptions(40, `electric.sdk-source-release`),
-      ...(seed === undefined ? {} : { seed }),
+      ...(seed === undefined ? {} : oracleFixedSeed(seed)),
     }
-    // oraclePropertyOptions registers `random seed` when it runs inside a test,
-    // so the route for this campaign is registered after its options are built.
-    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+    oracleRoute(oracleRouteOf(options))
     await fc.assert(releaseProperty, options)
     releaseReach.assertReached()
   },

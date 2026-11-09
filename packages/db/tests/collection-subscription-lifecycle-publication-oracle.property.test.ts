@@ -14,8 +14,10 @@ import {
   reduceLifecycle,
 } from './collection-subscription-lifecycle-grammar-oracle.js'
 import {
+  oracleFixedSeed,
   oracleRandomParameters,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -2912,7 +2914,6 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     : [undefined]) {
     for (const delivery of restartDeliveries) {
       it(`matches restarted row publication ${delivery} (${seed === undefined ? `random or replayed seed` : `fixed seed`})`, async () => {
-        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
         const scenarios = restartScenarios.filter(
           (item) => item.delivery === delivery,
         )
@@ -2921,6 +2922,11 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
           scenarios.map(({ state }) => state),
           { minimum: 12 * multiplier },
         )
+        const parameters = {
+          ...oracleRandomParameters(12 * multiplier, replay, restartProperty),
+          ...(seed === undefined ? {} : oracleFixedSeed(seed)),
+        }
+        oracleRoute(oracleRouteOf(parameters))
         await fc.assert(
           fc.asyncProperty(restartPublicationInputArbitrary, async (input) => {
             for (const scenario of scenarios) {
@@ -2980,10 +2986,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
               )
             }
           }),
-          {
-            ...oracleRandomParameters(12 * multiplier, replay, restartProperty),
-            ...(seed === undefined ? {} : { seed }),
-          },
+          parameters,
         )
         reach.assertReached()
       }, 120_000)
@@ -2994,12 +2997,16 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     : [undefined]) {
     for (const path of restartReceiverPaths) {
       it(`matches restarted row publication receiver ${path} (${seed === undefined ? `random or replayed seed` : `fixed seed`})`, async () => {
-        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
         const reach = createOracleReach(
           restartProperty,
           restartRowStates.map((row) => `${path}:${row}`),
           { minimum: 12 * multiplier },
         )
+        const campaignParameters = {
+          ...oracleRandomParameters(12 * multiplier, replay, restartProperty),
+          ...(seed === undefined ? {} : oracleFixedSeed(seed)),
+        }
+        oracleRoute(oracleRouteOf(campaignParameters))
         await fc.assert(
           fc.asyncProperty(restartPublicationInputArbitrary, async (input) => {
             for (const row of restartRowStates) {
@@ -3007,10 +3014,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
               reach.reach(await runRestartReceiver(input, path, row))
             }
           }),
-          {
-            ...oracleRandomParameters(12 * multiplier, replay, restartProperty),
-            ...(seed === undefined ? {} : { seed }),
-          },
+          campaignParameters,
         )
         reach.assertReached()
       }, 120_000)
@@ -3027,10 +3031,10 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       [`zero-sign-write`],
       { minimum: 5 },
     )
-    for (const history of fc.sample(publicationCommandHistoryArbitrary, {
-      seed: 1_657_005,
-      numRuns: runs,
-    })) {
+    for (const history of fc.sample(
+      publicationCommandHistoryArbitrary,
+      oracleFixedSeed(1_657_005, { numRuns: runs }),
+    )) {
       reach.beginHistory()
       const before = zeroSignWrites
       await runPublicationHistory(history)
@@ -3038,28 +3042,32 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     }
     reach.assertReached()
   }, 120_000)
-  fcTest.prop([publicationCommandHistoryArbitrary], {
+  const publicationCommandHistoryFixedSeed = oracleFixedSeed(1_657_005, {
     numRuns: runs,
-    seed: 1_657_005,
-  })(
+  })
+  fcTest.prop(
+    [publicationCommandHistoryArbitrary],
+    publicationCommandHistoryFixedSeed,
+  )(
     `matches row publications for a fixed seed`,
     async (history) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(publicationCommandHistoryFixedSeed))
       await runPublicationHistory(history)
     },
     120_000,
   )
+  const publicationCommandHistoryCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `subscription-lifecycle.publication-history`,
+  )
   fcTest.prop(
     [publicationCommandHistoryArbitrary],
-    oracleRandomParameters(
-      runs,
-      replay,
-      `subscription-lifecycle.publication-history`,
-    ),
+    publicationCommandHistoryCampaign,
   )(
     `matches row publications for a random or replayed seed`,
     async (history) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(publicationCommandHistoryCampaign))
       await runPublicationHistory(history)
     },
     120_000,

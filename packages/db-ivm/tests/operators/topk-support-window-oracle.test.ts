@@ -8,9 +8,11 @@ import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalI
 import { groupedTopKWithFractionalIndex } from '../../src/operators/groupedTopKWithFractionalIndex.js'
 import { orderByWithFractionalIndex } from '../../src/operators/orderBy.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../../db/tests/oracle-config.js'
 import { declareOracle } from '../../../db/tests/oracle-declaration.js'
@@ -92,7 +94,7 @@ const campaigns = [
   {
     name: `fixed`,
     test: oracleReplayTest(it),
-    parameters: { numRuns: runs, seed: 409033 },
+    parameters: oracleFixedSeed(409033, { numRuns: runs }),
   },
   {
     name: `random`,
@@ -135,7 +137,6 @@ describe.each([
     campaign.test(
       `matches counted typed keys at every cut (${campaign.name} campaign)`,
       () => {
-        oracleRoute(campaign.name === 'fixed' ? `fixed seed` : `random seed`)
         let firstFailure:
           | {
               observation: `rows` | `size`
@@ -145,6 +146,11 @@ describe.each([
               message: string
             }
           | undefined
+        const campaignParameters = {
+          ...campaign.parameters,
+          examples: [[boundaryHistory]],
+        }
+        oracleRoute(oracleRouteOf(campaignParameters))
         fc.assert(
           fc.property(
             fc.array(
@@ -253,10 +259,7 @@ describe.each([
               }
             },
           ),
-          {
-            ...campaign.parameters,
-            examples: [[boundaryHistory]],
-          },
+          campaignParameters,
         )
       },
     )
@@ -393,7 +396,7 @@ describe.each([
       {
         name: `fixed`,
         test: oracleReplayTest(it),
-        parameters: { numRuns: runs, seed: 2291 },
+        parameters: oracleFixedSeed(2291, { numRuns: runs }),
       },
       {
         name: `random`,
@@ -404,7 +407,6 @@ describe.each([
       campaign.test(
         `preserves ${profile} bounds and demand (${campaign.name} campaign)`,
         () => {
-          oracleRoute(campaign.name === 'fixed' ? `fixed seed` : `random seed`)
           const profileState =
             profile === `offset`
               ? `large offset move returned`
@@ -422,6 +424,11 @@ describe.each([
           let firstFailure:
             { step: number; error: NumericWindowMismatch } | undefined
           try {
+            const campaignParameters = {
+              ...campaign.parameters,
+              examples: [[numericWindowExample]],
+            }
+            oracleRoute(oracleRouteOf(campaignParameters))
             fc.assert(
               fc.property(numericWindowInput, (generated) => {
                 reach.beginHistory({ fixed: begun++ === 0 })
@@ -508,7 +515,7 @@ describe.each([
                   if (index === 7) reach.reach(`returned to installed rows`)
                 }
               }),
-              { ...campaign.parameters, examples: [[numericWindowExample]] },
+              campaignParameters,
             )
             reach.assertReached()
           } finally {
@@ -772,7 +779,6 @@ describe.each([
           ? oracleReplayTest(it)
           : oracleReplayTest(it, property)
       test(`preserves rank intersections and source edits (${campaign})`, async () => {
-        oracleRoute(campaign === 'fixed' ? `fixed seed` : `random seed`)
         const reach = createOracleReach(
           `${property}/${name}/${campaign}`,
           negativeStates,
@@ -781,6 +787,16 @@ describe.each([
         const fidelity = createOracleFailureFidelity<NegativeWindowHistory>()
         let begun = 0
         try {
+          const parameters =
+            campaign === `fixed`
+              ? oracleFixedSeed(2316, {
+                  numRuns: oracleRuns(100) + negativeWindowExamples.length,
+                  examples: negativeWindowExamples,
+                })
+              : oraclePropertyOptions(100, property, {
+                  examples: negativeWindowExamples,
+                })
+          oracleRoute(oracleRouteOf(parameters))
           await fidelity.assert(() =>
             fc.assert(
               fc.asyncProperty(negativeWindowHistory, async (history) => {
@@ -796,15 +812,7 @@ describe.each([
                   ),
                 )
               }),
-              campaign === `fixed`
-                ? {
-                    seed: 2316,
-                    numRuns: oracleRuns(100) + negativeWindowExamples.length,
-                    examples: negativeWindowExamples,
-                  }
-                : oraclePropertyOptions(100, property, {
-                    examples: negativeWindowExamples,
-                  }),
+              parameters,
             ),
           )
           reach.assertReached()

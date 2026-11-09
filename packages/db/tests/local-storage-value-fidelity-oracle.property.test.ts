@@ -33,10 +33,12 @@ import { SerializationError } from '../src/errors'
 import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -452,20 +454,24 @@ describe(`LocalStorage value fidelity oracle`, () => {
       })
     }
 
-    fcTest.prop([historyArbitrary], {
-      seed: 20_261_021,
+    const historyFixedSeed = oracleFixedSeed(20_261_021, {
       numRuns: oracleRuns(300),
-    })(`matches the JSON value model (fixed)`, (history) => {
-      oracleRoute(`fixed seed`)
-      return runHistory(history)
     })
+    fcTest.prop([historyArbitrary], historyFixedSeed)(
+      `matches the JSON value model (fixed)`,
+      (history) => {
+        oracleRoute(oracleRouteOf(historyFixedSeed))
+        return runHistory(history)
+      },
+    )
   }
   // A path replay of this property runs its one recorded history here.
-  oracleReplayTest(fcTest, property).prop(
-    [historyArbitrary],
-    oraclePropertyOptions(300, property),
-  )(`matches the JSON value model (random)`, (history) => {
-    oracleRoute(`random seed`)
-    return runHistory(history)
-  })
+  const historyCampaign = oraclePropertyOptions(300, property)
+  oracleReplayTest(fcTest, property).prop([historyArbitrary], historyCampaign)(
+    `matches the JSON value model (random)`,
+    (history) => {
+      oracleRoute(oracleRouteOf(historyCampaign))
+      return runHistory(history)
+    },
+  )
 })

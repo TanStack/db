@@ -15,9 +15,11 @@ import {
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -1284,7 +1286,7 @@ function temporalCampaigns(property: string, fixedSeed: number) {
     {
       label: `fixed seed ${fixedSeed}`,
       test: oracleReplayTest(fcTest),
-      options: { numRuns: oracleRuns(20), seed: fixedSeed },
+      options: oracleFixedSeed(fixedSeed, { numRuns: oracleRuns(20) }),
     },
     {
       label: `random or replayed seed`,
@@ -1350,11 +1352,7 @@ describe(`includes temporal oracle`, () => {
           typeof expectScheduledAcquisitionsRespectCurrentDemand
         >
       ) => {
-        oracleRoute(
-          campaign.label.startsWith(`fixed seed`)
-            ? `fixed seed`
-            : `random seed`,
-        )
+        oracleRoute(oracleRouteOf(campaign.options))
         return expectScheduledAcquisitionsRespectCurrentDemand(...args)
       },
     )
@@ -1428,11 +1426,7 @@ describe(`includes temporal oracle`, () => {
           typeof expectDemandReactivationRetriesAfterReleaseFailure
         >
       ) => {
-        oracleRoute(
-          campaign.label.startsWith(`fixed seed`)
-            ? `fixed seed`
-            : `random seed`,
-        )
+        oracleRoute(oracleRouteOf(campaign.options))
         return expectDemandReactivationRetriesAfterReleaseFailure(...args)
       },
     )
@@ -1496,11 +1490,7 @@ describe(`includes temporal oracle`, () => {
     campaign.test.prop([partialBodies], campaign.options)(
       `publishes each partial child prefix before the acquisition promise fulfills with ${campaign.label}`,
       async (bodies) => {
-        oracleRoute(
-          campaign.label.startsWith(`fixed seed`)
-            ? `fixed seed`
-            : `random seed`,
-        )
+        oracleRoute(oracleRouteOf(campaign.options))
         for (const form of [`array`, `materialized`] as const) {
           const parents = createMutablePosts([
             { id: 1, authorId: `selected`, title: `Receiving children` },

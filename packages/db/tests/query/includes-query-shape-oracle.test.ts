@@ -8,8 +8,10 @@ import {
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { runTrace } from '../trace-runner.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -473,7 +475,7 @@ function campaigns(fixedSeed: number, property: string) {
   return [
     {
       name: `fixed`,
-      options: { numRuns: oracleRuns(12), seed: fixedSeed },
+      options: oracleFixedSeed(fixedSeed, { numRuns: oracleRuns(12) }),
     },
     {
       name: `random or replayed`,
@@ -487,7 +489,7 @@ describe(`includes query-shape recompute oracle`, () => {
     fcTest.prop([fc.integer({ min: 2, max: 5 })], campaign.options)(
       `deleting one joined contributor preserves remaining multiplicity (${campaign.name})`,
       async (childCount) => {
-        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
+        oracleRoute(oracleRouteOf(campaign.options))
         await runTrace({
           steps: [1],
           driver: createMultiplicityDriver(childCount),
@@ -541,7 +543,7 @@ describe(`includes query-shape recompute oracle`, () => {
     )(
       `materialization follows correlation through a joined alias (${campaign.name})`,
       async ({ correlationId, productionId }) => {
-        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
+        oracleRoute(oracleRouteOf(campaign.options))
         await runTrace({
           steps: [],
           driver: createCorrelationDriver(
@@ -607,7 +609,7 @@ describe(`includes query-shape recompute oracle`, () => {
     fcTest.prop([fc.integer({ min: 1, max: 100 })], campaign.options)(
       `findOne maps a null correlation key to undefined (${campaign.name})`,
       async (postId) => {
-        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
+        oracleRoute(oracleRouteOf(campaign.options))
         await runTrace({
           steps: [],
           driver: createNullableDriver([], [{ id: postId, authorId: null }]),

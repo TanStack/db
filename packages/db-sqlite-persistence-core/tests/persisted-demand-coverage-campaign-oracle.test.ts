@@ -8,10 +8,12 @@ import {
   eq,
 } from '@tanstack/db'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplaySkips,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   recordOracleReplay,
 } from '../../db/tests/oracle-config'
@@ -1180,7 +1182,7 @@ async function assertRun<T>(property: string, result: fc.RunDetails<T>) {
     throw new Error(message, { cause: result.errorInstance })
 }
 
-async function campaign(options: Parameters<typeof fc.assert>[1]) {
+async function campaign(options: NonNullable<Parameters<typeof fc.assert>[1]>) {
   // A seed alone runs a reseeded campaign and must still enforce reach.
   // A path replays one input directly and does not owe campaign-wide reach.
   const reach = createOracleReach<CoverageReach>(PROPERTY, REACH_STATES, {
@@ -1188,6 +1190,7 @@ async function campaign(options: Parameters<typeof fc.assert>[1]) {
   })
   let seed: number | undefined
   if (!oracleReplaySkips(PROPERTY)) {
+    oracleRoute(oracleRouteOf(options))
     const result = await fc.check(
       fc.asyncProperty(historyArb, (history) => checkHistory(history, reach)),
       options,
@@ -1241,7 +1244,7 @@ async function campaign(options: Parameters<typeof fc.assert>[1]) {
     reach.assertReached()
   } catch (error) {
     throw new Error(
-      `${PROPERTY}: seed=${seed}, numRuns=${options?.numRuns}; replay the full campaign with this seed`,
+      `${PROPERTY}: seed=${seed}, numRuns=${options.numRuns}; replay the full campaign with this seed`,
       { cause: error },
     )
   }
@@ -1262,7 +1265,9 @@ function checkRelease(
   })
 }
 
-declareOracle({ owns: [`src/persisted.ts`],   check: [coverageViolations, checkFault, checkRelease],
+declareOracle({
+  owns: [`src/persisted.ts`],
+  check: [coverageViolations, checkFault, checkRelease],
   grammar: [historyArb, requiredHistoriesArb],
 })
 
@@ -1451,9 +1456,8 @@ describe(`persisted demand coverage over generated histories`, () => {
   it.skipIf(oracleReplayRequested())(
     `refines the model over a fixed campaign`,
     async () => {
-      oracleRoute(`fixed seed`)
       quietConsole()
-      await campaign({ seed: 2102, numRuns: oracleRuns(RUNS) })
+      await campaign(oracleFixedSeed(2102, { numRuns: oracleRuns(RUNS) }))
     },
     campaignTimeoutMs,
   )
@@ -1461,7 +1465,6 @@ describe(`persisted demand coverage over generated histories`, () => {
   it.skipIf(oracleReplaySkips(PROPERTY, REQUIRED_PROPERTY))(
     `refines the model over a random or replayed campaign`,
     async () => {
-      oracleRoute(`random seed`)
       quietConsole()
       await campaign(oraclePropertyOptions(RUNS, PROPERTY))
     },

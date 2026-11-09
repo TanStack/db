@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -154,24 +156,26 @@ describe(`getter failure does not publish partial structural hashes`, () => {
   oracleReplayTest(it)(
     `preserves failure causes and retry cuts (fixed seed 205206)`,
     () => {
-      oracleRoute(`fixed seed`)
+      const parameters = oracleFixedSeed(205206, { numRuns: oracleRuns(100) })
+      oracleRoute(oracleRouteOf(parameters))
       fc.assert(
         fc.property(retryHistoryArbitrary, (history) =>
           expectRetryHistory(history),
         ),
-        { numRuns: oracleRuns(100), seed: 205206 },
+        parameters,
       )
     },
   )
   oracleReplayTest(it, retryProperty)(
     `preserves failure causes and retry cuts (random seed)`,
     () => {
-      oracleRoute(`random seed`)
+      const campaignParameters = oraclePropertyOptions(100, retryProperty)
+      oracleRoute(oracleRouteOf(campaignParameters))
       fc.assert(
         fc.property(retryHistoryArbitrary, (history) =>
           expectRetryHistory(history),
         ),
-        oraclePropertyOptions(100, retryProperty),
+        campaignParameters,
       )
     },
   )

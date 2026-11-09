@@ -24,9 +24,11 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createTransaction } from '../../src'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   recordOracleReplay,
 } from '../oracle-config'
@@ -308,7 +310,7 @@ describe('settled histories', () => {
     parameters: { numRuns: number; seed?: number; path?: string },
   ) => {
     return async () => {
-      oracleRoute(mode === `fixed` ? `fixed seed` : `random seed`)
+      oracleRoute(oracleRouteOf(parameters))
       console.info('indexeddb.persistence campaign', mode, parameters)
       await fc.assert(fc.asyncProperty(history, runHistory), {
         verbose: true,
@@ -331,7 +333,10 @@ describe('settled histories', () => {
   }
   oracleReplayTest(it)(
     'matches authored data through fixed histories',
-    settledCampaign(`fixed`, { numRuns: oracleRuns(30), seed: 1179001 }),
+    settledCampaign(
+      `fixed`,
+      oracleFixedSeed(1179001, { numRuns: oracleRuns(30) }),
+    ),
     30_000,
   )
   oracleReplayTest(it, settledProperty)(

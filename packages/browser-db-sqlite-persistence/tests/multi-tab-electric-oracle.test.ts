@@ -101,10 +101,12 @@ import { createCollection } from '@tanstack/db'
 import { createOracleReach } from '../../db/tests/oracle-reach.js'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
@@ -1727,6 +1729,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
       `interrupted reset before explicit now recovery`,
     ] as const
     const reach = createOracleReach(`browser.electric-source-prefix`, states)
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(sourcePrefixHistory, async (history) => {
         const slowTab = 1 - history.fastTab
@@ -1820,16 +1823,15 @@ describe(`multi-tab Electric over one persisted database`, () => {
   it.skipIf(oracleReplayRequested())(
     `converges after interleaved source prefixes (fixed seed)`,
     () => {
-      oracleRoute(`fixed seed`)
-      return runSourcePrefixCampaign({ numRuns: oracleRuns(80), seed: 2281 })
+      return runSourcePrefixCampaign(
+        oracleFixedSeed(2281, { numRuns: oracleRuns(80) }),
+      )
     },
     600_000,
   )
   oracleReplayTest(it, `browser.electric-source-prefix`)(
     `converges after interleaved source prefixes (random or replayed)`,
-    () =>
-      {
-      oracleRoute(`random seed`)
+    () => {
       return runSourcePrefixCampaign(
         oraclePropertyOptions(80, `browser.electric-source-prefix`),
       )
@@ -1886,6 +1888,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
     parameters: ReturnType<typeof oraclePropertyOptions>,
   ) => {
     generatedReach = createGeneratedReach()
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(generatedHistory, async (history) => {
         let primary: { error: unknown } | undefined
@@ -1908,21 +1911,18 @@ describe(`multi-tab Electric over one persisted database`, () => {
   }
   it.skipIf(oracleReplayRequested())(
     `keeps reserved commits lawful across generated multi-tab histories (fixed seed)`,
-    () =>
-      {
-      oracleRoute(`fixed seed`)
-      return runGeneratedCampaign({
-        numRuns: oracleRuns(GENERATED_RUNS),
-        seed: GENERATED_FIXED_SEED,
-      })
+    () => {
+      return runGeneratedCampaign(
+        oracleFixedSeed(GENERATED_FIXED_SEED, {
+          numRuns: oracleRuns(GENERATED_RUNS),
+        }),
+      )
     },
     600_000,
   )
   oracleReplayTest(it, GENERATED_PROPERTY)(
     `keeps reserved commits lawful across generated multi-tab histories (random or replayed)`,
-    () =>
-      {
-      oracleRoute(`random seed`)
+    () => {
       return runGeneratedCampaign(
         oraclePropertyOptions(GENERATED_RUNS, GENERATED_PROPERTY),
       )
@@ -1937,8 +1937,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // rows from peers' commits as this stream's evidence.
   it.fails(
     `keeps a resumed lagging tab out of error when a peer deleted the row it updates`,
-    () =>
-      {
+    () => {
       oracleRoute(`calibration`)
       return runGeneratedHistory(
         {
@@ -1961,93 +1960,78 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // The final delivery can be the first attempt to commit a transaction
   // abandoned by the reset. The driver must observe its failure, recover,
   // and only then judge convergence. This replays the original issue trace.
-  it(
-    `recovers a reset-abandoned source that fails during final catch-up`,
-    () =>
+  it(`recovers a reset-abandoned source that fails during final catch-up`, () => {
+    oracleRoute(`fixed history`)
+    return runGeneratedHistory(
       {
-      oracleRoute(`fixed history`)
-      return runGeneratedHistory(
-        {
-          tabCount: 2,
-          steps: [
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `advance`, tab: 1, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `advance`, tab: 0, pick: 0 },
-            { kind: `peer reset` },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `deploy` },
-            { kind: `deploy` },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-          ],
-        },
-        () => undefined,
-      )
-    },
-    60_000,
-  )
+        tabCount: 2,
+        steps: [
+          { kind: `server change`, key: 1, pick: 0 },
+          { kind: `advance`, tab: 1, pick: 0 },
+          { kind: `server change`, key: 1, pick: 0 },
+          { kind: `advance`, tab: 0, pick: 0 },
+          { kind: `peer reset` },
+          { kind: `server change`, key: 1, pick: 0 },
+          { kind: `deploy` },
+          { kind: `deploy` },
+          { kind: `server change`, key: 1, pick: 0 },
+          { kind: `server change`, key: 1, pick: 0 },
+        ],
+      },
+      () => undefined,
+    )
+  }, 60_000)
 
   // The later no-deploy reset trace reaches the same final-delivery failure
   // from a reloaded tab. Recovery must happen after that failed commit too.
   // Seed -1371495859, path 75:0:0:0:0:0:0:1:1:0:0.
-  it(
-    `recovers a reloaded source whose final commit was abandoned by a peer reset`,
-    () =>
+  it(`recovers a reloaded source whose final commit was abandoned by a peer reset`, () => {
+    oracleRoute(`fixed history`)
+    return runGeneratedHistory(
       {
-      oracleRoute(`fixed history`)
-      return runGeneratedHistory(
-        {
-          tabCount: 2,
-          steps: [
-            { kind: `recover`, tab: 0, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `advance`, tab: 0, pick: 0 },
-            { kind: `advance`, tab: 1, pick: 0 },
-            { kind: `advance`, tab: 0, pick: 0 },
-            { kind: `peer reset` },
-            { kind: `advance`, tab: 0, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-          ],
-        },
-        () => undefined,
-      )
-    },
-    60_000,
-  )
+        tabCount: 2,
+        steps: [
+          { kind: `recover`, tab: 0, pick: 0 },
+          { kind: `server change`, key: 1, pick: 0 },
+          { kind: `advance`, tab: 0, pick: 0 },
+          { kind: `advance`, tab: 1, pick: 0 },
+          { kind: `advance`, tab: 0, pick: 0 },
+          { kind: `peer reset` },
+          { kind: `advance`, tab: 0, pick: 0 },
+          { kind: `server change`, key: 1, pick: 0 },
+        ],
+      },
+      () => undefined,
+    )
+  }, 60_000)
 
   // A discontinuous source prefix does not corrupt the cached key set. Keep
   // durable rows visible during reload while a fresh source snapshot repairs
   // continuation. This is a reduced random history, replayed by the same law.
-  it(
-    `keeps cached rows visible while recovering a discontinuous source`,
-    () =>
+  it(`keeps cached rows visible while recovering a discontinuous source`, () => {
+    oracleRoute(`fixed history`)
+    return runGeneratedHistory(
       {
-      oracleRoute(`fixed history`)
-      return runGeneratedHistory(
-        {
-          tabCount: 2,
-          steps: [
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `catch up`, tab: 1, pick: 1 },
-            { kind: `catch up`, tab: 0, pick: 0 },
-            { kind: `recover`, tab: 0, pick: 0 },
-            { kind: `recover`, tab: 0, pick: 0 },
-            { kind: `stop`, tab: 0, pick: 0 },
-            { kind: `peer reset` },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `catch up`, tab: 0, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `advance`, tab: 0, pick: 0 },
-          ],
-        },
-        () => undefined,
-      )
-    },
-    60_000,
-  )
+        tabCount: 2,
+        steps: [
+          { kind: `server change`, key: 1, pick: 0 },
+          { kind: `server change`, key: 1, pick: 0 },
+          { kind: `catch up`, tab: 1, pick: 1 },
+          { kind: `catch up`, tab: 0, pick: 0 },
+          { kind: `recover`, tab: 0, pick: 0 },
+          { kind: `recover`, tab: 0, pick: 0 },
+          { kind: `stop`, tab: 0, pick: 0 },
+          { kind: `peer reset` },
+          { kind: `server change`, key: 1, pick: 0 },
+          { kind: `server change`, key: 1, pick: 0 },
+          { kind: `catch up`, tab: 0, pick: 0 },
+          { kind: `server change`, key: 1, pick: 0 },
+          { kind: `advance`, tab: 0, pick: 0 },
+        ],
+      },
+      () => undefined,
+    )
+  }, 60_000)
 
   // Known limit #2209, as a fixed history: tab A commits v1 and v2; tab B's lagging stream
   // then commits only v1, so the durable row falls back to v1, and B closes
@@ -2057,8 +2041,7 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // Remove `fails` when source writes are ordered by server position.
   it.fails(
     `converges an open tab to the head after a lagging tab commits an older row and closes`,
-    () =>
-      {
+    () => {
       oracleRoute(`calibration`)
       return runGeneratedHistory(
         {
@@ -2085,31 +2068,26 @@ describe(`multi-tab Electric over one persisted database`, () => {
   // rows to show the head. The source-progress repair forces a fresh snapshot.
   // It replays through the same driver and checks with the known-limit detector
   // off. The generated source-prefix campaign extends this same law.
-  it(
-    `keeps a durable row after both tabs catch up to it and then stop`,
-    () =>
+  it(`keeps a durable row after both tabs catch up to it and then stop`, () => {
+    oracleRoute(`fixed history`)
+    return runGeneratedHistory(
       {
-      oracleRoute(`fixed history`)
-      return runGeneratedHistory(
-        {
-          tabCount: 2,
-          steps: [
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `catch up`, tab: 0, pick: 0 },
-            { kind: `server change`, key: 1, pick: 0 },
-            { kind: `catch up`, tab: 0, pick: 0 },
-            { kind: `catch up`, tab: 1, pick: 1 },
-            { kind: `catch up`, tab: 0, pick: 0 },
-            { kind: `stop`, tab: 1, pick: 0 },
-            { kind: `catch up`, tab: 0, pick: 0 },
-            { kind: `stop`, tab: 0, pick: 0 },
-          ],
-        },
-        () => undefined,
-      )
-    },
-    60_000,
-  )
+        tabCount: 2,
+        steps: [
+          { kind: `server change`, key: 1, pick: 0 },
+          { kind: `catch up`, tab: 0, pick: 0 },
+          { kind: `server change`, key: 1, pick: 0 },
+          { kind: `catch up`, tab: 0, pick: 0 },
+          { kind: `catch up`, tab: 1, pick: 1 },
+          { kind: `catch up`, tab: 0, pick: 0 },
+          { kind: `stop`, tab: 1, pick: 0 },
+          { kind: `catch up`, tab: 0, pick: 0 },
+          { kind: `stop`, tab: 0, pick: 0 },
+        ],
+      },
+      () => undefined,
+    )
+  }, 60_000)
 
   // Issue #2281 reduces to the same six-step history for both membership
   // directions. A stores two server changes; B stores only the first. A's
@@ -2132,58 +2110,43 @@ describe(`multi-tab Electric over one persisted database`, () => {
     const reopenPeer: HistoryStep = { kind: `recover`, tab: 1, pick: 0 }
 
     // Keeping only the maximum cursor does not repair these rows.
-    it(
-      `${behavior} after a cursor-only commit and a lagging tab reload`,
-      () =>
+    it(`${behavior} after a cursor-only commit and a lagging tab reload`, () => {
+      oracleRoute(`fixed history`)
+      return runGeneratedHistory(
         {
-        oracleRoute(`fixed history`)
-        return runGeneratedHistory(
-          {
-            tabCount: 2,
-            steps: [...stalePrefix, publishCursor, reopenPeer],
-          },
-          () => undefined,
-        )
-      },
-      60_000,
-    )
+          tabCount: 2,
+          steps: [...stalePrefix, publishCursor, reopenPeer],
+        },
+        () => undefined,
+      )
+    }, 60_000)
 
     // A peer that drains its backlog supplies the missing change itself.
-    it(
-      `${behavior} when the lagging stream drains before reloading`,
-      () =>
+    it(`${behavior} when the lagging stream drains before reloading`, () => {
+      oracleRoute(`fixed history`)
+      return runGeneratedHistory(
         {
-        oracleRoute(`fixed history`)
-        return runGeneratedHistory(
-          {
-            tabCount: 2,
-            steps: [
-              ...stalePrefix,
-              publishCursor,
-              { kind: `catch up`, tab: 1, pick: 0 },
-              reopenPeer,
-            ],
-          },
-          () => undefined,
-        )
-      },
-      60_000,
-    )
+          tabCount: 2,
+          steps: [
+            ...stalePrefix,
+            publishCursor,
+            { kind: `catch up`, tab: 1, pick: 0 },
+            reopenPeer,
+          ],
+        },
+        () => undefined,
+      )
+    }, 60_000)
 
     // Without A's cursor-only commit, B resumes from its older position and
     // receives the missing change. This distinguishes cursor advancement
     // from reload or lag alone as the cause of the permanent mismatch.
-    it(
-      `${behavior} when the lagging tab reloads before the cursor advances`,
-      () =>
-        {
-        oracleRoute(`fixed history`)
-        return runGeneratedHistory(
-          { tabCount: 2, steps: [...stalePrefix, reopenPeer] },
-          () => undefined,
-        )
-      },
-      60_000,
-    )
+    it(`${behavior} when the lagging tab reloads before the cursor advances`, () => {
+      oracleRoute(`fixed history`)
+      return runGeneratedHistory(
+        { tabCount: 2, steps: [...stalePrefix, reopenPeer] },
+        () => undefined,
+      )
+    }, 60_000)
   }
 })

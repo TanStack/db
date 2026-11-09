@@ -25,6 +25,7 @@ import {
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config'
 import { declareOracle } from '../oracle-declaration'
@@ -457,7 +458,7 @@ it('a peer no-op cannot spend another source acknowledgement', async () => {
 const runs =
   process.env.TANSTACK_INDEXEDDB_ORACLE_PROFILE === 'stress' ? 300 : 30
 it(`refines held mutations through fixed peer histories`, async () => {
-  oracleRoute(`fixed history`)
+  oracleRoute(`fixed seed`)
   await runCampaign(
     'pending',
     histories,
@@ -468,8 +469,9 @@ it(`refines held mutations through fixed peer histories`, async () => {
 oracleReplayTest(vitestIt, PENDING_HISTORY)(
   `refines held mutations through fresh peer histories`,
   async () => {
-    oracleRoute(`random seed`)
-    const { numRuns, seed, path } = oraclePropertyOptions(runs, PENDING_HISTORY)
+    const parameters = oraclePropertyOptions(runs, PENDING_HISTORY)
+    oracleRoute(oracleRouteOf(parameters))
+    const { numRuns, seed, path } = parameters
     await runCampaign(
       'pending',
       histories,

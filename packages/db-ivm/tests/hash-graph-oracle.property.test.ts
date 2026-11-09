@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -147,24 +149,28 @@ describe(`structural hash graph boundary`, () => {
   oracleReplayTest(it)(
     `matches reachable graph cycles and shared DAGs (fixed)`,
     () => {
-      oracleRoute(`fixed seed`)
+      const parameters = oracleFixedSeed(fixedSeed, {
+        numRuns: oracleRuns(300),
+      })
+      oracleRoute(oracleRouteOf(parameters))
       fc.assert(
         fc.property(graphArbitrary, (edges) => {
           expectGraphHash(edges)
         }),
-        { numRuns: oracleRuns(300), seed: fixedSeed },
+        parameters,
       )
     },
   )
   oracleReplayTest(it, graphProperty)(
     `matches reachable graph cycles and shared DAGs (random)`,
     () => {
-      oracleRoute(`random seed`)
+      const campaignParameters = oraclePropertyOptions(300, graphProperty)
+      oracleRoute(oracleRouteOf(campaignParameters))
       fc.assert(
         fc.property(graphArbitrary, (edges) => {
           expectGraphHash(edges)
         }),
-        oraclePropertyOptions(300, graphProperty),
+        campaignParameters,
       )
     },
   )

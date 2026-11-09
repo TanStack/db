@@ -14,8 +14,10 @@ import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
+  oracleFixedSeed,
   oracleRandomParameters,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -1052,21 +1054,26 @@ describe(`ordered lifecycle product`, () => {
     rankStep: fc.integer({ min: 1, max: 10 }),
   })
   const { multiplier, ...replay } = readOracleRunConfig()
-  fcTest.prop([arbitrary], { numRuns: 20 * multiplier, seed: 93471 })(
+  const fixedCampaign = oracleFixedSeed(93471, {
+    numRuns: 20 * multiplier,
+  })
+  fcTest.prop([arbitrary], fixedCampaign)(
     `matches the ordered lifecycle for a fixed seed`,
     async (scenario) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(fixedCampaign))
       await assertHistory(scenario)
     },
     Math.max(10000, multiplier * 1500),
   )
-  fcTest.prop(
-    [arbitrary],
-    oracleRandomParameters(20 * multiplier, replay, `ordered-work.lifecycle`),
-  )(
+  const randomCampaign = oracleRandomParameters(
+    20 * multiplier,
+    replay,
+    `ordered-work.lifecycle`,
+  )
+  fcTest.prop([arbitrary], randomCampaign)(
     `matches the ordered lifecycle for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(randomCampaign))
       await assertHistory(scenario)
     },
     Math.max(10000, multiplier * 1500),
@@ -2466,25 +2473,26 @@ describe(`nullable multi-term lifecycle product`, () => {
   }
   const nullableRunBudget = 20 * multiplier
   const nullableTimeout = Math.max(10000, multiplier * 1500)
-  fcTest.prop([arbitrary], { numRuns: nullableRunBudget, seed: 93472 })(
+  const fixedCampaign2 = oracleFixedSeed(93472, {
+    numRuns: nullableRunBudget,
+  })
+  fcTest.prop([arbitrary], fixedCampaign2)(
     `matches nullable multi-term lifecycle histories for a fixed seed`,
     async (scenario) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(fixedCampaign2))
       await assertNullableHistory(scenario)
     },
     nullableTimeout,
   )
-  fcTest.prop(
-    [arbitrary],
-    oracleRandomParameters(
-      nullableRunBudget,
-      replay,
-      `ordered-work.nullable-lifecycle`,
-    ),
-  )(
+  const randomCampaign2 = oracleRandomParameters(
+    nullableRunBudget,
+    replay,
+    `ordered-work.nullable-lifecycle`,
+  )
+  fcTest.prop([arbitrary], randomCampaign2)(
     `matches nullable multi-term lifecycle histories for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(randomCampaign2))
       await assertNullableHistory(scenario)
     },
     nullableTimeout,

@@ -3,8 +3,10 @@ import { createCollection } from '@tanstack/db'
 import { describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
@@ -103,10 +105,14 @@ describe(`cursor adapter through production pagination`, () => {
   )(
     `manual writes preserve cache shapes: $wrapped/$nested ($campaign)`,
     async ({ wrapped, nested, campaign }) => {
-      if (campaign === `fixed`) oracleRoute(`fixed seed`)
       const cleanupFailures: Array<unknown> = []
       let lawFailure: unknown
       try {
+        const parameters =
+          campaign === `fixed`
+            ? oracleFixedSeed(20261012, { numRuns: oracleRuns(50) })
+            : oraclePropertyOptions(50, manualWriteProperty)
+        oracleRoute(oracleRouteOf(parameters))
         await fc.assert(
           fc.asyncProperty(
             fc.array(
@@ -224,9 +230,7 @@ describe(`cursor adapter through production pagination`, () => {
               }
             },
           ),
-          campaign === `fixed`
-            ? { seed: 20261012, numRuns: oracleRuns(50) }
-            : oraclePropertyOptions(50, manualWriteProperty),
+          parameters,
         )
       } catch (error) {
         lawFailure = error

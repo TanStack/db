@@ -20,8 +20,10 @@ import { describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { withChangeTracking } from '../src/proxy.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import {
@@ -46,6 +48,7 @@ describe(`Mutation result detachment`, () => {
   // For any number of ordinary fields, one write changes only that field and
   // defines no property descriptors: a generated law over the field count.
   it(`copies ordinary fields without descriptor writes`, () => {
+    const parameters = { seed: 20260914, numRuns: 40 }
     oracleRoute(`fixed seed`)
     fc.assert(
       fc.property(fc.integer({ min: 1, max: 40 }), (count) => {
@@ -69,7 +72,7 @@ describe(`Mutation result detachment`, () => {
         expect(row.field0).toBe(0)
         expect(writes).toBe(0)
       }),
-      { seed: 20260914, numRuns: 40 },
+      parameters,
     )
   })
 
@@ -187,7 +190,13 @@ describe(`Mutation result detachment`, () => {
   it.each([20260914, undefined])(
     `preserves JSON data keys on assignment seed=%s`,
     (seed) => {
-      oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+      const campaignParameters = {
+        ...(seed === undefined
+          ? oraclePropertyOptions(100, `proxy.json-data-keys`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
+        examples: [[`__proto__`, 1, false]],
+      }
+      oracleRoute(oracleRouteOf(campaignParameters))
       fc.assert(
         fc.property(
           fc.constantFrom(`__proto__`, `constructor`, `toString`, `ordinary`),
@@ -214,12 +223,7 @@ describe(`Mutation result detachment`, () => {
             expect(original).toEqual({ payload: { before: true } })
           },
         ),
-        {
-          ...(seed === undefined
-            ? oraclePropertyOptions(100, `proxy.json-data-keys`)
-            : { seed, numRuns: oracleRuns(100) }),
-          examples: [[`__proto__`, 1, false]],
-        },
+        campaignParameters,
       )
     },
   )

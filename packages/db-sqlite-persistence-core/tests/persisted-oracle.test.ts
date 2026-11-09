@@ -19,10 +19,12 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -1288,7 +1290,8 @@ function generatedPersistenceGrammarSamples(): ReadonlyArray<{
     if (match === undefined) throw new Error(`missing grammar: ${property}`)
     return match
   }
-  const sampleOptions = (seed: number) => ({ seed, numRuns: oracleRuns(4) })
+  const sampleOptions = (seed: number) =>
+    oracleFixedSeed(seed, { numRuns: oracleRuns(4) })
   return [
     {
       grammar: grammar(`sqlite-persistence.source-fifo-order`),
@@ -1415,27 +1418,34 @@ function registerGeneratedPersistenceProperty<Value>(options: {
   run: (value: Value) => Promise<void>
 }): void {
   const { property, title, arbitrary, fixedSeed, run } = options
-  oracleReplayTest(fcTest).prop([arbitrary], {
-    seed: fixedSeed,
-    numRuns: oracleRuns(4),
-  })(`${title} (fixed)`, (...args: Parameters<typeof run>) => {
+  oracleReplayTest(fcTest).prop(
+    [arbitrary],
+    oracleFixedSeed(fixedSeed, { numRuns: oracleRuns(4) }),
+  )(`${title} (fixed)`, (...args: Parameters<typeof run>) => {
     oracleRoute(`fixed seed`)
     return run(...args)
   })
-  oracleReplayTest(fcTest, property).prop(
-    [arbitrary],
-    oraclePropertyOptions(4, property),
-  )(`${title} (random)`, (...args: Parameters<typeof run>) => {
-    oracleRoute(`random seed`)
-    return run(...args)
-  })
+  const randomCampaign = oraclePropertyOptions(4, property)
+  oracleReplayTest(fcTest, property).prop([arbitrary], randomCampaign)(
+    `${title} (random)`,
+    (...args: Parameters<typeof run>) => {
+      oracleRoute(oracleRouteOf(randomCampaign))
+      return run(...args)
+    },
+  )
 }
 
 // The durability drivers run generated histories through the laws in this
 // file. The models predict public rows, durable rows, and metadata from the
 // authored inputs; the check drivers compare production observations with
 // them, and the grammar reaches the generated histories.
-declareOracle({ owns: [`src/persisted.ts`, `src/sqlite-core-adapter.ts`, `src/remote-subset-owner.ts`],   check: [
+declareOracle({
+  owns: [
+    `src/persisted.ts`,
+    `src/sqlite-core-adapter.ts`,
+    `src/remote-subset-owner.ts`,
+  ],
+  check: [
     runGeneratedSourceFifoOrderingHistory,
     runGeneratedAbortGraphHistory,
     runGeneratedOwnerIsolationHistory,
@@ -3494,23 +3504,24 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   }
 
-  fcTest.prop([retainedDemandHistory], {
+  const retainedDemandHistoryFixedSeed = oracleFixedSeed(186001, {
     numRuns: oracleRuns(50),
-    seed: 186001,
-  })(
+  })
+  fcTest.prop([retainedDemandHistory], retainedDemandHistoryFixedSeed)(
     `matches the retained exact-demand model with a fixed seed`,
     (...args: Parameters<typeof runRetainedDemandHistory>) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(retainedDemandHistoryFixedSeed))
       return runRetainedDemandHistory(...args)
     },
   )
-  fcTest.prop(
-    [retainedDemandHistory],
-    oraclePropertyOptions(50, `persistence.retained-demand`),
-  )(
+  const retainedDemandHistoryCampaign = oraclePropertyOptions(
+    50,
+    `persistence.retained-demand`,
+  )
+  fcTest.prop([retainedDemandHistory], retainedDemandHistoryCampaign)(
     `matches the retained exact-demand model with a random or replayed seed`,
     (...args: Parameters<typeof runRetainedDemandHistory>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(retainedDemandHistoryCampaign))
       return runRetainedDemandHistory(...args)
     },
   )
@@ -3871,10 +3882,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     { ownerCommit: `before-rotation`, later: `peer` },
   ] as const)(
     `publishes an elected owner's rows to a follower after rotation: commit $ownerCommit, later $later`,
-    (history) =>
-      {
+    (history) => {
       oracleRoute(`case`)
-      return assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `ok` })
+      return assertFollowerGenerationNoticeHistory({
+        ...history,
+        ownerRead: `ok`,
+      })
     },
   )
 
@@ -3892,10 +3905,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     ),
   )(
     `publishes an elected owner's rows after rotation when its notice is a $noticeShape: commit $ownerCommit, later $later`,
-    (history) =>
-      {
+    (history) => {
       oracleRoute(`case`)
-      return assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `ok` })
+      return assertFollowerGenerationNoticeHistory({
+        ...history,
+        ownerRead: `ok`,
+      })
     },
   )
 
@@ -3906,10 +3921,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     { ownerCommit: `after-rotation`, later: `owner` },
   ] as const)(
     `fails a follower when its elected owner's update cannot be read after rotation: commit $ownerCommit`,
-    (history) =>
-      {
+    (history) => {
       oracleRoute(`case`)
-      return assertFollowerGenerationNoticeHistory({ ...history, ownerRead: `fails` })
+      return assertFollowerGenerationNoticeHistory({
+        ...history,
+        ownerRead: `fails`,
+      })
     },
   )
 
@@ -3917,8 +3934,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // the owner's rows in the new generation never become visible.
   it.fails(
     `ignores a follower read failure when rotation starts while the read is in flight`,
-    () =>
-      {
+    () => {
       oracleRoute(`fixed history`)
       return assertFollowerGenerationNoticeHistory({
         ownerCommit: `before-rotation`,
@@ -3950,15 +3966,15 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // and replayed campaign back.
   it.fails(
     `checks generated follower generation-notice histories (fixed)`,
-    () =>
-      {
-      oracleRoute(`fixed seed`)
+    () => {
+      const parameters = oracleFixedSeed(2128, { numRuns: oracleRuns(12) })
+      oracleRoute(oracleRouteOf(parameters))
       return fc.assert(
         fc.asyncProperty(
           followerGenerationNoticeHistory,
           assertFollowerGenerationNoticeHistory,
         ),
-        { seed: 2128, numRuns: oracleRuns(12) },
+        parameters,
       )
     },
   )
@@ -4605,42 +4621,31 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
     10_000,
   )
-  it(
-    `releases held notices when a second rotation supersedes reacquisition as leader`,
-    () =>
-      {
-      oracleRoute(`fixed history`)
-      return assertRotatedReacquisition({
-        order: [`a`, `b`],
-        noticeBetween: false,
-        fails: `none`,
-        supersededAsLeader: true,
-      })
-    },
-    10_000,
-  )
+  it(`releases held notices when a second rotation supersedes reacquisition as leader`, () => {
+    oracleRoute(`fixed history`)
+    return assertRotatedReacquisition({
+      order: [`a`, `b`],
+      noticeBetween: false,
+      fails: `none`,
+      supersededAsLeader: true,
+    })
+  }, 10_000)
   // Two hydrations that both find the claim lost queue work while the
   // follower reacquires. Their flushes must leave the held notices alone;
   // otherwise each notice refreshes the scoped demand and the follower spins.
-  it(
-    `holds a rotated follower's notices when two reads find the claim lost: fails 'a'`,
-    () =>
-      {
-      oracleRoute(`fixed history`)
-      return assertRotatedReacquisition({
-        order: [`a`, `b`],
-        noticeBetween: false,
-        fails: `a`,
-        trigger: `claim-lost-during-reads`,
-      })
-    },
-    10_000,
-  )
+  it(`holds a rotated follower's notices when two reads find the claim lost: fails 'a'`, () => {
+    oracleRoute(`fixed history`)
+    return assertRotatedReacquisition({
+      order: [`a`, `b`],
+      noticeBetween: false,
+      fails: `a`,
+      trigger: `claim-lost-during-reads`,
+    })
+  }, 10_000)
   // Known limit: see #2139. Recovery never ends, so the rows stay hidden.
   it.fails(
     `holds a rotated follower's notices when two reads find the claim lost: fails 'none'`,
-    () =>
-      {
+    () => {
       oracleRoute(`calibration`)
       return assertRotatedReacquisition({
         order: [`a`, `b`],
@@ -4665,13 +4670,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       `load`,
     ),
   })
+  const followerRemoteDemandHistoryCampaign = oraclePropertyOptions(
+    12,
+    `persistence.follower-remote-demand`,
+  )
   fcTest.prop(
     [followerRemoteDemandHistory],
-    oraclePropertyOptions(12, `persistence.follower-remote-demand`),
+    followerRemoteDemandHistoryCampaign,
   )(
     `checks generated follower remote-demand histories (random or replayed)`,
     (...args: Parameters<typeof assertFollowerRemoteDemandHistory>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(followerRemoteDemandHistoryCampaign))
       return assertFollowerRemoteDemandHistory(...args)
     },
   )
@@ -4801,8 +4810,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   })
 
   it(`keeps generated crossed-leadership index RPC histories outside local hydration scopes`, async () => {
-    oracleRoute(`fixed seed`)
     let run = 0
+    const campaignParameters = { seed: 1868, numRuns: 8, endOnFailure: true }
+    oracleRoute(`fixed seed`)
     await fc.assert(
       fc.asyncProperty(
         fc.record({
@@ -4905,7 +4915,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           }
         },
       ),
-      { seed: 1868, numRuns: 8, endOnFailure: true },
+      campaignParameters,
     )
   })
 
@@ -7427,24 +7437,25 @@ declareOracle({
 })
 
 describe(`persistedCollectionOptions`, () => {
-  fcTest.prop([generationNoticeHistory], {
-    seed: 2069,
+  const generationNoticeHistoryFixedSeed = oracleFixedSeed(2069, {
     numRuns: oracleRuns(24),
-  })(
+  })
+  fcTest.prop([generationNoticeHistory], generationNoticeHistoryFixedSeed)(
     `checks generated cache-generation notice histories (fixed)`,
     (...args: Parameters<typeof assertGenerationNoticeHistory>) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(generationNoticeHistoryFixedSeed))
       return assertGenerationNoticeHistory(...args)
     },
   )
 
-  fcTest.prop(
-    [generationNoticeHistory],
-    oraclePropertyOptions(24, `persistence.generation-notice`),
-  )(
+  const generationNoticeHistoryCampaign = oraclePropertyOptions(
+    24,
+    `persistence.generation-notice`,
+  )
+  fcTest.prop([generationNoticeHistory], generationNoticeHistoryCampaign)(
     `checks generated cache-generation notice histories (random or replayed)`,
     (...args: Parameters<typeof assertGenerationNoticeHistory>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(generationNoticeHistoryCampaign))
       return assertGenerationNoticeHistory(...args)
     },
   )

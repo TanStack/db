@@ -11,9 +11,11 @@ import {
 import { materializeCompilation } from '../../src/query/live/materialized-pipeline.js'
 import { Query, eq, include } from '../../src/query/index.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -216,7 +218,10 @@ const examples: Array<[CopyInput]> = [
 for (const campaign of [
   {
     name: `fixed`,
-    options: { numRuns: oracleRuns(6) + examples.length, seed: 2355, examples },
+    options: oracleFixedSeed(2355, {
+      numRuns: oracleRuns(6) + examples.length,
+      examples,
+    }),
   },
   {
     name: `fresh or replayed`,
@@ -232,7 +237,7 @@ for (const campaign of [
     (description) => {
       // The options are built when the file loads, so each run registers its
       // campaign's route.
-      oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
+      oracleRoute(oracleRouteOf(campaign.options))
       checkCopyPrograms(description)
     },
   )

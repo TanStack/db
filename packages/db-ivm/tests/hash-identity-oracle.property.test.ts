@@ -7,9 +7,11 @@ import {
   registerOpaqueHash,
 } from '../src/hashing/hash.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -809,39 +811,39 @@ const it = oracleReplayTest(vitestIt)
 
 describe(`hash identity oracle`, () => {
   it(`matches the identity model across generated value pairs (${FIXED_SEED})`, () => {
-    oracleRoute(`fixed seed`)
+    const parameters = oracleFixedSeed(FIXED_SEED, { numRuns: oracleRuns(300) })
+    oracleRoute(oracleRouteOf(parameters))
     fc.assert(
       fc.property(pairArb, fc.nat(), fc.nat(), (pair, left, right) =>
         expectPair(pair, [left, right]),
       ),
-      { numRuns: oracleRuns(300), seed: FIXED_SEED },
+      parameters,
     )
   })
+  const pairCampaign = oraclePropertyOptions(300, PAIR_IDENTITY)
   oracleReplayTest(fcTest, PAIR_IDENTITY).prop(
     [pairArb, fc.nat(), fc.nat()],
-    oraclePropertyOptions(300, PAIR_IDENTITY),
+    pairCampaign,
   )(
     `matches the identity model across generated value pairs (random)`,
     (pair, left, right) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(pairCampaign))
       expectPair(pair, [left, right])
     },
   )
 
   it(`matches constructed verdicts across generated cyclic values (${FIXED_SEED})`, () => {
-    oracleRoute(`fixed seed`)
-    fc.assert(fc.property(cyclicArb, expectCyclicPair), {
+    const campaignParameters = oracleFixedSeed(FIXED_SEED, {
       numRuns: oracleRuns(300),
-      seed: FIXED_SEED,
     })
+    oracleRoute(oracleRouteOf(campaignParameters))
+    fc.assert(fc.property(cyclicArb, expectCyclicPair), campaignParameters)
   })
-  oracleReplayTest(fcTest, CYCLIC_IDENTITY).prop(
-    [cyclicArb],
-    oraclePropertyOptions(300, CYCLIC_IDENTITY),
-  )(
+  const cyclicCampaign = oraclePropertyOptions(300, CYCLIC_IDENTITY)
+  oracleReplayTest(fcTest, CYCLIC_IDENTITY).prop([cyclicArb], cyclicCampaign)(
     `matches constructed verdicts across generated cyclic values (random)`,
     (value: CyclicPair) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(cyclicCampaign))
       expectCyclicPair(value)
     },
   )

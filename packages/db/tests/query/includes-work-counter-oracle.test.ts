@@ -1,9 +1,11 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
@@ -153,7 +155,7 @@ function campaigns(fixedSeed: number, property: string, baseRuns = 6) {
   return [
     {
       name: `fixed`,
-      options: { numRuns: oracleRuns(baseRuns), seed: fixedSeed },
+      options: oracleFixedSeed(fixedSeed, { numRuns: oracleRuns(baseRuns) }),
     },
     {
       name: `random or replayed`,
@@ -202,7 +204,7 @@ describe(`includes deterministic work-counter oracle`, () => {
     fcTest.prop([fc.integer({ min: 1, max: 24 })], campaign.options)(
       `a join preserves correlated source pushdown (${campaign.name})`,
       (...args: Parameters<typeof expectCorrelatedJoinWorkBound>) => {
-        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
+        oracleRoute(oracleRouteOf(campaign.options))
         return expectCorrelatedJoinWorkBound(...args)
       },
     )
@@ -212,7 +214,7 @@ describe(`includes deterministic work-counter oracle`, () => {
     fcTest.prop([fc.integer({ min: 1, max: 24 })], campaign.options)(
       `indexed join-target growth keeps source work flat (${campaign.name})`,
       (...args: Parameters<typeof expectJoinTargetWorkBound>) => {
-        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
+        oracleRoute(oracleRouteOf(campaign.options))
         return expectJoinTargetWorkBound(...args)
       },
     )
@@ -222,7 +224,7 @@ describe(`includes deterministic work-counter oracle`, () => {
     fcTest.prop([fc.integer({ min: 1, max: 24 })], campaign.options)(
       `join-free correlated includes keep source work flat (${campaign.name})`,
       (...args: Parameters<typeof expectJoinFreeWorkBound>) => {
-        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
+        oracleRoute(oracleRouteOf(campaign.options))
         return expectJoinFreeWorkBound(...args)
       },
     )
@@ -1393,10 +1395,10 @@ describe(`includes work under an ordered parent window`, () => {
   it(`reaches every window dimension in the executed fixed cases`, () => {
     oracleRoute(`fixed seed`)
     const cases = fc
-      .sample(fc.tuple(windowCase), {
-        numRuns: oracleRuns(WINDOW_RUNS),
-        seed: 2137,
-      })
+      .sample(
+        fc.tuple(windowCase),
+        oracleFixedSeed(2137, { numRuns: oracleRuns(WINDOW_RUNS) }),
+      )
       .map(([testCase]) => testCase)
     const count = (premise: (testCase: WindowCase) => boolean) =>
       cases.filter(premise).length
@@ -1446,8 +1448,8 @@ describe(`includes work under an ordered parent window`, () => {
     it(
       `a parent window bounds child loading (${campaign.name})`,
       async () => {
-        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
         let strictForwardMoves = 0
+        oracleRoute(oracleRouteOf(campaign.options))
         await fc.assert(
           fc.asyncProperty(windowCase, async (testCase) => {
             strictForwardMoves += await checkWindowedIncludeWork(testCase)
@@ -1773,11 +1775,10 @@ it.each(payloadExamples)(
 for (const campaign of [
   {
     name: `fixed`,
-    options: {
+    options: oracleFixedSeed(2355, {
       numRuns: oracleRuns(8) + payloadExamples.length,
-      seed: 2355,
       examples: payloadExamples,
-    },
+    }),
   },
   {
     name: `random or replayed`,
@@ -1795,7 +1796,7 @@ for (const campaign of [
     (blockCount) => {
       // The options are built when the file loads, so each run registers its
       // campaign's route.
-      oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
+      oracleRoute(oracleRouteOf(campaign.options))
       return expectPayloadWork(blockCount)
     },
   )

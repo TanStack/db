@@ -10,7 +10,13 @@ import {
 } from '../src/index'
 import { localOnlyCollectionOptions } from '../src/local-only'
 import { PropRef } from '../src/query/ir'
-import { oraclePropertyOptions, oracleRoute, oracleRuns } from './oracle-config'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from './oracle-config'
 import { declareOracle } from './oracle-declaration'
 import { captureCreatedTransactions } from './utils'
 import {
@@ -881,20 +887,24 @@ describe(`change-event history oracle`, () => {
     }
   }
 
-  fcTest.prop([indexedHistory], { numRuns: oracleRuns(35), seed: 1_912 })(
+  const indexedHistoryFixedSeed = oracleFixedSeed(1_912, {
+    numRuns: oracleRuns(35),
+  })
+  fcTest.prop([indexedHistory], indexedHistoryFixedSeed)(
     `keeps eager indexes and indexed queries aligned across fixed-seed histories`,
     async (history) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(indexedHistoryFixedSeed))
       await verifyIndexedHistory(history)
     },
   )
-  fcTest.prop(
-    [indexedHistory],
-    oraclePropertyOptions(35, `collection-state.eager-index-history`),
-  )(
+  const indexedHistoryCampaign = oraclePropertyOptions(
+    35,
+    `collection-state.eager-index-history`,
+  )
+  fcTest.prop([indexedHistory], indexedHistoryCampaign)(
     `keeps eager indexes and indexed queries aligned across random histories`,
     async (history) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(indexedHistoryCampaign))
       await verifyIndexedHistory(history)
     },
   )
@@ -925,21 +935,25 @@ describe(`change-event history oracle`, () => {
     },
   )
 
-  fcTest.prop([generatedHistory], { numRuns: oracleRuns(100), seed: 1_902 })(
+  const generatedHistoryFixedSeed = oracleFixedSeed(1_902, {
+    numRuns: oracleRuns(100),
+  })
+  fcTest.prop([generatedHistory], generatedHistoryFixedSeed)(
     `keeps change messages and public rows aligned with a fixed seed`,
     async (history) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(generatedHistoryFixedSeed))
       await verifyGeneratedHistory(history)
     },
   )
 
-  fcTest.prop(
-    [generatedHistory],
-    oraclePropertyOptions(100, `collection-state.change-event-history`),
-  )(
+  const generatedHistoryCampaign = oraclePropertyOptions(
+    100,
+    `collection-state.change-event-history`,
+  )
+  fcTest.prop([generatedHistory], generatedHistoryCampaign)(
     `keeps change messages and public rows aligned with a random or replayed seed`,
     async (history) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(generatedHistoryCampaign))
       await verifyGeneratedHistory(history)
     },
   )

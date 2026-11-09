@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { equalHashValues, structuralIdentity } from '../src/hashing/hash.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -448,10 +450,11 @@ describe(`structuralIdentity`, () => {
       `structural-identity.equal-representations`,
     )
     if (campaignSeed === undefined) {
-      oracleRoute(`fixed seed`)
-      await fc.assert(property, { numRuns: options.numRuns, seed: 20261014 })
+      const fixed = oracleFixedSeed(20261014, { numRuns: options.numRuns })
+      oracleRoute(oracleRouteOf(fixed))
+      await fc.assert(property, fixed)
     }
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(options))
     await fc.assert(property, options)
   })
 
@@ -612,10 +615,11 @@ describe(`structuralIdentity`, () => {
       `structural-identity.independent-values`,
     )
     if (campaignSeed === undefined) {
-      oracleRoute(`fixed seed`)
-      await fc.assert(property, { numRuns: options.numRuns, seed: 1158727847 })
+      const fixed = oracleFixedSeed(1158727847, { numRuns: options.numRuns })
+      oracleRoute(oracleRouteOf(fixed))
+      await fc.assert(property, fixed)
     }
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(options))
     await fc.assert(property, options)
   })
 })

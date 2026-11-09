@@ -37,10 +37,12 @@ import {
 } from '../../src/errors.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRandomParameters,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
@@ -1786,6 +1788,15 @@ async function runCampaign(
     const generatedExamples = fc
       .sample(requiredHistories, { seed: parameters.seed, numRuns: 1 })[0]!
       .map((entry) => [entry] as [History])
+    const campaignParameters = {
+      ...parameters,
+      examples: [...parameters.examples, ...generatedExamples],
+      numRuns:
+        parameters.path === undefined
+          ? parameters.numRuns + generatedExamples.length
+          : parameters.numRuns,
+    }
+    oracleRoute(oracleRouteOf(campaignParameters))
     await fc.assert(
       fc.asyncProperty(history, async (entry) => {
         const fixed = structuralInputs.has(entry)
@@ -1793,14 +1804,7 @@ async function runCampaign(
         reach.beginHistory({ fixed })
         await runHistory(entry)
       }),
-      {
-        ...parameters,
-        examples: [...parameters.examples, ...generatedExamples],
-        numRuns:
-          parameters.path === undefined
-            ? parameters.numRuns + generatedExamples.length
-            : parameters.numRuns,
-      },
+      campaignParameters,
     )
     structuralReach.assertReached()
     generatedReach.assertReached()
@@ -1839,16 +1843,20 @@ describe(`aggregate select shapes`, () => {
   oracleReplayTest(it)(
     `match the model across generated shapes (fixed campaign)`,
     async () => {
-      oracleRoute(`fixed seed`)
       // Keep the literal budget/seed binding visible to the run-budget audit.
+      // runCampaign registers the route of the parameters, which declare the
+      // seed fixed.
       const options = { numRuns: oracleRuns(160), seed: 2094 }
       await runCampaign(
         `fixed`,
-        oracleRandomParameters(
-          options.numRuns,
+        oracleFixedSeed(
           options.seed,
-          undefined,
-          examples,
+          oracleRandomParameters(
+            options.numRuns,
+            options.seed,
+            undefined,
+            examples,
+          ),
         ),
       )
     },
@@ -1857,7 +1865,6 @@ describe(`aggregate select shapes`, () => {
   oracleReplayTest(it, PROPERTY)(
     `match the model across generated shapes (random or replayed)`,
     async () => {
-      oracleRoute(`random seed`)
       await runCampaign(
         `random`,
         oraclePropertyOptions(160, PROPERTY, { examples }),

@@ -4,8 +4,10 @@ import { DbClient } from '../src/client.js'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -47,7 +49,6 @@ describe(`observer hydration error timing`, () => {
   })
   for (const campaign of [`fixed`, `random`] as const) {
     it(`publishes errors at their ownership checkpoint (${campaign})`, async () => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(`observer-hydration-error`, [
         `granular`,
         `wholesale`,
@@ -59,6 +60,14 @@ describe(`observer hydration error timing`, () => {
         `defined-cause`,
         `undefined-cause`,
       ])
+      const parameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(2229, { numRuns: oracleRuns(64) })
+          : oraclePropertyOptions(
+              64,
+              `live-query-observer.hydration-error-timing`,
+            )
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(historyArbitrary, async (history) => {
           reach.beginHistory()
@@ -138,12 +147,7 @@ describe(`observer hydration error timing`, () => {
             () => client.cleanup(),
           ])
         }),
-        campaign === `fixed`
-          ? { numRuns: oracleRuns(64), seed: 2229 }
-          : oraclePropertyOptions(
-              64,
-              `live-query-observer.hydration-error-timing`,
-            ),
+        parameters,
       )
       reach.assertReached()
       console.info(
@@ -167,7 +171,6 @@ describe(`observer hydration error timing`, () => {
 describe(`observer release failure ownership`, () => {
   for (const campaign of [`fixed`, `random`] as const) {
     it(`reattaches after reporting a release failure (${campaign})`, async () => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(`observer-release`, [
         `granular`,
         `wholesale`,
@@ -175,6 +178,11 @@ describe(`observer release failure ownership`, () => {
         `retry`,
         `undefined-cause`,
       ])
+      const campaignParameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(2229, { numRuns: oracleRuns(40) })
+          : oraclePropertyOptions(40, `live-query-observer.release-failure`)
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(
           fc.record({
@@ -274,9 +282,7 @@ describe(`observer release failure ownership`, () => {
             ])
           },
         ),
-        campaign === `fixed`
-          ? { numRuns: oracleRuns(40), seed: 2229 }
-          : oraclePropertyOptions(40, `live-query-observer.release-failure`),
+        campaignParameters,
       )
       reach.assertReached()
       console.info(
@@ -299,13 +305,17 @@ describe(`observer release failure ownership`, () => {
 describe(`observer partial attachment`, () => {
   for (const campaign of [`fixed`, `random`] as const) {
     it(`releases every acquired channel before retry (${campaign})`, async () => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(`observer-partial-attach`, [
         `early-failure`,
         `sync-failure`,
         `surviving-peer`,
         `no-peer`,
       ])
+      const runParameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(2229, { numRuns: oracleRuns(60) })
+          : oraclePropertyOptions(60, `live-query-observer.partial-attach`)
+      oracleRoute(oracleRouteOf(runParameters))
       await fc.assert(
         fc.asyncProperty(
           fc.record({
@@ -439,9 +449,7 @@ describe(`observer partial attachment`, () => {
             ])
           },
         ),
-        campaign === `fixed`
-          ? { numRuns: oracleRuns(60), seed: 2229 }
-          : oraclePropertyOptions(60, `live-query-observer.partial-attach`),
+        runParameters,
       )
       reach.assertReached()
       console.info(
@@ -1049,7 +1057,8 @@ describe(`LiveQueryObserver generated histories`, () => {
     it.each([1813, -1359260562])(
       `${mode} listeners follow the eligibility ledger with fixed seed=%s`,
       async (seed) => {
-        oracleRoute(`fixed seed`)
+        const parameters = oracleFixedSeed(seed, { numRuns: oracleRuns(75) })
+        oracleRoute(oracleRouteOf(parameters))
         await fc.assert(
           fc.asyncProperty(
             fc.array(command, { minLength: 1, maxLength: 30 }),
@@ -1057,12 +1066,13 @@ describe(`LiveQueryObserver generated histories`, () => {
               await runHistory(mode, history)
             },
           ),
-          { numRuns: oracleRuns(75), seed },
+          parameters,
         )
       },
     )
     it(`${mode} listeners follow the eligibility ledger with a random or replayed seed`, async () => {
-      oracleRoute(`random seed`)
+      const parameters = oraclePropertyOptions(75, historyProperties[mode])
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.array(command, { minLength: 1, maxLength: 30 }),
@@ -1070,7 +1080,7 @@ describe(`LiveQueryObserver generated histories`, () => {
             await runHistory(mode, history)
           },
         ),
-        oraclePropertyOptions(75, historyProperties[mode]),
+        parameters,
       )
     })
   }

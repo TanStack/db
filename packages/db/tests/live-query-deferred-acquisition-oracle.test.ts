@@ -65,8 +65,10 @@ import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
 import { expectedStartHandoff } from './collection-subscription-lifecycle-grammar-oracle.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { createOracleReach } from './oracle-reach.js'
@@ -682,7 +684,6 @@ describe(`a subscriber that outlives cleanup`, () => {
 describe(`render sync-start handoff error provenance`, () => {
   for (const campaign of [`fixed`, `random`] as const) {
     it(`reports only its own thrown starts (${campaign})`, async () => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(`start-handoff`, [
         `prior-error`,
         `prior-crash`,
@@ -691,6 +692,11 @@ describe(`render sync-start handoff error provenance`, () => {
         `undefined-cause`,
         `healthy`,
       ])
+      const parameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(2229, { numRuns: oracleRuns(100) })
+          : oraclePropertyOptions(100, `live-query.start-handoff`)
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.record({
@@ -763,9 +769,7 @@ describe(`render sync-start handoff error provenance`, () => {
             }
           },
         ),
-        campaign === `fixed`
-          ? { numRuns: oracleRuns(100), seed: 2229 }
-          : oraclePropertyOptions(100, `live-query.start-handoff`),
+        parameters,
       )
       reach.assertReached()
       console.info(

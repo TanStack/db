@@ -55,9 +55,11 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { Index } from '../src/indexes.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -269,13 +271,14 @@ describe(`Index refinement oracle`, () => {
   oracleReplayTest(it)(
     `matches the multiset model across generated additions (20260930)`,
     () => {
-      oracleRoute(`fixed seed`)
+      const parameters = oracleFixedSeed(20260930, { numRuns: oracleRuns(300) })
+      oracleRoute(oracleRouteOf(parameters))
       fc.assert(
         fc.property(historyArbitrary, (additions) => {
           expectRefinement(additions)
           expectRefinement(additions, `prefixIdentity`)
         }),
-        { numRuns: oracleRuns(300), seed: 20260930 },
+        parameters,
       )
     },
   )
@@ -283,13 +286,17 @@ describe(`Index refinement oracle`, () => {
   oracleReplayTest(it, INDEX_REFINEMENT_PROPERTY)(
     `matches the multiset model across generated additions (random or replayed)`,
     () => {
-      oracleRoute(`random seed`)
+      const campaignParameters = oraclePropertyOptions(
+        300,
+        INDEX_REFINEMENT_PROPERTY,
+      )
+      oracleRoute(oracleRouteOf(campaignParameters))
       fc.assert(
         fc.property(historyArbitrary, (additions) => {
           expectRefinement(additions)
           expectRefinement(additions, `prefixIdentity`)
         }),
-        oraclePropertyOptions(300, INDEX_REFINEMENT_PROPERTY),
+        campaignParameters,
       )
     },
   )

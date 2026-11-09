@@ -23,8 +23,10 @@ import {
 } from '../../src/query/ir.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -341,7 +343,11 @@ describe('query identity agrees with compiled lexical output shape', () => {
   it.each([101600, undefined])(
     'varies safe aliases and payloads, seed=%s',
     async (seed) => {
-      oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+      const parameters =
+        seed === undefined
+          ? oraclePropertyOptions(60, `query-identity.compiled-output`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(60) })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.constantFrom(...forms),
@@ -353,9 +359,7 @@ describe('query identity agrees with compiled lexical output shape', () => {
           (form, aliases, label) =>
             runShapes(form, aliases as [string, string, string, string], label),
         ),
-        seed === undefined
-          ? oraclePropertyOptions(60, `query-identity.compiled-output`)
-          : { numRuns: oracleRuns(60), seed },
+        parameters,
       )
     },
   )
@@ -464,15 +468,17 @@ describe(`equality-value and IR operand identity agree`, () => {
   it.each([20260928, undefined])(
     `agrees across the supported value grammar, seed=%s`,
     async (seed) => {
-      oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+      const campaignParameters =
+        seed === undefined
+          ? oraclePropertyOptions(160, `query-identity.equality-partition`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(160) })
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(equalityPairArbitrary, (pair) => {
           assertEqualityPartition(pair)
           return Promise.resolve()
         }),
-        seed === undefined
-          ? oraclePropertyOptions(160, `query-identity.equality-partition`)
-          : { numRuns: oracleRuns(160), seed },
+        campaignParameters,
       )
     },
   )

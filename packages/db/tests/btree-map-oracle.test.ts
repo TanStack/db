@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { BTree } from '../src/utils/btree.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -129,7 +131,7 @@ const mapHistoryCampaigns = [
   {
     name: `fixed`,
     test: oracleReplayTest(it),
-    parameters: { numRuns: oracleRuns(100), seed: 20260930 },
+    parameters: oracleFixedSeed(20260930, { numRuns: oracleRuns(100) }),
   },
   {
     name: `random`,
@@ -349,7 +351,7 @@ describe(`BTree Map oracle`, () => {
     campaign.test(
       `matches complete Map cuts across shrinkable histories (${campaign.name})`,
       () => {
-        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
+        oracleRoute(oracleRouteOf(campaign.parameters))
         fc.assert(mapHistoryProperty, campaign.parameters)
       },
     )

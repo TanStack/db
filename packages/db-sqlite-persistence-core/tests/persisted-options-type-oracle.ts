@@ -30,9 +30,12 @@ import fc from 'fast-check'
 import ts from 'typescript'
 import { it } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
@@ -792,8 +795,9 @@ export function registerPersistedOptionsTypeOracle(receiver: Receiver): void {
     })
     const parameters =
       campaign === `fixed`
-        ? { numRuns: oracleRuns(12), seed: 2259 }
+        ? oracleFixedSeed(2259, { numRuns: oracleRuns(12) })
         : oraclePropertyOptions(12, propertyName)
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(property, parameters)
     // Replays use the same check but do not inflate generated reach. An
     // explicitly requested seed/path goes directly to its generated history.
@@ -874,6 +878,11 @@ export function registerPersistedUtilityAdmissionOracle(
       `inherited`,
       `schema-collision`,
     ])
+    const parameters =
+      campaign === `fixed`
+        ? oracleFixedSeed(2259, { numRuns: oracleRuns(12) })
+        : oraclePropertyOptions(12, propertyName)
+    oracleRoute(oracleRouteOf(parameters))
     fc.assert(
       fc.property(utilityAdmissionArbitrary, ({ token, extraNames, names }) => {
         reach.beginHistory()
@@ -1028,9 +1037,7 @@ export function registerPersistedUtilityAdmissionOracle(
           }
         }
       }),
-      campaign === `fixed`
-        ? { numRuns: oracleRuns(12), seed: 2259 }
-        : oraclePropertyOptions(12, propertyName),
+      parameters,
     )
     reach.assertReached()
     console.info(

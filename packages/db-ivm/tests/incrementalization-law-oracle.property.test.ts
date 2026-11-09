@@ -16,9 +16,11 @@ import { StreamBuilder } from '../src/d2.js'
 import { DifferenceStreamWriter, LinearUnaryOperator } from '../src/graph.js'
 import { MultiSet } from '../src/multiset.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -194,7 +196,7 @@ const generatedCampaigns = [
   {
     name: `fixed`,
     test: oracleReplayTest(it),
-    parameters: { numRuns: RUNS, seed: FIXED_SEED },
+    parameters: oracleFixedSeed(FIXED_SEED, { numRuns: RUNS }),
   },
   {
     name: `random`,
@@ -590,8 +592,8 @@ describe(`DBSP incrementalization laws`, () => {
       `checks consolidate, reduce, and groupBy against full recomputation (${campaign.name} campaign)`,
       async () => {
         // The gap report counts a fixed campaign's verdict as reproducible.
-        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
         const reach = new CampaignReach()
+        oracleRoute(oracleRouteOf(campaign.parameters))
         await fc.assert(
           fc.asyncProperty(
             fc.array(weightedWorld, { minLength: 2, maxLength: 7 }),
@@ -700,8 +702,8 @@ describe(`DBSP incrementalization laws`, () => {
     campaign.test(
       `checks simultaneous binary join deltas and split delivery (${campaign.name} campaign)`,
       async () => {
-        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
         const reach = new CampaignReach()
+        oracleRoute(oracleRouteOf(campaign.parameters))
         await fc.assert(
           fc.asyncProperty(
             fc.array(fc.tuple(weightedWorld, weightedWorld), {
@@ -811,8 +813,8 @@ describe(`DBSP incrementalization laws`, () => {
     campaign.test(
       `checks global ordering and window membership (${campaign.name} campaign)`,
       async () => {
-        oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
         const reach = new CampaignReach()
+        oracleRoute(oracleRouteOf(campaign.parameters))
         await fc.assert(
           fc.asyncProperty(orderedHistory, async (worlds) => {
             await setImmediate()
@@ -875,10 +877,10 @@ describe(`DBSP incrementalization laws`, () => {
         ([row]) => held.has(String(row)) && !before.has(String(row)),
       )
     }
-    for (const [worlds] of fc.sample(fc.tuple(orderedHistory), {
-      seed: FIXED_SEED,
-      numRuns: RUNS,
-    })) {
+    for (const [worlds] of fc.sample(
+      fc.tuple(orderedHistory),
+      oracleFixedSeed(FIXED_SEED, { numRuns: RUNS }),
+    )) {
       for (const [index, next] of worlds.slice(1).entries()) {
         const previous = worlds[index]!
         if (promoted(firstThree, previous, next)) promotions.global++

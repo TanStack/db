@@ -2,9 +2,11 @@ import { describe, expect, it as vitestIt } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { createChangeProxy } from '../src/proxy'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
@@ -852,11 +854,15 @@ const SIGNED_ZERO = `proxy.revert-signed-zero`
 
 const it = oracleReplayTest(vitestIt)
 
-// A random campaign registers its route inside each generated predicate.
+// A random campaign registers the route of its parameters inside each
+// generated predicate.
 const randomPredicate =
-  <TArgs extends Array<unknown>>(check: (...args: TArgs) => void) =>
+  <TArgs extends Array<unknown>>(
+    parameters: Parameters<typeof oracleRouteOf>[0],
+    check: (...args: TArgs) => void,
+  ) =>
   (...args: TArgs): void => {
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(parameters))
     check(...args)
   }
 
@@ -878,21 +884,20 @@ describe(`draft revert oracle`, () => {
           fixedHistories: zeroExamples.length,
         })
         let histories = 0
+        const parameters = {
+          ...oraclePropertyOptions(100, SIGNED_ZERO, {
+            examples: zeroExamples,
+          }),
+          ...(campaign === `fixed` ? oracleFixedSeed(FIXED_SEED) : {}),
+        }
+        oracleRoute(oracleRouteOf(parameters))
         fc.assert(
           fc.property(signedZeroArb, (input) => {
-            // oraclePropertyOptions registers `random seed` when it builds these
-            // options, so the fixed campaign registers its route in each run.
-            if (campaign === `fixed`) oracleRoute(`fixed seed`)
             reach.beginHistory({ fixed: histories++ < zeroExamples.length })
             expectHistory(signedZeroHistory(input))
             reach.reach(input.path)
           }),
-          {
-            ...oraclePropertyOptions(100, SIGNED_ZERO, {
-              examples: zeroExamples,
-            }),
-            ...(campaign === `fixed` ? { seed: FIXED_SEED } : {}),
-          },
+          parameters,
         )
         reach.assertReached()
         process.stdout.write(
@@ -902,63 +907,64 @@ describe(`draft revert oracle`, () => {
     )
 
   it(`matches the model across generated write histories (${FIXED_SEED})`, () => {
-    oracleRoute(`fixed seed`)
-    fc.assert(fc.property(historyArb, expectHistory), {
+    const campaignParameters = oracleFixedSeed(FIXED_SEED, {
       numRuns: oracleRuns(400),
-      seed: FIXED_SEED,
     })
+    oracleRoute(oracleRouteOf(campaignParameters))
+    fc.assert(fc.property(historyArb, expectHistory), campaignParameters)
   })
-  oracleReplayTest(fcTest, WRITE_HISTORY).prop(
-    [historyArb],
-    oraclePropertyOptions(400, WRITE_HISTORY),
-  )(
+  const historyCampaign = oraclePropertyOptions(400, WRITE_HISTORY)
+  oracleReplayTest(fcTest, WRITE_HISTORY).prop([historyArb], historyCampaign)(
     `matches the model across generated write histories (random)`,
-    randomPredicate(expectHistory),
+    randomPredicate(historyCampaign, expectHistory),
   )
 
   it(`matches the model across generated nested round trips (${FIXED_SEED})`, () => {
-    oracleRoute(`fixed seed`)
-    fc.assert(fc.property(nestedRoundTripArb, expectHistory), {
+    const runParameters = oracleFixedSeed(FIXED_SEED, {
       numRuns: oracleRuns(200),
-      seed: FIXED_SEED,
     })
+    oracleRoute(oracleRouteOf(runParameters))
+    fc.assert(fc.property(nestedRoundTripArb, expectHistory), runParameters)
   })
+  const nestedRoundTripCampaign = oraclePropertyOptions(200, NESTED_ROUND_TRIPS)
   oracleReplayTest(fcTest, NESTED_ROUND_TRIPS).prop(
     [nestedRoundTripArb],
-    oraclePropertyOptions(200, NESTED_ROUND_TRIPS),
+    nestedRoundTripCampaign,
   )(
     `matches the model across generated nested round trips (random)`,
-    randomPredicate(expectHistory),
+    randomPredicate(nestedRoundTripCampaign, expectHistory),
   )
 
   it(`matches the model across generated URL and keyless writes (${FIXED_SEED})`, () => {
-    oracleRoute(`fixed seed`)
-    fc.assert(fc.property(classWriteArb, expectHistory), {
+    const parameters = oracleFixedSeed(FIXED_SEED, {
       numRuns: oracleRuns(200),
-      seed: FIXED_SEED,
     })
+    oracleRoute(oracleRouteOf(parameters))
+    fc.assert(fc.property(classWriteArb, expectHistory), parameters)
   })
+  const classWriteCampaign = oraclePropertyOptions(200, CLASS_WRITES)
   oracleReplayTest(fcTest, CLASS_WRITES).prop(
     [classWriteArb],
-    oraclePropertyOptions(200, CLASS_WRITES),
+    classWriteCampaign,
   )(
     `matches the model across generated URL and keyless writes (random)`,
-    randomPredicate(expectHistory),
+    randomPredicate(classWriteCampaign, expectHistory),
   )
 
   it(`matches the model across generated partial reverts (${FIXED_SEED})`, () => {
-    oracleRoute(`fixed seed`)
-    fc.assert(fc.property(partialRevertArb, expectHistory), {
+    const parameters = oracleFixedSeed(FIXED_SEED, {
       numRuns: oracleRuns(200),
-      seed: FIXED_SEED,
     })
+    oracleRoute(oracleRouteOf(parameters))
+    fc.assert(fc.property(partialRevertArb, expectHistory), parameters)
   })
+  const partialRevertCampaign = oraclePropertyOptions(200, PARTIAL_REVERTS)
   oracleReplayTest(fcTest, PARTIAL_REVERTS).prop(
     [partialRevertArb],
-    oraclePropertyOptions(200, PARTIAL_REVERTS),
+    partialRevertCampaign,
   )(
     `matches the model across generated partial reverts (random)`,
-    randomPredicate(expectHistory),
+    randomPredicate(partialRevertCampaign, expectHistory),
   )
 
   // Positive execution witness: the fixed campaign reaches each operation, a
@@ -1563,18 +1569,19 @@ describe(`draft revert oracle: native mutators mixed with assignments`, () => {
   })
 
   it(`matches the model across generated native histories (${FIXED_SEED})`, () => {
-    oracleRoute(`fixed seed`)
-    fc.assert(fc.property(nativeHistoryArb, expectNativeHistory), {
+    const parameters = oracleFixedSeed(FIXED_SEED, {
       numRuns: oracleRuns(400),
-      seed: FIXED_SEED,
     })
+    oracleRoute(oracleRouteOf(parameters))
+    fc.assert(fc.property(nativeHistoryArb, expectNativeHistory), parameters)
   })
+  const nativeHistoryCampaign = oraclePropertyOptions(400, NATIVE_HISTORIES)
   oracleReplayTest(fcTest, NATIVE_HISTORIES).prop(
     [nativeHistoryArb],
-    oraclePropertyOptions(400, NATIVE_HISTORIES),
+    nativeHistoryCampaign,
   )(
     `matches the model across generated native histories (random)`,
-    randomPredicate(expectNativeHistory),
+    randomPredicate(nativeHistoryCampaign, expectNativeHistory),
   )
 
   // Positive execution witness: the fixed campaign reaches a native write

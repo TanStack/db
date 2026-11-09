@@ -2,8 +2,10 @@ import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { stripVirtualProps } from '../utils.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -794,20 +796,16 @@ declareOracle({
 
 describe(`bucket facade rollback`, () => {
   it(`restores written facades and reads no others (fixed campaign)`, async () => {
-    oracleRoute(`fixed seed`)
     // A repeatable baseline. Seed 2081 is arbitrary.
-    await fc.assert(fc.asyncProperty(history, runHistory), {
-      numRuns: oracleRuns(150),
-      seed: 2081,
-    })
+    const parameters = oracleFixedSeed(2081, { numRuns: oracleRuns(150) })
+    oracleRoute(oracleRouteOf(parameters))
+    await fc.assert(fc.asyncProperty(history, runHistory), parameters)
   })
 
   it(`restores written facades and reads no others (random or replayed)`, async () => {
-    oracleRoute(`random seed`)
-    await fc.assert(
-      fc.asyncProperty(history, runHistory),
-      oraclePropertyOptions(150, PROPERTY),
-    )
+    const campaignParameters = oraclePropertyOptions(150, PROPERTY)
+    oracleRoute(oracleRouteOf(campaignParameters))
+    await fc.assert(fc.asyncProperty(history, runHistory), campaignParameters)
   })
 
   // Fixed history: a flush that reorders a shown row throws. The retried flush must

@@ -50,9 +50,11 @@ import {
 } from '../../db/tests/oracle-failure-fidelity'
 import {
   declareOracle,
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import type { WindowRow } from '../../db/tests/conformance/window-history-oracle'
@@ -838,7 +840,6 @@ describe(`Suspense lifecycle histories`, () => {
             ? oracleReplayTest(it)
             : oracleReplayTest(it, property)
         test(`${scope}/${keyed ? `keyed` : `derived`} retry (${campaign})`, async () => {
-          oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
           const reach = createOracleReach(
             `${property}/${scope}/${keyed}/${campaign}`,
             retryStates,
@@ -847,6 +848,16 @@ describe(`Suspense lifecycle histories`, () => {
           let index = 0
           const fidelity = createOracleFailureFidelity<RetryHistory>()
           try {
+            const parameters =
+              campaign === `fixed`
+                ? oracleFixedSeed(2345, {
+                    numRuns: oracleRuns(24) + retryExamples.length,
+                    examples: retryExamples,
+                  })
+                : oraclePropertyOptions(24, property, {
+                    examples: retryExamples,
+                  })
+            oracleRoute(oracleRouteOf(parameters))
             await fidelity.assert(() =>
               fc.assert(
                 fc.asyncProperty(retryArbitrary, async (history) => {
@@ -855,15 +866,7 @@ describe(`Suspense lifecycle histories`, () => {
                     checkRetry(history, scope, keyed, reach),
                   )
                 }),
-                campaign === `fixed`
-                  ? {
-                      numRuns: oracleRuns(24) + retryExamples.length,
-                      seed: 2345,
-                      examples: retryExamples,
-                    }
-                  : oraclePropertyOptions(24, property, {
-                      examples: retryExamples,
-                    }),
+                parameters,
               ),
             )
             reach.assertReached()
@@ -882,7 +885,6 @@ describe(`Suspense lifecycle histories`, () => {
         ? oracleReplayTest(it)
         : oracleReplayTest(it, property)
     test(`client request replacement (${campaign})`, async () => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(
         `${property}/${campaign}`,
         replacementStates,
@@ -891,6 +893,16 @@ describe(`Suspense lifecycle histories`, () => {
       let index = 0
       const fidelity = createOracleFailureFidelity<ReplacementHistory>()
       try {
+        const parameters =
+          campaign === `fixed`
+            ? oracleFixedSeed(2345, {
+                numRuns: oracleRuns(32) + replacementExamples.length,
+                examples: replacementExamples,
+              })
+            : oraclePropertyOptions(32, property, {
+                examples: replacementExamples,
+              })
+        oracleRoute(oracleRouteOf(parameters))
         await fidelity.assert(() =>
           fc.assert(
             fc.asyncProperty(replacementArbitrary, async (history) => {
@@ -901,15 +913,7 @@ describe(`Suspense lifecycle histories`, () => {
                 checkReplacement(history, reach),
               )
             }),
-            campaign === `fixed`
-              ? {
-                  numRuns: oracleRuns(32) + replacementExamples.length,
-                  seed: 2345,
-                  examples: replacementExamples,
-                }
-              : oraclePropertyOptions(32, property, {
-                  examples: replacementExamples,
-                }),
+            parameters,
           ),
         )
         reach.assertReached()
@@ -929,7 +933,6 @@ describe(`Suspense lifecycle histories`, () => {
           ? oracleReplayTest(it)
           : oracleReplayTest(it, property)
       test(`${scope} preload restart (${campaign})`, async () => {
-        oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
         const reach = createOracleReach(
           `${property}/${scope}/${campaign}`,
           preloadStates,
@@ -938,6 +941,16 @@ describe(`Suspense lifecycle histories`, () => {
         const fidelity = createOracleFailureFidelity<PreloadHistory>()
         let index = 0
         try {
+          const parameters =
+            campaign === `fixed`
+              ? oracleFixedSeed(2345, {
+                  numRuns: oracleRuns(24) + preloadExamples.length,
+                  examples: preloadExamples,
+                })
+              : oraclePropertyOptions(24, property, {
+                  examples: preloadExamples,
+                })
+          oracleRoute(oracleRouteOf(parameters))
           await fidelity.assert(() =>
             fc.assert(
               fc.asyncProperty(preloadArbitrary, async (history) => {
@@ -946,15 +959,7 @@ describe(`Suspense lifecycle histories`, () => {
                   checkPreload(history, scope, reach),
                 )
               }),
-              campaign === `fixed`
-                ? {
-                    numRuns: oracleRuns(24) + preloadExamples.length,
-                    seed: 2345,
-                    examples: preloadExamples,
-                  }
-                : oraclePropertyOptions(24, property, {
-                    examples: preloadExamples,
-                  }),
+              parameters,
             ),
           )
           reach.assertReached()
@@ -1643,13 +1648,17 @@ for (const scope of [`none`, `provider`, `explicit`] as const)
           ? oracleReplayTest(it)
           : oracleReplayTest(it, property)
       test(`co-mounted siblings/${scope}/${keyed}/${campaign}`, async () => {
-        oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
         const reach = createOracleReach(
           `${property}/${scope}/${keyed}/${campaign}`,
           siblingStates,
         )
         const fidelity = createOracleFailureFidelity<SiblingsHistory>()
         try {
+          const parameters =
+            campaign === `fixed`
+              ? oracleFixedSeed(2348, { numRuns: oracleRuns(8) })
+              : oraclePropertyOptions(8, property)
+          oracleRoute(oracleRouteOf(parameters))
           await fidelity.assert(() =>
             fc.assert(
               fc.asyncProperty(siblingsArbitrary, async (history) => {
@@ -1660,9 +1669,7 @@ for (const scope of [`none`, `provider`, `explicit`] as const)
                   )
                 }
               }),
-              campaign === `fixed`
-                ? { numRuns: oracleRuns(8), seed: 2348 }
-                : oraclePropertyOptions(8, property),
+              parameters,
             ),
           )
           reach.assertReached()

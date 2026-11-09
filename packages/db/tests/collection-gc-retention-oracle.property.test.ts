@@ -4,9 +4,11 @@ import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -867,14 +869,15 @@ it.each(
 )(
   `preserves retention across transaction phases and idle delivery (seed %s)`,
   async (seed) => {
-    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
     boundaryReach = createOracleReach(boundaryPropertyName, boundaryStates)
+    const parameters = {
+      ...oraclePropertyOptions(250, boundaryPropertyName),
+      ...(seed === undefined ? {} : oracleFixedSeed(seed)),
+    }
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(boundaryHistoryArbitrary, runBoundaryHistory),
-      {
-        ...oraclePropertyOptions(250, boundaryPropertyName),
-        ...(seed === undefined ? {} : { seed }),
-      },
+      parameters,
     )
     boundaryReach.assertReached()
     console.info(

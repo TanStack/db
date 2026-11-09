@@ -206,8 +206,9 @@ it.each(
 )(
   `preserves $name cancellation (large group $largeGroup, collision $collision)`,
   ({ pair, largeGroup, collision }) => {
-    oracleRoute(`fixed seed`)
     if (collision) vi.spyOn(hashing, `hash`).mockReturnValue(7)
+    const parameters = { seed: 409033, numRuns: 25 }
+    oracleRoute(`fixed seed`)
     fc.assert(
       fc.property(
         fc.integer({ min: 0, max: 254 }),
@@ -265,7 +266,7 @@ it.each(
           expect(live[0]![1]).toBe(1)
         },
       ),
-      { seed: 409033, numRuns: 25 },
+      parameters,
     )
     if (collision) expect(hashing.hash).not.toHaveBeenCalled()
   },
@@ -274,10 +275,11 @@ it.each(
 it.each([true, false])(
   `replaces ordinary rows with File available=%s`,
   (available) => {
-    oracleRoute(`fixed seed`)
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, `File`)
     if (!available) Reflect.deleteProperty(globalThis, `File`)
     try {
+      const parameters = { seed: 409039, numRuns: 25 }
+      oracleRoute(`fixed seed`)
       fc.assert(
         fc.property(fc.integer(), fc.boolean(), (rank, retractFirst) => {
           const graph = new D2()
@@ -307,7 +309,7 @@ it.each([true, false])(
           expect(live[0]![0]).toBe(after)
           expect(live[0]![1]).toBe(1)
         }),
-        { seed: 409039, numRuns: 25 },
+        parameters,
       )
     } finally {
       if (descriptor) Object.defineProperty(globalThis, `File`, descriptor)
@@ -316,8 +318,9 @@ it.each([true, false])(
 )
 
 it(`compares shared subtrees without expanding every path`, () => {
-  oracleRoute(`fixed seed`)
   vi.spyOn(hashing, `hash`).mockReturnValue(7)
+  const campaignParameters = { seed: 409034, numRuns: 25 }
+  oracleRoute(`fixed seed`)
   fc.assert(
     fc.property(fc.integer({ min: 0, max: 20 }), (depth) => {
       let reads = 0
@@ -343,11 +346,12 @@ it(`compares shared subtrees without expanding every path`, () => {
       expect(actual).toEqual([])
       expect(reads).toBe(2)
     }),
-    { seed: 409034, numRuns: 25 },
+    campaignParameters,
   )
 })
 
 it(`short-circuits replacements without hashing unrelated payloads`, () => {
+  const runParameters = { seed: 409035, numRuns: 25 }
   oracleRoute(`fixed seed`)
   fc.assert(
     fc.property(fc.integer({ min: 1, max: 100 }), (count) => {
@@ -366,11 +370,12 @@ it(`short-circuits replacements without hashing unrelated payloads`, () => {
       expect([...topKBatch([new MultiSet(batch)])]).toHaveLength(count * 2)
       expect(reads).toBe(0)
     }),
-    { seed: 409035, numRuns: 25 },
+    runParameters,
   )
 })
 
 it(`cancels long same-key histories with independently allocated values`, () => {
+  const parameters = { seed: 409037, numRuns: 25 }
   oracleRoute(`fixed seed`)
   fc.assert(
     fc.property(fc.integer({ min: 10, max: 150 }), (count) => {
@@ -382,6 +387,6 @@ it(`cancels long same-key histories with independently allocated values`, () => 
         changes.push([[1, make(value)], -1])
       expect([...topKBatch([new MultiSet(changes)])]).toEqual([])
     }),
-    { seed: 409037, numRuns: 25 },
+    parameters,
   )
 })

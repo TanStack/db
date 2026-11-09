@@ -14,6 +14,7 @@ import { runTrace } from '../trace-runner.js'
 import {
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -807,11 +808,7 @@ describe(`layered-query publication oracle`, () => {
         fcTest.prop([changedValueArbitrary], campaign.options)(
           `publishes parent scalar updates through a ${q1Shape} Q1 and ${q2Shape} Q2 (${campaign.name})`,
           async (value) => {
-            oracleRoute(
-              campaign.name.startsWith(`fixed seed`)
-                ? `fixed seed`
-                : `random seed`,
-            )
+            oracleRoute(oracleRouteOf(campaign.options))
             await expectPublicationMatches(
               { type: `parentScalar`, value },
               q1Shape,
@@ -831,11 +828,7 @@ describe(`layered-query publication oracle`, () => {
         )(
           `recovers a ${q1Shape} Q1 and ${q2Shape} Q2 after a child update (${campaign.name})`,
           async (parentValue, childValue) => {
-            oracleRoute(
-              campaign.name.startsWith(`fixed seed`)
-                ? `fixed seed`
-                : `random seed`,
-            )
+            oracleRoute(oracleRouteOf(campaign.options))
             await expectPublicationMatches(
               { type: `parentThenChild`, parentValue, childValue },
               q1Shape,
@@ -852,11 +845,7 @@ describe(`layered-query publication oracle`, () => {
         fcTest.prop([changedValueArbitrary], campaign.options)(
           `publishes optimistic state before and after confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2 (${campaign.name})`,
           async (value) => {
-            oracleRoute(
-              campaign.name.startsWith(`fixed seed`)
-                ? `fixed seed`
-                : `random seed`,
-            )
+            oracleRoute(oracleRouteOf(campaign.options))
             await expectPublicationMatches(
               { type: `optimisticConfirm`, value },
               q1Shape,
@@ -911,9 +900,7 @@ describe(`layered-query publication oracle`, () => {
     fcTest.prop([changedChildValueArbitrary], campaign.options)(
       `publishes child-only scalar updates through both layers (${campaign.name})`,
       async (value) => {
-        oracleRoute(
-          campaign.name.startsWith(`fixed seed`) ? `fixed seed` : `random seed`,
-        )
+        oracleRoute(oracleRouteOf(campaign.options))
         await expectPublicationMatches({ type: `childScalar`, value })
       },
     )
@@ -926,9 +913,7 @@ describe(`layered-query publication oracle`, () => {
     fcTest.prop([fc.constantFrom(20, 30)], campaign.options)(
       `compares route transitions at both query layers (${campaign.name})`,
       async (group) => {
-        oracleRoute(
-          campaign.name.startsWith(`fixed seed`) ? `fixed seed` : `random seed`,
-        )
+        oracleRoute(oracleRouteOf(campaign.options))
         await expectPublicationMatches({ type: `parentRoute`, group })
       },
     )
@@ -949,9 +934,7 @@ describe(`layered-query publication oracle`, () => {
     )(
       `compares atomic parent replacements at both query layers (${campaign.name})`,
       async (row) => {
-        oracleRoute(
-          campaign.name.startsWith(`fixed seed`) ? `fixed seed` : `random seed`,
-        )
+        oracleRoute(oracleRouteOf(campaign.options))
         await expectPublicationMatches({ type: `atomicReplace`, ...row })
       },
     )
@@ -964,9 +947,7 @@ describe(`layered-query publication oracle`, () => {
     fcTest.prop([changedValueArbitrary], campaign.options)(
       `publishes restored state after optimistic rollback (${campaign.name})`,
       async (value) => {
-        oracleRoute(
-          campaign.name.startsWith(`fixed seed`) ? `fixed seed` : `random seed`,
-        )
+        oracleRoute(oracleRouteOf(campaign.options))
         await expectPublicationMatches({
           type: `optimisticRollback`,
           value,

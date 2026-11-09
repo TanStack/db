@@ -8,8 +8,10 @@ import { and, eq } from '../../src/query/builder/functions.js'
 import { PropRef } from '../../src/query/ir.js'
 import { makeComparator } from '../../src/utils/comparison.js'
 import {
+  oracleFixedSeed,
   oracleRandomParameters,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -4566,28 +4568,26 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
-  fcTest.prop([multiOrderScenarioArbitrary], {
+  const multiOrderScenarioFixedSeed = oracleFixedSeed(1663, {
     numRuns: orderedScenarioRuns,
-    seed: 1663,
-  })(
+  })
+  fcTest.prop([multiOrderScenarioArbitrary], multiOrderScenarioFixedSeed)(
     `matches multi-column nullable ordering for a fixed seed`,
     async (scenario) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(multiOrderScenarioFixedSeed))
       await runMultiOrderScenario(scenario)
     },
   )
 
-  fcTest.prop(
-    [multiOrderScenarioArbitrary],
-    oracleRandomParameters(
-      orderedScenarioRuns,
-      replay,
-      `pagination.multi-order`,
-    ),
-  )(
+  const multiOrderScenarioCampaign = oracleRandomParameters(
+    orderedScenarioRuns,
+    replay,
+    `pagination.multi-order`,
+  )
+  fcTest.prop([multiOrderScenarioArbitrary], multiOrderScenarioCampaign)(
     `matches multi-column nullable ordering for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(multiOrderScenarioCampaign))
       await runMultiOrderScenario(scenario)
     },
   )
@@ -4640,28 +4640,32 @@ describe(`pagination recomputation oracle`, () => {
     }
   })
 
-  fcTest.prop([nullableCursorScenarioArbitrary], {
+  const nullableCursorScenarioFixedSeed = oracleFixedSeed(1665, {
     numRuns: transitionScenarioRuns,
-    seed: 1665,
-  })(
+  })
+  fcTest.prop(
+    [nullableCursorScenarioArbitrary],
+    nullableCursorScenarioFixedSeed,
+  )(
     `matches nullable cursor ordering while an async response is pending for a fixed seed`,
     async (scenario) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(nullableCursorScenarioFixedSeed))
       await runNullableCursorScenario(scenario)
     },
   )
 
+  const nullableCursorScenarioCampaign = oracleRandomParameters(
+    transitionScenarioRuns,
+    replay,
+    `pagination.nullable-cursor`,
+  )
   fcTest.prop(
     [nullableCursorScenarioArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.nullable-cursor`,
-    ),
+    nullableCursorScenarioCampaign,
   )(
     `matches nullable cursor ordering while an async response is pending for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(nullableCursorScenarioCampaign))
       await runNullableCursorScenario(scenario)
     },
   )
@@ -5156,13 +5160,16 @@ describe(`pagination recomputation oracle`, () => {
     await runPendingMutationScenario(scenario, `before-response`)
   })
 
-  fcTest.prop([pendingMutationScenarioArbitrary, responseTimingArbitrary], {
+  const pendingMutationScenarioFixedSeed = oracleFixedSeed(1660, {
     numRuns: transitionScenarioRuns,
-    seed: 1660,
-  })(
+  })
+  fcTest.prop(
+    [pendingMutationScenarioArbitrary, responseTimingArbitrary],
+    pendingMutationScenarioFixedSeed,
+  )(
     `matches recomputation when source mutations cross a pending cursor response for a fixed seed`,
     async (scenario, timing) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(pendingMutationScenarioFixedSeed))
       const result = await runPendingMutationScenario(scenario, timing)
       expectPendingMutationRequestWork(result, scenario)
     },
@@ -5199,17 +5206,18 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
+  const pendingMutationScenarioCampaign = oracleRandomParameters(
+    transitionScenarioRuns,
+    replay,
+    `pagination.pending-mutation`,
+  )
   fcTest.prop(
     [pendingMutationScenarioArbitrary, responseTimingArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.pending-mutation`,
-    ),
+    pendingMutationScenarioCampaign,
   )(
     `matches recomputation when source mutations cross a pending cursor response for a random or replayed seed`,
     async (scenario, timing) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(pendingMutationScenarioCampaign))
       const result = await runPendingMutationScenario(scenario, timing)
       expectPendingMutationRequestWork(result, scenario)
     },
@@ -5220,13 +5228,16 @@ describe(`pagination recomputation oracle`, () => {
     await runRejectedCursorRetryAfterMutation()
   })
 
-  fcTest.prop([pendingHistoryScenarioArbitrary], {
+  const pendingHistoryScenarioFixedSeed = oracleFixedSeed(1664, {
     numRuns: transitionScenarioRuns,
-    seed: 1664,
-  })(
+  })
+  fcTest.prop(
+    [pendingHistoryScenarioArbitrary],
+    pendingHistoryScenarioFixedSeed,
+  )(
     `matches recomputation across multi-action pending histories for a fixed seed`,
     async (scenario) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(pendingHistoryScenarioFixedSeed))
       await runPendingHistoryScenario(scenario)
     },
   )
@@ -5259,17 +5270,18 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
+  const pendingHistoryScenarioCampaign = oracleRandomParameters(
+    transitionScenarioRuns,
+    replay,
+    `pagination.pending-history`,
+  )
   fcTest.prop(
     [pendingHistoryScenarioArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.pending-history`,
-    ),
+    pendingHistoryScenarioCampaign,
   )(
     `matches recomputation across multi-action pending histories for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(pendingHistoryScenarioCampaign))
       await runPendingHistoryScenario(scenario)
     },
   )
@@ -5423,99 +5435,91 @@ describe(`pagination recomputation oracle`, () => {
       await runPaginationStateScenario({ ...scenario, ...structure })
     }
 
-    fcTest.prop([scenarioPayloadArbitrary], {
-      numRuns: cellRuns,
-      seed: 16_570 + index,
-    })(`covers ${name} window paths for a fixed seed`, async (scenario) => {
+    fcTest.prop(
+      [scenarioPayloadArbitrary],
+      oracleFixedSeed(16_570 + index, { numRuns: cellRuns }),
+    )(`covers ${name} window paths for a fixed seed`, async (scenario) => {
       oracleRoute(`fixed seed`)
       await runWindowCell(scenario)
     })
-    fcTest.prop(
-      [scenarioPayloadArbitrary],
-      oracleRandomParameters(
-        cellRuns,
-        replay,
-        `pagination.matrix.window-${index}`,
-      ),
-    )(
+    const scenarioPayloadCampaign = oracleRandomParameters(
+      cellRuns,
+      replay,
+      `pagination.matrix.window-${index}`,
+    )
+    fcTest.prop([scenarioPayloadArbitrary], scenarioPayloadCampaign)(
       `covers ${name} window paths for a random or replayed seed [pagination.matrix.window-${index}]`,
       async (scenario) => {
-        oracleRoute(`random seed`)
+        oracleRoute(oracleRouteOf(scenarioPayloadCampaign))
         await runWindowCell(scenario)
       },
     )
 
-    fcTest.prop([stateScenarioPayloadArbitrary], {
-      numRuns: cellRuns,
-      seed: 16_580 + index,
-    })(`covers ${name} state paths for a fixed seed`, async (scenario) => {
+    fcTest.prop(
+      [stateScenarioPayloadArbitrary],
+      oracleFixedSeed(16_580 + index, { numRuns: cellRuns }),
+    )(`covers ${name} state paths for a fixed seed`, async (scenario) => {
       oracleRoute(`fixed seed`)
       await runStateCell(scenario)
     })
-    fcTest.prop(
-      [stateScenarioPayloadArbitrary],
-      oracleRandomParameters(
-        cellRuns,
-        replay,
-        `pagination.matrix.state-${index}`,
-      ),
-    )(
+    const stateScenarioPayloadCampaign = oracleRandomParameters(
+      cellRuns,
+      replay,
+      `pagination.matrix.state-${index}`,
+    )
+    fcTest.prop([stateScenarioPayloadArbitrary], stateScenarioPayloadCampaign)(
       `covers ${name} state paths for a random or replayed seed [pagination.matrix.state-${index}]`,
       async (scenario) => {
-        oracleRoute(`random seed`)
+        oracleRoute(oracleRouteOf(stateScenarioPayloadCampaign))
         await runStateCell(scenario)
       },
     )
   }
 
-  fcTest.prop([scenarioArbitrary], {
+  const scenarioFixedSeed = oracleFixedSeed(1657, {
     numRuns: orderedScenarioRuns,
-    seed: 1657,
-  })(
+  })
+  fcTest.prop([scenarioArbitrary], scenarioFixedSeed)(
     `matches full recomputation across ordered windows for a fixed seed`,
     async (scenario) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(scenarioFixedSeed))
       await runPaginationScenario(scenario)
     },
   )
 
-  fcTest.prop(
-    [scenarioArbitrary],
-    oracleRandomParameters(
-      orderedScenarioRuns,
-      replay,
-      `pagination.ordered-window`,
-    ),
-  )(
+  const scenarioCampaign = oracleRandomParameters(
+    orderedScenarioRuns,
+    replay,
+    `pagination.ordered-window`,
+  )
+  fcTest.prop([scenarioArbitrary], scenarioCampaign)(
     `matches full recomputation across ordered windows for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(scenarioCampaign))
       await runPaginationScenario(scenario)
     },
   )
 
-  fcTest.prop([stateScenarioArbitrary], {
+  const stateScenarioFixedSeed = oracleFixedSeed(1658, {
     numRuns: transitionScenarioRuns,
-    seed: 1658,
-  })(
+  })
+  fcTest.prop([stateScenarioArbitrary], stateScenarioFixedSeed)(
     `matches full recomputation across source and window transitions for a fixed seed`,
     async (scenario) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(stateScenarioFixedSeed))
       await runPaginationStateScenario(scenario)
     },
   )
 
-  fcTest.prop(
-    [stateScenarioArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.window-transition`,
-    ),
-  )(
+  const stateScenarioCampaign = oracleRandomParameters(
+    transitionScenarioRuns,
+    replay,
+    `pagination.window-transition`,
+  )
+  fcTest.prop([stateScenarioArbitrary], stateScenarioCampaign)(
     `matches full recomputation across source and window transitions for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(stateScenarioCampaign))
       await runPaginationStateScenario(scenario)
     },
   )
@@ -6678,28 +6682,26 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
-  fcTest.prop([scenarioArbitrary], {
+  const scenarioFixedSeed2 = oracleFixedSeed(1659, {
     numRuns: transitionScenarioRuns,
-    seed: 1659,
-  })(
+  })
+  fcTest.prop([scenarioArbitrary], scenarioFixedSeed2)(
     `matches full recomputation when exact async cursor loads widen ordered coverage for a fixed seed`,
     async (scenario) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(scenarioFixedSeed2))
       await runOnDemandPaginationScenario(scenario)
     },
   )
 
-  fcTest.prop(
-    [scenarioArbitrary],
-    oracleRandomParameters(
-      transitionScenarioRuns,
-      replay,
-      `pagination.async-cursor`,
-    ),
-  )(
+  const scenarioCampaign2 = oracleRandomParameters(
+    transitionScenarioRuns,
+    replay,
+    `pagination.async-cursor`,
+  )
+  fcTest.prop([scenarioArbitrary], scenarioCampaign2)(
     `matches full recomputation when exact async cursor loads widen ordered coverage for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(scenarioCampaign2))
       await runOnDemandPaginationScenario(scenario)
     },
   )

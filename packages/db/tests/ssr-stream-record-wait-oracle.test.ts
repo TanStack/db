@@ -20,8 +20,10 @@ import { getLiveQueryHash } from '../src/live-query-options.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { expectedSsrStreamRecordOutcome } from './ssr-stream-view-oracle.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { createOracleReach } from './oracle-reach.js'
@@ -224,7 +226,6 @@ async function checkRecordHistory(history: SsrStreamRecordHistory) {
 describe(`SSR stream record lifetime`, () => {
   for (const campaign of [`fixed`, `random`] as const) {
     it(`settles each record demand at its transport checkpoint (${campaign})`, async () => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(`ssr-stream-record`, [
         `missing`,
         `pending`,
@@ -238,6 +239,11 @@ describe(`SSR stream record lifetime`, () => {
         `undefined-cause`,
         `restart-after-cleanup`,
       ])
+      const parameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(2229, { numRuns: oracleRuns(100) })
+          : oraclePropertyOptions(100, `ssr.stream-record-lifetime`)
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(grammar, async (history) => {
           reach.beginHistory()
@@ -249,9 +255,7 @@ describe(`SSR stream record lifetime`, () => {
           if (!history.definedCause) reach.reach(`undefined-cause`)
           if (history.restartAfterCleanup) reach.reach(`restart-after-cleanup`)
         }),
-        campaign === `fixed`
-          ? { numRuns: oracleRuns(100), seed: 2229 }
-          : oraclePropertyOptions(100, `ssr.stream-record-lifetime`),
+        parameters,
       )
       reach.assertReached()
       console.info(

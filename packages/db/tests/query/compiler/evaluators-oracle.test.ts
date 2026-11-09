@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { compileExpression } from '../../../src/query/compiler/evaluators.js'
 import { Func, Value } from '../../../src/query/ir.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../oracle-config.js'
 import { declareOracle } from '../../oracle-declaration.js'
@@ -60,18 +62,17 @@ const likeCalibrationCases: Array<LikeCase> = [
 // The fixed campaign stands aside during a path replay. The random campaign uses
 // the seed of a replay of this property, when TANSTACK_DB_ORACLE_SEED supplies
 // one. This generator has no shrink path, so a path replay only reseeds it.
+// Each campaign's parameters carry its seed and give the test its route.
 const likeOracleCampaigns = [
   {
     name: `fixed`,
     test: oracleReplayTest(it),
-    seed: FIXED_LIKE_ORACLE_SEED,
+    parameters: oracleFixedSeed(FIXED_LIKE_ORACLE_SEED),
   },
   {
     name: `random`,
     test: oracleReplayTest(it, likeProperty),
-    seed:
-      oraclePropertyOptions(10_000, likeProperty).seed ??
-      Math.floor(Math.random() * 0x1_0000_0000),
+    parameters: oraclePropertyOptions(10_000, likeProperty),
   },
 ]
 
@@ -197,7 +198,10 @@ describe(`evaluators`, () => {
           campaign.test(
             `matches the LIKE law in the ${campaign.name} campaign`,
             () => {
-              const { seed } = campaign
+              oracleRoute(oracleRouteOf(campaign.parameters))
+              const seed =
+                campaign.parameters.seed ??
+                Math.floor(Math.random() * 0x1_0000_0000)
               let mismatchCount = 0
               const mismatchSamples: Array<LikeMismatch> = []
               const reach = {

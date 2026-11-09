@@ -237,10 +237,12 @@ import { RequestErrors } from '../src/collection/lifecycle.js'
 import { createDeferred } from '../src/deferred.js'
 import { createOracleReach } from './oracle-reach.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -3378,6 +3380,7 @@ describe(`source failure and health oracle`, () => {
     historyReachStates,
   )
   let historiesRan = false
+  const randomCampaign = oraclePropertyOptions(60, `source-health.history`)
   oracleReplayTest(fcTest, `source-health.history`).prop(
     [
       fc
@@ -3392,11 +3395,11 @@ describe(`source failure and health oracle`, () => {
         ]),
       fc.boolean(),
     ],
-    oraclePropertyOptions(60, `source-health.history`),
+    randomCampaign,
   )(
     `generated histories refine the model`,
     ([shape, steps], directSubscribers) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(randomCampaign))
       historiesRan = true
       historyReach.beginHistory()
       return withDeadline(
@@ -3424,16 +3427,17 @@ describe(`source failure and health oracle`, () => {
       { replaying: oracleReplayRequested() },
     )
     let requiredRan = false
+    const randomCampaign2 = {
+      ...oraclePropertyOptions(6, requiredProperty),
+      ...(seed === undefined ? {} : oracleFixedSeed(seed)),
+    }
     oracleReplayTest(fcTest, requiredProperty).prop(
       [fc.array(stepArb, { maxLength: 12 })],
-      {
-        ...oraclePropertyOptions(6, requiredProperty),
-        ...(seed === undefined ? {} : { seed }),
-      },
+      randomCampaign2,
     )(
       `required histories refine the model (${seed ?? `random`})`,
       async (rest) => {
-        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+        oracleRoute(oracleRouteOf(randomCampaign2))
         requiredRan = true
         historiesRan = true
         for (const prefix of reachPrefixes) {
@@ -5325,6 +5329,9 @@ describe(`on-demand demand grammar`, () => {
   afterAll(() => {
     if (demandHistoriesRan) demandReach.assertReached()
   })
+  const randomCampaign3 = oraclePropertyOptions(60, `source-health.on-demand`, {
+    examples: demandExamples,
+  })
   oracleReplayTest(fcTest, `source-health.on-demand`).prop(
     [
       fc
@@ -5338,13 +5345,11 @@ describe(`on-demand demand grammar`, () => {
         ]),
       fc.boolean(),
     ],
-    oraclePropertyOptions(60, `source-health.on-demand`, {
-      examples: demandExamples,
-    }),
+    randomCampaign3,
   )(
     `generated demand histories refine the model`,
     (steps, directSubscriber) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(randomCampaign3))
       demandHistoriesRan = true
       // fast-check passes an example's input by reference.
       demandReach.beginHistory({
@@ -7352,6 +7357,13 @@ describe(`lazy join demand grammar`, () => {
   afterAll(() => {
     if (lazyHistoriesRan) lazyReach.assertReached()
   })
+  const randomCampaign4 = oraclePropertyOptions(
+    100,
+    `source-health.lazy-demand`,
+    {
+      examples: lazyExamples,
+    },
+  )
   oracleReplayTest(fcTest, `source-health.lazy-demand`).prop(
     [
       fc
@@ -7362,9 +7374,7 @@ describe(`lazy join demand grammar`, () => {
         .map(([prefix, rest]): LazySteps => ({ prefix, rest })),
       lazyOptions,
     ],
-    oraclePropertyOptions(100, `source-health.lazy-demand`, {
-      examples: lazyExamples,
-    }),
+    randomCampaign4,
   )(
     `generated lazy demand histories refine the model`,
     (
@@ -7379,7 +7389,7 @@ describe(`lazy join demand grammar`, () => {
         ending,
       },
     ) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(randomCampaign4))
       const { prefix, rest } = lazySteps
       const steps = [...(prefix?.steps ?? []), ...rest]
       const holdChildReady = prefix?.holdChildReady ?? generatedHoldChildReady
@@ -7445,13 +7455,17 @@ describe(`request error bookkeeping`, () => {
     fc.record({ kind: fc.constant(`fail-again` as const), key }),
     fc.record({ kind: fc.constant(`settle` as const), key }),
   )
+  const randomCampaign5 = oraclePropertyOptions(
+    100,
+    `source-health.request-errors`,
+  )
   oracleReplayTest(fcTest, `source-health.request-errors`).prop(
     [fc.array(step, { maxLength: 12 })],
-    oraclePropertyOptions(100, `source-health.request-errors`),
+    randomCampaign5,
   )(
     `a node shows the latest failure still failing and lists them all`,
     (steps) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(randomCampaign5))
       const tracker = new RequestErrors()
       const failing: Array<{ key: string; cause: Error; order: number }> = []
       let failures = 0

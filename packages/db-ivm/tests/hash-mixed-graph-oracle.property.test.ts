@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -279,6 +281,7 @@ describe(`mixed-carrier structural graph laws`, () => {
         ? () => 0
         : hash
     const property = mixedGraphProperty(hashValue, () => checked++)
+    oracleRoute(oracleRouteOf(parameters))
     fc.assert(property, parameters)
     // A green normal campaign must reach the graph check for every run.
     if (parameters.path === undefined) expect(checked).toBe(parameters.numRuns)
@@ -288,14 +291,14 @@ describe(`mixed-carrier structural graph laws`, () => {
   oracleReplayTest(it)(
     `matches independent labels and mixed-carrier topology (fixed seed 205203)`,
     () => {
-      oracleRoute(`fixed seed`)
-      expectMixedGraphCampaign({ numRuns: oracleRuns(150), seed: 205203 })
+      expectMixedGraphCampaign(
+        oracleFixedSeed(205203, { numRuns: oracleRuns(150) }),
+      )
     },
   )
   oracleReplayTest(it, mixedGraphPropertyId)(
     `matches independent labels and mixed-carrier topology (random)`,
     () => {
-      oracleRoute(`random seed`)
       expectMixedGraphCampaign(oraclePropertyOptions(150, mixedGraphPropertyId))
     },
   )

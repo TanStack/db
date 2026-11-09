@@ -8,8 +8,10 @@ import { groupedTopKWithFractionalIndex } from '../../src/operators/groupedTopKW
 import { join, map, output } from '../../src/operators/index.js'
 import { assertOnlyKeysAffected } from '../test-utils.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../../db/tests/oracle-config.js'
 import { declareOracle } from '../../../db/tests/oracle-declaration'
@@ -105,7 +107,23 @@ describe.each([
     it.each([409036, undefined])(
       `preserves cyclic payloads through replacements and fresh transients (seed %s)`,
       (seed) => {
-        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+        const parameters = {
+          ...(seed === undefined
+            ? oraclePropertyOptions(30, cyclicPayloads)
+            : oracleFixedSeed(seed, { numRuns: oracleRuns(30) })),
+          examples: [
+            [
+              false,
+              1,
+              [
+                { key: 1, value: 2, additionFirst: true },
+                { key: 1, value: null, additionFirst: false },
+                { key: 1, value: 3, additionFirst: false },
+              ],
+            ],
+          ],
+        }
+        oracleRoute(oracleRouteOf(parameters))
         fc.assert(
           fc.property(
             fc.boolean(),
@@ -185,22 +203,7 @@ describe.each([
               }
             },
           ),
-          {
-            ...(seed === undefined
-              ? oraclePropertyOptions(30, cyclicPayloads)
-              : { seed, numRuns: oracleRuns(30) }),
-            examples: [
-              [
-                false,
-                1,
-                [
-                  { key: 1, value: 2, additionFirst: true },
-                  { key: 1, value: null, additionFirst: false },
-                  { key: 1, value: 3, additionFirst: false },
-                ],
-              ],
-            ],
-          },
+          parameters,
         )
       },
     )
@@ -208,7 +211,21 @@ describe.each([
     it.each([409032, undefined])(
       `matches outer-join replacements (seed %s)`,
       (seed) => {
-        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+        const campaignParameters = {
+          ...(seed === undefined
+            ? oraclePropertyOptions(100, outerJoinReplacements)
+            : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
+          examples: [
+            [
+              1,
+              [
+                { key: 1, value: `a` },
+                { key: 1, value: null },
+              ],
+            ],
+          ],
+        }
+        oracleRoute(oracleRouteOf(campaignParameters))
         fc.assert(
           fc.property(
             fc.integer({ min: 0, max: 4 }),
@@ -269,20 +286,7 @@ describe.each([
               }
             },
           ),
-          {
-            ...(seed === undefined
-              ? oraclePropertyOptions(100, outerJoinReplacements)
-              : { seed, numRuns: oracleRuns(100) }),
-            examples: [
-              [
-                1,
-                [
-                  { key: 1, value: `a` },
-                  { key: 1, value: null },
-                ],
-              ],
-            ],
-          },
+          campaignParameters,
         )
       },
     )
@@ -390,7 +394,7 @@ describe.each([
             },
           ),
           {
-            seed,
+            ...(seed === undefined ? {} : oracleFixedSeed(seed)),
             numRuns: oracleRuns(100),
             examples: [
               [

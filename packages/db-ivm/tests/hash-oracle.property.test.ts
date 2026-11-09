@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -97,12 +99,14 @@ function hashProp<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
   return (name: string, check: (...values: Ts) => void): void => {
     const property = fc.property(...arbitraries, check)
     oracleReplayTest(it)(`${name} (fixed)`, () => {
-      oracleRoute(`fixed seed`)
-      fc.assert(property, { numRuns: oracleRuns(100), seed: 1657021 })
+      const parameters = oracleFixedSeed(1657021, { numRuns: oracleRuns(100) })
+      oracleRoute(oracleRouteOf(parameters))
+      fc.assert(property, parameters)
     })
     oracleReplayTest(it, valueProperty)(`${name} (random)`, () => {
-      oracleRoute(`random seed`)
-      fc.assert(property, oraclePropertyOptions(100, valueProperty))
+      const campaignParameters = oraclePropertyOptions(100, valueProperty)
+      oracleRoute(oracleRouteOf(campaignParameters))
+      fc.assert(property, campaignParameters)
     })
   }
 }

@@ -4,9 +4,11 @@ import { createCollection } from '../src/collection/index.js'
 import { PropRef, Value } from '../src/query/ir.js'
 import { buildCursor } from '../src/utils/cursor.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -255,21 +257,28 @@ describe(`buildCursor properties`, () => {
     },
   )
 
-  fixedCampaign.prop([scalarCursorArbitrary], {
+  const scalarCursorFixedSeed = oracleFixedSeed(fixedSeed, {
     numRuns: oracleRuns(400),
-    seed: fixedSeed,
-  })(`scalar continuation agrees with order for a fixed seed`, (...args) => {
-    oracleRoute(`fixed seed`)
-    return assertScalarCursor(...args)
   })
+  fixedCampaign.prop([scalarCursorArbitrary], scalarCursorFixedSeed)(
+    `scalar continuation agrees with order for a fixed seed`,
+    (...args) => {
+      oracleRoute(oracleRouteOf(scalarCursorFixedSeed))
+      return assertScalarCursor(...args)
+    },
+  )
 
+  const scalarCursorCampaign = oraclePropertyOptions(
+    400,
+    `cursor.scalar-continuation`,
+  )
   randomCampaign(`cursor.scalar-continuation`).prop(
     [scalarCursorArbitrary],
-    oraclePropertyOptions(400, `cursor.scalar-continuation`),
+    scalarCursorCampaign,
   )(
     `scalar continuation agrees with order for a random or replayed seed`,
     (...args) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(scalarCursorCampaign))
       return assertScalarCursor(...args)
     },
   )
@@ -367,106 +376,126 @@ describe(`buildCursor properties`, () => {
     ).toThrow()
   })
 
-  fixedCampaign.prop([exactCursorArbitrary], {
+  const exactCursorFixedSeed = oracleFixedSeed(fixedSeed, {
     numRuns: oracleRuns(300),
-    seed: fixedSeed,
-  })(`restricts exact cursor width for a fixed seed`, (...args) => {
-    oracleRoute(`fixed seed`)
-    return assertCursorWidth(...args)
   })
+  fixedCampaign.prop([exactCursorArbitrary], exactCursorFixedSeed)(
+    `restricts exact cursor width for a fixed seed`,
+    (...args) => {
+      oracleRoute(oracleRouteOf(exactCursorFixedSeed))
+      return assertCursorWidth(...args)
+    },
+  )
 
+  const exactCursorCampaign = oraclePropertyOptions(300, `cursor.exact-width`)
   randomCampaign(`cursor.exact-width`).prop(
     [exactCursorArbitrary],
-    oraclePropertyOptions(300, `cursor.exact-width`),
+    exactCursorCampaign,
   )(`restricts exact cursor width for a random or replayed seed`, (...args) => {
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(exactCursorCampaign))
     return assertCursorWidth(...args)
   })
 
-  fixedCampaign.prop([exactCursorArbitrary], {
+  const exactCursorFixedSeed2 = oracleFixedSeed(fixedSeed, {
     numRuns: oracleRuns(300),
-    seed: fixedSeed,
-  })(
+  })
+  fixedCampaign.prop([exactCursorArbitrary], exactCursorFixedSeed2)(
     `preserves exact-width nullable local tuple order for a fixed seed`,
     (...args) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(exactCursorFixedSeed2))
       return assertLocalTupleOrder(...args)
     },
   )
 
+  const exactCursorCampaign2 = oraclePropertyOptions(
+    300,
+    `cursor.exact-local-order`,
+  )
   randomCampaign(`cursor.exact-local-order`).prop(
     [exactCursorArbitrary],
-    oraclePropertyOptions(300, `cursor.exact-local-order`),
+    exactCursorCampaign2,
   )(
     `preserves exact-width nullable local tuple order for a random or replayed seed`,
     (...args) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(exactCursorCampaign2))
       return assertLocalTupleOrder(...args)
     },
   )
 
-  fixedCampaign.prop([partialCursorArbitrary], {
+  const partialCursorFixedSeed = oracleFixedSeed(fixedSeed, {
     numRuns: oracleRuns(200),
-    seed: fixedSeed,
-  })(
+  })
+  fixedCampaign.prop([partialCursorArbitrary], partialCursorFixedSeed)(
     `uses one leading boundary value and rejects other mismatched widths for a fixed seed`,
     (...args) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(partialCursorFixedSeed))
       return assertCursorWidth(...args)
     },
   )
 
+  const partialCursorCampaign = oraclePropertyOptions(
+    200,
+    `cursor.partial-width`,
+  )
   randomCampaign(`cursor.partial-width`).prop(
     [partialCursorArbitrary],
-    oraclePropertyOptions(200, `cursor.partial-width`),
+    partialCursorCampaign,
   )(
     `uses one leading boundary value and rejects other mismatched widths for a random or replayed seed`,
     (...args) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(partialCursorCampaign))
       return assertCursorWidth(...args)
     },
   )
 
-  fixedCampaign.prop([partialCursorArbitrary], {
+  const partialCursorFixedSeed2 = oracleFixedSeed(fixedSeed, {
     numRuns: oracleRuns(200),
-    seed: fixedSeed,
-  })(
+  })
+  fixedCampaign.prop([partialCursorArbitrary], partialCursorFixedSeed2)(
     `preserves partial-width nullable local tuple order for a fixed seed`,
     (...args) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(partialCursorFixedSeed2))
       return assertLocalTupleOrder(...args)
     },
   )
 
+  const partialCursorCampaign2 = oraclePropertyOptions(
+    200,
+    `cursor.partial-local-order`,
+  )
   randomCampaign(`cursor.partial-local-order`).prop(
     [partialCursorArbitrary],
-    oraclePropertyOptions(200, `cursor.partial-local-order`),
+    partialCursorCampaign2,
   )(
     `preserves partial-width nullable local tuple order for a random or replayed seed`,
     (...args) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(partialCursorCampaign2))
       return assertLocalTupleOrder(...args)
     },
   )
 
-  fixedCampaign.prop([exactCursorArbitrary], {
+  const exactCursorFixedSeed3 = oracleFixedSeed(fixedSeed, {
     numRuns: oracleRuns(100),
-    seed: fixedSeed,
-  })(
+  })
+  fixedCampaign.prop([exactCursorArbitrary], exactCursorFixedSeed3)(
     `repeats the same cursor or unsupported-width error for a fixed seed`,
     (...args) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(exactCursorFixedSeed3))
       return assertRepeatedCursor(...args)
     },
   )
 
+  const exactCursorCampaign3 = oraclePropertyOptions(
+    100,
+    `cursor.repeat-construction`,
+  )
   randomCampaign(`cursor.repeat-construction`).prop(
     [exactCursorArbitrary],
-    oraclePropertyOptions(100, `cursor.repeat-construction`),
+    exactCursorCampaign3,
   )(
     `repeats the same cursor or unsupported-width error for a random or replayed seed`,
     (...args) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(exactCursorCampaign3))
       return assertRepeatedCursor(...args)
     },
   )

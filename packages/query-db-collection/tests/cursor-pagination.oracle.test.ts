@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   differs,
   oracleProperty,
+  oracleRouteOf,
   pass,
 } from '../../db/tests/oracle-property.js'
 import { createDeferred } from '../../db/src/deferred.js'
@@ -77,10 +78,9 @@ async function assertCursorProperty<Ts>(
   if (replay.replayPath !== undefined && replay.replayProperty !== name) return
   const options = oraclePropertyOptions(runs, name)
   if (replay.campaignSeed === undefined) {
-    oracleRoute(`fixed seed`)
     await fc.assert(property, { ...options, seed: fixedSeed })
   }
-  oracleRoute(`random seed`)
+  oracleRoute(oracleRouteOf(options))
   await fc.assert(property, options)
 }
 

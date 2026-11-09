@@ -290,12 +290,49 @@ describe(`Electric predicate compiler semantics`, () => {
   })
 
   it(`matches PostgreSQL over finite row worlds`, async () => {
-    oracleRoute(`fixed seed`)
     let executedCells = 0
     const reached = new Set<string>()
     const version = await client.query<{ server_version: string }>(
       `SHOW server_version`,
     )
+    const parameters = {
+      seed: 1814,
+      numRuns: 50,
+      examples: [
+        ...([`eq`, `in`, `isNull`] as const).map(
+          (op): [Array<Row>, Predicate] => [
+            [
+              { id: 1, count: 4, label: null, enabled: true },
+              { id: 2, count: 2, label: `a`, enabled: false },
+              { id: 3, count: null, label: `O'Reilly`, enabled: null },
+            ],
+            {
+              type: `test`,
+              op,
+              expected: true,
+              both: true,
+              value:
+                op === `in`
+                  ? {
+                      type: `not`,
+                      value: {
+                        type: `compare`,
+                        op: `eq`,
+                        column: `enabled`,
+                        value: true,
+                      },
+                    }
+                  : { type: `compare`, op: `gt`, column: `count`, value: 3 },
+            },
+          ],
+        ),
+        [
+          [{ id: 1, count: 0, label: `O'Reilly`, enabled: null }],
+          { type: `compare`, op: `eq`, column: `label`, value: `O'Reilly` },
+        ],
+      ],
+    }
+    oracleRoute(`fixed seed`)
     await fc.assert(
       fc.asyncProperty(
         rows,
@@ -328,45 +365,7 @@ describe(`Electric predicate compiler semantics`, () => {
           executedCells++
         },
       ),
-      {
-        seed: 1814,
-        numRuns: 50,
-        // Compound booleans are values too: cross comparison, membership, and
-        // null tests, including NOT with both possible membership values.
-        examples: [
-          ...([`eq`, `in`, `isNull`] as const).map(
-            (op): [Array<Row>, Predicate] => [
-              [
-                { id: 1, count: 4, label: null, enabled: true },
-                { id: 2, count: 2, label: `a`, enabled: false },
-                { id: 3, count: null, label: `O'Reilly`, enabled: null },
-              ],
-              {
-                type: `test`,
-                op,
-                expected: true,
-                both: true,
-                value:
-                  op === `in`
-                    ? {
-                        type: `not`,
-                        value: {
-                          type: `compare`,
-                          op: `eq`,
-                          column: `enabled`,
-                          value: true,
-                        },
-                      }
-                    : { type: `compare`, op: `gt`, column: `count`, value: 3 },
-              },
-            ],
-          ),
-          [
-            [{ id: 1, count: 0, label: `O'Reilly`, enabled: null }],
-            { type: `compare`, op: `eq`, column: `label`, value: `O'Reilly` },
-          ],
-        ],
-      },
+      parameters,
     )
     expect(executedCells).toBe(50)
     expect([...reached].sort()).toEqual(

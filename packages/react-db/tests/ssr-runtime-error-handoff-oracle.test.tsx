@@ -25,10 +25,12 @@ import {
   ssrRuntimeErrorHistoryArbitrary,
 } from '../../db/tests/ssr-snapshot-admission-oracle'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { createOracleReach } from '../../db/tests/oracle-reach'
@@ -309,19 +311,20 @@ describe(`runtime errors across SSR hydration`, () => {
         },
       )
     const runCampaign = async (campaign: `fixed` | `random`) => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = runtimeReach(hook)
       try {
+        const parameters = {
+          ...(campaign === `fixed`
+            ? oracleFixedSeed(2229, { numRuns: oracleRuns(64) })
+            : oraclePropertyOptions(64, runtimeProperties[hook])),
+          examples: ssrRuntimeErrorExamples.map((history) => [history]),
+        }
+        oracleRoute(oracleRouteOf(parameters))
         await fc.assert(
           fc.asyncProperty(ssrRuntimeErrorHistoryArbitrary, (history) =>
             checkRuntimeHistory(hook, history, reach),
           ),
-          {
-            ...(campaign === `fixed`
-              ? { numRuns: oracleRuns(64), seed: 2229 }
-              : oraclePropertyOptions(64, runtimeProperties[hook])),
-            examples: ssrRuntimeErrorExamples.map((history) => [history]),
-          },
+          parameters,
         )
         reach.assertReached()
       } finally {

@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { createDeferred } from '../src/deferred.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -106,7 +108,11 @@ describe(`Optimistic request outcome histories`, () => {
   it.each([851203, undefined])(
     `varies failed request and surviving peer histories, seed=%s`,
     async (seed) => {
-      oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+      const parameters =
+        seed === undefined
+          ? oraclePropertyOptions(100, `collection-state.optimistic-outcomes`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.record({
@@ -120,9 +126,7 @@ describe(`Optimistic request outcome histories`, () => {
           }),
           runOutcomeScenario,
         ),
-        seed === undefined
-          ? oraclePropertyOptions(100, `collection-state.optimistic-outcomes`)
-          : { seed, numRuns: oracleRuns(100) },
+        parameters,
       )
     },
   )

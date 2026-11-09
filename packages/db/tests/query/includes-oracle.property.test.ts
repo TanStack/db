@@ -15,10 +15,12 @@ import {
   withOracleCleanup,
 } from '../utils.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplaySkips,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -224,7 +226,10 @@ function generatedCampaigns(runs: number, property: string, fixedSeed: number) {
   }
 
   return [
-    { label: `fixed`, options: { numRuns: oracleRuns(runs), seed: fixedSeed } },
+    {
+      label: `fixed`,
+      options: oracleFixedSeed(fixedSeed, { numRuns: oracleRuns(runs) }),
+    },
     { label: `random`, options: oraclePropertyOptions(runs, property) },
   ]
 }
@@ -3857,7 +3862,7 @@ describe(`includes recompute oracle`, () => {
       fcTest.prop([arbitrary], options)(
         `matches recomputation for independent ${shape} relationship targets [${property}, ${label}]`,
         async (scenario) => {
-          oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+          oracleRoute(oracleRouteOf(options))
           expectEveryRouteTransitionVisible(scenario)
           await expectFullRowBatchScenarioMatches(scenario)
         },
@@ -3876,7 +3881,7 @@ describe(`includes recompute oracle`, () => {
       fcTest.prop([arbitrary], options)(
         `matches recomputation for the ${history} route destination history [${property}, ${label}]`,
         async (scenario) => {
-          oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+          oracleRoute(oracleRouteOf(options))
           expectEveryRouteTransitionVisible(scenario)
           await expectFullRowBatchScenarioMatches(scenario)
         },
@@ -4005,7 +4010,7 @@ describe(`includes recompute oracle`, () => {
         fcTest.prop([retiredArbitrary], options)(
           `reuses a retired route at depth ${depth}, branch ${sourceBranch} [${retiredProperty}, ${label}]`,
           (...args: Parameters<typeof expectHistoryScenarioPairMatches>) => {
-            oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+            oracleRoute(oracleRouteOf(options))
             return expectHistoryScenarioPairMatches(...args)
           },
         )
@@ -4025,7 +4030,7 @@ describe(`includes recompute oracle`, () => {
         fcTest.prop([intraBatchArbitrary], options)(
           `handles intra-batch rekey then retired-route reuse at depth ${depth}, branch ${sourceBranch} [${intraBatchProperty}, ${label}]`,
           (...args: Parameters<typeof expectHistoryScenarioPairMatches>) => {
-            oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+            oracleRoute(oracleRouteOf(options))
             return expectHistoryScenarioPairMatches(...args)
           },
         )
@@ -4062,7 +4067,7 @@ describe(`includes recompute oracle`, () => {
           fcTest.prop([arbitrary], options)(
             `matches forward/reverse delivery mirrors when replacing a moved child at depth ${depth}, level ${targetLevel}, source ${sourceBranch} [${property}, ${label}]`,
             async (scenarios) => {
-              oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+              oracleRoute(oracleRouteOf(options))
               for (const deliveryOrder of branchDeliveryOrders) {
                 await expectHistoryScenarioPairMatches(scenarios[deliveryOrder])
               }
@@ -4091,7 +4096,7 @@ describe(`includes recompute oracle`, () => {
           fcTest.prop([relationshipBatchFixtureArbitrary], options)(
             `matches the split/atomic replacement matrix for ${publicId} public id, ${route} route, ${ancestorUpdate} [${property}, ${label}]`,
             async (fixture) => {
-              oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+              oracleRoute(oracleRouteOf(options))
               const cells = createRelationshipBatchShapeMatrix(
                 fixture,
                 publicId,
@@ -4141,7 +4146,7 @@ describe(`includes recompute oracle`, () => {
     fcTest.prop(flatMaterializationArbitraries, options)(
       `matches recomputation for flat materializations [${flatMaterializationProperty}, ${label}]`,
       (kind, scenario) => {
-        oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+        oracleRoute(oracleRouteOf(options))
         return expectFlatMaterializationScenarioMatches(kind, scenario)
       },
     )
@@ -4158,7 +4163,7 @@ describe(`includes recompute oracle`, () => {
       fcTest.prop([arbitrary], options)(
         `matches recomputation for visible multi-row batches at depth ${depth} [${property}, ${label}]`,
         (...args: Parameters<typeof expectFullRowBatchScenarioMatches>) => {
-          oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+          oracleRoute(oracleRouteOf(options))
           return expectFullRowBatchScenarioMatches(...args)
         },
       )
@@ -4184,7 +4189,7 @@ describe(`includes recompute oracle`, () => {
           fcTest.prop([visibleArbitrary], options)(
             `matches recomputation for a visible ${transition} at depth ${depth}, level ${targetLevel} [${visibleProperty}, ${label}]`,
             async (scenarios) => {
-              oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+              oracleRoute(oracleRouteOf(options))
               for (const scenario of [
                 scenarios.transitionOnly,
                 scenarios.stateful,
@@ -4241,7 +4246,7 @@ describe(`includes recompute oracle`, () => {
             fcTest.prop([arbitrary], options)(
               `matches recomputation for ${firstTransition} → ${secondTransition} histories at depth ${depth}, branch ${sourceBranch} [${property}, ${label}]`,
               async (scenarios) => {
-                oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+                oracleRoute(oracleRouteOf(options))
                 for (const scenario of scenarios) {
                   expectEveryHistoryStepVisible(scenario)
                   await expectFullRowBatchScenarioMatches(scenario)
@@ -4371,7 +4376,7 @@ describe(`includes recompute oracle`, () => {
     fcTest.prop([scenarioArbitrary], options)(
       `matches naive recomputation after every incremental change [${label}]`,
       (...args: Parameters<typeof expectScenarioMatches>) => {
-        oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+        oracleRoute(oracleRouteOf(options))
         return expectScenarioMatches(...args)
       },
     )
@@ -4388,7 +4393,7 @@ describe(`includes recompute oracle`, () => {
     fcTest.prop([distinctMaterializationArbitrary], options)(
       `matches recomputation for nested scalar materialization [${label}]`,
       (...args: Parameters<typeof expectMaterializeScenarioMatches>) => {
-        oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+        oracleRoute(oracleRouteOf(options))
         return expectMaterializeScenarioMatches(...args)
       },
     )
@@ -4426,7 +4431,7 @@ describe(`includes recompute oracle`, () => {
     fcTest.prop(alphaArbitraries, options)(
       `is unchanged by alpha-renaming, sibling declaration order, or an unrelated sibling [${label}]`,
       async (rootRows, childRows) => {
-        oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+        oracleRoute(oracleRouteOf(options))
         const roots = createControlledCollection<RootRow>(
           `metamorphic-roots`,
           rootRows,
@@ -4551,7 +4556,7 @@ describe(`includes recompute oracle`, () => {
     fcTest.prop([confirmedValueArbitrary], options)(
       `optimistic updates converge to confirmed-only state [${label}]`,
       async (confirmedValue) => {
-        oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+        oracleRoute(oracleRouteOf(options))
         const roots = createControlledCollection<RootRow>(`convergence-roots`, [
           { id: 1, group: 1, value: 0, position: 0 },
         ])
@@ -4990,7 +4995,7 @@ describe(`includes alpha-renaming across lexical scopes`, () => {
     fcTest.prop([scopedScenarioArbitrary], options)(
       `is unchanged when lexical scopes reuse alias names [${label}]`,
       (scenario) => {
-        oracleRoute(label === `fixed` ? `fixed seed` : `random seed`)
+        oracleRoute(oracleRouteOf(options))
         return expectScopedAlphaRenamingHolds(scenario)
       },
       // Each run builds four live queries; scale with the run budget.
@@ -5028,12 +5033,12 @@ for (const campaign of generatedCampaigns(
     fcTest(
       `preserves colliding active buckets ${form} (${campaign.label})`,
       async () => {
-        oracleRoute(campaign.label === `fixed` ? `fixed seed` : `random seed`)
         const groups = collidingRouteGroups()
         const reach = createOracleReach(
           `includes.bucket-collisions`,
           DISTINCT_REACH_STATES,
         )
+        oracleRoute(oracleRouteOf(campaign.options))
         await fc.assert(
           fc.asyncProperty(distinctHistory, async (worlds) => {
             reach.beginHistory()

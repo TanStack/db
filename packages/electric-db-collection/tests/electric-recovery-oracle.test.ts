@@ -5,8 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -896,27 +898,25 @@ describe(`persisted Electric recovery laws`, () => {
     )
   })
 
-  fcTest.prop([publicationHistoryArbitrary], {
-    seed: 1659,
+  const publicationHistoryFixedSeed = oracleFixedSeed(1659, {
     numRuns: oracleRuns(20),
-  })(
+  })
+  fcTest.prop([publicationHistoryArbitrary], publicationHistoryFixedSeed)(
     `independent persistence publications and stream deltas agree with complete-row state (fixed)`,
     (commands) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(publicationHistoryFixedSeed))
       return assertPublicationHistory(commands)
     },
   )
 
-  fcTest.prop(
-    [publicationHistoryArbitrary],
-    oraclePropertyOptions(
-      20,
-      `electric-recovery.publication-stream-convergence`,
-    ),
-  )(
+  const publicationHistoryCampaign = oraclePropertyOptions(
+    20,
+    `electric-recovery.publication-stream-convergence`,
+  )
+  fcTest.prop([publicationHistoryArbitrary], publicationHistoryCampaign)(
     `independent persistence publications and stream deltas agree with complete-row state (random or replayed)`,
     (commands) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(publicationHistoryCampaign))
       return assertPublicationHistory(commands)
     },
   )

@@ -36,9 +36,11 @@ import {
 } from '../../db/tests/oracle-failure-fidelity'
 import {
   declareOracle,
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import type { InitialQueryBuilder } from '@tanstack/db'
@@ -282,7 +284,6 @@ describe(`window changes at React commit`, () => {
                   ? oracleReplayTest(it)
                   : oracleReplayTest(it, property)
               test(`${suspense ? `Suspense` : `ordinary`}/${scope}/${remote ? `on-demand` : `eager`}/${keyed ? `keyed` : `derived`}/${move}/${campaign}`, async () => {
-                oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
                 const reach = createOracleReach(
                   `${property}/${suspense}/${scope}/${remote}/${keyed}/${move}/${campaign}`,
                   states,
@@ -308,19 +309,18 @@ describe(`window changes at React commit`, () => {
                   },
                 )
                 try {
+                  const parameters =
+                    campaign === `fixed`
+                      ? oracleFixedSeed(2291, {
+                          numRuns: oracleRuns(6) + examples.length,
+                          examples: [...examples].map(([value]) => [value]),
+                        })
+                      : oraclePropertyOptions(6, property, {
+                          examples: [...examples].map(([value]) => [value]),
+                        })
+                  oracleRoute(oracleRouteOf(parameters))
                   await fidelity.assert(() =>
-                    fc.assert(
-                      propertyUnderTest,
-                      campaign === `fixed`
-                        ? {
-                            numRuns: oracleRuns(6) + examples.length,
-                            seed: 2291,
-                            examples: [...examples].map(([value]) => [value]),
-                          }
-                        : oraclePropertyOptions(6, property, {
-                            examples: [...examples].map(([value]) => [value]),
-                          }),
-                    ),
+                    fc.assert(propertyUnderTest, parameters),
                   )
                 } finally {
                   console.info(
@@ -608,7 +608,6 @@ for (const client of [false, true])
               ? oracleReplayTest(it)
               : oracleReplayTest(it, property)
           test(`retry ownership/${client ? `client` : `unscoped`}/${keyed ? `keyed` : `derived`}/${simultaneous ? `co-ready` : `borrower-first`}/${order}/${campaign}`, async () => {
-            oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
             const reach = createOracleReach(
               `${property}/${client}/${keyed}/${simultaneous}/${order}/${campaign}`,
               retryStates.filter(
@@ -623,6 +622,16 @@ for (const client of [false, true])
             let index = 0
             const fidelity = createOracleFailureFidelity<RenderHistory>()
             try {
+              const parameters =
+                campaign === `fixed`
+                  ? oracleFixedSeed(2345, {
+                      numRuns: oracleRuns(6) + examples.length,
+                      examples: [...examples].map(([value]) => [value]),
+                    })
+                  : oraclePropertyOptions(6, property, {
+                      examples: [...examples].map(([value]) => [value]),
+                    })
+              oracleRoute(oracleRouteOf(parameters))
               await fidelity.assert(() =>
                 fc.assert(
                   fc.asyncProperty(renderHistoryArbitrary, async (history) => {
@@ -638,15 +647,7 @@ for (const client of [false, true])
                       ),
                     )
                   }),
-                  campaign === `fixed`
-                    ? {
-                        numRuns: oracleRuns(6) + examples.length,
-                        seed: 2345,
-                        examples: [...examples].map(([value]) => [value]),
-                      }
-                    : oraclePropertyOptions(6, property, {
-                        examples: [...examples].map(([value]) => [value]),
-                      }),
+                  parameters,
                 ),
               )
             } finally {

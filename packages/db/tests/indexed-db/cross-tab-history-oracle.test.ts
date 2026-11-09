@@ -23,6 +23,7 @@ import {
   oracleReplayRequested,
   oracleReplaySkips,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration'
@@ -107,11 +108,9 @@ it.skipIf(oracleReplayRequested())(
 it.skipIf(oracleReplaySkips(crossTabProperty))(
   'refines independent per-Collection snapshots with fresh histories',
   () => {
-    oracleRoute(`random seed`)
-    const { numRuns, seed, path } = oraclePropertyOptions(
-      runs,
-      crossTabProperty,
-    )
+    const parameters = oraclePropertyOptions(runs, crossTabProperty)
+    oracleRoute(oracleRouteOf(parameters))
+    const { numRuns, seed, path } = parameters
     return campaign(numRuns, seed, path)
   },
   120_000,
@@ -302,13 +301,14 @@ it('rejects wrong raw event keys before folding including duplicate malformed in
 })
 
 it('replays only the selected history after the original failure is repaired', async () => {
-  oracleRoute(`fixed seed`)
   // This shrink path has a later sibling. fast-check check() continues into
   // that sibling when the selected counterexample passes, despite numRuns: 1.
   const arbitrary = fc.integer({ min: 0, max: 100 })
+  const parameters = { seed: 11792027, numRuns: 30 }
+  oracleRoute(`fixed seed`)
   const original = fc.check(
     fc.property(arbitrary, (value) => value < 10),
-    { seed: 11792027, numRuns: 30 },
+    parameters,
   )
   expect(original.counterexample).toEqual([10])
   expect(original.counterexamplePath).toBe('0:1:0:0:1')

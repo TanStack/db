@@ -1,7 +1,13 @@
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
 import { CleanupQueue } from '../src/collection/cleanup-queue'
-import { oraclePropertyOptions, oracleRoute, oracleRuns } from './oracle-config'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from './oracle-config'
 import { declareOracle } from './oracle-declaration'
 import { resetCleanupQueue } from './utils'
 
@@ -257,63 +263,64 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
 it.each([20260913, undefined])(
   `obeys appointment histories (seed %s)`,
   async (seed) => {
-    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+    const parameters = {
+      ...(seed === undefined
+        ? oraclePropertyOptions(100, `cleanup-queue.history`)
+        : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
+      examples: [
+        [
+          [
+            { kind: `schedule`, key: 0, delay: 10, throws: false },
+            { kind: `stepWallClock`, offset: -1000 },
+            // At 9 the callback is early; at 10 it is due.
+            { kind: `advance`, elapsed: 9 },
+            { kind: `advance`, elapsed: 1 },
+          ],
+        ],
+        [
+          [
+            { kind: `schedule`, key: 0, delay: 10, throws: false },
+            { kind: `stepWallClock`, offset: 1000 },
+            { kind: `schedule`, key: 1, delay: 20, throws: false },
+            { kind: `advance`, elapsed: 0 },
+            // The wall step cannot shift this elapsed-time boundary.
+            { kind: `advance`, elapsed: 9 },
+            { kind: `advance`, elapsed: 1 },
+          ],
+        ],
+        [
+          [
+            { kind: `schedule`, key: 0, delay: 1, throws: false },
+            { kind: `schedule`, key: 0, delay: 4, throws: true },
+            { kind: `schedule`, key: 1, delay: 4, throws: false },
+            { kind: `schedule`, key: 2, delay: 2, throws: false },
+            { kind: `cancel`, key: 2 },
+            { kind: `advance`, elapsed: 3 },
+            { kind: `advance`, elapsed: 1 },
+            { kind: `schedule`, key: 0, delay: 0, throws: false },
+            { kind: `advance`, elapsed: 0 },
+          ],
+        ],
+        [
+          [
+            { kind: `schedule`, key: 0, delay: 0, throws: false },
+            { kind: `schedule`, key: 1, delay: 0, throws: false },
+            { kind: `schedule`, key: 2, delay: 20, throws: false },
+            { kind: `schedule`, key: 3, delay: 20, throws: false },
+            { kind: `advance`, elapsed: 0 },
+            { kind: `cancel`, key: 2 },
+            { kind: `advance`, elapsed: 20 },
+          ],
+        ],
+      ],
+    }
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(
         fc.array(actionArbitrary, { maxLength: 50 }),
         (actions) => runHistory(actions),
       ),
-      {
-        ...(seed === undefined
-          ? oraclePropertyOptions(100, `cleanup-queue.history`)
-          : { seed, numRuns: oracleRuns(100) }),
-        examples: [
-          [
-            [
-              { kind: `schedule`, key: 0, delay: 10, throws: false },
-              { kind: `stepWallClock`, offset: -1000 },
-              // At 9 the callback is early; at 10 it is due.
-              { kind: `advance`, elapsed: 9 },
-              { kind: `advance`, elapsed: 1 },
-            ],
-          ],
-          [
-            [
-              { kind: `schedule`, key: 0, delay: 10, throws: false },
-              { kind: `stepWallClock`, offset: 1000 },
-              { kind: `schedule`, key: 1, delay: 20, throws: false },
-              { kind: `advance`, elapsed: 0 },
-              // The wall step cannot shift this elapsed-time boundary.
-              { kind: `advance`, elapsed: 9 },
-              { kind: `advance`, elapsed: 1 },
-            ],
-          ],
-          [
-            [
-              { kind: `schedule`, key: 0, delay: 1, throws: false },
-              { kind: `schedule`, key: 0, delay: 4, throws: true },
-              { kind: `schedule`, key: 1, delay: 4, throws: false },
-              { kind: `schedule`, key: 2, delay: 2, throws: false },
-              { kind: `cancel`, key: 2 },
-              { kind: `advance`, elapsed: 3 },
-              { kind: `advance`, elapsed: 1 },
-              { kind: `schedule`, key: 0, delay: 0, throws: false },
-              { kind: `advance`, elapsed: 0 },
-            ],
-          ],
-          [
-            [
-              { kind: `schedule`, key: 0, delay: 0, throws: false },
-              { kind: `schedule`, key: 1, delay: 0, throws: false },
-              { kind: `schedule`, key: 2, delay: 20, throws: false },
-              { kind: `schedule`, key: 3, delay: 20, throws: false },
-              { kind: `advance`, elapsed: 0 },
-              { kind: `cancel`, key: 2 },
-              { kind: `advance`, elapsed: 20 },
-            ],
-          ],
-        ],
-      },
+      parameters,
     )
   },
 )

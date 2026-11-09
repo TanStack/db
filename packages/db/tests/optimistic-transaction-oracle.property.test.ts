@@ -11,8 +11,10 @@ import {
   withHistoryCleanup,
 } from './optimistic-history-oracle.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -291,12 +293,16 @@ describe(`Same-key transaction laws`, () => {
   it.each([505201, undefined])(
     `varies merged request fields, seed=%s`,
     async (seed) => {
-      oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
       const reach = createOracleReach(
         `collection-state.same-key`,
         [`sign-only-reinsert`],
         { minimum: 3 },
       )
+      const parameters =
+        seed === undefined
+          ? oraclePropertyOptions(40, `collection-state.same-key`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(40) })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.oneof(
@@ -341,9 +347,7 @@ describe(`Same-key transaction laws`, () => {
             return runSameKey(scenario)
           },
         ),
-        seed === undefined
-          ? oraclePropertyOptions(40, `collection-state.same-key`)
-          : { numRuns: oracleRuns(40), seed },
+        parameters,
       )
       reach.assertReached()
     },
@@ -1041,7 +1045,11 @@ describe(`Whole mixed transaction publication`, () => {
   it.each([505202, undefined])(
     `varies full payloads, seed=%s`,
     async (seed) => {
-      oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+      const campaignParameters =
+        seed === undefined
+          ? oraclePropertyOptions(100, `collection-state.mixed-transaction`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(
           fc.record({
@@ -1057,9 +1065,7 @@ describe(`Whole mixed transaction publication`, () => {
           }),
           (scenario) => runTransaction(scenario),
         ),
-        seed === undefined
-          ? oraclePropertyOptions(100, `collection-state.mixed-transaction`)
-          : { numRuns: oracleRuns(100), seed },
+        campaignParameters,
       )
     },
   )

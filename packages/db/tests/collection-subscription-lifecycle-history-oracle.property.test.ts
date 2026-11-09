@@ -26,11 +26,13 @@ import {
 import { flushPromises, withOracleCleanup } from './utils.js'
 import { createOracleReach } from './oracle-reach.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRandomParameters,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -1751,80 +1753,96 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     `reject` as const,
   )
 
-  fixedCampaign.prop([greenLifecycleHistoryArbitrary, cancellationArbitrary], {
+  const greenLifecycleHistoryFixedSeed = oracleFixedSeed(1_657_003, {
     numRuns: runs,
-    seed: 1_657_003,
-  })(
+  })
+  fixedCampaign.prop(
+    [greenLifecycleHistoryArbitrary, cancellationArbitrary],
+    greenLifecycleHistoryFixedSeed,
+  )(
     `matches the pure lifecycle model for a fixed seed`,
     async (history, cancellation) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(greenLifecycleHistoryFixedSeed))
       await runHistory(history, { cancellation })
     },
     120_000,
+  )
+  const greenLifecycleHistoryCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `subscription-lifecycle.async-history`,
   )
   randomCampaign(`subscription-lifecycle.async-history`).prop(
     [greenLifecycleHistoryArbitrary, cancellationArbitrary],
-    oracleRandomParameters(
-      runs,
-      replay,
-      `subscription-lifecycle.async-history`,
-    ),
+    greenLifecycleHistoryCampaign,
   )(
     `matches the pure lifecycle model for a random or replayed seed`,
     async (history, cancellation) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(greenLifecycleHistoryCampaign))
       await runHistory(history, { cancellation })
     },
     120_000,
   )
+  const demandChangeLifecycleHistoryFixedSeed = oracleFixedSeed(1_657_005, {
+    numRuns: 5 * runs,
+  })
   fixedCampaign.prop(
     [demandChangeLifecycleHistoryArbitrary, cancellationArbitrary],
-    { numRuns: 5 * runs, seed: 1_657_005 },
+    demandChangeLifecycleHistoryFixedSeed,
   )(
     `judges a replay once per demand change for a fixed seed`,
     async (history, cancellation) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(demandChangeLifecycleHistoryFixedSeed))
       demandChangeHistoriesRan = true
       await runDemandChangeHistory(history, cancellation)
     },
     // Five times the base budget; a run multiplier scales its histories.
     120_000 * multiplier,
+  )
+  const demandChangeLifecycleHistoryCampaign = oracleRandomParameters(
+    5 * runs,
+    replay,
+    `subscription-lifecycle.demand-change`,
   )
   randomCampaign(`subscription-lifecycle.demand-change`).prop(
     [demandChangeLifecycleHistoryArbitrary, cancellationArbitrary],
-    oracleRandomParameters(
-      5 * runs,
-      replay,
-      `subscription-lifecycle.demand-change`,
-    ),
+    demandChangeLifecycleHistoryCampaign,
   )(
     `judges a replay once per demand change for a random or replayed seed`,
     async (history, cancellation) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(demandChangeLifecycleHistoryCampaign))
       demandChangeHistoriesRan = true
       await runDemandChangeHistory(history, cancellation)
     },
     // Five times the base budget; a run multiplier scales its histories.
     120_000 * multiplier,
   )
-  fixedCampaign.prop([syncLifecycleHistoryArbitrary], {
+  const syncLifecycleHistoryFixedSeed = oracleFixedSeed(1_657_004, {
     numRuns: runs,
-    seed: 1_657_004,
-  })(
+  })
+  fixedCampaign.prop(
+    [syncLifecycleHistoryArbitrary],
+    syncLifecycleHistoryFixedSeed,
+  )(
     `matches synchronous success histories for a fixed seed`,
     async (history) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(syncLifecycleHistoryFixedSeed))
       await runHistory(history, { acquisitionMode: `sync-success` })
     },
     120_000,
   )
+  const syncLifecycleHistoryCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `subscription-lifecycle.sync-history`,
+  )
   randomCampaign(`subscription-lifecycle.sync-history`).prop(
     [syncLifecycleHistoryArbitrary],
-    oracleRandomParameters(runs, replay, `subscription-lifecycle.sync-history`),
+    syncLifecycleHistoryCampaign,
   )(
     `matches synchronous success histories for a random or replayed seed`,
     async (history) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(syncLifecycleHistoryCampaign))
       await runHistory(history, { acquisitionMode: `sync-success` })
     },
     120_000,

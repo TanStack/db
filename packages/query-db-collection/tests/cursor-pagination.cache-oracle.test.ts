@@ -5,6 +5,7 @@ import { createDeferred } from '../../db/src/deferred.js'
 import {
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -47,10 +48,9 @@ async function assertCacheProperty<Ts>(
   if (replay.replayPath !== undefined && replay.replayProperty !== name) return
   const options = oraclePropertyOptions(runs, name)
   if (replay.campaignSeed === undefined) {
-    oracleRoute(`fixed seed`)
     await fc.assert(property, { ...options, seed: fixedSeed })
   }
-  oracleRoute(`random seed`)
+  oracleRoute(oracleRouteOf(options))
   await fc.assert(property, options)
 }
 

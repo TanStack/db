@@ -8,6 +8,7 @@ import { runOracleCampaign } from '../../db/tests/oracle-campaign'
 import {
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config'
@@ -429,13 +430,20 @@ it(`preserves marker-shaped user data through current wire encoding`, async () =
 it.each([`modified`, `original`, `changes`] as const)(
   `rejects malformed escaped objects anywhere in %s`,
   async (field) => {
-    oracleRoute(`fixed seed`)
     const collection = createCollection<Row>({
       getKey: (row) => row.id,
       sync: { sync: ({ markReady }) => markReady() },
     })
     const serializer = new TransactionSerializer({ rows: collection })
     try {
+      const parameters = {
+        seed: 20260914,
+        numRuns: 100,
+        examples: [undefined, null, 1, `text`, false, []].map(
+          (value): [typeof value, Array<boolean>] => [value, []],
+        ),
+      }
+      oracleRoute(`fixed seed`)
       fc.assert(
         fc.property(
           fc.constantFrom(undefined, null, 1, `text`, false, []),
@@ -468,13 +476,7 @@ it.each([`modified`, `original`, `changes`] as const)(
             ).toThrow(`Corrupted Object marker`)
           },
         ),
-        {
-          seed: 20260914,
-          numRuns: 100,
-          examples: [undefined, null, 1, `text`, false, []].map(
-            (value): [typeof value, Array<boolean>] => [value, []],
-          ),
-        },
+        parameters,
       )
     } finally {
       await collection.cleanup()
@@ -552,10 +554,12 @@ const mutationMeaningProperty = (fault: Fault = `none`) =>
   )
 
 const checkMutationWire = async (seed: number | undefined): Promise<void> => {
-  await fc.assert(mutationMeaningProperty(), {
+  const parameters = {
     ...oracleCampaignOptions(mutationWireOracle, seed),
     examples: [[fixedHistory, 1704067200000]],
-  })
+  }
+  oracleRoute(oracleRouteOf(parameters))
+  await fc.assert(mutationMeaningProperty(), parameters)
 }
 
 oracleReplayTest(it).each([20260914])(
@@ -570,6 +574,7 @@ oracleReplayTest(it, MUTATION_WIRE_PROPERTY).each([undefined])(
 oracleReplayTest(it, MUTATION_WIRE_PROPERTY)(
   `replays a shrunk mutation-wire failure at the same checkpoint`,
   async () => {
+    oracleRoute(`calibration`)
     // The fault drops a mutation field after the real encoder runs. It leaves
     // zero-edit histories green, so fast-check must find and shrink a generated
     // history that reaches the wire assertion. A seed alone reseeds this
@@ -639,6 +644,13 @@ it(`retains the wire mismatch when cleanup also fails`, async () => {
 })
 
 const checkDateMarker = async (seed: number | undefined): Promise<void> => {
+  const campaignParameters = {
+    ...oracleCampaignOptions(dateMarkerOracle, seed),
+    examples: [
+      [[{ kind: `update`, slot: 0, before: datePair(0), after: twin }]],
+    ],
+  }
+  oracleRoute(oracleRouteOf(campaignParameters))
   await fc.assert(
     fc.asyncProperty(
       fc.array(
@@ -670,12 +682,7 @@ const checkDateMarker = async (seed: number | undefined): Promise<void> => {
         )
       },
     ),
-    {
-      ...oracleCampaignOptions(dateMarkerOracle, seed),
-      examples: [
-        [[{ kind: `update`, slot: 0, before: datePair(0), after: twin }]],
-      ],
-    },
+    campaignParameters,
   )
 }
 
@@ -689,6 +696,11 @@ oracleReplayTest(it, DATE_MARKER_PROPERTY).each([undefined])(
 )
 
 const checkVersionTwo = async (seed: number | undefined): Promise<void> => {
+  const runParameters = {
+    ...oracleCampaignOptions(versionTwoOracle, seed),
+    examples: [[fixedHistory]],
+  }
+  oracleRoute(oracleRouteOf(runParameters))
   await fc.assert(
     fc.asyncProperty(
       fc.array(
@@ -702,10 +714,7 @@ const checkVersionTwo = async (seed: number | undefined): Promise<void> => {
       ),
       async (edits) => checkRoundtrip(edits, 0, `none`, `encoder`, false, true),
     ),
-    {
-      ...oracleCampaignOptions(versionTwoOracle, seed),
-      examples: [[fixedHistory]],
-    },
+    runParameters,
   )
 }
 

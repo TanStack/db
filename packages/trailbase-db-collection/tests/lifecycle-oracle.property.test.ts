@@ -2,8 +2,10 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it, vi } from 'vitest'
 import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -475,17 +477,19 @@ it.each([`list`, `set`, `buffered`] as const)(
     })
   },
 )
-fcTest.prop([scenarioArb], { seed: 714_203, numRuns: oracleRuns(50) })(
+const scenarioFixedSeed = oracleFixedSeed(714_203, { numRuns: oracleRuns(50) })
+fcTest.prop([scenarioArb], scenarioFixedSeed)(
   `matches generated lifecycle histories with a fixed seed`,
   (scenario) => {
-    oracleRoute(`fixed seed`)
+    oracleRoute(oracleRouteOf(scenarioFixedSeed))
     return checkLifecycle(scenario)
   },
 )
-fcTest.prop([scenarioArb], oraclePropertyOptions(50, `trailbase.lifecycle`))(
+const scenarioCampaign = oraclePropertyOptions(50, `trailbase.lifecycle`)
+fcTest.prop([scenarioArb], scenarioCampaign)(
   `matches generated lifecycle histories with a random or replayed seed`,
   (scenario) => {
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(scenarioCampaign))
     return checkLifecycle(scenario)
   },
 )
@@ -1490,20 +1494,21 @@ it.each(pageFixedHistories)(`converges: %s`, (_name, history) => {
   oracleRoute(`fixed history`)
   return checkPageHistory(history)
 })
-fcTest.prop([pageHistoryArb], { seed: 205_917, numRuns: oracleRuns(40) })(
+const pageHistoryFixedSeed = oracleFixedSeed(205_917, {
+  numRuns: oracleRuns(40),
+})
+fcTest.prop([pageHistoryArb], pageHistoryFixedSeed)(
   `converges across generated page histories with a fixed seed`,
   (history) => {
-    oracleRoute(`fixed seed`)
+    oracleRoute(oracleRouteOf(pageHistoryFixedSeed))
     return checkPageHistory(history)
   },
 )
-fcTest.prop(
-  [pageHistoryArb],
-  oraclePropertyOptions(40, `trailbase.page-event`),
-)(
+const pageHistoryCampaign = oraclePropertyOptions(40, `trailbase.page-event`)
+fcTest.prop([pageHistoryArb], pageHistoryCampaign)(
   `converges across generated page histories with a random or replayed seed`,
   (history) => {
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(pageHistoryCampaign))
     return checkPageHistory(history)
   },
 )

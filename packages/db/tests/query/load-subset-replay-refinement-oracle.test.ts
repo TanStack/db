@@ -14,8 +14,10 @@ import { createOracleReach } from '../oracle-reach.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
@@ -2976,7 +2978,6 @@ describe(`Ordered windows across truncate replays`, () => {
   it.each(orderedReplayCampaigns)(
     `keeps the ordered window under load and release faults (%s campaign)`,
     async (campaign) => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const total: OrderedReach = {
         settlementThrows: 0,
         throwsAfterReplay: 0,
@@ -3065,6 +3066,11 @@ describe(`Ordered windows across truncate replays`, () => {
         Object.keys(total) as Array<keyof OrderedReach>
       ).filter((dimension) => !ownedElsewhere.has(dimension))
       const declared = createOracleReach(orderedReplayProperty, dimensions)
+      const parameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(20261021, { numRuns: oracleRuns(300) })
+          : oraclePropertyOptions(300, orderedReplayProperty)
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.array(orderedCommand, { minLength: 1, maxLength: 12 }),
@@ -3077,9 +3083,7 @@ describe(`Ordered windows across truncate replays`, () => {
             }
           },
         ),
-        campaign === `fixed`
-          ? { seed: 20261021, numRuns: oracleRuns(300) }
-          : oraclePropertyOptions(300, orderedReplayProperty),
+        parameters,
       )
       console.info(
         orderedReplayProperty,
@@ -3453,7 +3457,6 @@ describe(`Ordered windows across truncate replays`, () => {
   it.each(preloadCampaigns)(
     `recovers replays that start during the initial preload (%s campaign)`,
     async (campaign) => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       // Declared reach: a replay participant that fails before the first
       // ready, which must end the query or let the preload settle, and a
       // window move that waits behind a replay a newer truncate discards,
@@ -3467,6 +3470,11 @@ describe(`Ordered windows across truncate replays`, () => {
         ] as const,
         { minimum: 5 },
       )
+      const campaignParameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(20261027, { numRuns: oracleRuns(300) })
+          : oraclePropertyOptions(300, preloadProperty)
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(preloadCase, async ([history, scenario]) => {
           reach.beginHistory()
@@ -3483,9 +3491,7 @@ describe(`Ordered windows across truncate replays`, () => {
         // builder that lets a discarded replay reject a deferred window move,
         // and one that keeps a failure before the first ready non-fatal. Each
         // dies in about half of 200-run seeds.
-        campaign === `fixed`
-          ? { seed: 20261027, numRuns: oracleRuns(300) }
-          : oraclePropertyOptions(300, preloadProperty),
+        campaignParameters,
       )
       reach.assertReached()
     },
@@ -3495,7 +3501,6 @@ describe(`Ordered windows across truncate replays`, () => {
   it.each(failedReplayCampaigns)(
     `keeps the last publication through a failed replay (%s campaign)`,
     async (campaign) => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       // Declared reach: histories where the retention law judged a failed
       // replay, judged a replay that still held publication, and saw a
       // demand that the graph started after the commit fail while its replay
@@ -3519,6 +3524,11 @@ describe(`Ordered windows across truncate replays`, () => {
         ] as const,
         { minimum: 5 },
       )
+      const runParameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(20261023, { numRuns: oracleRuns(600) })
+          : oraclePropertyOptions(600, failedReplayProperty)
+      oracleRoute(oracleRouteOf(runParameters))
       await fc.assert(
         fc.asyncProperty(failedReplayCase, async ([history, scenario]) => {
           reach.beginHistory()
@@ -3557,9 +3567,7 @@ describe(`Ordered windows across truncate replays`, () => {
             reach.reach(`successWhileSubscriptionOwes`)
           }
         }),
-        campaign === `fixed`
-          ? { seed: 20261023, numRuns: oracleRuns(600) }
-          : oraclePropertyOptions(600, failedReplayProperty),
+        runParameters,
       )
       reach.assertReached()
     },
@@ -3601,8 +3609,12 @@ const replayDemandHistory = fc.record({
 it.each(replayDemandCampaigns)(
   `distinguishes failed demand origins (%s campaign)`,
   async (campaign) => {
-    oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
     const declared = createOracleReach(replayDemandProperty, replayDemandStates)
+    const parameters =
+      campaign === `fixed`
+        ? oracleFixedSeed(2233, { numRuns: oracleRuns(75) })
+        : oraclePropertyOptions(75, replayDemandProperty)
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(replayDemandHistory, async (generated) => {
         declared.beginHistory()
@@ -3643,9 +3655,7 @@ it.each(replayDemandCampaigns)(
         // barrier, which keeps the query available for a later replay.
         checkReplayDemandFailure(reach, entered)
       }),
-      campaign === `fixed`
-        ? { seed: 2233, numRuns: oracleRuns(75) }
-        : oraclePropertyOptions(75, replayDemandProperty),
+      parameters,
     )
     console.info(
       replayDemandProperty,
@@ -3668,11 +3678,15 @@ it.each(replayDemandCampaigns)(
 it.each(orderedFailureCampaigns)(
   `distinguishes keyed request failure from reacquisition (%s campaign)`,
   async (campaign) => {
-    oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
     const failureReach = createOracleReach<OrderedFailureState>(
       orderedFailureProperty,
       [`initiating-keyed-request-failed`, `keyed-reacquisition-failed`],
     )
+    const parameters =
+      campaign === `fixed`
+        ? oracleFixedSeed(20261026, { numRuns: oracleRuns(40) })
+        : oraclePropertyOptions(40, orderedFailureProperty)
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(
         fc.array(orderedCommand, { minLength: 0, maxLength: 6 }),
@@ -3720,9 +3734,7 @@ it.each(orderedFailureCampaigns)(
           }
         },
       ),
-      campaign === `fixed`
-        ? { seed: 20261026, numRuns: oracleRuns(40) }
-        : oraclePropertyOptions(40, orderedFailureProperty),
+      parameters,
     )
     console.info(
       orderedFailureProperty,

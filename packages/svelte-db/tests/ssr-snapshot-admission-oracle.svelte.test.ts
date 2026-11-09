@@ -4,8 +4,10 @@ import { fc } from '@fast-check/vitest'
 import { render } from 'svelte/server'
 import { BTreeIndex, DbClient, Query, collectionOptions } from '@tanstack/db'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -142,18 +144,19 @@ describe(`Svelte SSR snapshot admission`, () => {
   }
   for (const campaign of [`fixed`, `random`] as const) {
     it(`admits reproducible SSR snapshots (${campaign})`, async () => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = makeReach()
+      const parameters = {
+        ...(campaign === `fixed`
+          ? oracleFixedSeed(2229, { numRuns: oracleRuns(120) })
+          : oraclePropertyOptions(120, `svelte.ssr-snapshot`)),
+        examples: ssrSnapshotExamples.map((history) => [history]),
+      }
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(ssrSnapshotHistoryArbitrary, (history) =>
           checkHistory(history, reach),
         ),
-        {
-          ...(campaign === `fixed`
-            ? { numRuns: oracleRuns(120), seed: 2229 }
-            : oraclePropertyOptions(120, `svelte.ssr-snapshot`)),
-          examples: ssrSnapshotExamples.map((history) => [history]),
-        },
+        parameters,
       )
       reach.assertReached()
       console.info(

@@ -1,9 +1,11 @@
 import { fc } from '@fast-check/vitest'
 import { afterEach, expect, it } from 'vitest'
 import {
+  oracleFixedSeed,
   oracleRandomParameters,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -101,7 +103,9 @@ function registerAliasOracle(
   )
   oracleReplayTest(it)(`${title} [fixed]`, () => {
     oracleRoute(`fixed seed`)
-    return check({ numRuns: aliasOracleRuns, seed: FIXED_ALIAS_ORACLE_SEED })
+    return check(
+      oracleFixedSeed(FIXED_ALIAS_ORACLE_SEED, { numRuns: aliasOracleRuns }),
+    )
   })
   oracleReplayTest(it, property)(`${title} [random]`, () => {
     oracleRoute(`random seed`)
@@ -150,16 +154,18 @@ function expectAliasGrammar<TAlias extends string>(
   ]
   const observed = new Set<string>()
 
+  const parameters = {
+    seed: FIXED_ALIAS_ORACLE_SEED,
+    numRuns: 50,
+    examples: witnesses.map((aliases) => [aliases]),
+  }
+  oracleRoute(`fixed seed`)
   fc.assert(
     fc.property(arbitrary, (aliases) => {
       expect(isLegalAliasSequence(aliases, allowedAliases)).toBe(true)
       observed.add(JSON.stringify(aliases))
     }),
-    {
-      seed: FIXED_ALIAS_ORACLE_SEED,
-      numRuns: 50,
-      examples: witnesses.map((aliases) => [aliases]),
-    },
+    parameters,
   )
 
   witnesses.forEach((aliases) => {
@@ -187,6 +193,13 @@ registerAliasOracle(
   `op-sqlite.write-marker-aliases`,
   `preserves generated single-row write-marker aliases in direct row arrays`,
   async (parameters) => {
+    const campaignParameters = {
+      ...parameters,
+      ...(parameters.path === undefined
+        ? { examples: [[[`rowsAffected`]], [[...writeResultFieldNames]]] }
+        : { endOnFailure: true }),
+    }
+    oracleRoute(oracleRouteOf(campaignParameters))
     await fc.assert(
       fc.asyncProperty(writeResultAliasesArbitrary, async (aliases) => {
         const row = Object.fromEntries(
@@ -195,12 +208,7 @@ registerAliasOracle(
         const actual = await queryInjectedResult<Record<string, unknown>>([row])
         expectExactAliasRows(actual, [row])
       }),
-      {
-        ...parameters,
-        ...(parameters.path === undefined
-          ? { examples: [[[`rowsAffected`]], [[...writeResultFieldNames]]] }
-          : { endOnFailure: true }),
-      },
+      campaignParameters,
     )
   },
 )
@@ -209,6 +217,18 @@ registerAliasOracle(
   `op-sqlite.result-carrier-equivalence`,
   `returns the same rows across equivalent documented result carriers`,
   async (parameters) => {
+    const runParameters = {
+      ...parameters,
+      ...(parameters.path === undefined
+        ? {
+            examples: [
+              [[`rowsAffected`]],
+              [[`rows`, `rawRows`, `columnNames`, `ordinary_name`]],
+            ],
+          }
+        : { endOnFailure: true }),
+    }
+    oracleRoute(oracleRouteOf(runParameters))
     await fc.assert(
       fc.asyncProperty(statementResultAliasesArbitrary, async (aliases) => {
         const { expected } = aliasQueryCase(aliases)
@@ -253,17 +273,7 @@ registerAliasOracle(
           expectExactAliasRows(actual, expected)
         }
       }),
-      {
-        ...parameters,
-        ...(parameters.path === undefined
-          ? {
-              examples: [
-                [[`rowsAffected`]],
-                [[`rows`, `rawRows`, `columnNames`, `ordinary_name`]],
-              ],
-            }
-          : { endOnFailure: true }),
-      },
+      runParameters,
     )
   },
 )
@@ -339,6 +349,15 @@ registerAliasOracle(
   `preserves generated legal SQL aliases through v14 columnar rows`,
   async (parameters) => {
     await withColumnarDriver(async ({ driver, queryExecutions }) => {
+      const campaignParameters: fc.Parameters<
+        [Array<(typeof statementResultAliasNames)[number]>]
+      > = {
+        ...parameters,
+        ...(parameters.path === undefined
+          ? { examples: [[[...statementResultFieldNames]]] }
+          : { endOnFailure: true }),
+      }
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(statementResultAliasesArbitrary, async (aliases) => {
           const executionsBefore = queryExecutions()
@@ -353,12 +372,7 @@ registerAliasOracle(
           expect(queryExecutions()).toBe(executionsBefore + 1)
           expectExactAliasRows(actual, expected)
         }),
-        {
-          ...parameters,
-          ...(parameters.path === undefined
-            ? { examples: [[[...statementResultFieldNames]]] }
-            : { endOnFailure: true }),
-        },
+        campaignParameters,
       )
     })
   },
@@ -438,10 +452,7 @@ it(`reserved-alias checker shrinks and replays the same row-law violation`, () =
     }),
     challenge,
   )
-  const original = fc.check(property, {
-    seed: 165903,
-    numRuns: 20,
-  })
+  const original = fc.check(property, { seed: 165903, numRuns: 20 })
   expect(original.failed).toBe(true)
   expect(String(original.errorInstance)).toContain(
     `op-sqlite reserved-alias exact-row law violated`,

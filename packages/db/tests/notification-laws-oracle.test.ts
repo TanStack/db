@@ -23,7 +23,13 @@ import {
   expectNotificationsStopped,
 } from '../../db-collection-e2e/src/utils/notification-laws-oracle'
 import { ScenarioLifetime } from './conformance/scenario-lifetime'
-import { oraclePropertyOptions, oracleRoute, oracleRuns } from './oracle-config'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from './oracle-config'
 import { declareOracle } from './oracle-declaration'
 import type { Notification } from '../../db-collection-e2e/src/utils/notification-laws-oracle'
 
@@ -39,7 +45,16 @@ declareOracle({
 it.each([20260913, undefined])(
   `checks real query publications against generated worlds seed=%s`,
   async (seed) => {
-    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+    const parameters = {
+      ...(seed === undefined
+        ? oraclePropertyOptions(30, `notification-laws.query-publications`)
+        : oracleFixedSeed(seed, { numRuns: oracleRuns(30) })),
+      examples: [
+        [1, [2, null]],
+        [1, [null]],
+      ],
+    }
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(
         fc.option(fc.integer(), { nil: null }),
@@ -118,15 +133,7 @@ it.each([20260913, undefined])(
           })
         },
       ),
-      {
-        ...(seed === undefined
-          ? oraclePropertyOptions(30, `notification-laws.query-publications`)
-          : { seed, numRuns: oracleRuns(30) }),
-        examples: [
-          [1, [2, null]],
-          [1, [null]],
-        ],
-      },
+      parameters,
     )
   },
 )
@@ -134,7 +141,12 @@ it.each([20260913, undefined])(
 it.each([20260913, undefined])(
   `reconstructs generated publication histories seed=%s`,
   (seed) => {
-    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+    const campaignParameters = {
+      ...(seed === undefined
+        ? oraclePropertyOptions(100, `notification-laws.publication-histories`)
+        : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
+    }
+    oracleRoute(oracleRouteOf(campaignParameters))
     fc.assert(
       fc.property(
         fc.array(fc.dictionary(fc.constantFrom('a', 'b', 'c'), fc.integer()), {
@@ -188,14 +200,7 @@ it.each([20260913, undefined])(
           ).toThrow()
         },
       ),
-      {
-        ...(seed === undefined
-          ? oraclePropertyOptions(
-              100,
-              `notification-laws.publication-histories`,
-            )
-          : { seed, numRuns: oracleRuns(100) }),
-      },
+      campaignParameters,
     )
   },
 )
@@ -274,7 +279,7 @@ it.each([20260913, undefined])(
       {
         ...(seed === undefined
           ? oraclePropertyOptions(50, `notification-laws.corrupt-prior-values`)
-          : { seed, numRuns: oracleRuns(50) }),
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(50) })),
       },
     )
   },

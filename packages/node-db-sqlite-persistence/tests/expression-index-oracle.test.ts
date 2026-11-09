@@ -71,9 +71,11 @@ import {
   decodePersistedStorageKey,
 } from '@tanstack/db-sqlite-persistence-core'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -153,10 +155,9 @@ type GeneratedPropertyCampaign = {
 // its property, where oraclePropertyOptions returns the recorded path.
 const fixedGeneratedCampaign: GeneratedPropertyCampaign = {
   name: `fixed`,
-  parameters: {
-    seed: DEFAULT_ORACLE_SEED,
+  parameters: oracleFixedSeed(DEFAULT_ORACLE_SEED, {
     numRuns: oracleRuns(DEFAULT_ORACLE_RUNS),
-  },
+  }),
 }
 
 function randomGeneratedCampaign(property: string): GeneratedPropertyCampaign {
@@ -651,11 +652,13 @@ async function runGeneratedScenarioProperty(
   campaign: GeneratedPropertyCampaign,
 ) {
   const reachedScenarios = new Set<GeneratedScenarioKind>()
+  const parameters = generatedCampaignParameters(campaign)
+  oracleRoute(oracleRouteOf(parameters))
   const details = await fc.check(
     generatedScenarioProperty({
       onScenario: (kind) => reachedScenarios.add(kind),
     }),
-    generatedCampaignParameters(campaign),
+    parameters,
   )
 
   if (details.failed) {
@@ -983,7 +986,8 @@ describe(`SQLite expression-index oracle`, () => {
   })
 
   async function roundTripGeneratedBigInt(campaign: GeneratedPropertyCampaign) {
-    oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
+    const campaignParameters = generatedCampaignParameters(campaign)
+    oracleRoute(oracleRouteOf(campaignParameters))
     await fc.assert(
       fc.asyncProperty(
         fc.bigInt({ min: SQLITE_BIGINT_MIN, max: SQLITE_BIGINT_MAX }),
@@ -1026,7 +1030,7 @@ describe(`SQLite expression-index oracle`, () => {
           }, [() => driver.close()])
         },
       ),
-      generatedCampaignParameters(campaign),
+      campaignParameters,
     )
   }
   oracleReplayTest(vitestIt).each([fixedGeneratedCampaign])(
@@ -1041,7 +1045,6 @@ describe(`SQLite expression-index oracle`, () => {
   )
 
   async function rejectGeneratedBigInt(campaign: GeneratedPropertyCampaign) {
-    oracleRoute(campaign.name === `fixed` ? `fixed seed` : `random seed`)
     const outOfRangeBigIntArbitrary = fc.oneof(
       fc
         .bigInt({ min: 1n, max: 1_000n })
@@ -1051,6 +1054,8 @@ describe(`SQLite expression-index oracle`, () => {
         .map((distance) => SQLITE_BIGINT_MAX + distance),
     )
 
+    const runParameters = generatedCampaignParameters(campaign)
+    oracleRoute(oracleRouteOf(runParameters))
     await fc.assert(
       fc.asyncProperty(outOfRangeBigIntArbitrary, async (value) => {
         const driver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
@@ -1080,7 +1085,7 @@ describe(`SQLite expression-index oracle`, () => {
           ).rejects.toThrow(bigintRangeError(value))
         }, [() => driver.close()])
       }),
-      generatedCampaignParameters(campaign),
+      runParameters,
     )
   }
   oracleReplayTest(vitestIt).each([fixedGeneratedCampaign])(
@@ -1143,11 +1148,7 @@ describe(`SQLite expression-index oracle`, () => {
       oracleRoute(`calibration`)
       const details = await fc.check(
         generatedScenarioProperty({ ablateKind: kind }),
-        {
-          seed: DEFAULT_ORACLE_SEED,
-          numRuns: 1,
-          verbose: 2,
-        },
+        { seed: DEFAULT_ORACLE_SEED, numRuns: 1, verbose: 2 },
       )
       const evidence = JSON.stringify({
         seed: details.seed,
@@ -1193,11 +1194,7 @@ describe(`SQLite expression-index oracle`, () => {
       oracleRoute(`calibration`)
       const details = await fc.check(
         generatedScenarioProperty({ faultKind: kind }),
-        {
-          seed: DEFAULT_ORACLE_SEED,
-          numRuns: 1,
-          verbose: 2,
-        },
+        { seed: DEFAULT_ORACLE_SEED, numRuns: 1, verbose: 2 },
       )
       const evidence = JSON.stringify({
         seed: details.seed,

@@ -1,9 +1,11 @@
 import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -75,6 +77,7 @@ async function campaign(options: fc.Parameters<[unknown]>) {
   const reach = createOracleReach(property, reachStatesFor(driver), {
     minimum: 5,
   })
+  oracleRoute(oracleRouteOf(options))
   await fc.assert(eagerLiveSourceProperty(driver, reach), options)
   return reach
 }
@@ -83,8 +86,9 @@ describe(`eager live-source conformance: reference adapter`, () => {
   oracleReplayTest(it)(
     `conforms on a fixed-seed campaign`,
     async () => {
-      oracleRoute(`fixed seed`)
-      const reach = await campaign({ seed: 2118, numRuns: oracleRuns(runs) })
+      const reach = await campaign(
+        oracleFixedSeed(2118, { numRuns: oracleRuns(runs) }),
+      )
       reach.assertReached()
     },
     campaignTimeoutMs,
@@ -93,8 +97,6 @@ describe(`eager live-source conformance: reference adapter`, () => {
   oracleReplayTest(it, property)(
     `conforms on a random campaign or a replayed seed`,
     async () => {
-      // oraclePropertyOptions registers this test's route: `random seed`, or
-      // `fixed history` on a path replay.
       const reach = await campaign(oraclePropertyOptions(runs, property))
       reach.assertReached()
     },
@@ -157,10 +159,7 @@ describe(`eager live-source conformance: reference adapter`, () => {
       oracleRoute(`calibration`)
       const result = await fc.check(
         eagerLiveSourceProperty(referenceDriver(mutant), undefined, law),
-        {
-          seed: 2118,
-          numRuns: runs,
-        },
+        { seed: 2118, numRuns: runs },
       )
       expect(result.failed).toBe(true)
       expect(result.errorInstance).toBeInstanceOf(ConformanceViolation)
@@ -197,12 +196,10 @@ describe(`eager live-source conformance: per-change commits`, () => {
   oracleReplayTest(it)(
     `the per-change reference adapter conforms`,
     async () => {
-      oracleRoute(`fixed seed`)
       const perChange = referenceDriver(undefined, { perChange: true })
-      await fc.assert(eagerLiveSourceProperty(perChange), {
-        seed: 2118,
-        numRuns: runs,
-      })
+      const parameters = { seed: 2118, numRuns: runs }
+      oracleRoute(`fixed seed`)
+      await fc.assert(eagerLiveSourceProperty(perChange), parameters)
     },
     campaignTimeoutMs,
   )
@@ -214,10 +211,7 @@ describe(`eager live-source conformance: per-change commits`, () => {
       const reversed = referenceDriver(`reverses-batch`, { perChange: true })
       const result = await fc.check(
         eagerLiveSourceProperty(reversed, undefined, `PUB-1 (publication)`),
-        {
-          seed: 2118,
-          numRuns: runs,
-        },
+        { seed: 2118, numRuns: runs },
       )
       expect(result.failed).toBe(true)
       expectNamedLaw(
@@ -240,16 +234,17 @@ describe(`eager live-source conformance: outage threshold, client values`, () =>
   oracleReplayTest(it)(
     `the reference adapter with an outage threshold conforms`,
     async () => {
-      oracleRoute(`fixed seed`)
       const reach = createOracleReach(
         `${property}.outage`,
         reachStatesFor(thresholdDriver),
         { minimum: 5 },
       )
-      await fc.assert(eagerLiveSourceProperty(thresholdDriver, reach), {
-        seed: 2118,
-        numRuns: runs,
-      })
+      const campaignParameters = { seed: 2118, numRuns: runs }
+      oracleRoute(`fixed seed`)
+      await fc.assert(
+        eagerLiveSourceProperty(thresholdDriver, reach),
+        campaignParameters,
+      )
       reach.assertReached()
     },
     campaignTimeoutMs,
@@ -617,11 +612,12 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it).each(ablations)(
     `without %s steps, histories never reach %s`,
     async (kind, lost) => {
-      oracleRoute(`fixed seed`)
       const states = reachStatesFor(driver)
       const reach = createOracleReach(`${property}.ablation`, states, {
         replaying: false,
       })
+      const runParameters = { seed: 2118, numRuns: 100 }
+      oracleRoute(`fixed seed`)
       await fc.assert(
         fc.asyncProperty(
           historyArb.map((history) =>
@@ -634,7 +630,7 @@ describe(`eager live-source grammar controls`, () => {
             })
           },
         ),
-        { seed: 2118, numRuns: 100 },
+        runParameters,
       )
       expect(reach.counts().get(lost)).toBe(0)
     },
@@ -644,7 +640,6 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it)(
     `without notes, histories never reach field-removed`,
     async () => {
-      oracleRoute(`fixed seed`)
       const reach = createOracleReach(
         `${property}.ablation`,
         reachStatesFor(driver),
@@ -654,6 +649,8 @@ describe(`eager live-source grammar controls`, () => {
         id: row.id,
         title: row.title,
       })
+      const parameters = { seed: 2118, numRuns: 100 }
+      oracleRoute(`fixed seed`)
       await fc.assert(
         fc.asyncProperty(
           historyArb.map((history) =>
@@ -679,7 +676,7 @@ describe(`eager live-source grammar controls`, () => {
             })
           },
         ),
-        { seed: 2118, numRuns: 100 },
+        parameters,
       )
       expect(reach.counts().get(`field-removed`)).toBe(0)
     },
@@ -693,12 +690,13 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it)(
     `without values in live changes, histories never reach value:date:change`,
     async () => {
-      oracleRoute(`fixed seed`)
       const reach = createOracleReach(
         `${property}.ablation`,
         reachStatesFor(driver),
         { replaying: false },
       )
+      const parameters = { seed: 2118, numRuns: 100 }
+      oracleRoute(`fixed seed`)
       await fc.assert(
         fc.asyncProperty(
           historyArb.map((history) =>
@@ -724,7 +722,7 @@ describe(`eager live-source grammar controls`, () => {
             })
           },
         ),
-        { seed: 2118, numRuns: 100 },
+        parameters,
       )
       expect(reach.counts().get(`value:date:change`)).toBe(0)
       expect(reach.counts().get(`value:date:load`)).toBeGreaterThan(0)
@@ -737,12 +735,13 @@ describe(`eager live-source grammar controls`, () => {
   oracleReplayTest(it)(
     `with every read after all buffered batches, histories never reach read-missed-change`,
     async () => {
-      oracleRoute(`fixed seed`)
       const reach = createOracleReach(
         `${property}.ablation`,
         reachStatesFor(driver),
         { replaying: false },
       )
+      const parameters = { seed: 2118, numRuns: 100 }
+      oracleRoute(`fixed seed`)
       await fc.assert(
         fc.asyncProperty(
           historyArb.map((history) =>
@@ -759,7 +758,7 @@ describe(`eager live-source grammar controls`, () => {
             })
           },
         ),
-        { seed: 2118, numRuns: 100 },
+        parameters,
       )
       expect(reach.counts().get(`read-missed-change`)).toBe(0)
     },

@@ -89,10 +89,12 @@ import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { and, eq, not, or } from '../../src/query/builder/functions.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -892,20 +894,24 @@ describe(`WHERE predicate publication oracle`, () => {
       })
     }
 
-    fcTest.prop([historyArbitrary], {
-      seed: 44_500_301,
+    const historyFixedSeed = oracleFixedSeed(44_500_301, {
       numRuns: oracleRuns(80),
-    })(`publishes exactly the TRUE rows (fixed)`, (history) => {
-      oracleRoute(`fixed seed`)
-      return runHistory(history)
     })
+    fcTest.prop([historyArbitrary], historyFixedSeed)(
+      `publishes exactly the TRUE rows (fixed)`,
+      (history) => {
+        oracleRoute(oracleRouteOf(historyFixedSeed))
+        return runHistory(history)
+      },
+    )
   }
 
-  oracleReplayTest(fcTest, property).prop(
-    [historyArbitrary],
-    oraclePropertyOptions(80, property),
-  )(`publishes exactly the TRUE rows (random)`, (history) => {
-    oracleRoute(`random seed`)
-    return runHistory(history)
-  })
+  const historyCampaign = oraclePropertyOptions(80, property)
+  oracleReplayTest(fcTest, property).prop([historyArbitrary], historyCampaign)(
+    `publishes exactly the TRUE rows (random)`,
+    (history) => {
+      oracleRoute(oracleRouteOf(historyCampaign))
+      return runHistory(history)
+    },
+  )
 })

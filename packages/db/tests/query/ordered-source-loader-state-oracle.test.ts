@@ -8,8 +8,10 @@ import { PropRef } from '../../src/query/ir.js'
 import { createOracleReach } from '../oracle-reach.js'
 import { captureMicrotaskErrors, flushPromises } from '../utils.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
@@ -2992,12 +2994,16 @@ describe(`Ordered source request authority`, () => {
   it.each(handoffCampaigns)(
     `preserves repair continuation identity across replay bookkeeping (%s campaign)`,
     async (campaign) => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(
         handoffProperty,
         [`deferred-refill`, `reset-continuation`] as const,
         { minimum: 5 },
       )
+      const parameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(20261029, { numRuns: oracleRuns(200) })
+          : oraclePropertyOptions(400, handoffProperty)
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(handoffCase, async (testCase) => {
           reach.beginHistory()
@@ -3006,9 +3012,7 @@ describe(`Ordered source request authority`, () => {
               reach.reach(state)
           })
         }),
-        campaign === `fixed`
-          ? { seed: 20261029, numRuns: oracleRuns(200) }
-          : oraclePropertyOptions(400, handoffProperty),
+        parameters,
       )
       reach.assertReached()
       process.stderr.write(
@@ -3070,7 +3074,6 @@ describe(`Ordered source request authority`, () => {
   it.each(retirementCampaigns)(
     `repairs an invalidation delivered during completed repair retirement (%s campaign)`,
     async (campaign) => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(
         retirementProperty,
         [
@@ -3080,6 +3083,11 @@ describe(`Ordered source request authority`, () => {
         ] as const,
         { minimum: 20 },
       )
+      const campaignParameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(20261029, { numRuns: oracleRuns(200) })
+          : oraclePropertyOptions(200, retirementProperty)
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(retirementCase, async (testCase) => {
           reach.beginHistory()
@@ -3092,9 +3100,7 @@ describe(`Ordered source request authority`, () => {
               reach.reach(state)
           })
         }),
-        campaign === `fixed`
-          ? { seed: 20261029, numRuns: oracleRuns(200) }
-          : oraclePropertyOptions(200, retirementProperty),
+        campaignParameters,
       )
       reach.assertReached()
       process.stderr.write(
@@ -3200,7 +3206,6 @@ describe(`Ordered source request authority`, () => {
   it.each(retirementReceiverCampaigns)(
     `repairs retirement invalidation through a real subscription (%s campaign)`,
     async (campaign) => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(
         retirementReceiverProperty,
         [
@@ -3220,6 +3225,11 @@ describe(`Ordered source request authority`, () => {
         ] as const,
         { minimum: 20 },
       )
+      const runParameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(20261029, { numRuns: oracleRuns(600) })
+          : oraclePropertyOptions(600, retirementReceiverProperty)
+      oracleRoute(oracleRouteOf(runParameters))
       await fc.assert(
         fc.asyncProperty(retirementReceiverCase, async (scenario) => {
           reach.beginHistory()
@@ -3231,9 +3241,7 @@ describe(`Ordered source request authority`, () => {
             ),
           )
         }),
-        campaign === `fixed`
-          ? { seed: 20261029, numRuns: oracleRuns(600) }
-          : oraclePropertyOptions(600, retirementReceiverProperty),
+        runParameters,
       )
       reach.assertReached()
       process.stderr.write(
@@ -3327,7 +3335,6 @@ describe(`Ordered source request authority`, () => {
   it.each(authorityCampaigns)(
     `holds, retires, and recovers requests under generated settlement orders (%s campaign)`,
     async (campaign) => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       let supersededFailures = 0
       let staleSettlementsAfterRepair = 0
       let supersededFailuresAfterRepair = 0
@@ -3382,6 +3389,11 @@ describe(`Ordered source request authority`, () => {
         hungRequests: 0,
         offsetWindows: 0,
       }
+      const parameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(20261016, { numRuns: oracleRuns(10000) })
+          : oraclePropertyOptions(10000, authorityProperty)
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(authorityCaseArbitrary, async (testCase) => {
           identityReach.beginHistory()
@@ -3424,9 +3436,7 @@ describe(`Ordered source request authority`, () => {
             later[key] += observation[key]
           }
         }),
-        campaign === `fixed`
-          ? { seed: 20261016, numRuns: oracleRuns(10000) }
-          : oraclePropertyOptions(10000, authorityProperty),
+        parameters,
       )
       // Reach witnesses: superseded requests fail, stale requests settle
       // after a repair succeeded, the strand law is checkable, a superseded
@@ -3600,7 +3610,6 @@ describe(`Ordered source request authority`, () => {
   it.each(unprovenReportCampaigns)(
     `answers each loaded-subset report as its coverage requires (%s campaign)`,
     async (campaign) => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       // Declared reach: histories where each report law judged a report.
       const reportStates = [
         `repairedReportsOnOwnPage`,
@@ -3617,6 +3626,11 @@ describe(`Ordered source request authority`, () => {
       const reach = createOracleReach(unprovenReportProperty, reportStates, {
         minimum: 20,
       })
+      const parameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(20261023, { numRuns: oracleRuns(1000) })
+          : oraclePropertyOptions(1000, unprovenReportProperty)
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(unprovenReportCase, async (testCase) => {
           reach.beginHistory()
@@ -3625,9 +3639,7 @@ describe(`Ordered source request authority`, () => {
             if (observation[state] > 0) reach.reach(state)
           }
         }),
-        campaign === `fixed`
-          ? { seed: 20261023, numRuns: oracleRuns(1000) }
-          : oraclePropertyOptions(1000, unprovenReportProperty),
+        parameters,
       )
       reach.assertReached()
     },

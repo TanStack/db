@@ -4,8 +4,10 @@ import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -418,21 +420,18 @@ it.each(
 )(
   `retires a Collection only after gcTime with no subscriber and no persisting transaction (seed %s)`,
   async (seed) => {
-    oracleRoute(
-      seed === undefined || runConfig.replayPath !== undefined
-        ? `random seed`
-        : `fixed seed`,
-    )
     reach = createReach()
-    await fc.assert(property, {
+    const parameters = {
       ...oraclePropertyOptions(
         100,
         `collection-lifecycle.gc-persisting-transaction`,
       ),
       ...(seed === undefined || runConfig.replayPath !== undefined
         ? {}
-        : { seed }),
-    })
+        : oracleFixedSeed(seed)),
+    }
+    oracleRoute(oracleRouteOf(parameters))
+    await fc.assert(property, parameters)
     reach.assertReached()
     console.info(
       `GC transaction reach: ${JSON.stringify(Object.fromEntries(reach.counts()))}`,

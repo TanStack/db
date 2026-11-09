@@ -32,9 +32,11 @@ import {
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createOracleReach } from '../../db/tests/oracle-reach'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import {
@@ -215,6 +217,14 @@ for (const runtime of runtimes) {
           const fidelity = createOracleFailureFidelity<SsrSnapshotHistory>()
           let index = 0
           try {
+            const parameters =
+              campaign === `fixed`
+                ? oracleFixedSeed(2291, {
+                    numRuns: oracleRuns(24) + inputs.length,
+                    examples: inputs,
+                  })
+                : oraclePropertyOptions(24, property, { examples: inputs })
+            oracleRoute(oracleRouteOf(parameters))
             await fidelity.assert(() =>
               fc.assert(
                 fc.asyncProperty(grammar, (history) =>
@@ -252,13 +262,7 @@ for (const runtime of runtimes) {
                     checkRender(history, actual, path)
                   }),
                 ),
-                campaign === `fixed`
-                  ? {
-                      numRuns: oracleRuns(24) + inputs.length,
-                      seed: 2291,
-                      examples: inputs,
-                    }
-                  : oraclePropertyOptions(24, property, { examples: inputs }),
+                parameters,
               ),
             )
             reach.assertReached()

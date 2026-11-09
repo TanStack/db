@@ -12,9 +12,11 @@ import fc from 'fast-check'
 import { describe, expect, it, onTestFailed, vi } from 'vitest'
 import { createOracleReach } from '../../db/tests/oracle-reach.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
@@ -2164,10 +2166,9 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         [`earlier end during hold`, `delete-held gap reported and repaired`],
         { minimum: 24 },
       )
-      if (campaign === `fixed`) oracleRoute(`fixed seed`)
       const options =
         campaign === `fixed`
-          ? { seed: 20261102, numRuns: oracleRuns(24) }
+          ? oracleFixedSeed(20261102, { numRuns: oracleRuns(24) })
           : oraclePropertyOptions(24, endProperty)
       const seed = options.seed ?? Math.floor(Math.random() * 2 ** 31)
       onTestFailed(() => {
@@ -2175,6 +2176,8 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
           `${endProperty} ${campaign} campaign: rerun with TANSTACK_DB_ORACLE_SEED=${seed}`,
         )
       })
+      const parameters = oracleFixedSeed(seed, { ...options })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(sameKeyEndCaseArbitrary, async (testCase) => {
           reach.beginHistory()
@@ -2184,7 +2187,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
           if (observation.reachedDeleteHeldGapReportAndRepair)
             reach.reach(`delete-held gap reported and repaired`)
         }),
-        { ...options, seed },
+        parameters,
       )
       reach.assertReached()
       console.info(endProperty, campaign, Object.fromEntries(reach.counts()))
@@ -2270,14 +2273,15 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
   it.skipIf(oracleReplayRequested())(
     `generated refetch histories under a hold (fixed campaign)`,
     async () => {
-      oracleRoute(`fixed seed`)
       let reachedReport = 0
+      const parameters = oracleFixedSeed(20261015, { numRuns: oracleRuns(40) })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(heldCaseArbitrary, async (testCase) => {
           const observation = await withDeadline(checkCase(testCase))
           if (observation.reachedReportDuringHold) reachedReport++
         }),
-        { seed: 20261015, numRuns: oracleRuns(40) },
+        parameters,
       )
       expect(reachedReport).toBeGreaterThan(0)
     },
@@ -2297,10 +2301,9 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
         `reachedReportOverFullWindow`,
       ] as const
       const reach = createOracleReach(property, states, { minimum: 3 })
-      if (campaign === `fixed`) oracleRoute(`fixed seed`)
       const options =
         campaign === `fixed`
-          ? { seed: 20261013, numRuns: oracleRuns(80) }
+          ? oracleFixedSeed(20261013, { numRuns: oracleRuns(80) })
           : oraclePropertyOptions(80, property)
       // fast-check reports its seed only when the property fails. Choose the
       // random campaign's seed here, so a test timeout can report it too.
@@ -2310,6 +2313,8 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
           `${property} ${campaign} campaign: rerun with TANSTACK_DB_ORACLE_SEED=${seed}`,
         )
       })
+      const campaignParameters = oracleFixedSeed(seed, { ...options })
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(caseArbitrary, async (testCase) => {
           reach.beginHistory()
@@ -2318,7 +2323,7 @@ describe(`query-db on-demand refetch keeps served ordered prefixes whole`, () =>
             if (observation[state]) reach.reach(state)
           }
         }),
-        { ...options, seed },
+        campaignParameters,
       )
       reach.assertReached()
       console.info(property, campaign, Object.fromEntries(reach.counts()))

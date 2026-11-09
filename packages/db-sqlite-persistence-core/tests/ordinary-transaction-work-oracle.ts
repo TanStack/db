@@ -1,6 +1,12 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
-import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
 import { createPersistedTableName } from '../src'
 import {
@@ -941,7 +947,8 @@ async function assertGeneratedHistory(
 // committed work. The generated histories and independent-key cases come from
 // the grammars, and the work bound is the write-count law at each checkpoint.
 declareOracle({
-  owns: [`src/sqlite-core-adapter.ts`],  check: [assertGeneratedHistory, assertIndependentWork],
+  owns: [`src/sqlite-core-adapter.ts`],
+  check: [assertGeneratedHistory, assertIndependentWork],
   model: [modelAfter],
   grammar: [generatedHistoryArbitrary, independentWorkArbitrary],
 })
@@ -1104,33 +1111,49 @@ export function runOrdinaryTransactionWorkOracle(): void {
       ).toBe(true)
     })
 
-    fcTest.prop([independentWorkArbitrary], {
-      seed: 31992,
-      numRuns: oracleRuns(24),
-    })('bounds independent-key write work (fixed)', assertIndependentWork)
+    // Each campaign registers the route of its parameters in every run.
+    const routed =
+      <TArgs extends Array<unknown>, TResult>(
+        parameters: Parameters<typeof oracleRouteOf>[0],
+        check: (...args: TArgs) => TResult,
+      ) =>
+      (...args: TArgs): TResult => {
+        oracleRoute(oracleRouteOf(parameters))
+        return check(...args)
+      }
 
-    fcTest.prop(
-      [independentWorkArbitrary],
-      oraclePropertyOptions(24, 'sqlite-ordinary.independent-work'),
-    )(
+    const independentWorkFixedSeed = oracleFixedSeed(31992, {
+      numRuns: oracleRuns(24),
+    })
+    fcTest.prop([independentWorkArbitrary], independentWorkFixedSeed)(
+      'bounds independent-key write work (fixed)',
+      routed(independentWorkFixedSeed, assertIndependentWork),
+    )
+
+    const independentWorkCampaign = oraclePropertyOptions(
+      24,
+      'sqlite-ordinary.independent-work',
+    )
+    fcTest.prop([independentWorkArbitrary], independentWorkCampaign)(
       'bounds independent-key write work (random or replayed)',
-      assertIndependentWork,
+      routed(independentWorkCampaign, assertIndependentWork),
     )
 
-    fcTest.prop([generatedHistoryArbitrary], {
-      seed: 1992,
+    const generatedHistoryFixedSeed = oracleFixedSeed(1992, {
       numRuns: oracleRuns(24),
-    })(
+    })
+    fcTest.prop([generatedHistoryArbitrary], generatedHistoryFixedSeed)(
       'preserves bounded ordinary write histories (fixed)',
-      assertGeneratedHistory,
+      routed(generatedHistoryFixedSeed, assertGeneratedHistory),
     )
 
-    fcTest.prop(
-      [generatedHistoryArbitrary],
-      oraclePropertyOptions(24, 'sqlite-ordinary.write-history'),
-    )(
+    const generatedHistoryCampaign = oraclePropertyOptions(
+      24,
+      'sqlite-ordinary.write-history',
+    )
+    fcTest.prop([generatedHistoryArbitrary], generatedHistoryCampaign)(
       'preserves bounded ordinary write histories (random or replayed)',
-      assertGeneratedHistory,
+      routed(generatedHistoryCampaign, assertGeneratedHistory),
     )
 
     it('rejects a wrong metadata-preservation design in the generated driver', async () => {

@@ -4,8 +4,10 @@ import { createCollection } from '../src/collection/index.js'
 import { createTransaction } from '../src/transactions.js'
 import { DuplicateTransactionIdError } from '../src/errors.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -756,18 +758,20 @@ declareOracle({
 
 describe(`settled transactions leave every Collection that tracked them`, () => {
   it(`generated histories with a fixed seed`, async () => {
-    oracleRoute(`fixed seed`)
+    const parameters = oracleFixedSeed(2080, { numRuns: oracleRuns(200) })
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(history, (steps) => runHistory(steps)),
-      { numRuns: oracleRuns(200), seed: 2080 },
+      parameters,
     )
   }, 300_000)
 
   it(`generated histories with a random or replayed seed`, async () => {
-    oracleRoute(`random seed`)
+    const campaignParameters = oraclePropertyOptions(200, PROPERTY)
+    oracleRoute(oracleRouteOf(campaignParameters))
     await fc.assert(
       fc.asyncProperty(history, (steps) => runHistory(steps)),
-      oraclePropertyOptions(200, PROPERTY),
+      campaignParameters,
     )
   }, 300_000)
 

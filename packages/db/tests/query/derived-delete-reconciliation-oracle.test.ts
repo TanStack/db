@@ -6,8 +6,10 @@ import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { stripVirtualProps } from '../utils.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -153,20 +155,24 @@ it.each([`initial`, `update`, `insert`] as const)(
   },
 )
 
-fcTest.prop([flushHistory], { numRuns: oracleRuns(40), seed: 41703 })(
+const flushHistoryFixedSeed = oracleFixedSeed(41703, {
+  numRuns: oracleRuns(40),
+})
+fcTest.prop([flushHistory], flushHistoryFixedSeed)(
   `shares membership work only for balanced deltas across fixed queue histories`,
   (steps) => {
-    oracleRoute(`fixed seed`)
+    oracleRoute(oracleRouteOf(flushHistoryFixedSeed))
     return runFlushHistory(steps)
   },
 )
-fcTest.prop(
-  [flushHistory],
-  oraclePropertyOptions(60, `derived-publication.membership-work`),
-)(
+const flushHistoryCampaign = oraclePropertyOptions(
+  60,
+  `derived-publication.membership-work`,
+)
+fcTest.prop([flushHistory], flushHistoryCampaign)(
   `shares membership work only for balanced deltas across random queue histories`,
   (steps) => {
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(flushHistoryCampaign))
     return runFlushHistory(steps)
   },
 )

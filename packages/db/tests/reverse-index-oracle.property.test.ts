@@ -4,8 +4,10 @@ import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { ReverseIndex } from '../src/indexes/reverse-index.js'
 import { PropRef } from '../src/query/ir.js'
 import {
+  oracleFixedSeed,
   oracleRandomParameters,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -208,21 +210,24 @@ describe(`reversed index reads`, () => {
     },
   )
 
-  fcTest.prop([readCase], { numRuns: runs, seed: 2045 })(
+  const readCaseFixedSeed = oracleFixedSeed(2045, { numRuns: runs })
+  fcTest.prop([readCase], readCaseFixedSeed)(
     `matches the query order in bounded work for a fixed seed`,
     (read) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(readCaseFixedSeed))
       checkRead(read)
     },
   )
 
-  fcTest.prop(
-    [readCase],
-    oracleRandomParameters(runs, replay, `reverse-index.reads`),
-  )(
+  const readCaseCampaign = oracleRandomParameters(
+    runs,
+    replay,
+    `reverse-index.reads`,
+  )
+  fcTest.prop([readCase], readCaseCampaign)(
     `matches the query order in bounded work for a random or replayed seed`,
     (read) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(readCaseCampaign))
       checkRead(read)
     },
   )

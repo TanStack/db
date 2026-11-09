@@ -10,9 +10,11 @@ import {
   stepGcModel,
 } from './collection-gc-retention-oracle.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -369,12 +371,16 @@ it.each(
 )(
   `retains every touched Collection across mutation shapes (seed %s)`,
   async (seed) => {
-    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
     reach = createOracleReach(propertyName, states)
-    await fc.assert(fc.asyncProperty(historyArbitrary, runMutationHistory), {
+    const parameters = {
       ...oraclePropertyOptions(150, propertyName),
-      ...(seed === undefined ? {} : { seed }),
-    })
+      ...(seed === undefined ? {} : oracleFixedSeed(seed)),
+    }
+    oracleRoute(oracleRouteOf(parameters))
+    await fc.assert(
+      fc.asyncProperty(historyArbitrary, runMutationHistory),
+      parameters,
+    )
     reach.assertReached()
     console.info(
       `GC mutation reach: ${JSON.stringify(Object.fromEntries(reach.counts()))}`,

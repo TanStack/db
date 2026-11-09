@@ -2,9 +2,11 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it as vitestIt } from 'vitest'
 import { reconcileChangesForD2 } from '../src/query/live/utils.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -525,24 +527,29 @@ const assertChangedSourceReplay = (row: SourceRow, key: SourceKey) => {
   ).toBe(1)
 }
 
-fixedCampaign.prop([sourceRowArbitrary, sourceKeyArbitrary], {
-  numRuns: oracleRuns(100),
-  seed: 1782,
-})(
+const sourceRowFixedSeed = oracleFixedSeed(1782, { numRuns: oracleRuns(100) })
+fixedCampaign.prop(
+  [sourceRowArbitrary, sourceKeyArbitrary],
+  sourceRowFixedSeed,
+)(
   `forces a changed source payload through every generated helper restart for a fixed seed`,
   (...args) => {
-    oracleRoute(`fixed seed`)
+    oracleRoute(oracleRouteOf(sourceRowFixedSeed))
     return assertChangedSourceReplay(...args)
   },
 )
 
+const sourceRowCampaign = oraclePropertyOptions(
+  100,
+  `d2-source.changed-restart`,
+)
 randomCampaign(`d2-source.changed-restart`).prop(
   [sourceRowArbitrary, sourceKeyArbitrary],
-  oraclePropertyOptions(100, `d2-source.changed-restart`),
+  sourceRowCampaign,
 )(
   `forces a changed source payload through every generated helper restart for a random or replayed seed`,
   (...args) => {
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(sourceRowCampaign))
     return assertChangedSourceReplay(...args)
   },
 )
@@ -602,24 +609,31 @@ const assertExactSourceContributions = (
   }
 }
 
-fixedCampaign.prop([reconciliationHistoryArbitrary], {
+const reconciliationHistoryFixedSeed = oracleFixedSeed(1780, {
   numRuns: oracleRuns(200),
-  seed: 1780,
-})(
+})
+fixedCampaign.prop(
+  [reconciliationHistoryArbitrary],
+  reconciliationHistoryFixedSeed,
+)(
   `keeps one exact D2 contribution per source key for a fixed seed`,
   (...args) => {
-    oracleRoute(`fixed seed`)
+    oracleRoute(oracleRouteOf(reconciliationHistoryFixedSeed))
     return assertExactSourceContributions(...args)
   },
 )
 
+const reconciliationHistoryCampaign = oraclePropertyOptions(
+  200,
+  `d2-source.exact-retractions`,
+)
 randomCampaign(`d2-source.exact-retractions`).prop(
   [reconciliationHistoryArbitrary],
-  oraclePropertyOptions(200, `d2-source.exact-retractions`),
+  reconciliationHistoryCampaign,
 )(
   `keeps one exact D2 contribution per source key for a random or replayed seed`,
   (...args) => {
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(reconciliationHistoryCampaign))
     return assertExactSourceContributions(...args)
   },
 )
@@ -639,21 +653,28 @@ const assertDisjointHistoriesCommute = ([left, right]: [
   expect(snapshotModel(rightThenLeft)).toEqual(snapshotModel(leftThenRight))
 }
 
-fixedCampaign.prop([disjointHistoriesArbitrary], {
+const disjointHistoriesFixedSeed = oracleFixedSeed(1781, {
   numRuns: oracleRuns(100),
-  seed: 1781,
-})(`commutes independent source histories for a fixed seed`, (...args) => {
-  oracleRoute(`fixed seed`)
-  return assertDisjointHistoriesCommute(...args)
 })
+fixedCampaign.prop([disjointHistoriesArbitrary], disjointHistoriesFixedSeed)(
+  `commutes independent source histories for a fixed seed`,
+  (...args) => {
+    oracleRoute(oracleRouteOf(disjointHistoriesFixedSeed))
+    return assertDisjointHistoriesCommute(...args)
+  },
+)
 
+const disjointHistoriesCampaign = oraclePropertyOptions(
+  100,
+  `d2-source.disjoint-commutation`,
+)
 randomCampaign(`d2-source.disjoint-commutation`).prop(
   [disjointHistoriesArbitrary],
-  oraclePropertyOptions(100, `d2-source.disjoint-commutation`),
+  disjointHistoriesCampaign,
 )(
   `commutes independent source histories for a random or replayed seed`,
   (...args) => {
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(disjointHistoriesCampaign))
     return assertDisjointHistoriesCommute(...args)
   },
 )

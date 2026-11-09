@@ -12,9 +12,11 @@ import { distinct } from '../src/operators/distinct.js'
 import { map } from '../src/operators/map.js'
 import { createOracleReach } from '../../db/tests/oracle-reach.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config.js'
 import { declareOracle } from '../../db/tests/oracle-declaration.js'
@@ -56,8 +58,12 @@ for (const mode of [`selected`, `tuple`] as const) {
     oracleReplayTest(it, ...(campaign === `random` ? [PROPERTY] : []))(
       `preserves distinct collisions by ${mode} (${campaign})`,
       () => {
-        oracleRoute(campaign === 'fixed' ? `fixed seed` : `random seed`)
         const reach = createOracleReach(PROPERTY, DISTINCT_REACH_STATES)
+        const parameters =
+          campaign === `fixed`
+            ? oracleFixedSeed(2306, { numRuns: oracleRuns(100) })
+            : oraclePropertyOptions(100, PROPERTY)
+        oracleRoute(oracleRouteOf(parameters))
         fc.assert(
           fc.property(distinctHistory, (worlds) => {
             reach.beginHistory()
@@ -92,9 +98,7 @@ for (const mode of [`selected`, `tuple`] as const) {
             // Both successful delivery paths checked these input conditions.
             for (const state of distinctReachStates(worlds)) reach.reach(state)
           }),
-          campaign === `fixed`
-            ? { numRuns: oracleRuns(100), seed: 2306 }
-            : oraclePropertyOptions(100, PROPERTY),
+          parameters,
         )
         reach.assertReached()
         process.stdout.write(

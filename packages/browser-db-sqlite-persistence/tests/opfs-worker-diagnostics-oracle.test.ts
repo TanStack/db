@@ -1,10 +1,12 @@
 import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -360,28 +362,33 @@ describe(`OPFS worker diagnostics oracle`, () => {
     },
   )
 
-  const checkDiagnostics = (options: { numRuns: number; seed?: number }) =>
-    fc.assert(fc.asyncProperty(diagnosticInput, checkDiagnostic), {
-      ...options,
-      verbose: true,
-    })
+  // Each campaign registers the route of the parameters it runs with.
+  const checkDiagnostics = (options: {
+    numRuns: number
+    seed?: number
+    path?: string
+  }) => {
+    const parameters = { ...options, verbose: true }
+    oracleRoute(oracleRouteOf(parameters))
+    return fc.assert(
+      fc.asyncProperty(diagnosticInput, checkDiagnostic),
+      parameters,
+    )
+  }
   oracleReplayTest(it)(
     `matches the independent diagnostic formatter (fixed campaign)`,
-    () => {
-      oracleRoute(`fixed seed`)
-      return checkDiagnostics({ seed: 1846, numRuns: oracleRuns(diagnosticRuns) })
-    },
+    () =>
+      checkDiagnostics(
+        oracleFixedSeed(1846, { numRuns: oracleRuns(diagnosticRuns) }),
+      ),
     15_000,
   )
   oracleReplayTest(it, diagnosticProperty)(
     `matches the independent diagnostic formatter (random campaign)`,
     () =>
-      {
-      oracleRoute(`random seed`)
-      return checkDiagnostics(
+      checkDiagnostics(
         oraclePropertyOptions(diagnosticRuns, diagnosticProperty),
-      )
-    },
+      ),
     15_000,
   )
 })

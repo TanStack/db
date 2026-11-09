@@ -5,8 +5,10 @@ import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { and, createLiveQueryCollection, eq } from '../../src/query/index.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
@@ -477,7 +479,6 @@ const coldJoinSeeds =
 // The fixed and random campaigns use one grammar and checker. A seed and
 // shrink path replay only the requested campaign through oraclePropertyOptions.
 it.each(coldJoinSeeds)(`checks cold join histories, seed=%s`, async (seed) => {
-  oracleRoute(`fixed seed`)
   const step: fc.Arbitrary<Step> = fc.oneof(
     fc
       .constantFrom(10, 20, 30, 40)
@@ -490,6 +491,11 @@ it.each(coldJoinSeeds)(`checks cold join histories, seed=%s`, async (seed) => {
       })
       .map((row) => ({ type: `put` as const, row })),
   )
+  const parameters =
+    seed === undefined
+      ? oraclePropertyOptions(50, coldJoinProperty)
+      : oracleFixedSeed(seed, { numRuns: oracleRuns(50) })
+  oracleRoute(oracleRouteOf(parameters))
   await fc.assert(
     fc.asyncProperty(
       fc.array(step, { minLength: 0, maxLength: 15 }),
@@ -497,9 +503,7 @@ it.each(coldJoinSeeds)(`checks cold join histories, seed=%s`, async (seed) => {
         await runColdJoin([...history, ...steps])
       },
     ),
-    seed === undefined
-      ? oraclePropertyOptions(50, coldJoinProperty)
-      : { seed, numRuns: oracleRuns(50) },
+    parameters,
   )
 })
 it.each([`hide-acquisition`, `drop-delete`, `wrong-result`] as const)(
@@ -979,13 +983,17 @@ describe(`compound join relational oracle`, () => {
   it.each(seeds)(
     `recomputes generated compound histories, seed=%s`,
     async (seed) => {
-      oracleRoute(`fixed seed`)
       const rowArbitrary = fc.record({
         id: fc.integer({ min: 0, max: 3 }),
         atom: fc.integer({ min: 0, max: compoundBoundaryRows.length - 1 }),
         b: fc.constantFrom<number | null>(0, 1, null),
         c: fc.integer({ min: 0, max: 1 }),
       })
+      const campaignParameters =
+        seed === undefined
+          ? oraclePropertyOptions(60, property)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(60) })
+      oracleRoute(oracleRouteOf(campaignParameters))
       await fc.assert(
         fc.asyncProperty(
           fc.record({
@@ -1020,9 +1028,7 @@ describe(`compound join relational oracle`, () => {
           }),
           (scenario) => runCompoundHistory(scenario),
         ),
-        seed === undefined
-          ? oraclePropertyOptions(60, property)
-          : { seed, numRuns: oracleRuns(60) },
+        campaignParameters,
       )
     },
   )

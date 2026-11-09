@@ -3,8 +3,10 @@ import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DuplicateKeySyncError } from '../src/errors.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -497,7 +499,7 @@ const retentionHistory = fc
 
 async function retentionCampaign(
   campaign: string,
-  options: Parameters<typeof fc.assert>[1],
+  options: NonNullable<Parameters<typeof fc.assert>[1]>,
 ): Promise<void> {
   retentionReach = createOracleReach(
     `collection-state.retention (${campaign})`,
@@ -505,6 +507,7 @@ async function retentionCampaign(
     { minimum: 5 },
   )
   try {
+    oracleRoute(oracleRouteOf(options))
     await fc.assert(
       fc.asyncProperty(retentionHistory, runRetentionHistory),
       options,
@@ -516,11 +519,12 @@ async function retentionCampaign(
 }
 
 it(`matches retained authoritative state with a fixed seed`, () => {
-  oracleRoute(`fixed seed`)
-  return retentionCampaign(`fixed`, { numRuns: oracleRuns(100), seed: 1_902 })
+  return retentionCampaign(
+    `fixed`,
+    oracleFixedSeed(1_902, { numRuns: oracleRuns(100) }),
+  )
 })
 it(`matches retained authoritative state with a random or replayed seed`, () => {
-  oracleRoute(`random seed`)
   return retentionCampaign(
     `random`,
     oraclePropertyOptions(100, `collection-state.retention`),
@@ -1069,7 +1073,11 @@ it.each(
 )(
   `drops a completed row at settlement around truncate $timing (seed $seed)`,
   async ({ timing, seed }) => {
-    oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+    const parameters =
+      seed === undefined
+        ? oraclePropertyOptions(30, acceptedSnapshotReplayProperty[timing])
+        : oracleFixedSeed(seed, { numRuns: oracleRuns(30) })
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(historyRow, fc.boolean(), async (row, reject) => {
         const truncate: OptimisticStep = {
@@ -1121,9 +1129,7 @@ it.each(
         expect(counts.deletes).toBe(deletes)
         expect(counts.settlements).toBe(2 + deletes)
       }),
-      seed === undefined
-        ? oraclePropertyOptions(30, acceptedSnapshotReplayProperty[timing])
-        : { seed, numRuns: oracleRuns(30) },
+      parameters,
     )
   },
 )
@@ -1243,20 +1249,24 @@ it.each(
     })
   },
 )
-fcTest.prop([optimisticHistory], { numRuns: oracleRuns(100), seed: 86103 })(
+const optimisticHistoryFixedSeed = oracleFixedSeed(86103, {
+  numRuns: oracleRuns(100),
+})
+fcTest.prop([optimisticHistory], optimisticHistoryFixedSeed)(
   `matches optimistic ownership and publication histories with a fixed seed`,
   async ({ initial, steps }) => {
-    oracleRoute(`fixed seed`)
+    oracleRoute(oracleRouteOf(optimisticHistoryFixedSeed))
     await runOptimisticHistory(initial, steps)
   },
 )
-fcTest.prop(
-  [optimisticHistory],
-  oraclePropertyOptions(100, `collection-state.optimistic-history`),
-)(
+const optimisticHistoryCampaign = oraclePropertyOptions(
+  100,
+  `collection-state.optimistic-history`,
+)
+fcTest.prop([optimisticHistory], optimisticHistoryCampaign)(
   `matches optimistic ownership and publication histories with a random or replayed seed`,
   async ({ initial, steps }) => {
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(optimisticHistoryCampaign))
     await runOptimisticHistory(initial, steps)
   },
 )
@@ -1297,22 +1307,26 @@ it(`merges a partial update after an aborted source delete`, async () => {
     distinguishingPartialUpdates: 1,
   })
 })
-fcTest.prop([partialHistory], { numRuns: oracleRuns(100), seed: 86104 })(
+const partialHistoryFixedSeed = oracleFixedSeed(86104, {
+  numRuns: oracleRuns(100),
+})
+fcTest.prop([partialHistory], partialHistoryFixedSeed)(
   `matches partial-update histories with a fixed seed`,
   async ({ initial, steps }) => {
-    oracleRoute(`fixed seed`)
+    oracleRoute(oracleRouteOf(partialHistoryFixedSeed))
     await runOptimisticHistory(initial, steps, undefined, {
       partialUpdates: true,
     })
   },
 )
-fcTest.prop(
-  [partialHistory],
-  oraclePropertyOptions(100, `collection-state.optimistic-history-partial`),
-)(
+const partialHistoryCampaign = oraclePropertyOptions(
+  100,
+  `collection-state.optimistic-history-partial`,
+)
+fcTest.prop([partialHistory], partialHistoryCampaign)(
   `matches partial-update histories with a random or replayed seed`,
   async ({ initial, steps }) => {
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(partialHistoryCampaign))
     await runOptimisticHistory(initial, steps, undefined, {
       partialUpdates: true,
     })

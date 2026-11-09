@@ -11,10 +11,12 @@ import {
 } from '../src/utils/comparison'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplaySkips,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   recordOracleReplay,
 } from './oracle-config.js'
@@ -95,7 +97,7 @@ function failureCheckpoint(error: unknown): string {
 function checkWithOriginalFailure<T>(
   arbitrary: fc.Arbitrary<T>,
   check: (value: T) => void,
-  options: Parameters<typeof fc.check>[1],
+  options: NonNullable<Parameters<typeof fc.check>[1]>,
   replayProperty?: string,
 ) {
   let original: ComparisonFailure | undefined
@@ -122,7 +124,7 @@ function assertComparisonProperty<T>(
   label: string,
   arbitrary: fc.Arbitrary<T>,
   check: (value: T) => void,
-  options: Parameters<typeof fc.check>[1],
+  options: NonNullable<Parameters<typeof fc.check>[1]>,
   // The registered property, so a guarded replay can witness this run.
   replayProperty?: string,
 ): void {
@@ -141,7 +143,7 @@ function assertComparisonProperty<T>(
     path: result.counterexamplePath,
     numRuns: 1,
     endOnFailure: true,
-    examples: options?.examples,
+    examples: options.examples,
   })
   const reproduced =
     replay.result.failed &&
@@ -172,19 +174,20 @@ function comparisonProperty<
     }
 
     it.skipIf(oracleReplayRequested())(`${label} fixed`, () => {
-      oracleRoute(`fixed seed`)
-      assertComparisonProperty(label, arbitrary, checkValues, {
-        seed: fixedSeed,
+      const parameters = oracleFixedSeed(fixedSeed, {
         numRuns: oracleRuns(campaignRuns),
       })
+      oracleRoute(oracleRouteOf(parameters))
+      assertComparisonProperty(label, arbitrary, checkValues, parameters)
     })
     it.skipIf(oracleReplaySkips(property))(`${label} random`, () => {
-      oracleRoute(`random seed`)
+      const parameters = oraclePropertyOptions(campaignRuns, property)
+      oracleRoute(oracleRouteOf(parameters))
       assertComparisonProperty(
         label,
         arbitrary,
         checkValues,
-        oraclePropertyOptions(campaignRuns, property),
+        parameters,
         property,
       )
     })
@@ -477,11 +480,7 @@ describe(`comparison law controls`, () => {
           `synthetic two-law control`,
           arbitrary,
           check,
-          {
-            seed: 20260911,
-            numRuns: 1,
-            examples: [[5]],
-          },
+          { seed: 20260911, numRuns: 1, examples: [[5]] },
         )
       } catch (error) {
         reported = error
@@ -568,12 +567,13 @@ describe(`comparison law controls`, () => {
   )
 
   fcTest(`fixed campaign reaches a changed byte in every case`, () => {
+    const parameters = { seed: 20260911, numRuns: 100 }
     oracleRoute(`fixed seed`)
     const result = fc.check(
       fc.property(arbitraryChangedBytes, (sample) => {
         assertChangedBytes(sample, areValuesEqual)
       }),
-      { seed: 20260911, numRuns: 100 },
+      parameters,
     )
     expect(result).toMatchObject({ failed: false, numRuns: 100, numSkips: 0 })
   })

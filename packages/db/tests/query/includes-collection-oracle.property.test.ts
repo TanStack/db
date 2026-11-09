@@ -13,9 +13,11 @@ import {
 import { runTrace } from '../trace-runner.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -566,24 +568,31 @@ describe(`Collection-valued includes oracle`, () => {
       projection: collectionProjection,
     })
 
-  oracleReplayTest(fcTest).prop([collectionScenarioArbitrary], {
+  const collectionScenarioFixedSeed = oracleFixedSeed(1_658_101, {
     numRuns: oracleRuns(30),
-    seed: 1_658_101,
-  })(
+  })
+  oracleReplayTest(fcTest).prop(
+    [collectionScenarioArbitrary],
+    collectionScenarioFixedSeed,
+  )(
     `keeps Collection, toArray, and materialize equivalent across fixed relationship histories`,
     (...args: Parameters<typeof runRelationshipHistory>) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(collectionScenarioFixedSeed))
       return runRelationshipHistory(...args)
     },
   )
 
+  const collectionScenarioCampaign = oraclePropertyOptions(
+    30,
+    relationshipProperty,
+  )
   oracleReplayTest(fcTest, relationshipProperty).prop(
     [collectionScenarioArbitrary],
-    oraclePropertyOptions(30, relationshipProperty),
+    collectionScenarioCampaign,
   )(
     `keeps Collection, toArray, and materialize equivalent across random or replayed relationship histories`,
     (...args: Parameters<typeof runRelationshipHistory>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(collectionScenarioCampaign))
       return runRelationshipHistory(...args)
     },
   )
@@ -1069,24 +1078,31 @@ describe(`Collection-valued includes oracle`, () => {
     )
   }
 
-  oracleReplayTest(fcTest).prop([publicKeyOrderArbitrary], {
+  const publicKeyOrderFixedSeed = oracleFixedSeed(1_658_102, {
     numRuns: oracleRuns(20),
-    seed: 1_658_102,
-  })(
+  })
+  oracleReplayTest(fcTest).prop(
+    [publicKeyOrderArbitrary],
+    publicKeyOrderFixedSeed,
+  )(
     `uses one raw public-key order across Collection and inline materializations with a fixed seed`,
     (...args: Parameters<typeof runPublicKeyOrder>) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(publicKeyOrderFixedSeed))
       return runPublicKeyOrder(...args)
     },
   )
 
+  const publicKeyOrderCampaign = oraclePropertyOptions(
+    20,
+    publicKeyOrderProperty,
+  )
   oracleReplayTest(fcTest, publicKeyOrderProperty).prop(
     [publicKeyOrderArbitrary],
-    oraclePropertyOptions(20, publicKeyOrderProperty),
+    publicKeyOrderCampaign,
   )(
     `uses one raw public-key order across Collection and inline materializations with a random or replayed seed`,
     (...args: Parameters<typeof runPublicKeyOrder>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(publicKeyOrderCampaign))
       return runPublicKeyOrder(...args)
     },
   )
@@ -1204,24 +1220,25 @@ describe(`Collection-valued includes oracle`, () => {
     )
   }
 
-  oracleReplayTest(fcTest).prop([orderSwapArbitrary], {
+  const orderSwapFixedSeed = oracleFixedSeed(1_658_103, {
     numRuns: oracleRuns(20),
-    seed: 1_658_103,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([orderSwapArbitrary], orderSwapFixedSeed)(
     `propagates order-only child swaps through every materialization with a fixed seed`,
     (...args: Parameters<typeof runLayoutSwap>) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(orderSwapFixedSeed))
       return runLayoutSwap(...args)
     },
   )
 
+  const orderSwapCampaign = oraclePropertyOptions(20, layoutSwapProperty)
   oracleReplayTest(fcTest, layoutSwapProperty).prop(
     [orderSwapArbitrary],
-    oraclePropertyOptions(20, layoutSwapProperty),
+    orderSwapCampaign,
   )(
     `propagates order-only child swaps through every materialization with a random or replayed seed`,
     (...args: Parameters<typeof runLayoutSwap>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(orderSwapCampaign))
       return runLayoutSwap(...args)
     },
   )
@@ -1655,24 +1672,31 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
-  oracleReplayTest(fcTest).prop([optimisticChildArbitrary], {
+  const optimisticChildFixedSeed = oracleFixedSeed(1_658_104, {
     numRuns: oracleRuns(20),
-    seed: 1_658_104,
-  })(
+  })
+  oracleReplayTest(fcTest).prop(
+    [optimisticChildArbitrary],
+    optimisticChildFixedSeed,
+  )(
     `matches optimistic child settlement histories with a fixed seed`,
     (...args: Parameters<typeof runOptimisticChildHistory>) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(optimisticChildFixedSeed))
       return runOptimisticChildHistory(...args)
     },
   )
 
+  const optimisticChildCampaign = oraclePropertyOptions(
+    20,
+    optimisticChildProperty,
+  )
   oracleReplayTest(fcTest, optimisticChildProperty).prop(
     [optimisticChildArbitrary],
-    oraclePropertyOptions(20, optimisticChildProperty),
+    optimisticChildCampaign,
   )(
     `matches optimistic child settlement histories with a random or replayed seed`,
     (...args: Parameters<typeof runOptimisticChildHistory>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(optimisticChildCampaign))
       return runOptimisticChildHistory(...args)
     },
   )

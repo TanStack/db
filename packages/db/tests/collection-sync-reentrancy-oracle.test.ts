@@ -35,8 +35,10 @@ import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { createDeferred } from '../src/deferred.js'
 import {
+  oracleFixedSeed,
   oracleRandomParameters,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -474,25 +476,26 @@ describe(`sync publication reentrancy`, () => {
     }
   })
 
-  fcTest.prop([listenerScenarioArbitrary], {
+  const listenerScenarioFixedSeed = oracleFixedSeed(1774, {
     numRuns: generatedRuns,
-    seed: 1774,
-  })(`matches the reentrant drain laws for a fixed seed`, (...args) => {
-    oracleRoute(`fixed seed`)
-    return runListenerScenario(...args)
   })
+  fcTest.prop([listenerScenarioArbitrary], listenerScenarioFixedSeed)(
+    `matches the reentrant drain laws for a fixed seed`,
+    (...args) => {
+      oracleRoute(oracleRouteOf(listenerScenarioFixedSeed))
+      return runListenerScenario(...args)
+    },
+  )
 
-  fcTest.prop(
-    [listenerScenarioArbitrary],
-    oracleRandomParameters(
-      generatedRuns,
-      replay,
-      `collection-sync.reentrant-drain`,
-    ),
-  )(
+  const listenerScenarioCampaign = oracleRandomParameters(
+    generatedRuns,
+    replay,
+    `collection-sync.reentrant-drain`,
+  )
+  fcTest.prop([listenerScenarioArbitrary], listenerScenarioCampaign)(
     `matches the reentrant drain laws for a random or replayed seed`,
     (...args) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(listenerScenarioCampaign))
       return runListenerScenario(...args)
     },
   )

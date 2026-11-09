@@ -53,10 +53,12 @@ import {
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { declareOracle } from '../oracle-declaration.js'
@@ -297,22 +299,26 @@ describe(`joined result key oracle`, () => {
       })
     }
 
-    fcTest.prop([historyArbitrary], {
-      seed: 44_501_962,
+    const historyFixedSeed = oracleFixedSeed(44_501_962, {
       numRuns: oracleRuns(80),
-    })(`publishes one row per joined pair (fixed)`, (history) => {
-      oracleRoute(`fixed seed`)
-      return runHistory(history)
     })
+    fcTest.prop([historyArbitrary], historyFixedSeed)(
+      `publishes one row per joined pair (fixed)`,
+      (history) => {
+        oracleRoute(oracleRouteOf(historyFixedSeed))
+        return runHistory(history)
+      },
+    )
   }
 
-  oracleReplayTest(fcTest, property).prop(
-    [historyArbitrary],
-    oraclePropertyOptions(80, property),
-  )(`publishes one row per joined pair (random)`, (history) => {
-    oracleRoute(`random seed`)
-    return runHistory(history)
-  })
+  const historyCampaign = oraclePropertyOptions(80, property)
+  oracleReplayTest(fcTest, property).prop([historyArbitrary], historyCampaign)(
+    `publishes one row per joined pair (random)`,
+    (history) => {
+      oracleRoute(oracleRouteOf(historyCampaign))
+      return runHistory(history)
+    },
+  )
 })
 
 /**
@@ -801,19 +807,23 @@ describe(`whole-source joined occurrences`, () => {
         return runSelectionHistory(history)
       },
     )
-    fcTest.prop([selectionHistoryArbitrary], {
-      seed: 15_811_743,
+    const selectionHistoryFixedSeed = oracleFixedSeed(15_811_743, {
       numRuns: oracleRuns(80),
-    })(`preserves selected occurrences (fixed)`, (history) => {
-      oracleRoute(`fixed seed`)
-      return runSelectionHistory(history)
     })
+    fcTest.prop([selectionHistoryArbitrary], selectionHistoryFixedSeed)(
+      `preserves selected occurrences (fixed)`,
+      (history) => {
+        oracleRoute(oracleRouteOf(selectionHistoryFixedSeed))
+        return runSelectionHistory(history)
+      },
+    )
   }
+  const selectionHistoryCampaign = oraclePropertyOptions(80, selectionProperty)
   oracleReplayTest(fcTest, selectionProperty).prop(
     [selectionHistoryArbitrary],
-    oraclePropertyOptions(80, selectionProperty),
+    selectionHistoryCampaign,
   )(`preserves selected occurrences (random)`, (history) => {
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(selectionHistoryCampaign))
     return runSelectionHistory(history)
   })
 })

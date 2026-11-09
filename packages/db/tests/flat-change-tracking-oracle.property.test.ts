@@ -80,10 +80,12 @@ import {
   withFlatChangeTracking,
 } from '../src/proxy.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -605,20 +607,24 @@ describe(`flat change tracking oracle`, () => {
       })
     }
 
-    fcTest.prop([historyArbitrary], {
-      seed: 44_502_101,
+    const historyFixedSeed = oracleFixedSeed(44_502_101, {
       numRuns: oracleRuns(200),
-    })(`matches the draft proxy (fixed)`, (...args) => {
-      oracleRoute(`fixed seed`)
-      return runHistory(...args)
     })
+    fcTest.prop([historyArbitrary], historyFixedSeed)(
+      `matches the draft proxy (fixed)`,
+      (...args) => {
+        oracleRoute(oracleRouteOf(historyFixedSeed))
+        return runHistory(...args)
+      },
+    )
   }
   // A path replay of this property runs its one recorded history here.
-  oracleReplayTest(fcTest, property).prop(
-    [historyArbitrary],
-    oraclePropertyOptions(200, property),
-  )(`matches the draft proxy (random)`, (...args) => {
-    oracleRoute(`random seed`)
-    return runHistory(...args)
-  })
+  const historyCampaign = oraclePropertyOptions(200, property)
+  oracleReplayTest(fcTest, property).prop([historyArbitrary], historyCampaign)(
+    `matches the draft proxy (random)`,
+    (...args) => {
+      oracleRoute(oracleRouteOf(historyCampaign))
+      return runHistory(...args)
+    },
+  )
 })

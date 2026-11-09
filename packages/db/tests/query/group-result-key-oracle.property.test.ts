@@ -49,8 +49,10 @@ import { createLiveQueryCollection } from '../../src/query/index.js'
 import { count } from '../../src/query/builder/functions.js'
 import { createCollection } from '../../src/collection/index.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
@@ -279,7 +281,6 @@ describe(`grouped result key oracle`, () => {
   it.each([92_604_118, undefined])(
     `publishes one key of the key type per group (seed %s)`,
     async (seed) => {
-      oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
       const reach = createOracleReach(
         property,
         [
@@ -289,13 +290,16 @@ describe(`grouped result key oracle`, () => {
         ],
         { minimum: 5 },
       )
+      const parameters =
+        seed === undefined
+          ? oraclePropertyOptions(80, property)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(80) })
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(historyArbitrary, (history) =>
           runHistory(history, reach),
         ),
-        seed === undefined
-          ? oraclePropertyOptions(80, property)
-          : { seed, numRuns: oracleRuns(80) },
+        parameters,
       )
       if (process.env.TANSTACK_DB_ORACLE_REACH_REPORT)
         console.log(property, seed ?? `random`, [...reach.counts()])

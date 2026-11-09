@@ -11,10 +11,12 @@ import {
   flushPromises,
 } from './utils.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRandomParameters,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   readOracleRunConfig,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -1526,29 +1528,30 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
   const fixedCampaign = oracleReplayTest(fcTest)
 
-  fixedCampaign.prop([asyncRestartScenarioArbitrary], {
+  const asyncRestartScenarioFixedSeed = oracleFixedSeed(1_657_002, {
     numRuns: 30 * multiplier,
-    seed: 1_657_002,
-  })(
+  })
+  fixedCampaign.prop(
+    [asyncRestartScenarioArbitrary],
+    asyncRestartScenarioFixedSeed,
+  )(
     `fences async demand settlements across sync-run generations for a fixed seed`,
     async (scenario) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(asyncRestartScenarioFixedSeed))
       await runAsyncRestartScenario(scenario)
     },
     120_000,
   )
 
-  fcTest.prop(
-    [asyncRestartScenarioArbitrary],
-    oracleRandomParameters(
-      30 * multiplier,
-      replay,
-      `subscription-lifecycle.async-restart`,
-    ),
-  )(
+  const asyncRestartScenarioCampaign = oracleRandomParameters(
+    30 * multiplier,
+    replay,
+    `subscription-lifecycle.async-restart`,
+  )
+  fcTest.prop([asyncRestartScenarioArbitrary], asyncRestartScenarioCampaign)(
     `fences async demand settlements across sync-run generations for a random or replayed seed`,
     async (scenario) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(asyncRestartScenarioCampaign))
       await runAsyncRestartScenario(scenario)
     },
     120_000,
@@ -1573,13 +1576,20 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 describe(`resumption notification error and surviving demand`, () => {
   for (const campaign of [`fixed`, `random`] as const) {
     it(`acquires retained demand after replacement readiness (${campaign})`, async () => {
-      oracleRoute(campaign === `fixed` ? `fixed seed` : `random seed`)
       const reach = createOracleReach(`resume-notification-error`, [
         `throwing-notification`,
         `retained-owner`,
         `held-cleanup`,
         `replacement-ready`,
       ])
+      const parameters =
+        campaign === `fixed`
+          ? oracleFixedSeed(2229, { ...oraclePropertyOptions(60) })
+          : oraclePropertyOptions(
+              60,
+              `subscription-lifecycle.notification-error`,
+            )
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.record({
@@ -1668,12 +1678,7 @@ describe(`resumption notification error and surviving demand`, () => {
             }
           },
         ),
-        campaign === `fixed`
-          ? { ...oraclePropertyOptions(60), seed: 2229 }
-          : oraclePropertyOptions(
-              60,
-              `subscription-lifecycle.notification-error`,
-            ),
+        parameters,
       )
       reach.assertReached()
       console.info(

@@ -4,9 +4,11 @@ import { createCollection } from '../src/collection/index'
 import { createChangeProxy, withChangeTracking } from '../src/proxy'
 import { makeFrozenRow, makeStoredRow } from './proxy-native-rows'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
@@ -307,6 +309,10 @@ describe(`native array callback oracle`, () => {
       [`zero-sign-write`],
       { minimum: 5 },
     )
+    const parameters = options as fc.Parameters<
+      [{ values: Array<number>; steps: unknown }]
+    >
+    oracleRoute(oracleRouteOf(parameters))
     fc.assert(
       fc.property(callbackHistory, ({ values, steps }) => {
         reach.beginHistory()
@@ -326,21 +332,19 @@ describe(`native array callback oracle`, () => {
         }
         assertArrayCallbacks(cuts)
       }),
-      options as fc.Parameters<[{ values: Array<number>; steps: unknown }]>,
+      parameters,
     )
     reach.assertReached()
   }
   oracleReplayTest(it)(
     `matches native two-step callback histories (2026103)`,
     () => {
-      oracleRoute(`fixed seed`)
-      callbackCampaign({ seed: 2026103, numRuns: oracleRuns(200) })
+      callbackCampaign(oracleFixedSeed(2026103, { numRuns: oracleRuns(200) }))
     },
   )
   oracleReplayTest(it, `proxy.callback-history`)(
     `matches native two-step callback histories (random)`,
     () => {
-      oracleRoute(`random seed`)
       callbackCampaign(oraclePropertyOptions(200, `proxy.callback-history`))
     },
   )

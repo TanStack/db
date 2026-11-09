@@ -14,9 +14,11 @@ import { createRequire } from 'node:module'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { afterAll, beforeAll, describe, expect, vi } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -279,31 +281,32 @@ declareOracle({
 
 describe(`OPFS request order oracle (Node driver)`, () => {
   // A path replay of this property selects only its random campaign.
-  oracleReplayTest(fcTest).prop([requestOrderHistory], {
-    seed: 1849,
+  const requestOrderHistoryFixedSeed = oracleFixedSeed(1849, {
     numRuns: oracleRuns(24),
     examples: requestOrderExamples.map((history): [RequestOrderHistory] => [
       history,
     ]),
     verbose: true,
-  })(
-    `answers requests in order and closes after them (fixed)`,
-    (history) => {
-      oracleRoute(`fixed seed`)
-      return runRequestOrderHistory(history)
-    },
-  )
-  oracleReplayTest(fcTest, requestOrderProperty).prop([requestOrderHistory], {
+  })
+  oracleReplayTest(fcTest).prop(
+    [requestOrderHistory],
+    requestOrderHistoryFixedSeed,
+  )(`answers requests in order and closes after them (fixed)`, (history) => {
+    oracleRoute(oracleRouteOf(requestOrderHistoryFixedSeed))
+    return runRequestOrderHistory(history)
+  })
+  const requestOrderHistoryCampaign = {
     ...oraclePropertyOptions(24, requestOrderProperty),
     examples: requestOrderExamples.map((history): [RequestOrderHistory] => [
       history,
     ]),
     verbose: true,
-  })(
-    `answers requests in order and closes after them (random)`,
-    (history) => {
-      oracleRoute(`random seed`)
-      return runRequestOrderHistory(history)
-    },
-  )
+  }
+  oracleReplayTest(fcTest, requestOrderProperty).prop(
+    [requestOrderHistory],
+    requestOrderHistoryCampaign,
+  )(`answers requests in order and closes after them (random)`, (history) => {
+    oracleRoute(oracleRouteOf(requestOrderHistoryCampaign))
+    return runRequestOrderHistory(history)
+  })
 })

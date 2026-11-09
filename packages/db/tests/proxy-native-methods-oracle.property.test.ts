@@ -1,9 +1,11 @@
 import { describe, it as vitestIt } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -85,7 +87,10 @@ describe(`array methods behave like native arrays`, () => {
   })
 
   it(`matches native arrays across generated rows (${FIXED_SEED})`, () => {
-    oracleRoute(`fixed seed`)
+    const parameters = oracleFixedSeed(FIXED_SEED, {
+      numRuns: oracleRuns(RUNS),
+    })
+    oracleRoute(oracleRouteOf(parameters))
     fc.assert(
       fc.property(
         arraySpecArb,
@@ -93,14 +98,15 @@ describe(`array methods behave like native arrays`, () => {
         fc.nat(4),
         expectArrayCall,
       ),
-      { numRuns: oracleRuns(RUNS), seed: FIXED_SEED },
+      parameters,
     )
   })
+  const arraySpecCampaign = oraclePropertyOptions(RUNS, ARRAY_METHODS)
   oracleReplayTest(fcTest, ARRAY_METHODS).prop(
     [arraySpecArb, fc.constantFrom(...arrayMethods), fc.nat(4)],
-    oraclePropertyOptions(RUNS, ARRAY_METHODS),
+    arraySpecCampaign,
   )(`matches native arrays across generated rows (random)`, (...args) => {
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(arraySpecCampaign))
     expectArrayCall(...args)
   })
 })
@@ -119,7 +125,10 @@ describe(`typed-array methods behave like native typed arrays`, () => {
   })
 
   it(`matches native typed arrays across generated rows (${FIXED_SEED})`, () => {
-    oracleRoute(`fixed seed`)
+    const campaignParameters = oracleFixedSeed(FIXED_SEED, {
+      numRuns: oracleRuns(RUNS),
+    })
+    oracleRoute(oracleRouteOf(campaignParameters))
     fc.assert(
       fc.property(
         typedSpecArb,
@@ -128,14 +137,15 @@ describe(`typed-array methods behave like native typed arrays`, () => {
         fc.boolean(),
         expectTypedCall,
       ),
-      { numRuns: oracleRuns(RUNS), seed: FIXED_SEED },
+      campaignParameters,
     )
   })
+  const typedSpecCampaign = oraclePropertyOptions(RUNS, TYPED_METHODS)
   oracleReplayTest(fcTest, TYPED_METHODS).prop(
     [typedSpecArb, fc.constantFrom(...typedMethods), fc.nat(4), fc.boolean()],
-    oraclePropertyOptions(RUNS, TYPED_METHODS),
+    typedSpecCampaign,
   )(`matches native typed arrays across generated rows (random)`, (...args) => {
-    oracleRoute(`random seed`)
+    oracleRoute(oracleRouteOf(typedSpecCampaign))
     expectTypedCall(...args)
   })
 })

@@ -6,10 +6,12 @@ import { SyncTransactionAbortedError } from '../src/errors.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
 import { createTransaction } from '../src/transactions.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
@@ -809,47 +811,55 @@ declareOracle({
 
 describe(`generated metadata publication histories`, () => {
   if (!oracleReplayRequested()) {
-    fcTest.prop([publicationHistoryArbitrary], {
+    const publicationHistoryFixedSeed = oracleFixedSeed(1_805_001, {
       numRuns: oracleRuns(50),
-      seed: 1_805_001,
-    })(
+    })
+    fcTest.prop([publicationHistoryArbitrary], publicationHistoryFixedSeed)(
       `keeps metadata-only optimistic settlement a valid keyed diff (fixed)`,
       async (rounds) => {
-        oracleRoute(`fixed seed`)
+        oracleRoute(oracleRouteOf(publicationHistoryFixedSeed))
         await runPublicationHistory(rounds)
       },
     )
 
-    fcTest.prop([metadataCancellationArbitrary], {
+    const metadataCancellationFixedSeed = oracleFixedSeed(1_805_002, {
       numRuns: oracleRuns(50),
-      seed: 1_805_002,
-    })(
+    })
+    fcTest.prop([metadataCancellationArbitrary], metadataCancellationFixedSeed)(
       `keeps metadata suppression owned by pending transactions (fixed)`,
       async (history) => {
-        oracleRoute(`fixed seed`)
+        oracleRoute(oracleRouteOf(metadataCancellationFixedSeed))
         await runCancellationHistory(history)
       },
     )
   }
   // A path replay of one property runs its one recorded history through that
   // property's registration. The other registration stands aside.
+  const publicationHistoryCampaign = oraclePropertyOptions(
+    50,
+    metadataOnlyProperty,
+  )
   oracleReplayTest(fcTest, metadataOnlyProperty).prop(
     [publicationHistoryArbitrary],
-    oraclePropertyOptions(50, metadataOnlyProperty),
+    publicationHistoryCampaign,
   )(
     `keeps metadata-only optimistic settlement a valid keyed diff (random)`,
     async (rounds) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(publicationHistoryCampaign))
       await runPublicationHistory(rounds)
     },
   )
+  const metadataCancellationCampaign = oraclePropertyOptions(
+    50,
+    metadataCancellationProperty,
+  )
   oracleReplayTest(fcTest, metadataCancellationProperty).prop(
     [metadataCancellationArbitrary],
-    oraclePropertyOptions(50, metadataCancellationProperty),
+    metadataCancellationCampaign,
   )(
     `keeps metadata suppression owned by pending transactions (random)`,
     async (history) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(metadataCancellationCampaign))
       await runCancellationHistory(history)
     },
   )

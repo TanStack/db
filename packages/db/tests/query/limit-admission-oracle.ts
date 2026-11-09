@@ -23,7 +23,13 @@ import { Query, getQueryIR } from '../../src/query/builder/index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { createDeferred } from '../../src/deferred.js'
 import { declareOracle } from '../oracle-declaration.js'
-import { oraclePropertyOptions, oracleReplayTest } from '../oracle-config.js'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleReplayTest,
+  oracleRoute,
+  oracleRouteOf,
+} from '../oracle-config.js'
 import { createOracleReach } from '../oracle-reach.js'
 import {
   atOracleCheckpoint,
@@ -402,6 +408,13 @@ export function registerLimitAdmissionOracle(): void {
                 JSON.stringify(history),
               )
               let count = 0
+              const parameters = {
+                ...oraclePropertyOptions(20, property, {
+                  examples: [[example]],
+                }),
+                ...(campaign === `fixed` ? oracleFixedSeed(2291) : {}),
+              }
+              oracleRoute(oracleRouteOf(parameters))
               await fidelity.assert(() =>
                 fc.assert(
                   fc.asyncProperty(historyArbitrary, (history) => {
@@ -429,12 +442,7 @@ export function registerLimitAdmissionOracle(): void {
                       }
                     })
                   }),
-                  {
-                    ...oraclePropertyOptions(20, property, {
-                      examples: [[example]],
-                    }),
-                    ...(campaign === `fixed` ? { seed: 2291 } : {}),
-                  },
+                  parameters,
                 ),
               )
               reach.assertReached()

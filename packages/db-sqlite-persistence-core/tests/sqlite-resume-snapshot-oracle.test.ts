@@ -3,10 +3,12 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayRequested,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -356,20 +358,24 @@ describe(`SQLite resume snapshots`, () => {
       1_230,
     ),
   })
-  fcTest.prop([retiredStorageHistory], {
-    seed: 2069,
+  const retiredStorageHistoryFixedSeed = oracleFixedSeed(2069, {
     numRuns: oracleRuns(24),
-  })(`checks retired storage reachability (fixed)`, (...args: Parameters<typeof assertRetiredStorageHistory>) => {
-    oracleRoute(`fixed seed`)
-    return assertRetiredStorageHistory(...args)
   })
-  fcTest.prop(
-    [retiredStorageHistory],
-    oraclePropertyOptions(24, `sqlite-resume.retired-storage`),
-  )(
+  fcTest.prop([retiredStorageHistory], retiredStorageHistoryFixedSeed)(
+    `checks retired storage reachability (fixed)`,
+    (...args: Parameters<typeof assertRetiredStorageHistory>) => {
+      oracleRoute(oracleRouteOf(retiredStorageHistoryFixedSeed))
+      return assertRetiredStorageHistory(...args)
+    },
+  )
+  const retiredStorageHistoryCampaign = oraclePropertyOptions(
+    24,
+    `sqlite-resume.retired-storage`,
+  )
+  fcTest.prop([retiredStorageHistory], retiredStorageHistoryCampaign)(
     `checks retired storage reachability (random or replayed)`,
     (...args: Parameters<typeof assertRetiredStorageHistory>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(retiredStorageHistoryCampaign))
       return assertRetiredStorageHistory(...args)
     },
   )
@@ -603,8 +609,7 @@ describe(`SQLite resume snapshots`, () => {
     { clockCut: `after expiry`, elapsedMs: 1, includeRows: true },
   ])(
     `checks a cache claim $clockCut inside a resume transaction with includeRows=$includeRows`,
-    ({ elapsedMs, includeRows }) =>
-      {
+    ({ elapsedMs, includeRows }) => {
       oracleRoute(`case`)
       return assertManagedClaimReadHistory({
         elapsedMs,
@@ -621,23 +626,24 @@ describe(`SQLite resume snapshots`, () => {
     peerDelayMs: fc.integer({ min: 10, max: 80 }),
     rowCount: fc.integer({ min: 0, max: 3 }),
   })
-  fcTest.prop([managedClaimReadHistory], {
-    seed: 2056,
+  const managedClaimReadHistoryFixedSeed = oracleFixedSeed(2056, {
     numRuns: oracleRuns(30),
-  })(
+  })
+  fcTest.prop([managedClaimReadHistory], managedClaimReadHistoryFixedSeed)(
     `checks generated managed-claim read histories (fixed)`,
     (...args: Parameters<typeof assertManagedClaimReadHistory>) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(managedClaimReadHistoryFixedSeed))
       return assertManagedClaimReadHistory(...args)
     },
   )
-  fcTest.prop(
-    [managedClaimReadHistory],
-    oraclePropertyOptions(30, `sqlite-resume.managed-claim-read`),
-  )(
+  const managedClaimReadHistoryCampaign = oraclePropertyOptions(
+    30,
+    `sqlite-resume.managed-claim-read`,
+  )
+  fcTest.prop([managedClaimReadHistory], managedClaimReadHistoryCampaign)(
     `checks generated managed-claim read histories (random or replayed)`,
     (...args: Parameters<typeof assertManagedClaimReadHistory>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(managedClaimReadHistoryCampaign))
       return assertManagedClaimReadHistory(...args)
     },
   )
@@ -862,6 +868,7 @@ describe(`SQLite resume snapshots`, () => {
       `duplicate source position`,
       `legacy source progress column added`,
     ])
+    oracleRoute(oracleRouteOf(parameters))
     await fc.assert(
       fc.asyncProperty(
         progressHistory,
@@ -981,15 +988,14 @@ describe(`SQLite resume snapshots`, () => {
   it.skipIf(oracleReplayRequested())(
     `preserves source progress evidence (fixed seed)`,
     () => {
-      oracleRoute(`fixed seed`)
-      return runProgressCampaign({ numRuns: oracleRuns(80), seed: 2281 })
+      return runProgressCampaign(
+        oracleFixedSeed(2281, { numRuns: oracleRuns(80) }),
+      )
     },
   )
   oracleReplayTest(it, `sqlite-resume.source-progress`)(
     `preserves source progress evidence (random or replayed)`,
-    () =>
-      {
-      oracleRoute(`random seed`)
+    () => {
       return runProgressCampaign(
         oraclePropertyOptions(80, `sqlite-resume.source-progress`),
       )
@@ -1000,7 +1006,9 @@ describe(`SQLite resume snapshots`, () => {
   // models of retained generations and claim intervals. The fixed and generated
   // cases share those checks. The startup grammar is the generator whose coverage
   // the fixed startup corpus calibrates.
-  declareOracle({ owns: [`src/sqlite-core-adapter.ts`],     check: [
+  declareOracle({
+    owns: [`src/sqlite-core-adapter.ts`],
+    check: [
       assertRetiredStorageHistory,
       assertManagedClaimReadHistory,
       runProgressCampaign,
@@ -1009,24 +1017,25 @@ describe(`SQLite resume snapshots`, () => {
     grammar: [startupHistoryArbitrary, progressHistory],
   })
 
-  fcTest.prop([startupHistoryArbitrary], {
-    seed: 1659,
+  const startupHistoryFixedSeed = oracleFixedSeed(1659, {
     numRuns: oracleRuns(12),
-  })(
+  })
+  fcTest.prop([startupHistoryArbitrary], startupHistoryFixedSeed)(
     `preserves local-only startup histories across managed generation advancement (fixed)`,
     (...args: Parameters<typeof assertStartupHistory>) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(startupHistoryFixedSeed))
       return assertStartupHistory(...args)
     },
   )
 
-  fcTest.prop(
-    [startupHistoryArbitrary],
-    oraclePropertyOptions(12, `sqlite-resume.startup-generation`),
-  )(
+  const startupHistoryCampaign = oraclePropertyOptions(
+    12,
+    `sqlite-resume.startup-generation`,
+  )
+  fcTest.prop([startupHistoryArbitrary], startupHistoryCampaign)(
     `preserves local-only startup histories across managed generation advancement (random or replayed)`,
     (...args: Parameters<typeof assertStartupHistory>) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(startupHistoryCampaign))
       return assertStartupHistory(...args)
     },
   )

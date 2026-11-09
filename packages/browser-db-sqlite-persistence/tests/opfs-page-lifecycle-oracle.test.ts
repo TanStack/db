@@ -1,9 +1,11 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { afterEach, describe, expect, vi } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -914,118 +916,144 @@ declareOracle({
 })
 
 describe(`OPFS page lifecycle oracle`, () => {
-  oracleReplayTest(fcTest).prop([pagehideHistory], {
-    seed: 1844,
+  const pagehideHistoryFixedSeed = oracleFixedSeed(1844, {
     numRuns: oracleRuns(48),
     examples: pagehideExamples,
     verbose: true,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([pagehideHistory], pagehideHistoryFixedSeed)(
     `matches the independent model across generated histories (fixed)`,
     (history) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(pagehideHistoryFixedSeed))
       return runPagehideHistory(history)
     },
   )
-  oracleReplayTest(fcTest, `opfs.page-lifecycle`).prop([pagehideHistory], {
+  const pagehideHistoryCampaign = {
     ...oraclePropertyOptions(48, `opfs.page-lifecycle`),
     examples: pagehideExamples,
     verbose: true,
-  })(
+  }
+  oracleReplayTest(fcTest, `opfs.page-lifecycle`).prop(
+    [pagehideHistory],
+    pagehideHistoryCampaign,
+  )(
     `matches the independent model across generated histories (random)`,
     (history) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(pagehideHistoryCampaign))
       return runPagehideHistory(history)
     },
   )
-  oracleReplayTest(fcTest).prop([mixedExecuteHistory], {
-    seed: 1845,
+  const mixedExecuteHistoryFixedSeed = oracleFixedSeed(1845, {
     numRuns: oracleRuns(32),
     examples: mixedExamples,
     verbose: true,
-  })(
+  })
+  oracleReplayTest(fcTest).prop(
+    [mixedExecuteHistory],
+    mixedExecuteHistoryFixedSeed,
+  )(
     `preserves completed siblings while aborting pending siblings (fixed)`,
     (history) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(mixedExecuteHistoryFixedSeed))
       return runMixedExecuteHistory(history)
     },
   )
-  oracleReplayTest(fcTest, `opfs.mixed-execute`).prop([mixedExecuteHistory], {
+  const mixedExecuteHistoryCampaign = {
     ...oraclePropertyOptions(32, `opfs.mixed-execute`),
     examples: mixedExamples,
     verbose: true,
-  })(
+  }
+  oracleReplayTest(fcTest, `opfs.mixed-execute`).prop(
+    [mixedExecuteHistory],
+    mixedExecuteHistoryCampaign,
+  )(
     `preserves completed siblings while aborting pending siblings (random)`,
     (history) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(mixedExecuteHistoryCampaign))
       return runMixedExecuteHistory(history)
     },
   )
-  oracleReplayTest(fcTest).prop([terminalEventHistory], {
-    seed: 1847,
+  const terminalEventHistoryFixedSeed = oracleFixedSeed(1847, {
     numRuns: oracleRuns(24),
     examples: terminalEventExamples,
     verbose: true,
-  })(
+  })
+  oracleReplayTest(fcTest).prop(
+    [terminalEventHistory],
+    terminalEventHistoryFixedSeed,
+  )(
     `rejects pending work across Worker terminal event paths (fixed)`,
     (history) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(terminalEventHistoryFixedSeed))
       return runTerminalEventHistory(history)
     },
   )
-  oracleReplayTest(fcTest, `opfs.terminal-event`).prop([terminalEventHistory], {
+  const terminalEventHistoryCampaign = {
     ...oraclePropertyOptions(24, `opfs.terminal-event`),
     examples: terminalEventExamples,
     verbose: true,
-  })(
+  }
+  oracleReplayTest(fcTest, `opfs.terminal-event`).prop(
+    [terminalEventHistory],
+    terminalEventHistoryCampaign,
+  )(
     `rejects pending work across Worker terminal event paths (random)`,
     (history) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(terminalEventHistoryCampaign))
       return runTerminalEventHistory(history)
     },
   )
-  oracleReplayTest(fcTest).prop([closeHistory], {
-    seed: 1848,
+  const closeHistoryFixedSeed = oracleFixedSeed(1848, {
     numRuns: oracleRuns(32),
     examples: closeExamples,
     verbose: true,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([closeHistory], closeHistoryFixedSeed)(
     `settles pending work and refuses new work across explicit close (fixed)`,
     (history) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(closeHistoryFixedSeed))
       return runCloseHistory(history)
     },
   )
-  oracleReplayTest(fcTest, `opfs.close`).prop([closeHistory], {
+  const closeHistoryCampaign = {
     ...oraclePropertyOptions(32, `opfs.close`),
     examples: closeExamples,
     verbose: true,
-  })(
+  }
+  oracleReplayTest(fcTest, `opfs.close`).prop(
+    [closeHistory],
+    closeHistoryCampaign,
+  )(
     `settles pending work and refuses new work across explicit close (random)`,
     (history) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(closeHistoryCampaign))
       return runCloseHistory(history)
     },
   )
-  oracleReplayTest(fcTest).prop([failureHistory], {
-    seed: 1846,
+  const failureHistoryFixedSeed = oracleFixedSeed(1846, {
     numRuns: oracleRuns(18),
     examples: failureExamples,
     verbose: true,
-  })(
+  })
+  oracleReplayTest(fcTest).prop([failureHistory], failureHistoryFixedSeed)(
     `matches terminal cleanup and error mapping across worker failures (fixed)`,
     (history) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(failureHistoryFixedSeed))
       return runFailureHistory(history)
     },
   )
-  oracleReplayTest(fcTest, `opfs.failure-cleanup`).prop([failureHistory], {
+  const failureHistoryCampaign = {
     ...oraclePropertyOptions(18, `opfs.failure-cleanup`),
     examples: failureExamples,
     verbose: true,
-  })(
+  }
+  oracleReplayTest(fcTest, `opfs.failure-cleanup`).prop(
+    [failureHistory],
+    failureHistoryCampaign,
+  )(
     `matches terminal cleanup and error mapping across worker failures (random)`,
     (history) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(failureHistoryCampaign))
       return runFailureHistory(history)
     },
   )

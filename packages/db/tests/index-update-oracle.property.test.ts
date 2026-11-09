@@ -8,7 +8,13 @@ import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { eq } from '../src/query/builder/functions.js'
 import { PropRef } from '../src/query/ir.js'
 import { mockSyncCollectionOptions } from './utils'
-import { oraclePropertyOptions, oracleRoute, oracleRuns } from './oracle-config'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from './oracle-config'
 import { declareOracle } from './oracle-declaration'
 import { indexTypes, withCollectionCleanup } from './index-update-support'
 import type { BaseIndex } from '../src/indexes/base-index.js'
@@ -226,7 +232,27 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
   test.each([20260930, undefined])(
     `matches a reference model across valid operation sequences (seed %s)`,
     async (seed) => {
-      oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+      const parameters = {
+        ...(seed === undefined
+          ? oraclePropertyOptions(100, `index-update.reference-model`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
+        examples: [
+          [
+            [
+              { type: `put`, key: `0`, value: 1 },
+              { type: `build`, entries: [[`1`, -1]] },
+              { type: `put`, key: `1`, value: 2 },
+            ],
+          ],
+          [
+            [
+              { type: `put`, key: `0`, value: 0 },
+              { type: `put`, key: `1`, value: -0 },
+            ],
+          ],
+        ],
+      }
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.array(arbitraryAction, { minLength: 1, maxLength: 100 }),
@@ -281,26 +307,7 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
             expectIndexMatchesModel(rebuilt, rows)
           },
         ),
-        {
-          ...(seed === undefined
-            ? oraclePropertyOptions(100, `index-update.reference-model`)
-            : { seed, numRuns: oracleRuns(100) }),
-          examples: [
-            [
-              [
-                { type: `put`, key: `0`, value: 1 },
-                { type: `build`, entries: [[`1`, -1]] },
-                { type: `put`, key: `1`, value: 2 },
-              ],
-            ],
-            [
-              [
-                { type: `put`, key: `0`, value: 0 },
-                { type: `put`, key: `1`, value: -0 },
-              ],
-            ],
-          ],
-        },
+        parameters,
       )
     },
   )
@@ -905,7 +912,11 @@ describe.each(indexTypes)(
     test.each([20261012, undefined])(
       `refines nullish membership histories (seed %s)`,
       async (seed) => {
-        oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+        const campaignParameters =
+          seed === undefined
+            ? oraclePropertyOptions(100, `index-update.nullish-membership`)
+            : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })
+        oracleRoute(oracleRouteOf(campaignParameters))
         await fc.assert(
           fc.asyncProperty(
             fc.array(arbitraryNullishAction, { minLength: 1, maxLength: 40 }),
@@ -918,9 +929,7 @@ describe.each(indexTypes)(
               }
             },
           ),
-          seed === undefined
-            ? oraclePropertyOptions(100, `index-update.nullish-membership`)
-            : { seed, numRuns: oracleRuns(100) },
+          campaignParameters,
         )
       },
     )
@@ -1742,7 +1751,13 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
   test.each([20260930, undefined])(
     `preserves exact equality while ordered traversal retains every row (seed %s)`,
     async (seed) => {
-      oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+      const runParameters = {
+        ...(seed === undefined
+          ? oraclePropertyOptions(100, `index-update.exact-identity`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
+        examples: [[[0, 1]]],
+      }
+      oracleRoute(oracleRouteOf(runParameters))
       await fc.assert(
         fc.asyncProperty(
           fc.array(fc.integer({ min: 0, max: 4 }), {
@@ -1865,12 +1880,7 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
             expectMatchesModel(index, [previous])
           },
         ),
-        {
-          ...(seed === undefined
-            ? oraclePropertyOptions(100, `index-update.exact-identity`)
-            : { seed, numRuns: oracleRuns(100) }),
-          examples: [[[0, 1]]],
-        },
+        runParameters,
       )
     },
   )
@@ -1878,7 +1888,13 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
   test.each([20260930, undefined])(
     `matches an independent custom-comparator model (seed %s)`,
     async (seed) => {
-      oracleRoute(seed === undefined ? `random seed` : `fixed seed`)
+      const parameters = {
+        ...(seed === undefined
+          ? oraclePropertyOptions(100, `index-update.custom-comparator`)
+          : oracleFixedSeed(seed, { numRuns: oracleRuns(100) })),
+        examples: [[[0, 1]]],
+      }
+      oracleRoute(oracleRouteOf(parameters))
       await fc.assert(
         fc.asyncProperty(
           fc.array(fc.integer({ min: 0, max: 4 }), {
@@ -1992,12 +2008,7 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
             }
           },
         ),
-        {
-          ...(seed === undefined
-            ? oraclePropertyOptions(100, `index-update.custom-comparator`)
-            : { seed, numRuns: oracleRuns(100) }),
-          examples: [[[0, 1]]],
-        },
+        parameters,
       )
     },
   )

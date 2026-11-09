@@ -4,8 +4,10 @@ import { Temporal } from 'temporal-polyfill'
 import { compileExpression } from '../../../src/query/compiler/evaluators.js'
 import { Func, PropRef, Value } from '../../../src/query/ir.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../oracle-config.js'
 import { declareOracle } from '../../oracle-declaration.js'
@@ -239,13 +241,15 @@ describe(`in evaluator`, () => {
   )
 
   it(`agrees with the reference over a fixed campaign`, () => {
-    oracleRoute(`fixed seed`)
-    fc.assert(property, { numRuns: oracleRuns(2000), seed: 0x2029 })
+    const parameters = oracleFixedSeed(0x2029, { numRuns: oracleRuns(2000) })
+    oracleRoute(oracleRouteOf(parameters))
+    fc.assert(property, parameters)
   })
 
   it(`agrees with the reference over a random or replayed campaign`, () => {
-    oracleRoute(`random seed`)
-    fc.assert(property, oraclePropertyOptions(2000, PROPERTY))
+    const campaignParameters = oraclePropertyOptions(2000, PROPERTY)
+    oracleRoute(oracleRouteOf(campaignParameters))
+    fc.assert(property, campaignParameters)
   })
 
   it.each([
@@ -286,7 +290,7 @@ describe(`in evaluator`, () => {
         : list.some((entry) => entry === value)
     const details = fc.check(
       fc.property(inCase, (testCase) => check(raw, testCase)),
-      { numRuns: 500, seed: 0x2029 },
+      { seed: 0x2029, numRuns: 500 },
     )
     expect(details.failed).toBe(true)
     expect(String(details.errorInstance)).toMatch(/in mismatch/)

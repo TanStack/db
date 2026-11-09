@@ -9,7 +9,10 @@ import {
   seedReinsertReloadHistoryArbitrary,
 } from '../../db/tests/sync-metadata-session-oracle'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
   oracleRuns,
   recordOracleReplay,
 } from '../../db/tests/oracle-config'
@@ -55,6 +58,11 @@ export async function runSeedReinsertReloadCampaign({
   ])
   const reach = createOracleReach(property, states)
   const completedReach = createOracleReach(property, completedStates)
+  const parameters =
+    campaign === `fixed`
+      ? oracleFixedSeed(527962096, { numRuns: oracleRuns(40) })
+      : oraclePropertyOptions(40, property)
+  oracleRoute(oracleRouteOf(parameters))
   const result = await fc.check(
     fc.asyncProperty(seedReinsertReloadHistoryArbitrary, async (history) => {
       const failures: Array<string> = []
@@ -82,9 +90,7 @@ export async function runSeedReinsertReloadCampaign({
       }
       if (failures.length) throw new Error(failures.join(`\n\n`))
     }),
-    campaign === `fixed`
-      ? { numRuns: oracleRuns(40), seed: 527962096 }
-      : oraclePropertyOptions(40, property),
+    parameters,
   )
   recordOracleReplay(property, result)
   requireExecutedHistory(property, result)
@@ -152,6 +158,11 @@ export async function runKeptMetadataDurabilityCampaign({
     ),
   )
   const reach = createOracleReach(property, [...states, ...extraStates])
+  const campaignParameters =
+    campaign === `fixed`
+      ? oracleFixedSeed(2220031, { numRuns: oracleRuns(8) })
+      : oraclePropertyOptions(8, property)
+  oracleRoute(oracleRouteOf(campaignParameters))
   const result = await fc.check(
     fc.asyncProperty(
       keptMetadataDurabilityHistoriesArbitrary,
@@ -179,9 +190,7 @@ export async function runKeptMetadataDurabilityCampaign({
         if (failures.length) throw new Error(failures.join(`\n\n`))
       },
     ),
-    campaign === `fixed`
-      ? { numRuns: oracleRuns(8), seed: 2220031 }
-      : oraclePropertyOptions(8, property),
+    campaignParameters,
   )
   recordOracleReplay(property, result)
   requireExecutedHistory(property, result)

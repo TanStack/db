@@ -4,9 +4,11 @@ import { DbClient, collectionOptions } from '../src/client.js'
 import { DuplicateKeySyncError } from '../src/errors.js'
 import { createOracleReach } from './oracle-reach.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleReplayTest,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from './oracle-config.js'
 import {
@@ -895,8 +897,8 @@ describe(`sync metadata session grammar ablation`, () => {
       const count = (filter: (action: SessionAction) => boolean) =>
         fc
           .sample(sessionHistoryArbitrary(grammar), {
-            numRuns: 200,
             seed: 2_220_100,
+            numRuns: 200,
           })
           .filter((history) =>
             historyRegimes(grammar, history.filter(filter)).has(regime),
@@ -907,8 +909,8 @@ describe(`sync metadata session grammar ablation`, () => {
           : grammar
       const full = fc
         .sample(sessionHistoryArbitrary(fullGrammar), {
-          numRuns: 200,
           seed: 2_220_100,
+          numRuns: 200,
         })
         .filter((history) =>
           historyRegimes(fullGrammar, history).has(regime),
@@ -932,10 +934,10 @@ describe(`sync metadata session hold invariance`, () => {
       )
       if (mismatch) throw new Error(describeMismatch(history, mismatch))
     }
-    oracleReplayTest(fcTest).prop([sessionHistoryArbitrary(grammar)], {
-      numRuns: oracleRuns(50),
-      seed: seed + 100,
-    })(
+    oracleReplayTest(fcTest).prop(
+      [sessionHistoryArbitrary(grammar)],
+      oracleFixedSeed(seed + 100, { numRuns: oracleRuns(50) }),
+    )(
       `keeps ${grammar.name} source reads independent of holds (fixed)`,
       (history) => {
         oracleRoute(`fixed seed`)
@@ -944,13 +946,14 @@ describe(`sync metadata session hold invariance`, () => {
       60_000,
     )
     // A path replay of this property runs here.
+    const generatedCampaign = oraclePropertyOptions(50, invariance)
     oracleReplayTest(fcTest, invariance).prop(
       [sessionHistoryArbitrary(grammar)],
-      oraclePropertyOptions(50, invariance),
+      generatedCampaign,
     )(
       `keeps ${grammar.name} source reads independent of holds (random)`,
       (history) => {
-        oracleRoute(`random seed`)
+        oracleRoute(oracleRouteOf(generatedCampaign))
         return run(history)
       },
       60_000,
@@ -987,10 +990,10 @@ describe(`sync metadata session paired formulations`, () => {
         )
         if (mismatch) throw new Error(describeMismatch(history, mismatch))
       }
-      oracleReplayTest(fcTest).prop([sessionHistoryArbitrary(grammar)], {
-        numRuns: oracleRuns(50),
-        seed: seed + 200,
-      })(
+      oracleReplayTest(fcTest).prop(
+        [sessionHistoryArbitrary(grammar)],
+        oracleFixedSeed(seed + 200, { numRuns: oracleRuns(50) }),
+      )(
         `${formulation.title} on ${grammar.name} histories (fixed)`,
         (history) => {
           oracleRoute(`fixed seed`)
@@ -999,13 +1002,14 @@ describe(`sync metadata session paired formulations`, () => {
         60_000,
       )
       // A path replay of this property runs here.
+      const generatedCampaign2 = oraclePropertyOptions(50, name)
       oracleReplayTest(fcTest, name).prop(
         [sessionHistoryArbitrary(grammar)],
-        oraclePropertyOptions(50, name),
+        generatedCampaign2,
       )(
         `${formulation.title} on ${grammar.name} histories (random)`,
         (history) => {
-          oracleRoute(`random seed`)
+          oracleRoute(oracleRouteOf(generatedCampaign2))
           return run(history)
         },
         60_000,
@@ -1019,10 +1023,12 @@ describe(`sync metadata session campaigns`, () => {
     const run = (history: Array<SessionAction>) =>
       assertSessionHistory(grammar, history)
     const reach = createCampaignReach(grammar, property)
-    oracleReplayTest(fcTest).prop([sessionHistoryArbitrary(grammar)], {
-      numRuns: oracleRuns(`runs` in entry ? entry.runs : 100),
-      seed,
-    })(
+    oracleReplayTest(fcTest).prop(
+      [sessionHistoryArbitrary(grammar)],
+      oracleFixedSeed(seed, {
+        numRuns: oracleRuns(`runs` in entry ? entry.runs : 100),
+      }),
+    )(
       `keeps the session law on ${grammar.name} histories (fixed)`,
       (history) => {
         oracleRoute(`fixed seed`)
@@ -1039,13 +1045,14 @@ describe(`sync metadata session campaigns`, () => {
       },
     )
     // A path replay of this property runs here.
+    const generatedCampaign3 = oraclePropertyOptions(100, property)
     oracleReplayTest(fcTest, property).prop(
       [sessionHistoryArbitrary(grammar)],
-      oraclePropertyOptions(100, property),
+      generatedCampaign3,
     )(
       `keeps the session law on ${grammar.name} histories (random)`,
       (history) => {
-        oracleRoute(`random seed`)
+        oracleRoute(oracleRouteOf(generatedCampaign3))
         return run(history)
       },
       60_000,

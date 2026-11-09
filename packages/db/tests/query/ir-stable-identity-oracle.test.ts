@@ -473,7 +473,8 @@ describe(`stable QueryIR identity smoke test`, () => {
     }
   })
 
-  fcTest.prop([outputProgramArbitrary], { numRuns: 200, seed: 715031 })(
+  const outputProgramFixedSeed = { seed: 715031, numRuns: 200 }
+  fcTest.prop([outputProgramArbitrary], outputProgramFixedSeed)(
     `matches output denotation through composed contexts with a fixed seed`,
     (program) => {
       oracleRoute(`fixed seed`)
