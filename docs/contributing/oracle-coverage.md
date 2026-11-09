@@ -3219,10 +3219,14 @@ reaches worker start, initialization, and the worker's WASM failure response.
 The [Chromium driver](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/opfs-open-outcome-oracle.e2e.test.ts)
 reaches the lookup, the real worker's WASM fetch, and worker start against a
 Vite dev server that pre-bundles the built package, for Vite 7 and Vite 8
-consumers. Under Vite 8 the lookup never reaches the dev server, so the lookup
-states are declared for Vite 7 only and a held lookup that never arrives fails
-the history after 10 seconds instead of hanging (decision on TanStack/db#2371,
-2026-11-08). It holds back only the
+consumers. Under Vite 8 the copy's asset URLs point at the original install, so
+the lookup never reaches the dev server; the lookup states are declared for
+Vite 7 only (decision on TanStack/db#2371, 2026-11-08). Vite 8 histories still
+interrupt a held WASM fetch, which is the step a Vite 8 copy reaches. A held
+step that never reaches the dev server fails the history after a bound scaled
+by the run multiplier (liveness only; no observation depends on it) instead of
+hanging. The Vite 7 witnesses for the srcdoc and cross-origin page tests are in
+wasm-package-consumer.e2e.test.ts. It holds back only the
 opener's deadline timer and fires it explicitly, interrupts only after the
 server holds the lookup, and reads the settlement and worker counts one task
 after each event, so no observation depends on elapsed time. Each driver checks that its
@@ -3239,8 +3243,12 @@ The
 [install-layout oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/install-layout-oracle.e2e.test.ts)
 models which installs open in Vite development and production: direct,
 hoisted, pnpm, transitive, npm-alias, and two-copy installs, three cache
-directories, and exclusion by import name or package name. Every history runs
-for each consumer Vite major, 7 and 8. The Vite 8 rule has the maintainer
+directories, and exclusion by import name or package name. Vite 7 runs every
+history. Vite 8 runs only the development and production rows of the default
+cache without exclusion (14 rows), because the model ignores the cache and the
+exclusion under Vite 8; those rows still separate the Vite 8 rule from the Vite 7
+rule and the production build from a mutant. Each major's coverage test reads
+its promised outcomes from the declared grammar. The Vite 8 rule has the maintainer
 decision on TanStack/db#2371 (2026-11-08) as its authority: under Vite 8
 development, the pre-bundled copy loads its own worker and WASM and opens with
 the imported copy in every layout. Under Vite 7 the rules below apply. It reads the
