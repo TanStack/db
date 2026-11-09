@@ -22,6 +22,7 @@ import { join } from 'node:path'
 import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { createServer, preview } from 'vite'
+import { createServer as createVite7Server } from 'vite-7'
 import {
   buildForProduction,
   createPackagedConsumer,
@@ -228,9 +229,9 @@ type OpenOutcome =
  * own URL cannot resolve a path. Vite returns asset paths for the dev server,
  * so the package must resolve them against that server rather than the page.
  */
-it(`opens packaged SQLite from an about:srcdoc frame under Vite development`, async () => {
+it(`opens packaged SQLite from an about:srcdoc frame under Vite 7 development`, async () => {
   const browser = await chromium.launch({ headless: true })
-  const developmentServer = await createServer({
+  const developmentServer = await createVite7Server({
     configFile: false,
     root: consumerDirectory,
     base: consumerBase,
@@ -288,9 +289,9 @@ it(`opens packaged SQLite from an about:srcdoc frame under Vite development`, as
  * another origin, so this open cannot succeed. It must still report
  * unavailable persistence rather than the Worker constructor's SecurityError.
  */
-it(`reports unavailable persistence when the page and Vite server origins differ`, async () => {
+it(`reports unavailable persistence when the page and Vite 7 server origins differ`, async () => {
   const browser = await chromium.launch({ headless: true })
-  const developmentServer = await createServer({
+  const developmentServer = await createVite7Server({
     configFile: false,
     root: consumerDirectory,
     base: consumerBase,

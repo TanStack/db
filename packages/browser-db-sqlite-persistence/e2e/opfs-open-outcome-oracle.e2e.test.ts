@@ -26,6 +26,7 @@ import { chromium } from '@playwright/test'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import * as vite8 from 'vite'
 import * as vite7 from 'vite-7'
+import { readOracleRunConfig } from '../../db/tests/oracle-config'
 import {
   describeHistory,
   expectOpenOutcome,
@@ -49,7 +50,7 @@ import type { ProbeGlobal } from './packaged-consumer'
 const chromiumReach: OpenDriverReach = {
   lookup: [`resolves`, `held`, `fails`],
   workerStart: [`starts`, `throws`, `fails to load`],
-  wasm: [`loads`, `fails`],
+  wasm: [`loads`, `fails`, `held`],
   init: [`answers`],
   interrupt: [`none`, `deadline`, `abort`],
 }
@@ -66,7 +67,10 @@ const historiesByVite = {
 }
 // A held lookup that never reaches the dev server fails the history here, in
 // seconds, rather than waiting for the test timeout.
-const heldLookupWaitMs = 10_000
+// A liveness bound on a lookup that never comes. It is scaled by the run
+// multiplier like the run counts, and it decides no observation: a lookup that
+// arrives in time is recorded by the reached witness either way.
+const heldLookupWaitMs = 10_000 * readOracleRunConfig().multiplier
 // A delay no other page timer uses, so the init script can hold it back.
 const deadlineMs = 987_654
 const wasmLookup = `/@id/@tanstack/browser-db-sqlite-persistence/wa-sqlite.wasm`
@@ -102,7 +106,8 @@ const temporaryDirectory = realpathSync(
   mkdtempSync(join(realpathSync(tmpdir()), `db-open-outcome-`)),
 )
 let browser: Browser
-let server: ViteDevServer
+// The dev server of the Vite major whose describe block is running.
+let server: ViteDevServer | undefined
 const consumerDirectory = join(temporaryDirectory, `consumer`)
 
 // Starts a dev server for the consumer under one Vite major.
@@ -147,6 +152,13 @@ async function startServer(
             }
             if (!url.includes(`/@id/`) && pathname.endsWith(`.wasm`)) {
               premises.wasmFileRequests++
+              // A held fetch waits until the driver interrupts the open and
+              // releases it, so the worker's initialization is pending.
+              if (premises.wasm === `held`) {
+                premises.heldLookups.push(next)
+                premises.onHeld?.()
+                return
+              }
             }
             if (
               premises.wasm === `fails` &&
@@ -223,7 +235,7 @@ async function awaitHeldLookup(lookupHeld: Promise<void>): Promise<void> {
       new Promise<never>((_, reject) => {
         timer = setTimeout(
           () =>
-            reject(new Error(`the asset lookup never reached the dev server`)),
+            reject(new Error(`the held step never reached the dev server`)),
           heldLookupWaitMs,
         )
       }),
@@ -252,7 +264,7 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
       refuseWorkers: history.workerStart === `throws`,
     })
     await page.addInitScript(holdDeadlineTimers, deadlineMs)
-    const baseUrl = server.resolvedUrls!.local[0]!
+    const baseUrl = server!.resolvedUrls!.local[0]!
     await page.goto(baseUrl)
     await page.waitForFunction(
       () => typeof (globalThis as ProbeGlobal).openDatabase === `function`,
@@ -316,10 +328,10 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
 
     // Checkpoint: let a held lookup complete in the page, then wait one task
     // so every continuation of the interrupted open has run.
+    for (const release of premises.heldLookups.splice(0)) release()
     const heldLookupPath = readHeldLookupPath()
     if (heldLookupPath) {
       const lookupUrl = new URL(heldLookupPath, baseUrl).href
-      for (const release of premises.heldLookups.splice(0)) release()
       // A string keeps Vitest from rewriting this page-side dynamic import.
       await page.evaluate(
         `import(${JSON.stringify(lookupUrl)}).catch(() => {}).then(() => new Promise((resolve) => { const channel = new MessageChannel(); channel.port1.onmessage = () => resolve(); channel.port2.postMessage(null) }))`,
@@ -347,7 +359,9 @@ async function runOpenHistory(history: OpenHistory): Promise<OpenObservation> {
     })
 
     if (history.interrupt !== `none`) {
+      // The later open runs without the interruption's held step.
       premises.lookup = `resolves`
+      premises.wasm = `loads`
       observation.laterOpen = (await page.evaluate(async (databaseName) => {
         const probe = globalThis as OracleProbe
         try {
@@ -381,9 +395,11 @@ function describeOpenOutcomes(
     beforeAll(async () => {
       await startServer(createDevServer)
     }, 120_000)
+    // Closes only the server this block started; a failed start leaves none.
     afterAll(async () => {
       for (const release of premises.heldLookups.splice(0)) release()
-      await server.close()
+      await server?.close()
+      server = undefined
     })
 
     it(`reaches every outcome that this driver controls`, () => {
@@ -400,16 +416,20 @@ function describeOpenOutcomes(
   })
 }
 
-describeOpenOutcomes(7, vite7.createServer as typeof vite8.createServer, [
+describeOpenOutcomes(7, vite7.createServer as unknown as typeof vite8.createServer, [
   `lookup: AbortError`,
   `lookup: PersistenceUnavailableError`,
   `lookup: TimeoutError`,
   `none: opened`,
+  `wasm: AbortError`,
   `wasm: PersistenceUnavailableError`,
+  `wasm: TimeoutError`,
   `worker start: PersistenceUnavailableError`,
 ])
 describeOpenOutcomes(8, vite8.createServer, [
   `none: opened`,
+  `wasm: AbortError`,
   `wasm: PersistenceUnavailableError`,
+  `wasm: TimeoutError`,
   `worker start: PersistenceUnavailableError`,
 ])
