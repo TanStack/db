@@ -3247,9 +3247,11 @@ The
 models which installs open in Vite development and production: direct,
 hoisted, pnpm, transitive, npm-alias, and two-copy installs, three cache
 directories, and exclusion by import name or package name. Vite 7 and Vite 8 each run all
-36 rows. The Vite 8 model ignores the cache and the exclusion in development, but
-a production build reads both, so every row witnesses that a Vite 8 install opens
-in each layout the README names (74 rows with the two coverage tests). Each major's coverage test reads
+36 rows. The Vite 8 model says the cache and the exclusion do not change a
+development install's outcome; the development rows for each cache and exclusion
+are the witnesses for that claim. Production rows use the default cache and no
+exclusion, because a production build does not pre-bundle, and they witness that
+each layout builds and opens (74 rows with the two coverage tests). Each major's coverage test reads
 its promised outcomes from the declared grammar. The Vite 8 rule has the maintainer
 decision on TanStack/db#2371 (2026-11-08) as its authority: under Vite 8
 development, the pre-bundled copy loads its own worker and WASM and opens with
@@ -3269,7 +3271,9 @@ reloaded pages during an open.
 
 The packaged-consumer
 [checks](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/wasm-package-consumer.e2e.test.ts)
-cover the build output and export map, a classic worker in development and
+run the consumer production build, the nested-base development and production
+preview, and the `about:srcdoc` and cross-origin page shapes under both Vite 7
+and Vite 8, each with its own build output. They also cover the build output and export map, a classic worker in development and
 production, an `about:srcdoc` frame, and a page on another origin than the
 Vite server, where the Worker constructor throws `SecurityError` and the open
 reports `PersistenceUnavailableError`. The
