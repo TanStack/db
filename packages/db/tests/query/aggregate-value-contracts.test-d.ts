@@ -56,6 +56,7 @@ type AggregateRow = {
   group: string
   amount: number
   maybeAmount?: number | null
+  optionalAmount?: number
   label: string
   createdAt: Date
   sequence: bigint
@@ -107,6 +108,9 @@ describe(`aggregate value contracts`, () => {
               Aggregate<number>
             >()
             expectTypeOf(min(row.label)).toEqualTypeOf<Aggregate<string>>()
+            expectTypeOf(min(row.optionalAmount)).toEqualTypeOf<
+              Aggregate<number | null | undefined>
+            >()
             expectTypeOf(max(row.createdAt)).toEqualTypeOf<Aggregate<Date>>()
             expectTypeOf(min(row.sequence)).toEqualTypeOf<Aggregate<bigint>>()
 

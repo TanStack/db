@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import {
   add,
+  avg,
   caseWhen,
   coalesce,
   count,
@@ -13,6 +14,7 @@ import {
   include as includeWrap,
   materialize,
   max,
+  min,
   sum,
   toArray,
   upper,
@@ -73,10 +75,25 @@ import { declareOracle } from '../oracle-declaration.js'
  * literal as itself, `add` and `caseWhen(eq(...))` as arithmetic. A group with
  * no source rows publishes no row. The model never reads the compiler.
  *
+ * An aggregate reads the values of its group, and `null` or `undefined` is not
+ * a value (#2365; the guide describes `count` as "Count non-null values"). So
+ * `count`, `sum`, `avg`, `min` and `max` over a field that can be nullish see
+ * only the others, and `avg` divides by their number. A group with no value
+ * has `count` and `sum` 0, the count and total of nothing, and `min` and `max`
+ * `null`, as in SQL. Its `avg` is 0. `sum` and `avg` return `Aggregate<number>`
+ * for a nullable argument (`aggregate-value-contracts.test-d.ts`), which rules
+ * out SQL's `null`; nothing but today's output picks 0 over `NaN`, so that value
+ * is a proposal for the maintainers to confirm. `orderBy` puts `null` first in
+ * either direction (the builder's default `nulls: 'first'`), and `add` reads a
+ * `null` operand as 0, as its evaluator does.
+ *
  * The grammar generates a select object of one to three fields, each a tree of
  * depth at most two over literals, parent fields (include only), source fields,
- * and the aggregates `count`, `sum` and `max`, combined by `add` and
- * `caseWhen`. A field can also be a nested object of such expressions, or a
+ * and the aggregates `count`, `sum` and `max` of a number, and `count`, `sum`,
+ * `avg`, `min` and `max` of a number that can be `null` or absent, combined by
+ * `add` and `caseWhen`. `min` and `max` of a Date, a string or a bigint that
+ * can be `null` or absent appear only as a field of their own, because those
+ * domains have no arithmetic or order here. A field can also be a nested object of such expressions, or a
  * `caseWhen` whose branches are such objects (a conditional select). A shape
  * may spread the source or the parent row. Every shape
  * holds at least one aggregate. Each history runs the shape at the top level
@@ -187,6 +204,31 @@ import { declareOracle } from '../oracle-declaration.js'
 
 const PROPERTY = `aggregate.select-shapes`
 
+/** Aggregates of a number: `v` always holds one, `n` can be null or absent. */
+const numericAggregates = [
+  `count`,
+  `sum`,
+  `max`,
+  `n:count`,
+  `n:sum`,
+  `n:avg`,
+  `n:min`,
+  `n:max`,
+] as const
+/** Aggregates of the other orderable domains, each null or absent at times. */
+const domainAggregates = [
+  `at:min`,
+  `at:max`,
+  `s:min`,
+  `s:max`,
+  `b:min`,
+  `b:max`,
+] as const
+type NumericAggregate = (typeof numericAggregates)[number]
+type Aggregated = NumericAggregate | (typeof domainAggregates)[number]
+const isNumericAggregate = (fn: Aggregated): fn is NumericAggregate =>
+  (numericAggregates as ReadonlyArray<Aggregated>).includes(fn)
+
 type Part =
   | { k: `lit`; n: number }
   | { k: `parent` }
@@ -194,7 +236,7 @@ type Part =
   | { k: `key` }
   /** The raw field `c.k`: the group key only when the query groups by it. */
   | { k: `rawKey` }
-  | { k: `agg`; fn: `count` | `sum` | `max` }
+  | { k: `agg`; fn: Aggregated }
   | { k: `add`; a: Part; b: Part }
   | { k: `case`; cond: Part; lit: number | string; a: Part; b: Part }
   | { k: `nested`; fields: Record<string, Part> }
@@ -225,7 +267,7 @@ type Shape = {
 }
 
 type OrderTerm =
-  | { by: `agg`; fn: `count` | `sum` | `max`; dir: `asc` | `desc` }
+  | { by: `agg`; fn: NumericAggregate; dir: `asc` | `desc` }
   | {
       by: `selected`
       field: string
@@ -251,7 +293,15 @@ function groupsByRawKey(grouping: Grouping): boolean {
 }
 
 type Issue = { id: number; k: string; x: number }
-type Comment = { id: number; k: string; v: number }
+type Comment = {
+  id: number
+  k: string
+  v: number
+  n?: number | null
+  at?: Date | null
+  s?: string | null
+  b?: bigint | null
+}
 
 // --- Model -----------------------------------------------------------------
 
@@ -297,7 +347,7 @@ function readsSourceOutsideAggregate(part: Part, grouping: Grouping): boolean {
 }
 
 /** The aggregates a part reads, outside or inside other expressions. */
-function aggregatesOf(part: Part): Array<`count` | `sum` | `max`> {
+function aggregatesOf(part: Part): Array<Aggregated> {
   switch (part.k) {
     case `agg`:
       return [part.fn]
@@ -334,7 +384,7 @@ function modelError(
 }
 
 /** The aggregates the select holds as top-level fields. */
-function selectedAggregates(shape: Shape): Set<`count` | `sum` | `max`> {
+function selectedAggregates(shape: Shape): Set<Aggregated> {
   return new Set(
     Object.values(shape.fields).flatMap((part) =>
       part.k === `agg` ? [part.fn] : [],
@@ -373,7 +423,7 @@ function selectOrHavingAggregate(shape: Shape): boolean {
 }
 
 /** The aggregates the orderBy terms read. */
-function orderAggregates(shape: Shape): Array<`count` | `sum` | `max`> {
+function orderAggregates(shape: Shape): Array<Aggregated> {
   return (shape.orderBy ?? []).flatMap((term) =>
     term.by === `agg` ? [term.fn] : [],
   )
@@ -480,6 +530,28 @@ function groupIdOf(row: Comment, grouping: Grouping): string {
     : `${typeof key}:${String(key)}`
 }
 
+/** An aggregate of a field that can be nullish reads only its values. */
+function nullableAggregate(
+  fn: Exclude<Aggregated, `count` | `sum` | `max`>,
+  rows: ReadonlyArray<Comment>,
+): unknown {
+  const [field, operator] = fn.split(`:`) as [`n` | `at` | `s` | `b`, string]
+  const values = rows.flatMap((row) => {
+    const value = row[field]
+    return value === null || value === undefined ? [] : [value]
+  }) as Array<any>
+  if (operator === `count`) return values.length
+  if (operator === `sum` || operator === `avg`) {
+    const total = values.reduce((t, value) => t + value, 0)
+    if (operator === `sum`) return total
+    return values.length === 0 ? 0 : total / values.length
+  }
+  if (values.length === 0) return null
+  return values.reduce((best, value) =>
+    (operator === `min` ? value < best : value > best) ? value : best,
+  )
+}
+
 function evaluate(
   part: Part,
   rows: ReadonlyArray<Comment>,
@@ -500,7 +572,8 @@ function evaluate(
     case `agg`:
       if (part.fn === `count`) return rows.length
       if (part.fn === `sum`) return rows.reduce((t, r) => t + r.v, 0)
-      return Math.max(...rows.map((r) => r.v))
+      if (part.fn === `max`) return Math.max(...rows.map((r) => r.v))
+      return nullableAggregate(part.fn, rows)
     case `add`:
       return (
         (evaluate(part.a, rows, parent, grouping) as number) +
@@ -605,6 +678,11 @@ function modelOrderBlocks(
   const compare = (a: Array<unknown>, b: Array<unknown>): number => {
     for (const [index, term] of terms.entries()) {
       const [x, y] = [a[index], b[index]]
+      // `null` comes first whichever way the term sorts.
+      if (x === null || y === null) {
+        if (x !== y) return x === null ? -1 : 1
+        continue
+      }
       const result =
         typeof x === `string` && typeof y === `string`
           ? collator.compare(x, y)
@@ -630,11 +708,13 @@ function sortRows(
   // Compare by a canonical form: key order is not part of the law either.
   const canonical = (value: unknown): string =>
     JSON.stringify(value, (_key, inner) =>
-      inner !== null && typeof inner === `object` && !Array.isArray(inner)
-        ? Object.fromEntries(
-            Object.entries(inner).sort(([a], [b]) => (a < b ? -1 : 1)),
-          )
-        : inner,
+      typeof inner === `bigint`
+        ? `${inner}n`
+        : inner !== null && typeof inner === `object` && !Array.isArray(inner)
+          ? Object.fromEntries(
+              Object.entries(inner).sort(([a], [b]) => (a < b ? -1 : 1)),
+            )
+          : inner,
     )
   return [...rows].sort((a, b) => (canonical(a) < canonical(b) ? -1 : 1))
 }
@@ -642,6 +722,16 @@ function sortRows(
 // --- Grammar ---------------------------------------------------------------
 
 const literal = fc.integer({ min: 0, max: 3 })
+// A column can hold a value, `null`, or nothing; a maximum can be below zero
+// and a minimum above it, so a nullish value read as 0 changes the answer.
+const nullableColumns = {
+  n: fc.constantFrom(-2, -1, 1, 3, null, undefined),
+  at: fc.constantFrom(new Date(1_000), new Date(2_000), null, undefined),
+  s: fc.constantFrom(`b`, `c`, null, undefined),
+  b: fc.constantFrom(5n, 7n, null, undefined),
+}
+const numericAggregate = fc.constantFrom(...numericAggregates)
+const aggregatePart = numericAggregate.map((fn): Part => ({ k: `agg`, fn }))
 // A condition may compare with a group key value, so a missing key changes
 // the branch it takes.
 const conditionLiteral = fc.oneof(literal, fc.constantFrom(`a`, `b`, `A`, `B`))
@@ -654,9 +744,7 @@ const leaf = (include: boolean, grouped: boolean): fc.Arbitrary<Part> =>
     { weight: grouped ? 1 : 2, arbitrary: fc.constant<Part>({ k: `source` }) },
     { weight: grouped ? 4 : 1, arbitrary: fc.constant<Part>({ k: `key` }) },
     fc.constant<Part>({ k: `rawKey` }),
-    fc
-      .constantFrom(`count` as const, `sum` as const, `max` as const)
-      .map((fn): Part => ({ k: `agg`, fn })),
+    aggregatePart,
   )
 // Function arguments and conditions are expressions; a nested object is a
 // select value, so it appears only as a field.
@@ -708,6 +796,7 @@ const part = (
 ): fc.Arbitrary<Part> =>
   fc.oneof(
     { weight: 4, arbitrary: expression(include, grouped, depth) },
+    fc.constantFrom(...domainAggregates).map((fn): Part => ({ k: `agg`, fn })),
     nestedObject(include, grouped, depth - 1),
     fc
       .record({
@@ -721,7 +810,7 @@ const part = (
 // A grouped query needs no aggregate; an ungrouped one is an aggregate query
 // only when it holds one.
 const orderSeed: fc.Arbitrary<OrderSeed> = fc.record({
-  fn: fc.constantFrom(`count` as const, `sum` as const, `max` as const),
+  fn: numericAggregate,
   dir: fc.constantFrom(`asc` as const, `desc` as const),
   selected: fc.option(fc.nat(2), { nil: undefined, freq: 2 }),
 })
@@ -769,9 +858,7 @@ const shape = (include: boolean, grouping: Grouping): fc.Arbitrary<Shape> =>
           // in two compares an aggregate directly.
           part: fc.oneof(
             expression(include, grouping !== `none`, 1),
-            fc
-              .constantFrom(`count` as const, `sum` as const, `max` as const)
-              .map((fn): Part => ({ k: `agg`, fn })),
+            aggregatePart,
           ),
           lit: conditionLiteral,
           // One in three reads a select field through `$selected` instead.
@@ -796,7 +883,7 @@ const shape = (include: boolean, grouping: Grouping): fc.Arbitrary<Shape> =>
     )
 
 type OrderSeed = {
-  fn: `count` | `sum` | `max`
+  fn: NumericAggregate
   dir: `asc` | `desc`
   selected: number | undefined
 }
@@ -835,16 +922,13 @@ const orderedShape = (
   include: boolean,
   grouping: Grouping,
 ): fc.Arbitrary<Shape> => {
-  const agg = fc
-    .constantFrom(`count` as const, `sum` as const, `max` as const)
-    .map((fn): Part => ({ k: `agg`, fn }))
   const field = fc.oneof(
-    { weight: 3, arbitrary: agg },
+    { weight: 3, arbitrary: aggregatePart },
     literal.map((n): Part => ({ k: `lit`, n })),
     ...(grouping === `none` ? [] : [fc.constant<Part>({ k: `key` })]),
     ...(include ? [fc.constant<Part>({ k: `parent` })] : []),
     fc
-      .tuple(agg, literal)
+      .tuple(aggregatePart, literal)
       .map(([a, n]): Part => ({ k: `add`, a, b: { k: `lit`, n } })),
   )
   return fc
@@ -866,7 +950,7 @@ const orderedShape = (
           ? { ...generated, fk: { k: `key` } as Part }
           : generated
       const s: Shape = { fields }
-      const selected = [...selectedAggregates(s)]
+      const selected = [...selectedAggregates(s)].filter(isNumericAggregate)
       // An aggregate term names an aggregate the select holds, if any.
       const usable = seeds.map((seed) =>
         selected.length === 0 || selected.includes(seed.fn)
@@ -887,9 +971,10 @@ function orderKind(
   grouping: Grouping,
 ): `number` | `string` | undefined {
   switch (part.k) {
+    case `agg`:
+      return isNumericAggregate(part.fn) ? `number` : undefined
     case `lit`:
     case `parent`:
-    case `agg`:
       return `number`
     case `add`:
       return orderKind(part.a, grouping) === `number` &&
@@ -913,10 +998,11 @@ function orderKind(
   }
 }
 
+type NullableColumns = Pick<Comment, `n` | `at` | `s` | `b`>
 type Step =
   | { t: `parent`; id: number; x: number }
-  | { t: `insert`; k: string; v: number }
-  | { t: `update`; pick: number; v: number; k?: string }
+  | ({ t: `insert`; k: string; v: number } & NullableColumns)
+  | ({ t: `update`; pick: number; v: number; k?: string } & NullableColumns)
   | { t: `delete`; pick: number }
 // `A` matches no parent, and shares a group with `a` under `upper(c.k)`.
 const sourceKey = fc.constantFrom(`a`, `b`, `A`)
@@ -930,12 +1016,14 @@ const step: fc.Arbitrary<Step> = fc.oneof(
     t: fc.constant(`insert` as const),
     k: sourceKey,
     v: literal,
+    ...nullableColumns,
   }),
   // An update can move a source row to another group and parent route.
   fc.record({
     t: fc.constant(`update` as const),
     pick: fc.nat(5),
     v: literal,
+    ...nullableColumns,
     k: fc.option(sourceKey, { nil: undefined }),
   }),
   fc.record({ t: fc.constant(`delete` as const), pick: fc.nat(5) }),
@@ -943,11 +1031,59 @@ const step: fc.Arbitrary<Step> = fc.oneof(
 
 // --- Driver ----------------------------------------------------------------
 
+const isValue = <T>(value: T | null | undefined): value is T =>
+  value !== null && value !== undefined
+
+/** A step contains bigints, which `JSON.stringify` refuses. */
+const stepLabel = (entry: Step): string =>
+  JSON.stringify(entry, (_key, value) =>
+    typeof value === `bigint` ? `${value}n` : value,
+  )
+
+/** Records which nullish states the source rows' groups are in. */
+function reachNullishStates(
+  rows: ReadonlyArray<Comment>,
+  grouping: Grouping,
+): void {
+  const groups = new Map<string, Array<Comment>>()
+  for (const row of rows) {
+    const id = grouping === `none` ? `` : groupIdOf(row, grouping)
+    groups.set(id, [...(groups.get(id) ?? []), row])
+  }
+  for (const members of groups.values()) {
+    const numbers = members.map((row) => row.n).filter(isValue)
+    const dates = members.map((row) => row.at).filter(isValue)
+    if (numbers.length === 0) reach?.reach(`a group holds only nullish entries`)
+    else if (numbers.length < members.length) {
+      reach?.reach(`a group mixes values with nullish entries`)
+      if (Math.max(...numbers) < 0)
+        reach?.reach(`a maximum below zero sits beside a nullish entry`)
+      if (Math.min(...numbers) > 0)
+        reach?.reach(`a minimum above zero sits beside a nullish entry`)
+    }
+    if (dates.length === 0)
+      reach?.reach(`a Date column holds only nullish entries`)
+    else if (dates.length < members.length)
+      reach?.reach(`a Date column mixes values with nullish entries`)
+  }
+}
+
 /** Build the select value of a part from the query's refs. */
 /** The group expression of the current history. */
 let keyExpression: (c: any) => any = (c) => c.k
 /** What the history passes to `groupBy`: its key, or for `pair` two keys. */
 let groupExpressions: (c: any) => any = (c) => c.k
+
+/** Every column an aggregate can read, for a union branch to pass on. */
+const unionColumns = (row: any) => ({
+  id: row.id,
+  k: row.k,
+  v: row.v,
+  n: row.n,
+  at: row.at,
+  s: row.s,
+  b: row.b,
+})
 
 function build(p: Part, c: any, issue: any): any {
   switch (p.k) {
@@ -962,11 +1098,20 @@ function build(p: Part, c: any, issue: any): any {
     case `rawKey`:
       return c.k
     case `agg`:
-      return p.fn === `count`
-        ? count(c.id)
-        : p.fn === `sum`
-          ? sum(c.v)
-          : max(c.v)
+      if (p.fn === `count`) return count(c.id)
+      if (p.fn === `sum`) return sum(c.v)
+      if (p.fn === `max`) return max(c.v)
+      {
+        const [field, operator] = p.fn.split(`:`) as [string, string]
+        const operators: Record<string, (arg: any) => any> = {
+          count,
+          sum,
+          avg,
+          min,
+          max,
+        }
+        return operators[operator]!(c[field])
+      }
     case `add`:
       return add(build(p.a, c, issue), build(p.b, c, issue))
     case `case`:
@@ -1219,10 +1364,10 @@ async function runHistory({
   // `A` matches no parent; under `upper(c.k)` it shares a group with `a`,
   // and a string term orders it between `a` and `b` in `en-US` collation.
   let comments: Array<Comment> = [
-    { id: 10, k: `a`, v: 1 },
-    { id: 11, k: `a`, v: 2 },
+    { id: 10, k: `a`, v: 1, n: 3, at: new Date(1_000), s: `c`, b: 7n },
+    { id: 11, k: `a`, v: 2, n: null, at: null, s: null, b: null },
     { id: 12, k: `b`, v: 3 },
-    { id: 13, k: `A`, v: 2 },
+    { id: 13, k: `A`, v: 2, n: -1 },
   ]
   let nextId = 20
   const issueSource = createCollection(
@@ -1283,13 +1428,11 @@ async function runHistory({
   const topSource = (q: any) =>
     union
       ? q.unionAll(
-          q
-            .from({ c: commentSource })
-            .select(({ c }: any) => ({ id: c.id, k: c.k, v: c.v })),
+          q.from({ c: commentSource }).select(({ c }: any) => unionColumns(c)),
           q
             .from({ e: commentSource })
             .where(({ e }: any) => eq(e.id, -1))
-            .select(({ e }: any) => ({ id: e.id, k: e.k, v: e.v })),
+            .select(({ e }: any) => unionColumns(e)),
         )
       : q.from({ c: commentSource })
   const topAlias = union ? undefined : `c`
@@ -1496,7 +1639,15 @@ async function runHistory({
         issueSource.utils.write({ type: `update`, value: next })
         issueSource.utils.commit()
       } else if (s.t === `insert`) {
-        const row = { id: nextId++, k: s.k, v: s.v }
+        const row = {
+          id: nextId++,
+          k: s.k,
+          v: s.v,
+          n: s.n,
+          at: s.at,
+          s: s.s,
+          b: s.b,
+        }
         comments = [...comments, row]
         commentSource.utils.begin()
         commentSource.utils.write({ type: `insert`, value: row })
@@ -1505,7 +1656,19 @@ async function runHistory({
         if (comments.length === 0) continue
         const target = comments[s.pick % comments.length]!
         if (s.t === `update`) {
-          const row = { ...target, v: s.v, k: s.k ?? target.k }
+          const row = {
+            ...target,
+            v: s.v,
+            n: s.n,
+            at: s.at,
+            s: s.s,
+            b: s.b,
+            k: s.k ?? target.k,
+          }
+          if (isValue(target.n) && !isValue(s.n))
+            reach?.reach(`a value is replaced by a nullish one`)
+          if (!isValue(target.n) && isValue(s.n))
+            reach?.reach(`a nullish value is replaced by a value`)
           routeMoved = row.k !== target.k
           comments = comments.map((c) => (c.id === target.id ? row : c))
           commentSource.utils.begin()
@@ -1519,7 +1682,8 @@ async function runHistory({
         }
       }
       await new Promise((resolve) => setTimeout(resolve, 0))
-      check(`step ${index} ${JSON.stringify(s)}`)
+      check(`step ${index} ${stepLabel(s)}`)
+      if (topQuery.ok || includeQuery.ok) reachNullishStates(comments, grouping)
       if (topQuery.ok || includeQuery.ok) {
         const checkpoint = {
           parent: `published after a parent update`,
@@ -1761,6 +1925,14 @@ const generatedCheckpoints = [
   `published after a source route move`,
   `a shadowed child alias publishes rows`,
   `a union source publishes rows`,
+  `a group mixes values with nullish entries`,
+  `a group holds only nullish entries`,
+  `a maximum below zero sits beside a nullish entry`,
+  `a minimum above zero sits beside a nullish entry`,
+  `a Date column mixes values with nullish entries`,
+  `a Date column holds only nullish entries`,
+  `a value is replaced by a nullish one`,
+  `a nullish value is replaced by a value`,
 ] as const
 type ReachState =
   (typeof reachStates)[number] | (typeof generatedCheckpoints)[number]
