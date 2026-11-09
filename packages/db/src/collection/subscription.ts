@@ -390,8 +390,8 @@ export class CollectionSubscription
       if (this.options.discardsRowsOnCleanup) {
         this.publishedRows = new Map()
         this.sentKeys = new Set()
-      }
-      this.stalePublishedRows = new Map(this.publishedRows)
+        this.stalePublishedRows = new Map()
+      } else this.stalePublishedRows = new Map(this.publishedRows)
     }
     this.pendingLoadSubsetParticipants.clear()
 
