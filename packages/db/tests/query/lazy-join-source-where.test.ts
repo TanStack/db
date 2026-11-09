@@ -10,26 +10,23 @@ import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { flushPromises } from '../utils.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
-type Task = { id: number; title: string }
-type TaskTag = { id: number; task_id: number; tag_id: number }
-type Tag = { id: number; name: string; type: string }
+type TodoList = { id: number }
+type Todo = { id: number; listId: number; assigneeId: number }
+type User = { id: number; active: boolean }
 
-const taskRows: Array<Task> = [
-  { id: 1, title: `one` },
-  { id: 2, title: `two` },
+const todoListRows: Array<TodoList> = [{ id: 1 }, { id: 2 }]
+const todoRows: Array<Todo> = [
+  { id: 1, listId: 1, assigneeId: 7 },
+  { id: 2, listId: 1, assigneeId: 8 },
+  { id: 3, listId: 2, assigneeId: 9 },
 ]
-const taskTagRows: Array<TaskTag> = [
-  { id: 100, task_id: 1, tag_id: 7 },
-  { id: 101, task_id: 1, tag_id: 8 },
-  { id: 102, task_id: 2, tag_id: 9 },
-]
-// Tags 10 and 11 are named by no tagging: a keyed load must not ask for them.
-const tagRows: Array<Tag> = [
-  { id: 7, name: `seven`, type: `user` },
-  { id: 8, name: `eight`, type: `generated` },
-  { id: 9, name: `nine`, type: `user` },
-  { id: 10, name: `ten`, type: `user` },
-  { id: 11, name: `eleven`, type: `user` },
+// Users 10 and 11 are assigned no todo: a keyed load must not ask for them.
+const userRows: Array<User> = [
+  { id: 7, active: true },
+  { id: 8, active: false },
+  { id: 9, active: true },
+  { id: 10, active: true },
+  { id: 11, active: true },
 ]
 
 let sequence = 0
@@ -107,25 +104,28 @@ describe(`lazy join source where`, () => {
   })
 
   it(`include: a where on the lazy joined side keeps the join-key filter`, async () => {
-    const tasks = createEagerCollection(`tasks`, taskRows)
-    const taskTags = createEagerCollection(`task-tags`, taskTagRows)
-    const { collection: tags, loads } = createOnDemandCollection(
-      `tags`,
-      tagRows,
+    const todoLists = createEagerCollection(`todo-lists`, todoListRows)
+    const todos = createEagerCollection(`todos`, todoRows)
+    const { collection: users, loads } = createOnDemandCollection(
+      `users`,
+      userRows,
     )
 
     const live = createLiveQueryCollection((q) =>
-      q.from({ task: tasks }).select(({ task }) => ({
-        id: task.id,
-        tags: toArray(
+      q.from({ list: todoLists }).select(({ list }) => ({
+        id: list.id,
+        todos: toArray(
           q
-            .from({ taskTag: taskTags })
-            .where(({ taskTag }) => eq(taskTag.task_id, task.id))
-            .innerJoin({ tag: tags }, ({ taskTag, tag }) =>
-              eq(taskTag.tag_id, tag.id),
+            .from({ todo: todos })
+            .where(({ todo }) => eq(todo.listId, list.id))
+            .innerJoin({ assignee: users }, ({ todo, assignee }) =>
+              eq(todo.assigneeId, assignee.id),
             )
-            .where(({ tag }) => not(eq(tag.type, `generated`)))
-            .select(({ tag }) => ({ id: tag.id, name: tag.name })),
+            .where(({ assignee }) => eq(assignee.active, true))
+            .select(({ todo, assignee }) => ({
+              id: todo.id,
+              assignee: assignee.id,
+            })),
         ),
       })),
     )
@@ -139,37 +139,40 @@ describe(`lazy join source where`, () => {
     }
     expect(
       live.toArray
-        .map((task) => ({
-          id: task.id,
-          tags: [...task.tags].map((tag) => tag.id).sort(),
+        .map((list) => ({
+          id: list.id,
+          assignees: [...list.todos].map((todo) => todo.assignee).sort(),
         }))
         .sort((a, b) => a.id - b.id),
     ).toEqual([
-      { id: 1, tags: [7] },
-      { id: 2, tags: [9] },
+      { id: 1, assignees: [7] },
+      { id: 2, assignees: [9] },
     ])
   })
 
   it(`include: a where on the parent-filtered side keeps the join-key filter`, async () => {
-    const tasks = createEagerCollection(`tasks`, taskRows)
-    const taskTags = createEagerCollection(`task-tags`, taskTagRows)
-    const { collection: tags, loads } = createOnDemandCollection(
-      `tags`,
-      tagRows,
+    const todoLists = createEagerCollection(`todo-lists`, todoListRows)
+    const todos = createEagerCollection(`todos`, todoRows)
+    const { collection: users, loads } = createOnDemandCollection(
+      `users`,
+      userRows,
     )
 
     const live = createLiveQueryCollection((q) =>
-      q.from({ task: tasks }).select(({ task }) => ({
-        id: task.id,
-        tags: toArray(
+      q.from({ list: todoLists }).select(({ list }) => ({
+        id: list.id,
+        todos: toArray(
           q
-            .from({ taskTag: taskTags })
-            .where(({ taskTag }) => eq(taskTag.task_id, task.id))
-            .where(({ taskTag }) => not(eq(taskTag.tag_id, 8)))
-            .innerJoin({ tag: tags }, ({ taskTag, tag }) =>
-              eq(taskTag.tag_id, tag.id),
+            .from({ todo: todos })
+            .where(({ todo }) => eq(todo.listId, list.id))
+            .where(({ todo }) => not(eq(todo.assigneeId, 8)))
+            .innerJoin({ assignee: users }, ({ todo, assignee }) =>
+              eq(todo.assigneeId, assignee.id),
             )
-            .select(({ tag }) => ({ id: tag.id, name: tag.name })),
+            .select(({ todo, assignee }) => ({
+              id: todo.id,
+              assignee: assignee.id,
+            })),
         ),
       })),
     )
@@ -184,20 +187,23 @@ describe(`lazy join source where`, () => {
   })
 
   it(`leftJoin: a where on the lazy joined side keeps the join-key filter`, async () => {
-    const taskTags = createEagerCollection(`task-tags`, taskTagRows)
-    const { collection: tags, loads } = createOnDemandCollection(
-      `tags`,
-      tagRows,
+    const todos = createEagerCollection(`todos`, todoRows)
+    const { collection: users, loads } = createOnDemandCollection(
+      `users`,
+      userRows,
     )
 
     const live = createLiveQueryCollection((q) =>
       q
-        .from({ taskTag: taskTags })
-        .leftJoin({ tag: tags }, ({ taskTag, tag }) =>
-          eq(taskTag.tag_id, tag.id),
+        .from({ todo: todos })
+        .leftJoin({ assignee: users }, ({ todo, assignee }) =>
+          eq(todo.assigneeId, assignee.id),
         )
-        .where(({ tag }) => not(eq(tag.type, `generated`)))
-        .select(({ taskTag, tag }) => ({ id: taskTag.id, tagId: tag.id })),
+        .where(({ assignee }) => eq(assignee.active, true))
+        .select(({ todo, assignee }) => ({
+          id: todo.id,
+          assignee: assignee.id,
+        })),
     )
     cleanups.push(() => live.cleanup())
     await live.preload()
@@ -210,39 +216,40 @@ describe(`lazy join source where`, () => {
   })
 
   // A joined subquery whose filter reads the parent is not a source filter:
-  // it must stay routed by parent, so each task sees only its own owner's tags.
+  // it must stay routed by parent, so each list sees only its own team's
+  // assignees.
   it(`include: a joined subquery that reads the parent row keeps its parent filter`, async () => {
-    const tasks = createEagerCollection(`owned-tasks`, [
-      { id: 1, owner: `a` },
-      { id: 2, owner: `b` },
+    const todoLists = createEagerCollection(`team-todo-lists`, [
+      { id: 1, team: `a` },
+      { id: 2, team: `b` },
     ])
-    const taskTags = createEagerCollection(`owned-task-tags`, [
-      { id: 100, task_id: 1, tag_id: 7 },
-      { id: 101, task_id: 1, tag_id: 8 },
-      { id: 102, task_id: 2, tag_id: 7 },
-      { id: 103, task_id: 2, tag_id: 8 },
+    const todos = createEagerCollection(`team-todos`, [
+      { id: 1, listId: 1, assigneeId: 7 },
+      { id: 2, listId: 1, assigneeId: 8 },
+      { id: 3, listId: 2, assigneeId: 7 },
+      { id: 4, listId: 2, assigneeId: 8 },
     ])
-    const tags = createEagerCollection(`owned-tags`, [
-      { id: 7, owner: `a` },
-      { id: 8, owner: `b` },
+    const users = createEagerCollection(`team-users`, [
+      { id: 7, team: `a` },
+      { id: 8, team: `b` },
     ])
 
     const live = createLiveQueryCollection((q) =>
-      q.from({ task: tasks }).select(({ task }) => ({
-        id: task.id,
-        tags: toArray(
+      q.from({ list: todoLists }).select(({ list }) => ({
+        id: list.id,
+        todos: toArray(
           q
-            .from({ taskTag: taskTags })
-            .where(({ taskTag }) => eq(taskTag.task_id, task.id))
+            .from({ todo: todos })
+            .where(({ todo }) => eq(todo.listId, list.id))
             .innerJoin(
               {
-                tag: q
-                  .from({ tag: tags })
-                  .where(({ tag }) => eq(tag.owner, task.owner)),
+                assignee: q
+                  .from({ assignee: users })
+                  .where(({ assignee }) => eq(assignee.team, list.team)),
               },
-              ({ taskTag, tag }) => eq(taskTag.tag_id, tag.id),
+              ({ todo, assignee }) => eq(todo.assigneeId, assignee.id),
             )
-            .select(({ tag }) => ({ id: tag.id })),
+            .select(({ assignee }) => ({ id: assignee.id })),
         ),
       })),
     )
@@ -251,14 +258,14 @@ describe(`lazy join source where`, () => {
 
     expect(
       live.toArray
-        .map((task) => ({
-          id: task.id,
-          tags: [...task.tags].map((tag) => tag.id),
+        .map((list) => ({
+          id: list.id,
+          assignees: [...list.todos].map((assignee) => assignee.id),
         }))
         .sort((a, b) => a.id - b.id),
     ).toEqual([
-      { id: 1, tags: [7] },
-      { id: 2, tags: [8] },
+      { id: 1, assignees: [7] },
+      { id: 2, assignees: [8] },
     ])
   })
 })
