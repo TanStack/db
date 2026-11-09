@@ -343,10 +343,7 @@ export function createLifecycleModel(
  */
 
 export type LifecyclePhase =
-  | `live`
-  | `cleaned-up`
-  | `unsubscribed`
-  | `unsubscribed-cleaned-up`
+  `live` | `cleaned-up` | `unsubscribed` | `unsubscribed-cleaned-up`
 
 export type LifecycleStateVariable =
   | `phase`
@@ -421,7 +418,8 @@ function replacementSucceeded(model: LifecycleModel): boolean {
 // Judge an open replay: success closes the publication barrier. Returns
 // whether the closing judgment decided a failed owner.
 function judgeReplay(model: LifecycleModel): boolean {
-  if (!model.publicationBarrierOpen || !replacementSucceeded(model)) return false
+  if (!model.publicationBarrierOpen || !replacementSucceeded(model))
+    return false
   model.publicationBarrierOpen = false
   return model.owners.some(
     ({ attemptId }) =>
@@ -595,10 +593,7 @@ function admitRequest(
 
 // Replay setup is asynchronous even when every acquisition is synchronous or
 // canceled. Logical owners queue setup; live owners start acquisitions.
-function startReplay(
-  model: LifecycleModel,
-  facts: LifecycleStepFacts,
-): void {
+function startReplay(model: LifecycleModel, facts: LifecycleStepFacts): void {
   model.replayGeneration++
   setStatus(model, model.owners.length > 0)
   // A canceled-only truncate starts no new work. It still opens the
@@ -697,7 +692,10 @@ function defineNoopRow<E extends LifecycleEvent>(spec: {
   }
 }
 
-const ENDED: ReadonlyArray<LifecyclePhase> = [`unsubscribed`, `unsubscribed-cleaned-up`]
+const ENDED: ReadonlyArray<LifecyclePhase> = [
+  `unsubscribed`,
+  `unsubscribed-cleaned-up`,
+]
 const SUBSCRIBED: ReadonlyArray<LifecyclePhase> = [`live`, `cleaned-up`]
 const LIVE: ReadonlyArray<LifecyclePhase> = [`live`]
 const CLEANED: ReadonlyArray<LifecyclePhase> = [`cleaned-up`]
@@ -728,7 +726,12 @@ export const lifecycleTable: ReadonlyArray<LifecycleRow> = [
     from: [`unsubscribed-cleaned-up`],
     event: `restart`,
     to: `unsubscribed`,
-    writes: [`phase`, `generations`, `publication-barrier`, `collection-status`],
+    writes: [
+      `phase`,
+      `generations`,
+      `publication-barrier`,
+      `collection-status`,
+    ],
     effect: (model) => {
       model.active = true
       model.syncRunGeneration++
@@ -997,7 +1000,9 @@ export const lifecycleTable: ReadonlyArray<LifecycleRow> = [
       model.active = true
       model.syncRunGeneration++
       model.replayGeneration = 0
-      model.publicationBarrierOpen = model.owners.some(({ aborted }) => !aborted)
+      model.publicationBarrierOpen = model.owners.some(
+        ({ aborted }) => !aborted,
+      )
       model.collectionStatus = `ready`
       setStatus(model, model.owners.length > 0)
       const replayLoads: Array<LifecycleLoadEvent> = []
@@ -1176,7 +1181,8 @@ export function reduceLifecycle(
       (candidate.event === `*` || candidate.event === command.type) &&
       (candidate.guard?.(model, command) ?? true),
   )
-  if (!row) throw new Error(`lifecycle table has no row for ${phase} ${command.type}`)
+  if (!row)
+    throw new Error(`lifecycle table has no row for ${phase} ${command.type}`)
   const before = observeBefore(model, command)
   const facts: LifecycleStepFacts = {
     releaseVerdicts: [],
