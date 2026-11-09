@@ -1,0 +1,1 @@
+export { supabaseCollectionOptions } from './db'
