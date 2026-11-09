@@ -401,7 +401,7 @@ describe(`structuralIdentity`, () => {
     const nullPrototype = build(spec, decisions(true, false, false, false))
     expect(classVariant).toBeInstanceOf(Instance)
     expect(Object.keys(classVariant as object)).toEqual([`b`, `a`])
-    const [hidden] = Object.getOwnPropertySymbols(classVariant as object)
+    const [hidden] = Object.getOwnPropertySymbols(classVariant)
     expect(hidden).toBeDefined()
     expect(
       Object.getOwnPropertyDescriptor(classVariant, hidden!)?.enumerable,
