@@ -4,6 +4,15 @@ import { commonJsDeclarations } from '../../scripts/commonjs-declarations.mjs'
 import packageJson from './package.json'
 
 const config = defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        preserveModulesRoot: `src`,
+        // npm omits node_modules directories even inside published dist.
+        sanitizeFileName: (name) => name.replaceAll(`node_modules`, `vendor`),
+      },
+    },
+  },
   test: {
     name: packageJson.name,
     dir: `./tests`,
