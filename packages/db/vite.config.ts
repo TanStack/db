@@ -37,6 +37,15 @@ function manglePrivateMembers(): Plugin {
 }
 
 const config = defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        preserveModulesRoot: `src`,
+        // npm omits node_modules directories even inside published dist.
+        sanitizeFileName: (name) => name.replaceAll(`node_modules`, `vendor`),
+      },
+    },
+  },
   plugins: [manglePrivateMembers()],
   test: {
     name: packageJson.name,
@@ -57,6 +66,8 @@ export default mergeConfig(
   tanstackViteConfig({
     entry: [`./src/index.ts`],
     srcDir: `./src`,
+    // Keep the advertised CommonJS entrypoint independent of require(ESM).
+    bundledDeps: [/^@tanstack\/pacer-lite(?:\/|$)/],
     beforeWriteDeclarationFile: commonJsDeclarations,
   }),
 )
