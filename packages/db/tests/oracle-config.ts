@@ -12,6 +12,7 @@ import {
 export * from '@tanstack/oracles'
 
 const staticOracleProperties = [
+  `query.join-demand-loading`,
   `query.public-container-copy`,
   `pagination.limit-admission-replay-pending-negative`,
   `pagination.limit-admission-replay-pending-valid`,

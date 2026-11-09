@@ -549,7 +549,7 @@ export class CollectionConfigBuilder<
     const participant = pending ? createDeferred<void>() : undefined
     if (participant) {
       void participant.promise.catch(() => {})
-      this.trackSubsetLoadOperationPromise(participant.promise)
+      this.trackSubsetLoadPromise(participant.promise)
     }
     this.activeDemands.set(planId, {
       generation,
