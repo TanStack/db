@@ -9,6 +9,7 @@ import type { RefProxy } from './ref-proxy.js'
 import type {
   ContainsAggregate,
   Context,
+  IsNullableRef,
   RefLeaf,
   StringifiableScalar,
 } from './types.js'
@@ -130,9 +131,6 @@ type AggregateArgument<T, Domain> = T &
         : never)
 
 type OrderableAggregateValue = number | Date | bigint | string
-
-// A group whose values are all absent has no minimum or maximum: `null`.
-type MinMaxResult<T> = undefined extends T ? T | null : T
 type AggregateWrapper<T> = RefProxy<T> | RefLeaf<T> | BasicExpression<T>
 
 // Constrained overloads compose through supported generics; these conditional
@@ -150,6 +148,15 @@ type OrderableAggregateArgument<T> = AggregateArgument<
   T,
   OrderableAggregateValue
 >
+
+// A group can hold no value when its argument can be absent, and `min` and
+// `max` then return `null`.
+type AbsentableOrderableArgument<T> =
+  IsNullableRef<T> extends true
+    ? OrderableAggregateArgument<T>
+    : undefined extends ExtractType<T>
+      ? OrderableAggregateArgument<T>
+      : never
 
 // Helper type to determine string function return type based on input nullability
 type StringFunctionReturnType<T> =
@@ -597,23 +604,25 @@ export function sum(arg: ExpressionLike): Aggregate<number> {
 }
 
 export function min<T extends OrderableAggregateValue>(arg: T): Aggregate<T>
-export function min<T>(
-  arg: OrderableAggregateWrapperArgument<T>,
-): Aggregate<MinMaxResult<T>>
+export function min<T extends ExpressionLike>(
+  arg: AbsentableOrderableArgument<T>,
+): Aggregate<NonNullable<ExtractType<T>> | null>
+export function min<T>(arg: OrderableAggregateWrapperArgument<T>): Aggregate<T>
 export function min<T extends ExpressionLike>(
   arg: OrderableAggregateArgument<T>,
-): Aggregate<MinMaxResult<ExtractType<T>>>
+): Aggregate<ExtractType<T>>
 export function min(arg: ExpressionLike): Aggregate {
   return new Aggregate(`min`, [toExpression(arg)], grouping)
 }
 
 export function max<T extends OrderableAggregateValue>(arg: T): Aggregate<T>
-export function max<T>(
-  arg: OrderableAggregateWrapperArgument<T>,
-): Aggregate<MinMaxResult<T>>
+export function max<T extends ExpressionLike>(
+  arg: AbsentableOrderableArgument<T>,
+): Aggregate<NonNullable<ExtractType<T>> | null>
+export function max<T>(arg: OrderableAggregateWrapperArgument<T>): Aggregate<T>
 export function max<T extends ExpressionLike>(
   arg: OrderableAggregateArgument<T>,
-): Aggregate<MinMaxResult<ExtractType<T>>>
+): Aggregate<ExtractType<T>>
 export function max(arg: ExpressionLike): Aggregate {
   return new Aggregate(`max`, [toExpression(arg)], grouping)
 }

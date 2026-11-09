@@ -92,8 +92,8 @@ import { declareOracle } from '../oracle-declaration.js'
  * and the aggregates `count`, `sum` and `max` of a number, and `count`, `sum`,
  * `avg`, `min` and `max` of a number that can be `null` or absent, combined by
  * `add` and `caseWhen`. `min` and `max` of a Date, a string or a bigint that
- * can be `null` or absent appear only as a field of their own, because those
- * domains have no arithmetic or order here. A field can also be a nested object of such expressions, or a
+ * can be `null` or absent appear only as a field of their own, so the grammar
+ * neither adds nor orders them. A field can also be a nested object of such expressions, or a
  * `caseWhen` whose branches are such objects (a conditional select). A shape
  * may spread the source or the parent row. Every shape
  * holds at least one aggregate. Each history runs the shape at the top level
@@ -536,10 +536,7 @@ function nullableAggregate(
   rows: ReadonlyArray<Comment>,
 ): unknown {
   const [field, operator] = fn.split(`:`) as [`n` | `at` | `s` | `b`, string]
-  const values = rows.flatMap((row) => {
-    const value = row[field]
-    return value === null || value === undefined ? [] : [value]
-  }) as Array<any>
+  const values = rows.map((row) => row[field]).filter(isValue) as Array<any>
   if (operator === `count`) return values.length
   if (operator === `sum` || operator === `avg`) {
     const total = values.reduce((t, value) => t + value, 0)
@@ -1033,12 +1030,6 @@ const step: fc.Arbitrary<Step> = fc.oneof(
 
 const isValue = <T>(value: T | null | undefined): value is T =>
   value !== null && value !== undefined
-
-/** A step contains bigints, which `JSON.stringify` refuses. */
-const stepLabel = (entry: Step): string =>
-  JSON.stringify(entry, (_key, value) =>
-    typeof value === `bigint` ? `${value}n` : value,
-  )
 
 /** Records which nullish states the source rows' groups are in. */
 function reachNullishStates(
@@ -1682,9 +1673,9 @@ async function runHistory({
         }
       }
       await new Promise((resolve) => setTimeout(resolve, 0))
-      check(`step ${index} ${stepLabel(s)}`)
-      if (topQuery.ok || includeQuery.ok) reachNullishStates(comments, grouping)
+      check(`step ${index} ${fc.stringify(s)}`)
       if (topQuery.ok || includeQuery.ok) {
+        reachNullishStates(comments, grouping)
         const checkpoint = {
           parent: `published after a parent update`,
           insert: `published after a source insert`,

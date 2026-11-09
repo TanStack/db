@@ -25,7 +25,9 @@ import type { OutputWithVirtual } from '../utils.js'
  * - `sum` and `avg` accept numeric values, expressions, and query refs. They
  *   return `Aggregate<number>` because the runtime reduces them to numbers.
  * - `min` and `max` accept number, string, bigint, or Date domains. Their
- *   result preserves the accepted value domain.
+ *   result preserves the accepted value domain, and adds `null` for a nullable
+ *   or optional value and a ref on the nullable side of a join, because a
+ *   group with no value has no minimum or maximum.
  * - A nullable wrapper remains valid when its non-nullish domain is valid.
  *   A null-only wrapper and `unknown` have no aggregate value domain.
  * - A generic helper constrained to a supported domain must forward its value
@@ -109,7 +111,7 @@ describe(`aggregate value contracts`, () => {
             >()
             expectTypeOf(min(row.label)).toEqualTypeOf<Aggregate<string>>()
             expectTypeOf(min(row.optionalAmount)).toEqualTypeOf<
-              Aggregate<number | null | undefined>
+              Aggregate<number | null>
             >()
             expectTypeOf(max(row.createdAt)).toEqualTypeOf<Aggregate<Date>>()
             expectTypeOf(min(row.sequence)).toEqualTypeOf<Aggregate<bigint>>()
@@ -194,6 +196,10 @@ describe(`aggregate value contracts`, () => {
       value: T,
     ) => max(value)
 
+    const maxNumericExpression = <T extends number>(
+      value: BasicExpression<T>,
+    ): Aggregate<T> => max(value)
+
     const branded = 1 as BrandedAmount
     const nullableBrandedRef = undefined as unknown as RefLeaf<
       BrandedAmount | null | undefined,
@@ -212,6 +218,9 @@ describe(`aggregate value contracts`, () => {
       Aggregate<number>
     >()
     expectTypeOf(maxOrderableValue(new Date())).toEqualTypeOf<Aggregate<Date>>()
+    expectTypeOf(maxNumericExpression(add(1, 2))).toEqualTypeOf<
+      Aggregate<number>
+    >()
 
     type BroadExpressionLike =
       | Aggregate
@@ -254,6 +263,12 @@ describe(`aggregate value contracts`, () => {
           .groupBy(({ row }) => row.group)
           .select(({ row, detail }) => {
             expectTypeOf(sum(detail.amount)).toEqualTypeOf<Aggregate<number>>()
+            expectTypeOf(min(detail.amount)).toEqualTypeOf<
+              Aggregate<BrandedAmount | null>
+            >()
+            expectTypeOf(max(detail.amount)).toEqualTypeOf<
+              Aggregate<BrandedAmount | null>
+            >()
             return {
               group: row.group,
               total: sum(detail.amount),

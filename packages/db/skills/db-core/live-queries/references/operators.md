@@ -179,9 +179,9 @@ sum(order.amount)
 avg(user.salary)
 ```
 
-### min(value), max(value) -> Aggregate\<T\>
+### min(value), max(value) -> Aggregate\<T\> or Aggregate\<T | null\>
 
-Minimum/maximum value (numbers, strings, dates), leaving out `null` and `undefined`. A group with no value returns `null`.
+Minimum/maximum value (numbers, strings, dates), leaving out `null` and `undefined`. A group with no value returns `null`, so the result type includes `null` for a nullable or optional field, or a column on the nullable side of a join.
 
 ```ts
 min(order.amount)

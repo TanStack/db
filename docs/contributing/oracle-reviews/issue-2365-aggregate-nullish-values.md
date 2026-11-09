@@ -114,3 +114,47 @@ brotli. Tests add 267 lines and remove 46.
 | ORC-014 | Claim limited to the controlled mock source. |
 | ORC-015 | The reach above, enforced by `createOracleReach`. |
 | ORC-016 | No example-based test was added to an oracle file. |
+
+## Follow-up from PR review
+
+Reviewed change: the commit on top of
+`b52b0f86083357492ebbf7d36fa4feccc0a3515c` that adds this section. It answers
+CodeRabbit's two comments on the PR. It changes the `min` and `max` result
+types, their type test, the docs and helpers inside the aggregate select oracle.
+Emitted JS for `functions.ts` and `types.ts` is unchanged, so the runtime
+evidence above still holds, and seed 2094 reaches the same 48, 31, 20, 21, 44,
+39, 42 and 39.
+
+`min` and `max` now return `T | null` for an optional field and for a column on
+the nullable side of a join, including a right or full join. A required column
+stays `T`, and a generic helper over a required value is not widened.
+
+RED, the reviewed head's `functions.ts` and `types.ts`, `pnpm exec vitest --run
+--coverage.enabled=false --typecheck.only
+tests/query/aggregate-value-contracts.test-d.ts`: fails at `min` of an optional
+field, at the generic `max` helper, and at `min` and `max` of a left-joined
+column, for example `Expected null, Actual never`.
+
+Mutants, each rejected in `aggregate-value-contracts.test-d.ts`:
+
+| Mutant | Rejected at |
+| --- | --- |
+| The new overload ignores the nullable side of a join | `min` and `max` of a left-joined column |
+| The new overload ignores an optional field | `min` of an optional field |
+| The new overload's result has no `null` | an optional field and a left-joined column |
+
+These are fixed type assertions, not generated inputs.
+
+Open cells at this commit: the left-join gap named above is closed for a column
+read directly. `upper`, `lower`, `caseWhen`, and `coalesce` without a non-null
+fallback, over a non-nullable column on the nullable side of a join, keep a
+non-nullable `min` and `max` type while the runtime returns `null` for a group
+with no match. Their return types use `ExtractType`, which drops the nullable
+brand, and the parent's 0 hid this.
+Owner: the aggregate select oracle and `aggregate-value-contracts`. Joins and
+optimistic writes over nullable columns are still not generated.
+
+Correction to the ORC-004 row: the rejected nearby input is `min` and `max` of
+Dates, strings and bigints, which the grammar neither adds nor orders. The
+reason given in that row is wrong for strings: the oracle orders string fields
+under `en-US`.
