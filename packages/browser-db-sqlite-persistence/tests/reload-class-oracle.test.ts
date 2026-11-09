@@ -21,8 +21,10 @@ import BetterSqlite3 from 'better-sqlite3'
 import { test as fcTest } from '@fast-check/vitest'
 import { describe, expect, onTestFinished } from 'vitest'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleRouteOf,
   oracleRuns,
 } from '../../db/tests/oracle-config'
 import { declareOracle } from '../../db/tests/oracle-declaration'
@@ -143,22 +145,23 @@ describe(`reload class oracle (Node Browser driver)`, () => {
     30_000,
   )
 
-  fcTest.prop([reloadHistoryArb], { seed: 2204, numRuns: oracleRuns(12) })(
+  const reloadHistoryFixedSeed = oracleFixedSeed(2204, {
+    numRuns: oracleRuns(12),
+  })
+  fcTest.prop([reloadHistoryArb], reloadHistoryFixedSeed)(
     `keeps generated reloads lawful (fixed seed)`,
     (history) => {
-      oracleRoute(`fixed seed`)
+      oracleRoute(oracleRouteOf(reloadHistoryFixedSeed))
       return expectLawful(history)
     },
     300_000,
   )
 
-  fcTest.prop(
-    [reloadHistoryArb],
-    oraclePropertyOptions(12, `sqlite-reload.class`),
-  )(
+  const reloadHistoryCampaign = oraclePropertyOptions(12, `sqlite-reload.class`)
+  fcTest.prop([reloadHistoryArb], reloadHistoryCampaign)(
     `keeps generated reloads lawful (random or replayed)`,
     (history) => {
-      oracleRoute(`random seed`)
+      oracleRoute(oracleRouteOf(reloadHistoryCampaign))
       return expectLawful(history)
     },
     300_000,

@@ -1,4 +1,10 @@
-import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oracleFixedSeed,
+  oraclePropertyOptions,
+  oracleRoute,
+  oracleRouteOf,
+  oracleRuns,
+} from '../../db/tests/oracle-config'
 
 type OfflineOracleConfigOptions = {
   /** A property registered in packages/db/tests/oracle-config.ts. */
@@ -38,18 +44,22 @@ export function readOfflineOracleConfig({
  * fast-check counts the examples in the recorded path, so a replay without
  * them would select a different value.
  *
- * The fast-check options for one campaign. An `undefined` seed selects the random
- * campaign. A number selects the fixed-seed campaign, which keeps its ordinary run
- * budget.
+ * The fast-check options for one campaign, called in the test that runs it.
+ * An `undefined` seed selects the random campaign. A number selects the
+ * fixed-seed campaign, which declares its seed and keeps its ordinary run
+ * budget. The test's route for the gap report is the route of these
+ * options.
  */
 export function oracleCampaignOptions(
   config: ReturnType<typeof readOfflineOracleConfig>,
   seed: number | undefined,
 ):
-  ReturnType<typeof oraclePropertyOptions> | { numRuns: number; seed: number } {
-  // A fixed seed is a reproducible route for the gap report. The random
-  // campaign's options registered its route when they were built, which
-  // happened when the file loaded, so it registers again here, in the test.
-  globalThis.__oracleRoute?.(seed === undefined ? `random seed` : `fixed seed`)
-  return seed === undefined ? config.random : { numRuns: config.runs, seed }
+  | ReturnType<typeof oraclePropertyOptions>
+  | ReturnType<typeof oracleFixedSeed<{ numRuns: number }>> {
+  const parameters =
+    seed === undefined
+      ? config.random
+      : oracleFixedSeed(seed, { numRuns: config.runs })
+  oracleRoute(oracleRouteOf(parameters))
+  return parameters
 }
