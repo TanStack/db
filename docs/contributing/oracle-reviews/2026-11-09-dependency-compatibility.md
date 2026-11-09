@@ -12,9 +12,8 @@ Pre-repair oracle-extension commit:
 `d4448ca49c3db623b63005ad7f2e3c35cdbc85df`, following production baseline
 `6e931cfa367af698d0de304d7e1e18fe8ddc562d`.
 
-**Final repair commit: PENDING_CODE_SHA.** Replace this marker after the code
-commit. The source fingerprints below identify the reviewed implementation
-before that commit; do not substitute a later head without checking them.
+**Final repair commit: c767674b5a7351d3410181ece26faa10b263b9f0.** The source fingerprints below identify the implementation in that commit.
+Do not substitute a later head without checking them.
 
 | Reviewed source | SHA-256 |
 | --- | --- |
@@ -321,7 +320,7 @@ It does not retroactively certify every neighboring property in their files.
 | ORC-009 Vocabulary mapping | Satisfied within scope: model stages map to public writes, requestSnapshot calls are physical requests, demand settlement is separate from provider return and durable application. Cursor consumer explicitly means one admitted demand with two requests. |
 | ORC-010 Failure fidelity and cleanup | Existing sameViolation and lifetime helpers retain primary checkpoint/history and release resources. Mutant outcomes above distinguish assertions, progress timeout, survival and unreached experiments. |
 | ORC-011 Independent second formulation | No unresolved shared semantic fault requires a second model for these small expected-value functions. Ordinary-name controls, raw/current versus tracked observations, source retention, fresh-launch HTTP and durable metadata provide distinct observations; they are not advertised as a second independent model. |
-| ORC-012 Review evidence | This versioned record retains every disposition and known limit, source fingerprints, per-path reach and mutant classifications. Final repair SHA and final-head CI remain explicit completion items. |
+| ORC-012 Review evidence | This versioned record retains every disposition and known limit, source fingerprints, per-path reach and mutant classifications. The repair SHA is recorded above. Final-head CI remains an explicit completion item. |
 | ORC-013 Distinguishing boundary witness | Satisfied in bounded scope: signed zero versus ordinary scalar, own undefined versus omission, empty versus nonempty snapshots, held versus applied metadata, and first versus advanced accepted cursor each reject a plausible wrong rule. |
 | ORC-014 Controlled-premise handoff | Real Solid host and real upgraded Electric SDK supply native tracking/framing premises. HTTP and persistence storage remain controlled. Electron real walker plus controlled installer has no real ABI claim; final desktop CI supplies that remaining handoff. No real backend/native SQLite closure is inferred. |
 | ORC-015 Declared reach | Satisfied in normal campaigns/finite enumerations by per-history assertions and the per-path counts above. Replay bypasses normal reach and supplies no campaign credit. |
@@ -338,9 +337,8 @@ defect in the inspected scope. Every surviving or unreached mutant above is
 retained without relabeling it as a kill. No oracle budget or accepted
 observation was narrowed to obtain GREEN.
 
-Before merge readiness: replace `PENDING_CODE_SHA`, check final-head CI on the
-upgraded graph, retain the actual Electron native result, and complete the
-release-tool evidence below. Existing prior-head CI success does not establish
+Before merge readiness, check final-head CI on the upgraded graph and retain
+the actual Electron native result. The release-tool evidence is linked below. Existing prior-head CI success does not establish
 these later repairs. These completion items do not erase the local results.
 
 ## Release-tool compatibility

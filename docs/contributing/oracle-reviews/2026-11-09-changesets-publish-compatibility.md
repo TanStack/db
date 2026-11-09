@@ -1,7 +1,7 @@
 # Changesets publish compatibility
 
 Reviewed base: `d4448ca49c3db623b63005ad7f2e3c35cdbc85df`.
-Repair commit: `PENDING_CODE_SHA`.
+Repair commit: `c767674b5a7351d3410181ece26faa10b263b9f0`.
 The publisher's repaired SHA-256 is
 `65229f7a47f182f363528082a4495bec3f3e7638e81c754cfb579d5a7cc67134`.
 
