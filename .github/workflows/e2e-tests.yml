@@ -57,6 +57,7 @@ jobs:
           --filter '@tanstack/electric-db-collection...'
           --filter '@tanstack/query-db-collection...'
           --filter '@tanstack/convex-db-collection...'
+          --filter '@tanstack/trailbase-db-collection...'
           --filter '@tanstack/db...'
           build
 
@@ -92,6 +93,10 @@ jobs:
       - name: Run Convex backend E2E tests
         if: matrix.group == 'browser'
         run: pnpm --filter @tanstack/convex-db-collection test:e2e
+
+      - name: Run TrailBase E2E tests
+        if: matrix.group == 'browser'
+        run: pnpm --filter @tanstack/trailbase-db-collection test:e2e
 
       - name: Run Query E2E tests
         if: matrix.group == 'browser'
