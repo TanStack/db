@@ -173,7 +173,7 @@ const pluginName = `@tanstack/eslint-plugin-oracles`
  * in place.
  */
 function pluginEntries(text) {
-  const lines = (text ?? ``).split(`\n`)
+  const lines = text.split(`\n`)
   const entries = []
   for (let index = 0; index < lines.length; index++) {
     if (!lines[index].includes(pluginName)) continue
@@ -184,20 +184,26 @@ function pluginEntries(text) {
   return entries.join(`\n`)
 }
 
-/** Whether the plugin's lockfile entries differ from the merge-base's. */
+/**
+ * Whether the plugin's lockfile entries differ from the merge-base's.
+ * `mergeBase` fails without a main branch, as `changedFiles` does. A merge-base
+ * without a lockfile has no plugin entries; any other git failure throws. The
+ * lockfile is larger than a child process's default 1 MiB output buffer, so
+ * its text is read with no limit.
+ */
 function pluginChanged() {
-  let base
-  try {
-    base = execFileSync(`git`, [`show`, `${mergeBase(root)}:pnpm-lock.yaml`], {
-      cwd: root,
-      encoding: `utf8`,
-      stdio: [`ignore`, `pipe`, `ignore`],
-    })
-  } catch {
-    // The merge-base has no lockfile.
-  }
+  const base = mergeBase(root)
+  const tracked = git(`ls-tree`, `--name-only`, base, `--`, `pnpm-lock.yaml`)
+  const before =
+    tracked === ``
+      ? ``
+      : execFileSync(`git`, [`show`, `${base}:pnpm-lock.yaml`], {
+          cwd: root,
+          encoding: `utf8`,
+          maxBuffer: Infinity,
+        })
   const current = existsSync(lockfile) ? readFileSync(lockfile, `utf8`) : ``
-  return pluginEntries(base) !== pluginEntries(current)
+  return pluginEntries(before) !== pluginEntries(current)
 }
 
 /**

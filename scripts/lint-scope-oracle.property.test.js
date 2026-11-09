@@ -64,7 +64,9 @@
  * unrelated lockfile edit bumps another package that nothing depends on. A
  * change deeper in the plugin's dependency tree, which leaves its own entries
  * alone, is not drawn, and the script would not select it. The lockfile is a
- * small hand-written pnpm v9 file, not one pnpm wrote. A settings edit changes
+ * hand-written pnpm v9 file, not one pnpm wrote: small, or padded past the
+ * 1 MiB default output buffer of a child process with packages nothing uses.
+ * The base commit may lack it, and the branch then adds it. A settings edit changes
  * no report. The repository's own `.gitignore` is copied into each
  * temporary repository, so its rules are part of what is tested.
  *
@@ -86,6 +88,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -231,6 +234,20 @@ const skeletonArbitrary = fc.record({
   // A plain directory under the launch checkout's `.worktrees/`, holding an
   // oracle-named file that the rule reports.
   scratch: fc.boolean(),
+  // The lockfile: small, or larger than the 1 MiB that a child process's
+  // output buffer holds by default; and whether the base commit has one. A
+  // missing base lockfile is one the branch adds. Drawn last, so the fields
+  // above keep their draws.
+  lockfile: fc.record({
+    size: fc.oneof(
+      { weight: 3, arbitrary: fc.constant(`small`) },
+      { weight: 1, arbitrary: fc.constant(`large`) },
+    ),
+    base: fc.oneof(
+      { weight: 4, arbitrary: fc.constant(`present`) },
+      { weight: 1, arbitrary: fc.constant(`missing`) },
+    ),
+  }),
 })
 
 function programOf({ shape, ...skeleton }) {
@@ -244,9 +261,10 @@ function programOf({ shape, ...skeleton }) {
 const programArbitrary = skeletonArbitrary.map(programOf)
 
 /**
- * Constructed histories. Each configuration edit, and an edit hook that names
- * the lockfile while the plugin's entries stay as they were, is a declared
- * state that 24 random draws can miss. So every campaign also runs, before its
+ * Constructed histories. Each configuration edit, an edit hook that names the
+ * lockfile while the plugin's entries stay as they were, an unrelated edit of
+ * a large lockfile, and a base commit without a lockfile, is a declared state
+ * that 24 random draws can miss. So every campaign also runs, before its
  * random histories, one generated skeleton per state with the one field that
  * enters it fixed. The skeletons are drawn from the campaign's seed, so they
  * are members of the grammar and vary with the seed.
@@ -261,6 +279,16 @@ const constructions = [
     ruleEdited: false,
     hookKind: `rule`,
     hookIndex: CONFIGURATION.indexOf(LOCKFILE),
+    lockfile: { ...skeleton.lockfile, base: `present` },
+  }),
+  (skeleton) => ({
+    ...skeleton,
+    ruleEdited: LOCKFILE_EDIT,
+    lockfile: { size: `large`, base: `present` },
+  }),
+  (skeleton) => ({
+    ...skeleton,
+    lockfile: { ...skeleton.lockfile, base: `missing` },
   }),
 ]
 
@@ -463,6 +491,7 @@ function buildProgram(skeleton) {
     ruleEdited: skeleton.ruleEdited,
     session: skeleton.session,
     scratch: skeleton.scratch,
+    lockfile: skeleton.lockfile,
     edges,
     reexports,
     modules,
@@ -472,7 +501,8 @@ function buildProgram(skeleton) {
 
 /**
  * The files that each scope treats as edited. The changed scope sees every
- * edited tracked module and every untracked file. The named scope, which the
+ * edited tracked module and every untracked file, including a lockfile that
+ * the base commit lacks. The named scope, which the
  * pre-commit hook runs, sees the files it is given: the edited tracked modules.
  * It runs only when there is one: the hook never runs it without files.
  * The edit hook sees the one file that the hook input names.
@@ -485,12 +515,13 @@ function editedByScope(program) {
     .filter((module) => module.untracked)
     .map((module) => module.name)
   const rule = program.ruleEdited ? [fileOfEdit(program.ruleEdited)] : []
+  const added = program.lockfile.base === `missing` ? [LOCKFILE] : []
   return {
-    changed: [...tracked, ...untracked, ...rule],
+    changed: [...tracked, ...untracked, ...added, ...rule],
     named: [...tracked, ...rule],
     hook: [program.hookTarget],
     // The stop hook lints the changed files of the session's checkout.
-    stop: [...tracked, ...untracked, ...rule],
+    stop: [...tracked, ...untracked, ...added, ...rule],
   }
 }
 
@@ -502,8 +533,10 @@ function editedByScope(program) {
 // rule never reads it, so an edge into production carries nothing. The oracle
 // files in the affected set are the ones to lint. When the edited files
 // include the settings module, or the lockfile of a branch that changed the
-// plugin's entries, every oracle file must be linted. The model knows which
-// edit the branch drew; it does not read the lockfile. A lockfile that the
+// plugin's entries, every oracle file must be linted. A lockfile that the
+// branch adds, where the base commit had none, changes them too: the base has
+// no plugin entries. The model knows which edit the branch drew; it does not
+// read the lockfile, so its size cannot matter to it. A lockfile that the
 // branch left alone, or edited only for another package, is like production:
 // no test module imports it, so it affects nothing.
 
@@ -511,7 +544,8 @@ function editedByScope(program) {
 function predictSelected(program, edited) {
   if (
     edited.includes(SETTINGS) ||
-    (edited.includes(LOCKFILE) && isPluginEdit(program.ruleEdited))
+    (edited.includes(LOCKFILE) &&
+      (isPluginEdit(program.ruleEdited) || program.lockfile.base === `missing`))
   )
     return program.oracles.map((oracle) => oracle.name).sort()
   const affected = new Set(edited.filter((name) => name !== PRODUCTION))
@@ -572,14 +606,22 @@ const SCRATCH = `.worktrees/scratch/${APP}/tests/scratch-oracle.test.ts`
 const RULE_MESSAGE = `registers tests and declares no oracle part.`
 const RULE_MARK = `[branch rule]`
 
+// Packages that nothing depends on, which make a large lockfile larger than
+// the 1 MiB default output buffer of a child process (about 1.2 MiB).
+const PADDING = Array.from(
+  { length: 10_000 },
+  (_, index) =>
+    `  pad-${index}@1.0.0:\n    resolution: {integrity: sha512-${`p`.repeat(88)}}\n`,
+).join(`\n`)
+
 /**
  * A pnpm v9 lockfile that pins the plugin and one unrelated package. The
  * plugin has entries in the importers, packages, and snapshots sections, and
  * its snapshot lists one resolved dependency. A plugin edit changes one of
  * `plugin`'s parts; an unrelated edit changes `other`, which nothing else
- * depends on.
+ * depends on. A large lockfile also holds the padding packages.
  */
-function lockfileText({ plugin = {}, other = `1.0.0` } = {}) {
+function lockfileText({ plugin = {}, other = `1.0.0`, size = `small` } = {}) {
   const {
     version = `1.0.0`,
     integrity = `sha512-plugin`,
@@ -608,6 +650,7 @@ function lockfileText({ plugin = {}, other = `1.0.0` } = {}) {
     `  left-pad@${other}:`,
     `    resolution: {integrity: sha512-left-pad-${other}}`,
     ``,
+    ...(size === `large` ? [PADDING] : []),
     `snapshots:`,
     ``,
     `  '${name}@${version}':`,
@@ -621,14 +664,15 @@ function lockfileText({ plugin = {}, other = `1.0.0` } = {}) {
 
 /** The edited lockfile for a configuration edit. */
 function editedLockfile(program) {
+  const { size } = program.lockfile
   if (program.ruleEdited === LOCKFILE_EDIT)
-    return lockfileText({ other: `1.0.1` })
+    return lockfileText({ other: `1.0.1`, size })
   const plugin = {
     'plugin-version': { version: `1.0.1` },
     'plugin-integrity': { integrity: `sha512-plugin-rebuilt` },
     'plugin-dependency': { dependency: `8.0.1` },
   }[program.ruleEdited]
-  return lockfileText({ plugin })
+  return lockfileText({ plugin, size })
 }
 
 /** The text of one module, with or without its edit. */
@@ -754,7 +798,11 @@ function repositoryOf(program) {
   // The lint configuration: the settings module and a lockfile.
   mkdirSync(join(launch, `scripts`), { recursive: true })
   writeFileSync(join(launch, SETTINGS), readFileSync(settingsFile, `utf8`))
-  writeFileSync(join(launch, LOCKFILE), lockfileText())
+  if (program.lockfile.base === `present`)
+    writeFileSync(
+      join(launch, LOCKFILE),
+      lockfileText({ size: program.lockfile.size }),
+    )
   writeFileSync(
     join(launch, `scripts`, `agent-lint-feedback.mjs`),
     readFileSync(feedbackScript, `utf8`),
@@ -799,6 +847,15 @@ function repositoryOf(program) {
   } else if (program.ruleEdited) {
     writeFileSync(modulePath(checkout, LOCKFILE), editedLockfile(program))
   }
+  if (
+    program.lockfile.base === `missing` &&
+    !existsSync(join(checkout, LOCKFILE))
+  )
+    // The branch adds the lockfile that the base commit lacks.
+    writeFileSync(
+      join(checkout, LOCKFILE),
+      lockfileText({ size: program.lockfile.size }),
+    )
   if (isPluginEdit(program.ruleEdited)) {
     // The new lockfile installs a changed plugin in the session checkout.
     const rule = join(checkout, RULE_SOURCE)
@@ -947,6 +1004,11 @@ function compareRuleSource(marks, marked) {
 //     selected.
 //   hook-lockfile-same-plugin: the edit hook names the lockfile, and the
 //     plugin's entries are the merge-base's, so the hook selects nothing.
+//   large-lockfile-same-plugin: a lockfile larger than 1 MiB is edited or
+//     named while the plugin's entries stay the merge-base's, so the base's
+//     lockfile must be read whole to find that nothing changed.
+//   missing-base-lockfile: the base commit has no lockfile and the branch
+//     adds one, so the plugin's entries are new.
 //   untracked-dependent: an untracked oracle file reaches the hook's file.
 //   js-oracle: a JavaScript oracle file is selected.
 //   hook-oracle, hook-support, hook-driver, hook-production, hook-rule: the
@@ -972,6 +1034,8 @@ const STATES = [
   `lockfile-edit`,
   `settings-edit`,
   `hook-lockfile-same-plugin`,
+  `large-lockfile-same-plugin`,
+  `missing-base-lockfile`,
   `untracked-dependent`,
   `js-oracle`,
   `hook-oracle`,
@@ -1020,8 +1084,17 @@ function recordStates(program) {
   const { changed, hook } = editedByScope(program)
   const edited = new Set(changed)
   if (program.ruleEdited) states.add(`${program.ruleEdited}-edit`)
-  if (program.hookTarget === LOCKFILE && !isPluginEdit(program.ruleEdited))
+  const basePresent = program.lockfile.base === `present`
+  const samePlugin = basePresent && !isPluginEdit(program.ruleEdited)
+  if (program.hookTarget === LOCKFILE && samePlugin)
     states.add(`hook-lockfile-same-plugin`)
+  if (
+    program.lockfile.size === `large` &&
+    samePlugin &&
+    (program.ruleEdited === LOCKFILE_EDIT || program.hookTarget === LOCKFILE)
+  )
+    states.add(`large-lockfile-same-plugin`)
+  if (!basePresent) states.add(`missing-base-lockfile`)
   const reached = new Set()
   for (const oracle of program.oracles) {
     if (oracle.edited) states.add(`oracle-edit`)
