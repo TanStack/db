@@ -62,8 +62,14 @@ import { createLiveQueryCollection } from '../../src/query/index.js'
 import { count } from '../../src/query/builder/functions.js'
 import { createCollection } from '../../src/collection/index.js'
 import { declareOracle } from '../oracle-declaration.js'
-import { oracleProperty, pass, differs, violation } from '../oracle-property.js'
+import { differs, oracleProperty, pass, violation } from '../oracle-property.js'
+import {
+  asProductionError,
+  errorViolation,
+  isErrorObservation,
+} from '../oracle-error-observation.js'
 import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
+import type { Observation, Verdict } from '../oracle-property.js'
 
 type Row = { id: number; g: unknown }
 type Change =
@@ -232,6 +238,22 @@ type Snapshot = {
   rows: Array<{ keyType: string; key: unknown; g: unknown; n: number }>
 }
 
+// Collection ids carry a per-process serial. The serial is stripped from an
+// error message here, so two runs of one history record the same observation.
+function normalizedError(error: unknown): Error {
+  const original = asProductionError(error)
+  const copy = new Error(
+    original.message.replace(/(live-query|group-key-source)-\d+/g, `$1`),
+    { cause: original.cause },
+  )
+  copy.name = original.name
+  copy.stack = original.stack
+  return copy
+}
+
+// Each production call is observed at its checkpoint. An error raised by a
+// call is the observation of that checkpoint, and it stops the history. Cleanup
+// runs outside these catches, so a teardown failure is a setup error.
 async function runHistory(
   plan: Plan,
   observe: (checkpoint: string, value: unknown) => void,
@@ -260,46 +282,41 @@ async function runHistory(
       n: (row as { n: number }).n,
     })),
   })
-  // A production error raised while publishing a checkpoint is itself an
-  // observation at that checkpoint, so the check names the law it breaks
-  // instead of the run failing as a setup error.
-  let checkpoint = `after preload`
-  try {
-    await withOracleCleanup(async () => {
-      await live.preload()
-      observe(checkpoint, snapshot())
-      for (const [index, step] of plan.steps.entries()) {
-        checkpoint = `after change ${index} (${step.kind})`
-        source.utils.begin()
-        if (step.kind === `insert`)
-          source.utils.write({ type: `insert`, value: { ...step.row } })
-        else if (step.kind === `update`)
-          source.utils.write({ type: `update`, value: { ...step.row } })
-        else if (step.kind === `delete`)
-          source.utils.write({ type: `delete`, value: { ...step.row } })
-        source.utils.commit()
-        observe(checkpoint, snapshot())
-      }
-    }, [() => live.cleanup(), () => source.cleanup()])
-  } catch (error) {
-    observe(checkpoint, { error: errorData(error) })
+  // Returns false when the call raised, after observing the error.
+  const observed = async (
+    checkpoint: string,
+    call: () => Promise<void> | void,
+  ): Promise<boolean> => {
+    let value: unknown
+    try {
+      await call()
+      value = snapshot()
+    } catch (error) {
+      observe(checkpoint, normalizedError(error))
+      return false
+    }
+    observe(checkpoint, value)
+    return true
   }
-}
-
-function isErrorData(
-  value: unknown,
-): value is { error: { name: string; message: string } } {
-  return typeof value === `object` && value !== null && `error` in value
-}
-
-// Collection ids carry a per-process serial, so the message is stripped of it;
-// otherwise two runs of one history would record different traces.
-function errorData(error: unknown): { name: string; message: string } {
-  const name = error instanceof Error ? error.name : `non-error`
-  const message = String(
-    error instanceof Error ? error.message : error,
-  ).replace(/(live-query|group-key-source)-\d+/g, `$1`)
-  return { name, message }
+  await withOracleCleanup(async () => {
+    if (!(await observed(`after preload`, () => live.preload()))) return
+    for (const [index, step] of plan.steps.entries()) {
+      const written = await observed(
+        `after change ${index} (${step.kind})`,
+        () => {
+          source.utils.begin()
+          if (step.kind === `insert`)
+            source.utils.write({ type: `insert`, value: { ...step.row } })
+          else if (step.kind === `update`)
+            source.utils.write({ type: `update`, value: { ...step.row } })
+          else if (step.kind === `delete`)
+            source.utils.write({ type: `delete`, value: { ...step.row } })
+          source.utils.commit()
+        },
+      )
+      if (!written) return
+    }
+  }, [() => live.cleanup(), () => source.cleanup()])
 }
 
 const LAW_KEY_TYPE = `grouped keys are strings or numbers`
@@ -307,10 +324,83 @@ const LAW_GROUPS = `each published group has its owed count`
 const LAW_DISTINCT = `no two groups share a key, and the key count is the group count`
 const LAW_KEPT = `a group that survives a change keeps its key`
 const LAW_PUBLISHES = `publishing a valid grouped change raises no error`
+const LAW_OBSERVED = `every checkpoint of a history is observed`
+
+// The grouped-key comparison: each observation against the model's groups for
+// its checkpoint. An observation that is missing, or an error that stops the
+// history, is a violation too.
+function judgeGroups(
+  _plan: Plan,
+  observations: ReadonlyArray<Observation>,
+  expected: ReadonlyArray<Array<[string, number]>>,
+): Verdict {
+  let previous = new Map<string, unknown>()
+  for (const [index, observation] of observations.entries()) {
+    const { checkpoint, value } = observation
+    if (isErrorObservation(value))
+      return errorViolation(checkpoint, LAW_PUBLISHES, value, `no error`)
+    const snapshot = value as Snapshot
+    for (const row of snapshot.rows) {
+      if (row.keyType !== `string` && row.keyType !== `number`)
+        return violation(
+          checkpoint,
+          `a key of type ${row.keyType} is not a string or a number`,
+          LAW_KEY_TYPE,
+          { actual: row.keyType, expected: `string or number` },
+        )
+    }
+    const published = snapshot.rows
+      .map((row) => [describeGroup(row.g), row.n] as [string, number])
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    const groups = expected[index]!
+    const distinctKeys = new Set(snapshot.rows.map((row) => row.key)).size
+    const verdict =
+      differs(checkpoint, LAW_GROUPS, published, groups) ??
+      differs(checkpoint, LAW_DISTINCT, snapshot.size, groups.length) ??
+      differs(checkpoint, LAW_DISTINCT, distinctKeys, groups.length)
+    if (verdict) return verdict
+    const keys = new Map(
+      snapshot.rows.map((row) => [describeGroup(row.g), row.key]),
+    )
+    for (const [group, key] of keys) {
+      if (!previous.has(group)) continue
+      if (!Object.is(previous.get(group), key))
+        return violation(checkpoint, `${group} changed its key`, LAW_KEPT, {
+          actual: key,
+          expected: previous.get(group),
+        })
+    }
+    previous = keys
+  }
+  if (observations.length !== expected.length)
+    return violation(
+      `end of history`,
+      `observed ${observations.length} of ${expected.length} checkpoints`,
+      LAW_OBSERVED,
+      { actual: observations.length, expected: expected.length },
+    )
+  return pass
+}
+
+// Replaces the value at one observation, or reports that it does not apply.
+function replaceValue(
+  trace: ReadonlyArray<Observation>,
+  index: number,
+  value: unknown,
+): Array<Observation> {
+  return trace.map((observation, at) =>
+    at === index ? { checkpoint: observation.checkpoint, value } : observation,
+  )
+}
+
+function snapshotAt(trace: ReadonlyArray<Observation>, index: number) {
+  const value = trace[index]?.value
+  return isErrorObservation(value) ? undefined : (value as Snapshot)
+}
 
 declareOracle({
   owns: [`src/query/live-query-collection.ts#createLiveQueryCollection`],
-  check: [runHistory],
+  check: [judgeGroups],
   model: [expectedGroups],
 })
 
@@ -389,60 +479,77 @@ oracleProperty<History, Array<Array<[string, number]>>, Plan>({
   model: expectedGroups,
   reached: reachedStates,
   driver: runHistory,
-  check: (_plan, observations, expected) => {
-    let previous = new Map<string, unknown>()
-    for (const [index, observation] of observations.entries()) {
-      const { checkpoint, value } = observation
-      if (isErrorData(value)) {
-        const { name, message } = value.error
-        return violation(
-          checkpoint,
-          `production raised ${name}: ${message}`,
-          LAW_PUBLISHES,
-          { actual: name, expected: `no error` },
+  check: judgeGroups,
+  // One wrong answer per verdict branch, plus a dropped checkpoint.
+  calibrations: [
+    {
+      name: `key of an unsupported type`,
+      law: LAW_KEY_TYPE,
+      corrupt: (trace) => {
+        const index = trace.findIndex(
+          (_, at) => (snapshotAt(trace, at)?.rows.length ?? 0) > 0,
         )
-      }
-      const snapshot = value as Snapshot
-      for (const row of snapshot.rows) {
-        if (row.keyType !== `string` && row.keyType !== `number`)
-          return violation(
-            checkpoint,
-            `a key of type ${row.keyType} is not a string or a number`,
-            LAW_KEY_TYPE,
-            { actual: row.keyType, expected: `string or number` },
+        const snapshot = snapshotAt(trace, index)
+        if (snapshot === undefined) return undefined
+        const rows = snapshot.rows.map((row, at) =>
+          at === 0 ? { ...row, keyType: `boolean`, key: null } : row,
+        )
+        return replaceValue(trace, index, { ...snapshot, rows })
+      },
+    },
+    {
+      name: `two groups share a key`,
+      law: LAW_DISTINCT,
+      corrupt: (trace) => {
+        const index = trace.findIndex(
+          (_, at) => (snapshotAt(trace, at)?.rows.length ?? 0) > 1,
+        )
+        const snapshot = snapshotAt(trace, index)
+        if (snapshot === undefined) return undefined
+        const rows = snapshot.rows.map((row, at) =>
+          at === 1 ? { ...row, key: snapshot.rows[0]!.key } : row,
+        )
+        return replaceValue(trace, index, { ...snapshot, rows })
+      },
+    },
+    {
+      name: `a surviving group changes its key`,
+      law: LAW_KEPT,
+      corrupt: (trace) => {
+        for (let index = 1; index < trace.length; index++) {
+          const before = snapshotAt(trace, index - 1)
+          const after = snapshotAt(trace, index)
+          if (before === undefined || after === undefined) continue
+          const kept = after.rows.findIndex((row) =>
+            before.rows.some(
+              (other) => describeGroup(other.g) === describeGroup(row.g),
+            ),
           )
-      }
-      const published = snapshot.rows
-        .map((row) => [describeGroup(row.g), row.n] as [string, number])
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      const verdict =
-        differs(checkpoint, LAW_GROUPS, published, expected[index]) ??
-        differs(
-          checkpoint,
-          LAW_DISTINCT,
-          snapshot.size,
-          snapshot.rows.length,
-        ) ??
-        differs(
-          checkpoint,
-          LAW_DISTINCT,
-          new Set(snapshot.rows.map((row) => row.key)).size,
-          snapshot.rows.length,
-        )
-      if (verdict) return verdict
-      const keys = new Map(
-        snapshot.rows.map((row) => [describeGroup(row.g), row.key]),
-      )
-      for (const [group, key] of keys) {
-        if (!previous.has(group)) continue
-        if (!Object.is(previous.get(group), key))
-          return violation(checkpoint, `${group} changed its key`, LAW_KEPT, {
-            actual: key,
-            expected: previous.get(group),
-          })
-      }
-      previous = keys
-    }
-    return pass
-  },
+          if (kept === -1) continue
+          const rows = after.rows.map((row, at) =>
+            at === kept ? { ...row, key: `${String(row.key)}~moved` } : row,
+          )
+          return replaceValue(trace, index, { ...after, rows })
+        }
+        return undefined
+      },
+    },
+    {
+      name: `publication raises an error`,
+      law: LAW_PUBLISHES,
+      corrupt: (trace) =>
+        trace.length === 0
+          ? undefined
+          : replaceValue(
+              trace,
+              0,
+              new Error(`calibration: publication raised`),
+            ),
+    },
+    {
+      name: `last checkpoint dropped`,
+      law: LAW_OBSERVED,
+      corrupt: (trace) => (trace.length === 0 ? undefined : trace.slice(0, -1)),
+    },
+  ],
 })

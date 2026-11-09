@@ -1142,10 +1142,7 @@ const replayTestNames = new Map([
     `index-update.custom-comparator`,
     `matches an independent custom-comparator model \\(seed undefined\\)`,
   ],
-  [
-    `group-result-key.groups`,
-    `publishes one key of the key type per group \\(seed undefined\\)`,
-  ],
+  [`group-result-key.groups`, `group-result-key\\.groups > random seed`],
 ])
 
 // Properties whose own seeded generator replaces fast-check, so they have no
