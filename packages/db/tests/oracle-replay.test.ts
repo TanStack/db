@@ -5,7 +5,6 @@ import { dirname, join, resolve } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { stripVTControlCharacters } from 'node:util'
-import fc from 'fast-check'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { oracleReplayManifest } from './oracle-replay-manifest.js'
 import { oracleReplayReporter } from './oracle-replay-witness.js'
@@ -357,48 +356,43 @@ describe(`oracle replay reporting`, () => {
     })
   })
 
-  // fast-check 4 always attaches the property's error as the cause.
-  it(`preserves native async failure formatting and cause`, async () => {
+  // fast-check 4 always attaches the property's error as the cause. The
+  // framework reads the replay environment once, at configuration, so the
+  // comparison runs in a child process that starts with that environment.
+  it(`preserves native async failure formatting and cause`, () => {
     directory = mkdtempSync(join(tmpdir(), `oracle-reporter-test-`))
     const channel = join(directory, `witness.jsonl`)
-    vi.stubEnv(`TANSTACK_DB_ORACLE_REPLAY_WITNESS`, channel)
-    vi.stubEnv(`TANSTACK_DB_ORACLE_PROPERTY`, `oracle-replay.calibration`)
-    vi.stubEnv(`TANSTACK_DB_ORACLE_SEED`, `42`)
-    vi.stubEnv(`TANSTACK_DB_ORACLE_PATH`, `0`)
-    const sentinel = new Error(`native cause sentinel`)
-    const value = {
-      [fc.asyncToStringMethod]: () => Promise.resolve(`async replay value`),
-    }
-    const property = fc.asyncProperty(fc.constant(value), () =>
-      Promise.reject(sentinel),
+    const result = spawnSync(
+      process.execPath,
+      [
+        `--import`,
+        `tsx`,
+        join(packageDirectory, `tests/replay-reporter-format.fixture.ts`),
+      ],
+      {
+        cwd: packageDirectory,
+        env: {
+          ...process.env,
+          TANSTACK_DB_ORACLE_REPLAY_WITNESS: channel,
+          TANSTACK_DB_ORACLE_PROPERTY: `oracle-replay.calibration`,
+          TANSTACK_DB_ORACLE_SEED: `42`,
+          TANSTACK_DB_ORACLE_PATH: `0`,
+        },
+        encoding: `utf8`,
+        timeout: 30_000,
+      },
     )
-    const options = { seed: 42, path: `0`, numRuns: 1 }
-    async function failure(instrumented: boolean): Promise<Error> {
-      try {
-        await fc.assert(property, {
-          ...options,
-          ...(instrumented
-            ? oracleReplayReporter(`oracle-replay.calibration`, 42, `0`)
-            : {}),
-        })
-      } catch (error) {
-        if (error instanceof Error) return error
-        throw error
-      }
-      throw new Error(`expected property failure`)
-    }
-    const native = await failure(false)
-    const instrumented = await failure(true)
+    if (result.error) throw result.error
+    expect(result.status, result.stderr).toBe(0)
+    const { native, instrumented, witness } = JSON.parse(
+      result.stdout.trim().split(`\n`).at(-1)!,
+    )
     expect(instrumented.message).toBe(native.message)
     expect(instrumented.message).toContain(`async replay value`)
-    expect(Object.getOwnPropertyDescriptor(instrumented, `cause`)).toEqual(
-      Object.getOwnPropertyDescriptor(native, `cause`),
-    )
-    expect(JSON.parse(readFileSync(channel, `utf8`))).toMatchObject({
-      numRuns: 1,
-      failed: true,
-    })
-  })
+    expect(native.cause).toMatchObject({ sentinel: true })
+    expect(instrumented.cause).toEqual(native.cause)
+    expect(witness).toMatchObject({ numRuns: 1, failed: true })
+  }, 40_000)
 })
 
 describe(`named oracle replay manifest`, () => {
