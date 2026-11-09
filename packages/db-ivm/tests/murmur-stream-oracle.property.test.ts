@@ -108,9 +108,12 @@ describe(`MurmurHashStream`, () => {
   it(`digests every chunk sequence as the byte-at-a-time stream does`, () =>
     runOracleCampaign(`IVM_MURMUR_STREAM`, [], (_reach, parameters) => {
       fc.assert(
-        fc.property(fc.array(chunk, { minLength: 1, maxLength: 8 }), (chunks) => {
-          expect(digests(Current, chunks)).toEqual(digests(Reference, chunks))
-        }),
+        fc.property(
+          fc.array(chunk, { minLength: 1, maxLength: 8 }),
+          (chunks) => {
+            expect(digests(Current, chunks)).toEqual(digests(Reference, chunks))
+          },
+        ),
         { numRuns: oracleRuns(2000), ...parameters },
       )
     }))

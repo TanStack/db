@@ -483,7 +483,9 @@ describe('reserved commits across real-adapter hydrations', () => {
       loadOutcome,
     }).toEqual(expected.observation)
   }
-  declareOracle({ owns: [`src/sqlite-core-adapter.ts`, `src/persisted.ts`],     check: [runAdapterHistory],
+  declareOracle({
+    owns: [`src/sqlite-core-adapter.ts`, `src/persisted.ts`],
+    check: [runAdapterHistory],
     model: [expectedAdapterOutcome],
     grammar: [adapterHistories],
   })

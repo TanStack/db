@@ -399,7 +399,10 @@ async function compareIpcReadinessHistory(
 }
 
 declareOracle({
-  owns: [`src/renderer.ts#createElectronSQLitePersistence`, `src/electron-coordinator.ts`],
+  owns: [
+    `src/renderer.ts#createElectronSQLitePersistence`,
+    `src/electron-coordinator.ts`,
+  ],
   check: [compareIpcReadinessHistory],
   model: [expectedCheckpoints],
 })

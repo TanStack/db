@@ -307,4 +307,8 @@ describe(`persisted reload replacement oracle`, () => {
   })
 })
 
-declareOracle({ owns: [`src/persisted.ts`, `src/sqlite-core-adapter.ts`], model: [expected], grammar: [histories] })
+declareOracle({
+  owns: [`src/persisted.ts`, `src/sqlite-core-adapter.ts`],
+  model: [expected],
+  grammar: [histories],
+})

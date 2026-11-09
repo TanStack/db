@@ -152,7 +152,11 @@ const cases = kinds.flatMap((kind) =>
   ),
 )
 
-declareOracle({ owns: [`src/sqlite-value.ts`, `src/sqlite-core-adapter.ts`], grammar: [cases], model: [expectedValue, expectedRows] })
+declareOracle({
+  owns: [`src/sqlite-value.ts`, `src/sqlite-core-adapter.ts`],
+  grammar: [cases],
+  model: [expectedValue, expectedRows],
+})
 
 describe(`SQLite typed-value preservation after reopen`, () => {
   oracleRoute(`fixed history`)
