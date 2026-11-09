@@ -15,6 +15,8 @@ import {
   expectedParkedReloadDemand,
   greenLifecycleHistories,
   greenLifecycleHistoryArbitrary,
+  lifecycleCommandArbitrary,
+  lifecycleRowLabels,
   mixedAbortedRestartHistory,
   parkedReloadDemandCases,
   pendingSupersessionHistory,
@@ -1708,7 +1710,9 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     cancellation: `manual` | `reject` = `manual`,
   ) => {
     demandChangeReach.beginHistory()
+    lifecycleRowReach.beginHistory()
     const reached = await runHistory(history, { cancellation })
+    markLifecycleRows(reached)
     for (const [label, state] of Object.entries(demandChangeReachStates))
       if (reached.has(label)) demandChangeReach.reach(state)
   }
@@ -1828,9 +1832,21 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     `subscription-lifecycle.replacement-abort`,
     Object.values(replacementReachStates),
   )
+  // Every row of the lifecycle transition table must fire somewhere in the
+  // green and demand-change campaigns, so the table's rows are declared here.
+  const lifecycleRowReach = createOracleReach(
+    `subscription-lifecycle.rows`,
+    lifecycleRowLabels,
+  )
+  const markLifecycleRows = (reached: ReadonlySet<string>) => {
+    for (const row of lifecycleRowLabels)
+      if (reached.has(row)) lifecycleRowReach.reach(row)
+  }
   let greenHistoriesRan = false
   afterAll(() => {
     if (greenHistoriesRan) replacementReach.assertReached()
+    if (greenHistoriesRan || demandChangeHistoriesRan)
+      lifecycleRowReach.assertReached()
   })
   const runGreenHistory = async (
     history: ReadonlyArray<LifecycleCommand>,
@@ -1838,12 +1854,54 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   ) => {
     greenHistoriesRan = true
     replacementReach.beginHistory()
+    lifecycleRowReach.beginHistory()
     const reached = await runHistory(history, { cancellation })
     if (reached.has(replacementPendingReachLabel))
       replacementReach.reach(
         replacementReachStates[replacementPendingReachLabel],
       )
+    markLifecycleRows(reached)
   }
+
+  // Constructed prefixes reach the two pairs that no generated history
+  // produced: a replacement followed by a change that names no owned demand,
+  // and a replacement after a restart. Each prefix is the shortest legal path
+  // the lifecycle table search found, followed by a random tail.
+  const constructedPrefixes: ReadonlyArray<ReadonlyArray<LifecycleCommand>> = [
+    [
+      { type: `request`, demand: `a` },
+      { type: `request`, demand: `b` },
+      { type: `replace`, demand: `a`, replaced: `b` },
+      { type: `change`, release: [`c`] },
+    ],
+    [
+      { type: `request`, demand: `a` },
+      { type: `request`, demand: `b` },
+      { type: `cleanup` },
+      { type: `restart` },
+      { type: `replace`, demand: `a`, replaced: `b` },
+    ],
+  ]
+  const constructedPrefixArbitrary = fc
+    .tuple(
+      fc.constantFrom(...constructedPrefixes),
+      fc.array(lifecycleCommandArbitrary, { maxLength: 8 }),
+    )
+    .map(([prefix, tail]) => [...prefix, ...tail])
+  const constructedPrefixSeed = oracleFixedSeed(1_657_011, {
+    numRuns: runs,
+  })
+  fixedCampaign.prop(
+    [constructedPrefixArbitrary, cancellationArbitrary],
+    constructedPrefixSeed,
+  )(
+    `matches the pure lifecycle model after a constructed prefix`,
+    async (history, cancellation) => {
+      oracleRoute(oracleRouteOf(constructedPrefixSeed))
+      await runGreenHistory(history, cancellation)
+    },
+    120_000,
+  )
 
   const greenLifecycleHistoryFixedSeed = oracleFixedSeed(1_657_003, {
     numRuns: runs,
