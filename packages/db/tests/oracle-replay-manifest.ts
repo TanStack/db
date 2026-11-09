@@ -878,6 +878,12 @@ for (const property of registeredOracleProperties) {
       `packages/db/tests/query/pagination-oracle.property.test.ts`,
     )
   }
+  if (property.startsWith(`electric.sdk-resume-checkpoint.`)) {
+    owners.set(
+      property,
+      `packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
+    )
+  }
 }
 
 export type OracleReplayManifestEntry = {

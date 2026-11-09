@@ -49,7 +49,7 @@ let temporary: string
 const programs = new Map<string, string>()
 const runtimes = [
   { name: `react18`, react: `react18`, dom: `react-dom18`, version: `18.3.1` },
-  { name: `current`, react: `react`, dom: `react-dom`, version: `19.2.4` },
+  { name: `current`, react: `react`, dom: `react-dom`, version: `19.3.1` },
 ] as const
 
 beforeAll(async () => {

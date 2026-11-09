@@ -56,19 +56,19 @@
   "dependencies": {
     "@standard-schema/spec": "^1.1.0",
     "@tanstack/db-ivm": "workspace:*",
-    "@tanstack/pacer-lite": "^0.2.1"
+    "@tanstack/pacer-lite": "^0.3.0"
   },
   "peerDependencies": {
     "typescript": ">=4.7"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "^1.65.0",
     "@tanstack/config": "^0.22.2",
-    "@vitest/coverage-istanbul": "^5.0.5",
-    "arktype": "^2.1.29",
-    "fake-indexeddb": "^6.0.0",
+    "@vitest/coverage-istanbul": "^5.1.0",
+    "arktype": "^2.2.9",
+    "fake-indexeddb": "^6.2.8",
     "mitt": "^3.0.1",
     "superjson": "^2.2.6",
-    "temporal-polyfill": "^0.3.0"
+    "temporal-polyfill": "^0.3.2"
   }
 }

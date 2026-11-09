@@ -1609,7 +1609,7 @@ scheduler.
 
 The [React SSR diagnostic receiver](../../packages/react-db/tests/ssr-effects-oracle.test.ts)
 extends that preparation grammar and judgment with real matched React/ReactDOM
-18.3.1 and 19.2.4 development server renderers. Separate paths cover provider
+18.3.1 and 19.3.1 development server renderers. Separate paths cover provider
 and explicit-client ordinary hooks, completed non-streaming Suspense through
 both client forms, standalone builders and supplied Collections. A disabled
 input replays the same diagnostic comparison. Each checks return and the raw
@@ -6280,6 +6280,26 @@ resumes and the unmanaged full-log fallback remain separate controls.
 An installed-SDK abort witness holds subset HTTP across external stream
 retirement, then returns a valid row. The demand rejects, the row stays absent,
 and an identical demand is not certified as loaded.
+The dependency-compatibility extension checks the accepted SDK cursor after
+`requestSnapshot` fulfills and before its physical serialization turn ends.
+Successful demand settlement waits for both row application and the separate
+resume-metadata receipt; it does not certify a crash-atomic row/cursor commit.
+Twenty-eight lanes cross tags, direct/live-query consumers, an empty second
+response, and applied/held/rejected cursor writes; four held cursor-demand lanes
+add the second physical request while the first checkpoint stays held. Each
+lane runs eight fixed and eight random histories (448 total). Every applicable
+reach is enforced separately per lane. Cold cursor, advanced cursor, fresh-launch
+demand, held checkpoint, rejected checkpoint and next-request totals are
+256, 320, 320, 192, 128 and 64 histories respectively. Tagged fresh launches
+retain scoped recovery's reset marker. The original missing checkpoint fails
+the intended metadata comparison; queue-await and scoped-reset mutants fail
+their progress and reset cuts. Removing the explicit receipt await survives the
+rejected-write fixture because the persistence wrapper independently rejects
+the demand; this fixture does not isolate that mechanism. Direct replay selects
+one property and path, but the local fast-check 3 traversal executed seven
+histories, so singleton execution is not claimed. See the
+[compatibility record](oracle-reviews/2026-11-09-dependency-compatibility.md)
+for commands, exact outcomes, grammar controls and remaining limits.
 The two-launch receiver also delivers a coordinator invalidation after a
 paginated scoped snapshot. The persistence owner crosses targeted, paginated,
 full-reload, and reset notifications after an active source row. Its
@@ -6891,6 +6911,21 @@ uses Vitest 4.1.12 with the existing actual npm/pnpm/Changesets tools and retain
 the earlier receiver's limits. Clean setup/build evidence and unresolved release
 gates are recorded [separately](oracle-reviews/2026-10-29-pr-2171-release-gates.md).
 
+The [Changesets 2.31 compatibility repair](oracle-reviews/2026-11-09-changesets-publish-compatibility.md)
+preserves those 29 HTTP histories and adds four private-version-policy neighbors.
+Temporarily hidden packages remain versionable for config validation while their
+private manifests still exclude them from uploads. Both receivers now capture
+original config/private-manifest bytes; HTTP archives additionally retain runtime
+and peer dependency edges, including bounded `workspace:*` expansion. The
+unchanged publisher gives 71 config-validation failures / 14 passes; the repair
+passes all 85 command/HTTP tests and 32 ordinary controls. Normal HTTP reach is
+33 registry/restoration/comparison/public-dependent histories, 26 packed uploads,
+12 failure/retry histories and seven already-current histories. Reformatting
+restoration and temporarily stripping packed edges each fail both selected
+histories at the intended assertion. Matching CLI 2.31.1/config 3.1.4 tagged
+sources were built together locally; published-distribution final-head CI remains
+a separate receiving gate. No publication ledger, tag law or budget was narrowed.
+
 The [chunk 23 SortedMap reach repair](oracle-reviews/2026-10-28-pr-2171-oracle-chunks.md#chunk-23-constructive-deferred-row-order-reach)
 constructively reaches changed-deferred order restoration before executing
 each original generated suffix from its original empty starting condition.
@@ -7007,6 +7042,25 @@ original reach requires a nonempty actual receipt. See the
 [native revision review](oracle-reviews/2026-10-30-solid-native-store-review.md)
 and the historical [materialization](oracle-reviews/2026-10-30-solid-row-materialization-review.md)
 and [snapshot](oracle-reviews/2026-10-30-solid-row-snapshot-isolation.md) records.
+
+The Solid 1.9.18 compatibility extension replaces the reserved-name native-node
+seeding with a revision signal on detached owned data and a read facade; it
+does not alter Solid's guarded setters or native bookkeeping identities.
+Seventy-two finite reserved-field histories cross three public inputs, ordinary
+and `__proto__` names, three initial ownness states, and scalar/signed-zero/object/
+array payloads. Each input has 24 histories enforcing all ten declared reaches,
+including tracked own keys, prototype integrity, retained sources and a quiet
+neighbor. The descriptor-visibility helper family now has 24 histories, crossing
+both field names with its original six payload kinds and two initial visibility
+states; all four reaches hold in every history. A get-only facade mutant passes
+all 72 public reserved-field histories but fails 12 of these helper visibility
+histories, preserving the distinction between normalized public rows and the
+helper's descriptor law. A signed-zero extension first fails six of eighteen
+selected histories, then all eighteen pass with Object.is-sensitive
+invalidation. The final upgraded-runtime Solid suite passes 426 tests. The
+original 32-per-distinct-container work budget and preceding limits remain.
+The [compatibility record](oracle-reviews/2026-11-09-dependency-compatibility.md)
+separates original-code RED, repaired GREEN, hostile controls, and host limits.
 
 **Core source-field and destination preservation:** the maintainer authorized
 fixing the sibling Core boundary in this PR. The existing context-transport
