@@ -48,7 +48,7 @@
     "preact": ">=10.0.0"
   },
   "devDependencies": {
-    "@vitest/coverage-istanbul": "^5.0.5",
-    "preact": "^11.0.1"
+    "@vitest/coverage-istanbul": "^5.1.0",
+    "preact": "^11.2.0"
   }
 }
