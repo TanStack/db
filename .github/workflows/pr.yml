@@ -121,6 +121,28 @@ jobs:
         uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Build dependencies
         run: node scripts/ci-tests.mjs build "$TEST_GROUP"
+      - name: Collect compatibility test runtimes
+        if: matrix.group == 'frameworks'
+        run: |
+          node --input-type=module <<'NODE'
+          import { createRequire } from 'node:module'
+          import { cpSync, mkdirSync } from 'node:fs'
+          import { dirname, join } from 'node:path'
+          const root = join(process.env.RUNNER_TEMP, 'compat-sdk-packages')
+          mkdirSync(root, { recursive: true })
+          for (const [name, owner] of [['solid-js', 'solid-db'], ['@electric-sql/client', 'electric-db-collection']]) {
+            const require = createRequire(join(process.cwd(), 'packages', owner, 'package.json'))
+            cpSync(dirname(require.resolve(`${name}/package.json`)), join(root, name), { recursive: true })
+          }
+          NODE
+          tar -czf "$RUNNER_TEMP/compat-sdk-packages.tgz" -C "$RUNNER_TEMP/compat-sdk-packages" .
+      - name: Upload compatibility test runtimes
+        if: matrix.group == 'frameworks'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: compatibility-test-runtimes
+          path: ${{ runner.temp }}/compat-sdk-packages.tgz
+          retention-days: 1
       - name: Typecheck Test Sources
         if: matrix.group == 'ivm-offline'
         run: pnpm run typecheck:tests

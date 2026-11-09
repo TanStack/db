@@ -1,6 +1,11 @@
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
-import { IR, createCollection } from '@tanstack/db'
+import {
+  IR,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+} from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
@@ -28,7 +33,11 @@ import {
   createRetryModel,
   expectedRetryObservation,
 } from './electric-retry-decision-model'
-import { storageTargetId } from './electric-persistence-fixture'
+import {
+  managedTagPersistence,
+  storageTargetId,
+} from './electric-persistence-fixture'
+import type { TestRow } from './electric-persistence-fixture'
 import type { Item, Request } from './electric-sdk-delivery-support'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src'
@@ -87,8 +96,8 @@ vi.mock(`@electric-sql/client`, async (importOriginal) => {
  * full-shape network read. Concurrent demands share one SDK cursor, so their
  * snapshot requests must run in order. The hand-written two-launch and
  * concurrent cases in electric-sdk-delivery.test.ts illustrate those laws at
- * HTTP, local-read, public-row, and settlement boundaries; no declared check
- * in this file compares the scoped-restart history with a model.
+ * HTTP, local-read, public-row, and settlement boundaries; the resume-checkpoint family below models cursor persistence and the
+ * next launch independently of the adapter and SDK cursor state.
  * A coordinator notification after the scoped A snapshot changes an unrelated
  * durable row. The source Map still predicts A for its active predicate. The
  * post-notification public comparison must retain A; the persistence capability
@@ -133,8 +142,14 @@ declareOracle({
     runClientRetryCell,
     checkSourceRelease,
     checkManagedRotation,
+    checkResumeCheckpoint,
   ],
-  model: [createRetryModel, applyRetryModel, expectedRetryObservation],
+  model: [
+    createRetryModel,
+    applyRetryModel,
+    expectedRetryObservation,
+    expectedResumeCheckpoint,
+  ],
 })
 
 // Scaled with the run multiplier, so stress campaigns keep their budget.
@@ -1915,5 +1930,267 @@ sdkCampaigns(
       ...(seed === undefined ? {} : { seed }),
     })
     releaseReach.assertReached()
+  },
+)
+
+/**
+ * A completed scoped snapshot establishes rows and a durable continuation
+ * checkpoint. The Electric guide's persisted-resume contract requires the
+ * response's handle/offset, not the cursor from the preceding response.
+ * The independent model uses only authored HTTP positions and source rows.
+ * It never reads ShapeStream state to predict durable metadata.
+ *
+ * Each history starts changes-only, performs two different demands, then
+ * restarts. All tag/consumer/empty-second-response lanes run for each generated
+ * position and payload. Distinct demands avoid deduplication; increasing
+ * positions are legal, while regressing source positions are excluded.
+ * The first load distinguishes an absent cursor, the second a stale cursor,
+ * and the empty neighbor requires progress without a row write. Tagged restart
+ * must quarantine cache-only rows; its reset policy is owned separately.
+ *
+ * The real installed SDK receives controlled HTTP. Comparisons run immediately
+ * after successful acquisition settlement, then after a fresh launch's demand.
+ * No extra polling may repair a missing durable checkpoint after settlement.
+ * This does not establish a real server's framing, native SQLite durability,
+ * intermediate row/cursor atomic publication, or arbitrary provider schedules.
+ */
+function expectedResumeCheckpoint(offset: number, tagged: boolean) {
+  return {
+    kind: `resume`,
+    handle: `shape`,
+    offset: `${offset}_0`,
+    requiresTagState: tagged,
+  }
+}
+
+// Virtual Collection metadata is outside this source payload law.
+function checkpointRow(row: TestRow | undefined) {
+  return row && { id: row.id, name: row.name, stable: row.stable }
+}
+
+type ResumeCheckpointHistory = { base: number; gap: number; name: string }
+async function checkResumeCheckpoint(history: ResumeCheckpointHistory) {
+  for (const tagged of [false, true])
+    for (const consumer of [`direct`, `live-query`] as const)
+      for (const emptySecond of [false, true]) {
+        const reach = createOracleReach(
+          `electric.sdk-resume-checkpoint.${tagged}.${consumer}.${emptySecond}`,
+          [`cold-cursor`, `advanced-cursor`, `fresh-launch-demand`],
+        )
+        reach.beginHistory()
+        const fixture = managedTagPersistence()
+        const http = controlledHttp()
+        const collectionId = `sdk-resume-checkpoint-${++sequence}`
+        const create = () =>
+          createCollection(
+            persistedCollectionOptions<
+              TestRow,
+              string | number,
+              never,
+              ElectricCollectionUtils<TestRow>
+            >({
+              ...electricCollectionOptions<TestRow>({
+                id: collectionId,
+                shapeOptions: {
+                  url: `http://test-url/${collectionId}`,
+                  params: { table: `rows` },
+                  fetchClient: http.fetchClient,
+                },
+                syncMode: `on-demand`,
+                startSync: true,
+                getKey: (row) => row.id,
+              }),
+              persistence: { adapter: fixture.adapter },
+            }),
+          )
+        const first = create()
+        let current = first
+        const queries: Array<{ cleanup: () => Promise<void> }> = []
+        const demand = (id: number) => {
+          if (consumer === `direct`)
+            return Promise.resolve(
+              current._sync.loadSubset({
+                where: new IR.Func(`eq`, [
+                  new IR.PropRef([`id`]),
+                  new IR.Value(id),
+                ]),
+              }),
+            )
+          const source = current
+          const query = createLiveQueryCollection({
+            startSync: false,
+            query: (q) =>
+              q
+                .from({ row: source })
+                .where(({ row }) => eq(row.id, id))
+                .select(({ row }) => ({
+                  id: row.id,
+                  name: row.name,
+                  stable: row.stable,
+                })),
+          })
+          queries.push(query)
+          return query.preload()
+        }
+        const respond = (
+          request: Request,
+          id: number,
+          offset: number,
+          empty: boolean,
+        ) => {
+          expect(request.url.searchParams.get(`subset__where`)).toBe(
+            `"id" = $1`,
+          )
+          expect(
+            JSON.parse(
+              request.url.searchParams.get(`subset__params`) ?? `null`,
+            ),
+          ).toEqual({ 1: String(id) })
+          request.respond(
+            new Response(
+              JSON.stringify({
+                metadata: {
+                  xmin: `10`,
+                  xmax: `20`,
+                  xip_list: [],
+                  database_lsn: `10`,
+                  snapshot_mark: offset,
+                },
+                data: empty
+                  ? []
+                  : [
+                      {
+                        key: String(id),
+                        value: {
+                          id: String(id),
+                          name: history.name,
+                          stable: `retained`,
+                        },
+                        headers: {
+                          operation: `insert`,
+                          ...(tagged ? { tags: [`selected`] } : {}),
+                        },
+                      },
+                    ],
+              }),
+              {
+                headers: {
+                  ...headers(offset),
+                  'electric-schema': JSON.stringify({
+                    id: { type: `int4` },
+                    name: { type: `text` },
+                    stable: { type: `text` },
+                  }),
+                },
+              },
+            ),
+          )
+        }
+        await withElectricCleanup(async () => {
+          const initial = await atCheckpoint(
+            http.take(),
+            `checkpoint first stream`,
+          )
+          expect(initial.url.searchParams.get(`log`)).toBe(`changes_only`)
+          for (const id of [1, 2]) {
+            const loading = demand(id)
+            void loading.catch(() => undefined)
+            const offset = history.base + (id - 1) * history.gap
+            respond(
+              await atCheckpoint(http.take(true), `checkpoint snapshot ${id}`),
+              id,
+              offset,
+              id === 2 && emptySecond,
+            )
+            await atCheckpoint(loading, `checkpoint demand ${id} applied`)
+            expect(
+              fixture.metadata().get(`electric:resume`),
+              `durable cursor at successful demand settlement`,
+            ).toMatchObject(expectedResumeCheckpoint(offset, tagged))
+            expect(checkpointRow(current.get(id))).toEqual(
+              id === 2 && emptySecond
+                ? undefined
+                : { id, name: history.name, stable: `retained` },
+            )
+            reach.reach(id === 1 ? `cold-cursor` : `advanced-cursor`)
+          }
+          for (const query of queries.splice(0)) await query.cleanup()
+          await first.cleanup()
+          current = create()
+          const resumed = await atCheckpoint(
+            http.take(),
+            `checkpoint restarted stream`,
+          )
+          expect(resumed.url.searchParams.get(`log`)).toBe(`changes_only`)
+          expect(resumed.url.searchParams.get(`offset`)).toBe(
+            tagged ? `now` : `${history.base + history.gap}_0`,
+          )
+          const loading = demand(1)
+          void loading.catch(() => undefined)
+          respond(
+            await atCheckpoint(
+              http.take(true),
+              `checkpoint restarted snapshot`,
+            ),
+            1,
+            history.base + history.gap + 1,
+            false,
+          )
+          await atCheckpoint(loading, `checkpoint restarted demand applied`)
+          expect(checkpointRow(current.get(1))).toEqual({
+            id: 1,
+            name: history.name,
+            stable: `retained`,
+          })
+          expect(fixture.rows().get(1)?.value).toEqual(
+            checkpointRow(current.get(1)),
+          )
+          reach.reach(`fresh-launch-demand`)
+        }, [
+          async () => {
+            for (const query of queries) await query.cleanup()
+          },
+          () => current.cleanup(),
+          () => first.cleanup(),
+          () => http.close(),
+          () => expect(http.activeCount()).toBe(0),
+        ])
+        reach.assertReached()
+        console.log(
+          `ORACLE_REACH`,
+          JSON.stringify({
+            property: `electric.sdk-resume-checkpoint`,
+            tagged,
+            consumer,
+            emptySecond,
+            counts: Object.fromEntries(reach.counts()),
+          }),
+        )
+      }
+}
+const resumeCheckpointViolation = sameViolation()
+sdkCampaigns(
+  `electric.sdk-resume-checkpoint`,
+  `persists each completed SDK snapshot cursor before demand settlement`,
+  20261109,
+  resumeCheckpointViolation,
+  async (seed) => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.record({
+          base: fc.integer({ min: 1, max: 30 }),
+          gap: fc.integer({ min: 1, max: 5 }),
+          name: fc.string({ minLength: 1, maxLength: 8 }),
+        }),
+        (history) =>
+          resumeCheckpointViolation.check(history, () =>
+            checkResumeCheckpoint(history),
+          ),
+      ),
+      {
+        ...oraclePropertyOptions(8, `electric.sdk-resume-checkpoint`),
+        ...(seed === undefined ? {} : { seed }),
+      },
+    )
   },
 )

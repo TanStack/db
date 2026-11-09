@@ -1313,7 +1313,8 @@ declareOracle({
  * receiving family checks the distinct Solid listener boundary. Native get's
  * reserved-name shortcut must not leave the first subscribed value stale.
  *
- * The independent model is a scalar stage sequence, including own undefined.
+ * The independent model is a stage sequence with scalar, object and array data,
+ * including own undefined.
  * The grammar starts with own data, own undefined or an inherited fallback,
  * then replaces, omits and readmits the field. Host bookkeeping symbols and
  * nested mutable-source writes are outside this family.
@@ -1322,43 +1323,48 @@ type ReservedFieldHistory = {
   input: History[`input`]
   key: `ordinary` | `__proto__`
   initial: `value` | `undefined` | `absent`
+  payload: `scalar` | `object` | `array`
 }
 type ReservedFieldRow = {
   id: string
   version: number
   unchanged: number
-  ordinary?: number
-  __proto__?: number
+  ordinary?: unknown
+  __proto__?: unknown
 }
 function* reservedFieldHistories(): Generator<ReservedFieldHistory> {
   for (const input of [`callback`, `config`, `collection`] as const)
     for (const key of [`ordinary`, `__proto__`] as const)
       for (const initial of [`value`, `undefined`, `absent`] as const)
-        yield { input, key, initial }
+        for (const payload of [`scalar`, `object`, `array`] as const)
+          yield { input, key, initial, payload }
 }
 function expectedReservedField(
   stage: number,
   initial: ReservedFieldHistory[`initial`],
   key: ReservedFieldHistory[`key`],
+  payload: ReservedFieldHistory[`payload`],
 ): unknown {
   const inherited = key === `__proto__` ? Object.prototype : undefined
-  if (stage === 0)
-    return initial === `absent`
-      ? inherited
-      : initial === `undefined`
-        ? undefined
-        : 0
-  if (stage === 3) return inherited
-  return stage === 2 ? undefined : stage === 1 ? 1 : 2
+  if (stage === 3 || (stage === 0 && initial === `absent`)) return inherited
+  if (stage === 2 || (stage === 0 && initial === `undefined`)) return undefined
+  const value = stage === 0 ? 0 : stage === 1 ? 1 : 2
+  return payload === `scalar`
+    ? value
+    : payload === `array`
+      ? [value]
+      : { value }
 }
 function compareReservedField(observed: unknown, expected: unknown) {
-  expect(observed, `tracked own data follows its admitted scalar stage`).toBe(
-    expected,
-  )
+  if (expected === Object.prototype) expect(observed).toBe(expected)
+  else
+    expect(observed, `tracked own data follows its admitted stage`).toEqual(
+      expected,
+    )
 }
 async function runReservedFieldHistory(history: ReservedFieldHistory) {
   const reach = createOracleReach(
-    `solid.own-field.${history.input}.${history.key}.${history.initial}`,
+    `solid.own-field.${history.input}.${history.key}.${history.initial}.${history.payload}`,
     [
       `initial-source-shape`,
       `tracked-initial`,
@@ -1368,6 +1374,8 @@ async function runReservedFieldHistory(history: ReservedFieldHistory) {
       `readmission`,
       `retained-source`,
       `quiet-neighbor`,
+      `tracked-own-keys`,
+      `prototype-preserved`,
     ],
   )
   reach.beginHistory()
@@ -1382,15 +1390,12 @@ async function runReservedFieldHistory(history: ReservedFieldHistory) {
         : Object.fromEntries([
             [
               history.key,
-              stage === 0
-                ? history.initial === `undefined`
-                  ? undefined
-                  : 0
-                : stage === 2
-                  ? undefined
-                  : stage === 1
-                    ? 1
-                    : 2,
+              expectedReservedField(
+                stage,
+                history.initial,
+                history.key,
+                history.payload,
+              ),
             ],
           ])),
     })
@@ -1425,18 +1430,29 @@ async function runReservedFieldHistory(history: ReservedFieldHistory) {
         ).toBe(stage !== 3 && (stage !== 0 || history.initial !== `absent`))
         compareReservedField(
           row[history.key],
-          expectedReservedField(stage, history.initial, history.key),
+          expectedReservedField(
+            stage,
+            history.initial,
+            history.key,
+            history.payload,
+          ),
         )
         retained.push({ row, stage })
       }
       admit(0)
       reach.reach(`initial-source-shape`)
       let observed: unknown
+      let observedKeys: Array<string> = []
+      let observedOwn = false
       let unchangedReads = 0
       createRoot((dispose) => {
         resources.defer(dispose)
         createRenderEffect(() => {
           observed = query()[0]![history.key]
+        })
+        createRenderEffect(() => {
+          observedKeys = Object.keys(query()[0]!)
+          observedOwn = Object.hasOwn(query()[0]!, history.key)
         })
         createRenderEffect(() => {
           void query()[0]!.unchanged
@@ -1445,7 +1461,7 @@ async function runReservedFieldHistory(history: ReservedFieldHistory) {
       })
       compareReservedField(
         observed,
-        expectedReservedField(0, history.initial, history.key),
+        expectedReservedField(0, history.initial, history.key, history.payload),
       )
       reach.reach(`tracked-initial`)
       for (const stage of [1, 2, 3, 4]) {
@@ -1456,16 +1472,34 @@ async function runReservedFieldHistory(history: ReservedFieldHistory) {
         admit(stage)
         compareReservedField(
           query()[0]![history.key],
-          expectedReservedField(stage, history.initial, history.key),
+          expectedReservedField(
+            stage,
+            history.initial,
+            history.key,
+            history.payload,
+          ),
         )
         compareReservedField(
           observed,
-          expectedReservedField(stage, history.initial, history.key),
+          expectedReservedField(
+            stage,
+            history.initial,
+            history.key,
+            history.payload,
+          ),
         )
         expect(
           Object.hasOwn(query()[0]!, history.key),
           `current own user field`,
         ).toBe(stage !== 3)
+        expect(observedKeys.toSorted(), `tracked own keys`).toEqual(
+          Object.keys(source.get(`a`)!).toSorted(),
+        )
+        expect(observedOwn, `tracked ownness`).toBe(stage !== 3)
+        expect(Object.getPrototypeOf(query()[0]!)).toBe(Object.prototype)
+        expect(Object.hasOwn(Object.prototype, `value`)).toBe(false)
+        reach.reach(`tracked-own-keys`)
+        reach.reach(`prototype-preserved`)
         expect(query()[0]!, `ordinary root identity`).toBe(root)
         expect(unchangedReads, `unchanged scalar neighbor stays quiet`).toBe(1)
         for (const saved of retained) {
@@ -1478,7 +1512,12 @@ async function runReservedFieldHistory(history: ReservedFieldHistory) {
           )
           compareReservedField(
             saved.row[history.key],
-            expectedReservedField(saved.stage, history.initial, history.key),
+            expectedReservedField(
+              saved.stage,
+              history.initial,
+              history.key,
+              history.payload,
+            ),
           )
         }
         reach.reach(
@@ -1500,7 +1539,7 @@ async function runReservedFieldHistory(history: ReservedFieldHistory) {
   reach.assertReached()
 }
 it.each([...reservedFieldHistories()])(
-  `tracks own $key data through $input initially=$initial`,
+  `tracks own $key data through $input initially=$initial payload=$payload`,
   runReservedFieldHistory,
 )
 declareOracle({
