@@ -9,6 +9,7 @@ import {
   oracleRoute,
   oracleRouteOf,
   readOracleRunConfig,
+  withOracleFixedHistories,
 } from './oracle-config.js'
 import { declareOracle } from './oracle-declaration.js'
 import { createOracleReach } from './oracle-reach.js'
@@ -405,6 +406,53 @@ const property = fc.asyncProperty(
   (history) => runHistory(history),
 )
 
+// Constructed histories enter every declared state in every campaign, so
+// reach does not depend on the seed. They are inputs to the same model,
+// production driver, and comparison as the generated histories, and they
+// carry no expected answer of their own. With `gcTime` 100:
+// - A row settles while a subscriber holds its Collection.
+// - A Collection stays due past `gcTime` while a row persists, the row
+//   completes, the Collection retires 120 ms later, and a subscribe restarts
+//   it.
+// - A row written to both Collections fails, and both retire after the
+//   shared settlement.
+// - Explicit cleanup runs while a row persists.
+const constructedHistories: Array<[History]> = [
+  [
+    {
+      steps: [
+        { kind: `subscribe`, side: `a` },
+        { kind: `insert`, into: `a` },
+        { kind: `settle`, outcome: `complete` },
+      ],
+      end: `cleanup`,
+    },
+  ],
+  [
+    {
+      steps: [
+        { kind: `insert`, into: `a` },
+        { kind: `advance`, elapsedMs: 120 },
+        { kind: `settle`, outcome: `complete` },
+        { kind: `advance`, elapsedMs: 120 },
+        { kind: `subscribe`, side: `a` },
+      ],
+      end: `drain-complete`,
+    },
+  ],
+  [
+    {
+      steps: [
+        { kind: `insert`, into: `both` },
+        { kind: `settle`, outcome: `fail` },
+        { kind: `advance`, elapsedMs: 120 },
+      ],
+      end: `drain-fail`,
+    },
+  ],
+  [{ steps: [{ kind: `insert`, into: `b` }], end: `cleanup` }],
+]
+
 // What this oracle owns: the garbage-collection hold that a persisting
 // transaction places on each Collection it touches, in lifecycle.ts. The
 // cleanup-queue oracle owns the timer dispatch that runs the deadline.
@@ -421,15 +469,18 @@ it.each(
   `retires a Collection only after gcTime with no subscriber and no persisting transaction (seed %s)`,
   async (seed) => {
     reach = createReach()
-    const parameters = {
-      ...oraclePropertyOptions(
-        100,
-        `collection-lifecycle.gc-persisting-transaction`,
-      ),
-      ...(seed === undefined || runConfig.replayPath !== undefined
-        ? {}
-        : oracleFixedSeed(seed)),
-    }
+    const parameters = withOracleFixedHistories(
+      {
+        ...oraclePropertyOptions(
+          100,
+          `collection-lifecycle.gc-persisting-transaction`,
+        ),
+        ...(seed === undefined || runConfig.replayPath !== undefined
+          ? {}
+          : oracleFixedSeed(seed)),
+      },
+      constructedHistories,
+    )
     oracleRoute(oracleRouteOf(parameters))
     await fc.assert(property, parameters)
     reach.assertReached()
