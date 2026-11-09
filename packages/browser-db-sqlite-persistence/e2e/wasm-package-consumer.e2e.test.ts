@@ -28,7 +28,7 @@ import {
   packageDirectory,
   probeWorkers,
 } from './packaged-consumer'
-import type { ConsumerVite, ProbeGlobal  } from './packaged-consumer'
+import type { ConsumerVite, ProbeGlobal } from './packaged-consumer'
 import type { AddressInfo } from 'node:net'
 import type { Response } from '@playwright/test'
 

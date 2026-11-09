@@ -33,13 +33,11 @@ import {
   reachedOutcomes,
 } from '../tests/opfs-open-outcome-oracle'
 import {
-  
   consumerVite,
   createPackagedConsumer,
-  probeWorkers 
+  probeWorkers,
 } from './packaged-consumer'
-import type {ConsumerVite, ProbeGlobal 
-} from './packaged-consumer';
+import type { ConsumerVite, ProbeGlobal } from './packaged-consumer'
 import type { Browser } from '@playwright/test'
 import type { ViteDevServer } from 'vite'
 import type {
