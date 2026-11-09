@@ -3,18 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index'
 import { createChangeProxy, withChangeTracking } from '../src/proxy'
 import { makeFrozenRow, makeStoredRow } from './proxy-native-rows'
-import {
-  oracleFixedSeed,
-  oraclePropertyOptions,
-  oracleReplayTest,
-  oracleRoute,
-  oracleRouteOf,
-  oracleRuns,
-} from './oracle-config'
+import { oracleRoute } from './oracle-config'
 import { declareOracle } from './oracle-declaration'
-import { createOracleReach } from './oracle-reach'
+import { differs, oracleProperty, pass, violation } from './oracle-property'
+import type { Observation, Verdict } from './oracle-property'
 import type { FrozenRow, StoredRow } from './proxy-native-rows'
-
 /**
  * # Does a draft behave like the native value it represents?
  *
@@ -110,51 +103,177 @@ function copyCallbackRow(row: CallbackRow): CallbackRow {
   return { items: row.items.map((item) => ({ ...item })), peer: row.peer }
 }
 
-function observeArrayCallbacks(
-  values: Array<number>,
-  steps: Array<CallbackStep>,
-) {
-  const initial: CallbackRow = {
+type CallbackHistory = { values: Array<number>; steps: Array<CallbackStep> }
+
+// What the draft exposes after one step, or what the native callback owes.
+type CallbackView = {
+  call: ReturnType<typeof runArrayCallback>
+  row: CallbackRow
+  changes: Record<string, unknown>
+  original: CallbackRow
+}
+
+function initialRow(values: Array<number>): CallbackRow {
+  return {
     items: values.map((value, id) => ({ id, value })),
     peer: `untouched`,
   }
-  const original = copyCallbackRow(initial)
-  const native = copyCallbackRow(initial)
+}
+
+// Production side: one draft row, run step by step. It records what the draft
+// exposes and decides nothing. A production error is itself an observation.
+function driveArrayCallbacks(
+  history: CallbackHistory,
+  observe: (checkpoint: string, value: unknown) => void,
+): void {
+  const original = copyCallbackRow(initialRow(history.values))
   const { proxy, getChanges } = createChangeProxy(original)
-  return steps.map((step) => {
-    const expectedCall = runArrayCallback(native, step)
-    const actualCall = runArrayCallback(proxy, step)
-    const expectedRow = copyCallbackRow(native)
+  let checkpoint = `step 0`
+  try {
+    for (const [index, step] of history.steps.entries()) {
+      checkpoint = `step ${index}`
+      const call = runArrayCallback(proxy, step)
+      const changes = getChanges()
+      observe(checkpoint, {
+        call,
+        row: copyCallbackRow({ ...original, ...changes }),
+        changes: {
+          ...changes,
+          ...(changes.items !== undefined
+            ? { items: changes.items.map((item: object) => ({ ...item })) }
+            : {}),
+        },
+        original: copyCallbackRow(original),
+      })
+    }
+  } catch (error) {
+    observe(checkpoint, { error: errorData(error) })
+  }
+}
+
+// Native side: the same callback history on a plain row, independent of the
+// draft. The views it returns are what the driver must exhibit.
+function modelArrayCallbacks(history: CallbackHistory): Array<CallbackView> {
+  const initial = initialRow(history.values)
+  const native = copyCallbackRow(initial)
+  return history.steps.map((step) => {
+    const call = runArrayCallback(native, step)
     // A value is changed unless it is the same value. -0 and 0 are distinct
     // row values (maintainer decision, 2026-10-29), so `Object.is` decides.
     const changed = native.items.some(
-      (item, index) => !Object.is(item.value, values[index]),
+      (item, index) => !Object.is(item.value, history.values[index]),
     )
-    const changes: Partial<CallbackRow> = getChanges()
+    const row = copyCallbackRow(native)
     return {
-      expectedCall,
-      actualCall,
-      expectedRow,
-      actualRow: copyCallbackRow({ ...original, ...changes }),
-      expectedChanges: changed ? { items: expectedRow.items } : {},
-      actualChanges: {
-        ...changes,
-        ...(changes.items !== undefined
-          ? { items: changes.items.map((item) => ({ ...item })) }
-          : {}),
-      },
-      initial,
-      original: copyCallbackRow(original),
+      call,
+      row,
+      changes: changed ? { items: row.items } : {},
+      original: copyCallbackRow(initial),
     }
   })
 }
 
+const LAW_CALL = `a draft's callback makes the native call: the same visits and result`
+const LAW_ROW = `the row rebuilt from the draft's recorded changes is the native row`
+const LAW_CHANGES = `the recorded changes are the native changes`
+const LAW_BASELINE = `the input row is never changed by a callback`
+
+// The comparison shared by the campaign and the fixed examples.
+function judgeStep(
+  checkpoint: string,
+  actual: CallbackView,
+  expected: CallbackView,
+): Verdict | undefined {
+  return (
+    differs(checkpoint, LAW_CALL, actual.call, expected.call) ??
+    differs(checkpoint, LAW_ROW, actual.row, expected.row) ??
+    differs(checkpoint, LAW_CHANGES, actual.changes, expected.changes) ??
+    differs(checkpoint, LAW_BASELINE, actual.original, expected.original)
+  )
+}
+
+function judgeCallbacks(
+  _history: CallbackHistory,
+  observations: ReadonlyArray<Observation>,
+  expected: ReadonlyArray<CallbackView>,
+): Verdict {
+  for (const [index, observation] of observations.entries()) {
+    const value = observation.value
+    if (isErrorData(value)) {
+      const { name, message } = value.error
+      return violation(
+        observation.checkpoint,
+        `production raised ${name}: ${message}`,
+        LAW_CALL,
+        { actual: name, expected: `no error` },
+      )
+    }
+    const verdict = judgeStep(
+      observation.checkpoint,
+      value as CallbackView,
+      expected[index]!,
+    )
+    if (verdict) return verdict
+  }
+  return pass
+}
+
+function isErrorData(
+  value: unknown,
+): value is { error: { name: string; message: string } } {
+  return typeof value === `object` && value !== null && `error` in value
+}
+
+function errorData(error: unknown): { name: string; message: string } {
+  return {
+    name: error instanceof Error ? error.name : `non-error`,
+    message: String(error instanceof Error ? error.message : error),
+  }
+}
+
+// Fixed examples and the baseline test use these cut-shaped helpers, which run
+// the same driver, model, and comparison as the campaign.
+function observeArrayCallbacks(
+  values: Array<number>,
+  steps: Array<CallbackStep>,
+) {
+  const history = { values, steps }
+  const views: Array<CallbackView> = []
+  driveArrayCallbacks(history, (_checkpoint, value) => {
+    views.push(value as CallbackView)
+  })
+  const expected = modelArrayCallbacks(history)
+  return views.map((view, index) => ({
+    expectedCall: expected[index]!.call,
+    actualCall: view.call,
+    expectedRow: expected[index]!.row,
+    actualRow: view.row,
+    expectedChanges: expected[index]!.changes,
+    actualChanges: view.changes,
+    initial: initialRow(values),
+    original: view.original,
+  }))
+}
+
 function assertArrayCallbacks(cuts: ReturnType<typeof observeArrayCallbacks>) {
-  for (const cut of cuts) {
-    expect(cut.actualCall).toStrictEqual(cut.expectedCall)
-    expect(cut.actualRow).toStrictEqual(cut.expectedRow)
-    expect(cut.actualChanges).toStrictEqual(cut.expectedChanges)
-    expect(cut.original).toStrictEqual(cut.initial)
+  for (const [index, cut] of cuts.entries()) {
+    const verdict = judgeStep(
+      `step ${index}`,
+      {
+        call: cut.actualCall,
+        row: cut.actualRow,
+        changes: cut.actualChanges,
+        original: cut.original,
+      },
+      {
+        call: cut.expectedCall,
+        row: cut.expectedRow,
+        changes: cut.expectedChanges,
+        original: cut.initial,
+      },
+    )
+    if (verdict?.kind === `violation`)
+      throw new Error(`${verdict.law}: ${verdict.difference}`)
   }
 }
 
@@ -190,8 +309,127 @@ function writeThroughAccessPath(
 // proxy.ts by this file's tests.
 declareOracle({
   owns: [`src/proxy.ts`],
-  check: [assertArrayCallbacks],
-  model: [runArrayCallback, writeThroughAccessPath],
+  check: [judgeCallbacks],
+  model: [runArrayCallback, writeThroughAccessPath, modelArrayCallbacks],
+})
+
+// -0 joins the values and deltas, so `-0 += 0` writes 0: a change of a
+// zero's sign alone, which a draft must record like any other write. The
+// campaign and its random histories are oracleProperty below.
+const signedInteger = (min: number, max: number) =>
+  fc.oneof(fc.integer({ min, max }), fc.constant(-0), fc.constant(0))
+const step = fc.record({
+  method: fc.constantFrom(...callbackMethods),
+  target: fc.integer({ min: 0, max: 5 }),
+  delta: signedInteger(-5, 5),
+})
+const callbackHistory = fc.record({
+  values: fc.array(signedInteger(-10, 10), {
+    minLength: 1,
+    maxLength: 6,
+  }),
+  steps: fc.tuple(step, step),
+})
+
+// Reach: a step left an item whose value differs from its start only by the
+// sign of a zero. The model's views say so; production is not consulted.
+function reachedStates(
+  history: CallbackHistory,
+  _trace: ReadonlyArray<Observation>,
+  expected: ReadonlyArray<CallbackView>,
+): Array<`zero-sign-write`> {
+  return expected.some((view) =>
+    view.row.items.some(
+      (item, index) =>
+        item.value === history.values[index] &&
+        !Object.is(item.value, history.values[index]),
+    ),
+  )
+    ? [`zero-sign-write`]
+    : []
+}
+
+// Replaces the first observation's view, or reports that the corruption does
+// not apply to this history.
+function replaceFirstView(
+  trace: ReadonlyArray<Observation>,
+  change: (view: CallbackView) => CallbackView | undefined,
+): Array<Observation> | undefined {
+  const [first, ...rest] = trace
+  if (first === undefined) return undefined
+  const corrupted = change(first.value as CallbackView)
+  return corrupted === undefined
+    ? undefined
+    : [{ checkpoint: first.checkpoint, value: corrupted }, ...rest]
+}
+
+oracleProperty<CallbackHistory, Array<CallbackView>>({
+  id: `proxy.callback-history`,
+  law: {
+    statement: `A draft's array callback runs the native callback: it makes the same call, the row rebuilt from its recorded changes is the native row, its recorded changes are the native changes, and the input row is never changed. A change of a zero's sign alone is a change.`,
+    authority: `packages/db/src/proxy.ts; the maintainer decision (2026-10-29) that -0 and 0 are distinct row values; the native array methods as the authority for callback results.`,
+    limits: `One row of up to six numeric items, two callback steps, and the eight array callback methods; the Collection write path, virtual fields, Map and Set drafts, and detachment belong to their own oracles.`,
+    owner: `Proxy drafts`,
+  },
+  histories: {
+    arbitrary: callbackHistory,
+    states: [`zero-sign-write`],
+    runs: 200,
+    fixedSeeds: [2026103],
+    // The first step makes a zero change sign and leaves its magnitude; the
+    // second step stays random, so the states after the write are explored.
+    constructed: [
+      {
+        name: `a zero changes sign on the first step`,
+        enters: [`zero-sign-write`],
+        build: (generated) => ({
+          values: [-0, ...generated.values.slice(0, 5)],
+          steps: [
+            { method: `forEach`, target: 0, delta: 0 },
+            generated.steps[1]!,
+          ],
+        }),
+      },
+    ],
+  },
+  model: modelArrayCallbacks,
+  reached: reachedStates,
+  driver: driveArrayCallbacks,
+  check: judgeCallbacks,
+  // Wrong answers the check must reject: the write lost, the visit repeated,
+  // and the peer corrupted.
+  calibrations: [
+    {
+      name: `lost write`,
+      law: LAW_ROW,
+      corrupt: (trace) =>
+        replaceFirstView(trace, (view) => {
+          const baseline = copyCallbackRow(view.original)
+          return differs(`lost write`, LAW_ROW, view.row, baseline) ===
+            undefined
+            ? undefined
+            : { ...view, row: baseline }
+        }),
+    },
+    {
+      name: `extra visit`,
+      law: LAW_CALL,
+      corrupt: (trace) =>
+        replaceFirstView(trace, (view) => ({
+          ...view,
+          call: { ...view.call, visits: [...view.call.visits, 0] },
+        })),
+    },
+    {
+      name: `wrong peer`,
+      law: LAW_ROW,
+      corrupt: (trace) =>
+        replaceFirstView(trace, (view) => ({
+          ...view,
+          row: { ...view.row, peer: `corrupted` },
+        })),
+    },
+  ],
 })
 
 describe(`native array callback oracle`, () => {
@@ -279,90 +517,6 @@ describe(`native array callback oracle`, () => {
           )
         }
       }
-    },
-  )
-
-  // -0 joins the values and deltas, so `-0 += 0` writes 0: a change of a
-  // zero's sign alone, which a draft must record like any other write. 0
-  // has its own weight too: with -0 alone, one random seed in 40 reached
-  // that write fewer than five times in 200 histories; with both, the
-  // lowest of 40 seeds reached it 29 times.
-  const signedInteger = (min: number, max: number) =>
-    fc.oneof(fc.integer({ min, max }), fc.constant(-0), fc.constant(0))
-  const step = fc.record({
-    method: fc.constantFrom(...callbackMethods),
-    target: fc.integer({ min: 0, max: 5 }),
-    delta: signedInteger(-5, 5),
-  })
-  // A fixed and a random campaign. A path replay of
-  // `proxy.callback-history` runs only the random campaign, from its path.
-  const callbackHistory = fc.record({
-    values: fc.array(signedInteger(-10, 10), {
-      minLength: 1,
-      maxLength: 6,
-    }),
-    steps: fc.tuple(step, step),
-  })
-  const callbackCampaign = (options: fc.Parameters<[unknown]>) => {
-    const reach = createOracleReach(
-      `proxy.callback-history`,
-      [`zero-sign-write`],
-      { minimum: 5 },
-    )
-    const parameters = options as fc.Parameters<
-      [{ values: Array<number>; steps: unknown }]
-    >
-    oracleRoute(oracleRouteOf(parameters))
-    fc.assert(
-      fc.property(callbackHistory, ({ values, steps }) => {
-        reach.beginHistory()
-        const cuts = observeArrayCallbacks(values, steps)
-        // Reach: a step left an item whose value differs from its start only
-        // by the sign of a zero.
-        if (
-          cuts.some((cut) =>
-            cut.expectedRow.items.some(
-              (item, index) =>
-                item.value === values[index] &&
-                !Object.is(item.value, values[index]),
-            ),
-          )
-        ) {
-          reach.reach(`zero-sign-write`)
-        }
-        assertArrayCallbacks(cuts)
-      }),
-      parameters,
-    )
-    reach.assertReached()
-  }
-  oracleReplayTest(it)(
-    `matches native two-step callback histories (2026103)`,
-    () => {
-      callbackCampaign(oracleFixedSeed(2026103, { numRuns: oracleRuns(200) }))
-    },
-  )
-  oracleReplayTest(it, `proxy.callback-history`)(
-    `matches native two-step callback histories (random)`,
-    () => {
-      callbackCampaign(oraclePropertyOptions(200, `proxy.callback-history`))
-    },
-  )
-
-  it.each([`lost-write`, `extra-visit`, `wrong-peer`] as const)(
-    `rejects a captured %s independently of the native authority`,
-    (fault) => {
-      oracleRoute(`calibration`)
-      const cuts = observeArrayCallbacks(
-        [4, -2, 7],
-        [{ method: `forEach`, target: 1, delta: 3 }],
-      )
-      assertArrayCallbacks(cuts)
-      const cut = cuts[0]!
-      if (fault === `lost-write`) cut.actualRow.items[1]!.value = -2
-      if (fault === `extra-visit`) cut.actualCall.visits.push(1)
-      if (fault === `wrong-peer`) cut.actualRow.peer = `corrupted`
-      expect(() => assertArrayCallbacks(cuts)).toThrowError(/expected/)
     },
   )
 })
