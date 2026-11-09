@@ -946,6 +946,9 @@ next public batch reconciles retained subscriber rows against the installed
 state, including deletions for keys that do not return. An empty ready batch
 also reconciles an empty replacement. On-demand sources cannot infer absence
 from their partial installed state; their replay barrier owns replacement.
+A live-query observer's subscription retains no rows across cleanup: the
+observer's `cleaned-up` snapshot shows none, so every row of the next sync
+run, including one equal to a row it showed before, reaches it as new.
 
 ### Source cancellation and applied settlement
 
