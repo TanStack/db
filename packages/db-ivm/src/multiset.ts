@@ -82,9 +82,11 @@ export class MultiSet<T> {
    * changed.
    */
   consolidate(): MultiSet<T> {
-    // Development-only oracle probes read this. A bundler that sets NODE_ENV
-    // folds it to `false`, inlines it, and removes them; the typeof check keeps
-    // an unbundled module from throwing where `process` does not exist.
+    // Development-only oracle probes read this. The published build removes
+    // this guard and its probes (scripts/strip-oracle-probes.mjs). A bundler
+    // that sets NODE_ENV and bundles these sources folds it to `false` and
+    // removes them; the typeof check keeps an unbundled module from throwing
+    // where `process` does not exist.
     const probing =
       typeof process === `undefined`
         ? false
