@@ -109,6 +109,7 @@ import {
   oracleFixedSeed,
   oraclePropertyOptions,
   oracleRoute,
+  oracleReplayTest,
   oracleRouteOf,
   oracleRuns,
   withOracleFixedHistories,
@@ -1191,7 +1192,7 @@ function campaign(name) {
   }
   // The constructed histories run first, on top of the random ones, as the
   // framework adds examples; a path replay runs only its one history.
-  it(`${name}: fixed-seed campaign`, async () => {
+  oracleReplayTest(it)(`${name}: fixed-seed campaign`, async () => {
     const parameters = oracleFixedSeed(FIXED_SEED, {
       numRuns: oracleRuns(BASE_RUNS),
     })
@@ -1202,7 +1203,7 @@ function campaign(name) {
     oracleRoute(oracleRouteOf(options))
     await fc.assert(fc.asyncProperty(programArbitrary, predicate), options)
   }, 1_200_000)
-  it(`${name}: random-seed campaign`, async () => {
+  oracleReplayTest(it, PROPERTY)(`${name}: random-seed campaign`, async () => {
     // The constructed histories are drawn from the campaign's seed, so the
     // options come first.
     const parameters = oraclePropertyOptions(BASE_RUNS, PROPERTY)
