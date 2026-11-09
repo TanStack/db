@@ -106,8 +106,10 @@ import fc from 'fast-check'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { declareOracle } from '../packages/db/tests/oracle-declaration.js'
 import {
+  oracleFixedSeed,
   oraclePropertyOptions,
   oracleRuns,
+  withOracleFixedHistories,
 } from '../packages/db/tests/oracle-config.js'
 import { createOracleReach } from '../packages/db/tests/oracle-reach.js'
 
@@ -1185,22 +1187,28 @@ function campaign(name) {
       compareRuleSource(observed[scope].marks, marked)
     }
   }
+  // The constructed histories run first, on top of the random ones, as the
+  // framework adds examples; a path replay runs only its one history.
   it(`${name}: fixed-seed campaign`, async () => {
-    const examples = constructedPrograms(FIXED_SEED)
-    await fc.assert(fc.asyncProperty(programArbitrary, predicate), {
-      // The constructed histories run first, on top of the random ones.
-      numRuns: oracleRuns(BASE_RUNS) + examples.length,
-      seed: FIXED_SEED,
-      examples,
+    const parameters = oracleFixedSeed(FIXED_SEED, {
+      numRuns: oracleRuns(BASE_RUNS),
     })
+    await fc.assert(
+      fc.asyncProperty(programArbitrary, predicate),
+      withOracleFixedHistories(parameters, constructedPrograms(FIXED_SEED)),
+    )
   }, 1_200_000)
   it(`${name}: random-seed campaign`, async () => {
-    const options = oraclePropertyOptions(BASE_RUNS, PROPERTY)
-    await fc.assert(fc.asyncProperty(programArbitrary, predicate), {
-      ...options,
-      examples: constructedPrograms(options.seed),
-      numRuns: options.numRuns + constructions.length,
-    })
+    // The constructed histories are drawn from the campaign's seed, so the
+    // options come first.
+    const parameters = oraclePropertyOptions(BASE_RUNS, PROPERTY)
+    await fc.assert(
+      fc.asyncProperty(programArbitrary, predicate),
+      withOracleFixedHistories(
+        parameters,
+        constructedPrograms(parameters.seed),
+      ),
+    )
   }, 1_200_000)
 }
 
