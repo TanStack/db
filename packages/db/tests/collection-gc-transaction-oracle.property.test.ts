@@ -526,10 +526,19 @@ const settleStep = (outcome: `complete` | `fail`): Step => ({
 const advanceStep = (elapsedMs: 120): Step => ({ kind: `advance`, elapsedMs })
 
 // What this oracle owns: the garbage-collection hold that a persisting
-// transaction places on each Collection it touches, in lifecycle.ts. The
-// cleanup-queue oracle owns the timer dispatch that runs the deadline.
+// transaction places on each Collection it touches, in lifecycle.ts, and the
+// settlement that releases it. A transaction settles in `commit` (completion)
+// or `rollback` (failure), and both reach `touchCollection`, which restarts the
+// delay for each Collection the transaction touched. The oracle judges those
+// three functions with their static call trees. The cleanup-queue oracle owns
+// the timer dispatch that runs the deadline.
 declareOracle({
-  owns: [`src/collection/lifecycle.ts`],
+  owns: [
+    `src/collection/lifecycle.ts`,
+    `src/transactions.ts#Transaction.commit`,
+    `src/transactions.ts#Transaction.rollback`,
+    `src/transactions.ts#Transaction.touchCollection`,
+  ],
   grammar: [stepArbitrary],
 })
 
