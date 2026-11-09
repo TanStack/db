@@ -16,12 +16,16 @@
  * versions vary which package is already current and reverse their assignment.
  * A later-candidate fault follows an actual successful candidate upload, in
  * either package order. Retry must retain it without another upload.
+ * Private-version policies and public runtime/peer dependency edges cannot
+ * change that ledger. Actual archives retain authored ranges, with workspace:*
+ * replaced by its target version. Every attempt restores the original config,
+ * prerelease state and public/private manifest bytes, including config spacing.
  * Replay selects the complete unique Vitest test title; this finite enumeration
  * has no seed/shrink interface and claims no arbitrary schedules or semver.
  *
  * The fixture supplies local workspace links directly for packing. It disables
  * automatic installation, isolates configuration/cache/credentials and keeps
- * HOME unchanged. This establishes HTTP uploads and packed manifest identity,
+ * HOME unchanged. This establishes HTTP uploads and packed manifest edges,
  * not repository installation, consumer APIs, production authentication or
  * GitHub Actions. POSIX process groups are required. Standard tools and their
  * required loopback socket access are setup premises; missing tools, malformed
@@ -33,6 +37,7 @@ import { declareOracle } from '../packages/db/tests/oracle-declaration.js'
 import { createOracleReach } from '../packages/db/tests/oracle-reach.js'
 import {
   checkPublishObservation,
+  expectedPackedDependencies,
   expectedPublishes,
   httpPublishHistories,
   packageNames,
@@ -95,7 +100,7 @@ function requireSupportedProtocol(state) {
 
 declareOracle({
   check: [checkPublishObservation, checkRegistry, checkHttpUploadFailures],
-  model: [expectedPublishes],
+  model: [expectedPublishes, expectedPackedDependencies],
   grammar: [histories],
 })
 
@@ -118,6 +123,8 @@ test.each(histories)(
         'registry-read',
         'restored',
         'compared',
+        'public-dependent',
+        `private-policy-${history.privatePolicy ?? 'skip'}`,
         ...(history.registry === 'current'
           ? ['already-current']
           : ['packed-upload']),
@@ -149,210 +156,241 @@ test.each(histories)(
     let didFail = false
     let primary
     try {
-      await withReleaseWorkspace(async ({ root }) =>
-        withHttpPublishReceiver(root, history, async (receiver) => {
-          tools = receiver.tools
-          const expected = expectedPublishes(
-            receiver.manifests,
-            receiver.initialRegistry,
-          )
-          const before = receiver.bytes()
-          let firstError
-          let retryError
-          let controlledFailure
-          try {
-            await receiver.run()
-          } catch (error) {
-            firstError = error
-          }
-          let state = receiver.readState()
-          observation = state
-          requireSupportedProtocol(state)
-          assert.deepEqual(
-            receiver.bytes(),
-            before,
-            'first HTTP attempt restores original workspace bytes',
-          )
-          if (history.failure === 'none') {
-            if (
-              firstError &&
-              !state.requests.some(({ type }) => type === 'publish')
+      await withReleaseWorkspace(
+        async ({ root }) =>
+          withHttpPublishReceiver(root, history, async (receiver) => {
+            tools = receiver.tools
+            const expected = expectedPublishes(
+              receiver.manifests,
+              receiver.initialRegistry,
             )
-              throw new Error(
-                'HTTP release failed before any publication request',
-                { cause: firstError },
-              )
-          } else {
-            const failed = state.requests.filter(
-              ({ type, controlledFailure }) =>
-                type === 'publish' && controlledFailure,
+            const before = receiver.bytes()
+            const dependent = receiver.manifests.find(
+              ({ name }) => name === packageNames.offline,
             )
-            if (failed.length === 0 || firstError === undefined)
-              throw new Error(
-                'HTTP controlled failure boundary was not received',
-                { cause: firstError },
-              )
-            assert.equal(failed.length, 1, 'one controlled failed HTTP request')
-            controlledFailure = failed[0]
-            if (history.failure === 'candidate-after-success') {
-              assert(
-                [packageNames.db, packageNames.react].includes(
-                  controlledFailure.name,
-                ),
-                'the later controlled failure belongs to a candidate',
-              )
-              const failedIndex = state.requests.indexOf(controlledFailure)
-              assert(
-                state.requests
-                  .slice(0, failedIndex)
-                  .some(
-                    ({ type, success, name }) =>
-                      type === 'publish' &&
-                      success &&
-                      [packageNames.db, packageNames.react].includes(name),
-                  ),
-                'an actual candidate success precedes the later candidate failure',
-              )
-              reach.reach('candidate-success-before-failure')
-            } else
-              assert.equal(
-                controlledFailure.name,
-                history.failure === 'stable'
-                  ? packageNames.query
-                  : packageNames.db,
-              )
-            reach.reach('controlled-failure')
-            assert(
-              state.requests.some(
-                ({ type, success }) => type === 'publish' && success,
-              ),
-              'successful partial publications precede retry',
+            assert.equal(
+              (history.stableDependency
+                ? dependent.dependencies
+                : dependent.peerDependencies)[packageNames.db],
+              history.stableDependency ? 'workspace:*' : '^1.0.0-rc.0',
+              'public stable dependent retains its authored candidate edge',
             )
-            reach.reach('partial-publication')
+            reach.reach('public-dependent')
+            reach.reach(`private-policy-${history.privatePolicy ?? 'skip'}`)
+            let firstError
+            let retryError
+            let controlledFailure
             try {
               await receiver.run()
             } catch (error) {
-              retryError = error
+              firstError = error
             }
-            state = receiver.readState()
+            let state = receiver.readState()
             observation = state
             requireSupportedProtocol(state)
             assert.deepEqual(
               receiver.bytes(),
               before,
-              'HTTP retry restores original workspace bytes',
+              'first HTTP attempt restores original workspace bytes',
             )
-            reach.reach('retry')
-          }
-          reach.reach('restored')
-          const metadata = state.requests.filter(({ type }) => type === 'info')
-          const infos = new Set(metadata.map(({ name }) => name))
-          // The first GET carries source facts before that package can be uploaded.
-          // A stable-phase duplicate can stop the command before any candidate read.
-          // Record each actual receiving path before judging raw failed attempts.
-          for (const [name, initial] of Object.entries(
-            receiver.initialRegistry,
-          )) {
-            const info = metadata.find((entry) => entry.name === name)
-            if (info !== undefined)
-              assert.deepEqual(
-                { versions: info.versions, tags: info.tags },
-                initial,
-                'real npm receives exact initial version and tag facts',
+            if (history.failure === 'none') {
+              if (
+                firstError &&
+                !state.requests.some(({ type }) => type === 'publish')
               )
-          }
-          const stableRead = [packageNames.query, packageNames.offline].every(
-            (name) => infos.has(name),
-          )
-          const candidateRead = [packageNames.db, packageNames.react].every(
-            (name) => infos.has(name),
-          )
-          if (stableRead) {
-            reach.reach('stable-registry-read')
-            if (history.stableTagShape === 'no-tags')
-              reach.reach('stable-metadata-no-tags')
-          }
-          if (candidateRead) {
-            reach.reach('candidate-registry-read')
-            if (history.tagShape !== 'ordinary')
-              reach.reach(`metadata-${history.tagShape}`)
-            if (history.reactCandidate !== undefined) {
-              assert.notEqual(
-                receiver.manifests[0].version,
-                receiver.manifests[1].version,
+                throw new Error(
+                  'HTTP release failed before any publication request',
+                  { cause: firstError },
+                )
+            } else {
+              const failed = state.requests.filter(
+                ({ type, controlledFailure }) =>
+                  type === 'publish' && controlledFailure,
               )
-              reach.reach('different-candidate-versions')
-            }
-            const candidateExpected = expected.filter(({ name }) =>
-              [packageNames.db, packageNames.react].includes(name),
-            )
-            if (history.currentCandidate !== undefined) {
+              if (failed.length === 0 || firstError === undefined)
+                throw new Error(
+                  'HTTP controlled failure boundary was not received',
+                  { cause: firstError },
+                )
               assert.equal(
-                candidateExpected.length,
+                failed.length,
                 1,
-                'exactly one candidate target is missing',
+                'one controlled failed HTTP request',
               )
-              reach.reach('mixed-current-and-missing')
-            }
-            if (history.registry !== 'current') {
+              controlledFailure = failed[0]
+              if (history.failure === 'candidate-after-success') {
+                assert(
+                  [packageNames.db, packageNames.react].includes(
+                    controlledFailure.name,
+                  ),
+                  'the later controlled failure belongs to a candidate',
+                )
+                const failedIndex = state.requests.indexOf(controlledFailure)
+                assert(
+                  state.requests
+                    .slice(0, failedIndex)
+                    .some(
+                      ({ type, success, name }) =>
+                        type === 'publish' &&
+                        success &&
+                        [packageNames.db, packageNames.react].includes(name),
+                    ),
+                  'an actual candidate success precedes the later candidate failure',
+                )
+                reach.reach('candidate-success-before-failure')
+              } else
+                assert.equal(
+                  controlledFailure.name,
+                  history.failure === 'stable'
+                    ? packageNames.query
+                    : packageNames.db,
+                )
+              reach.reach('controlled-failure')
               assert(
-                candidateExpected.length > 0,
-                'at least one exact candidate target is missing',
+                state.requests.some(
+                  ({ type, success }) => type === 'publish' && success,
+                ),
+                'successful partial publications precede retry',
               )
-              reach.reach('missing-exact-candidate')
+              reach.reach('partial-publication')
+              try {
+                await receiver.run()
+              } catch (error) {
+                retryError = error
+              }
+              state = receiver.readState()
+              observation = state
+              requireSupportedProtocol(state)
+              assert.deepEqual(
+                receiver.bytes(),
+                before,
+                'HTTP retry restores original workspace bytes',
+              )
+              reach.reach('retry')
             }
-          }
-          if (stableRead && candidateRead) reach.reach('registry-read')
-          const uploads = state.requests.filter(
-            ({ type }) => type === 'publish',
-          )
-          checkHttpUploadFailures(uploads, controlledFailure)
-          assert.deepEqual(
-            [...infos].sort(),
-            Object.values(packageNames).sort(),
-            'both package phases reached registry metadata',
-          )
-          if (history.failure === 'none')
-            assert.equal(
-              firstError,
-              undefined,
-              'publication without controlled failure fulfills',
+            reach.reach('restored')
+            const metadata = state.requests.filter(
+              ({ type }) => type === 'info',
             )
-          else
-            assert.equal(
-              retryError,
-              undefined,
-              'retry after controlled failure fulfills',
+            const infos = new Set(metadata.map(({ name }) => name))
+            // The first GET carries source facts before that package can be uploaded.
+            // A stable-phase duplicate can stop the command before any candidate read.
+            // Record each actual receiving path before judging raw failed attempts.
+            for (const [name, initial] of Object.entries(
+              receiver.initialRegistry,
+            )) {
+              const info = metadata.find((entry) => entry.name === name)
+              if (info !== undefined)
+                assert.deepEqual(
+                  { versions: info.versions, tags: info.tags },
+                  initial,
+                  'real npm receives exact initial version and tag facts',
+                )
+            }
+            const stableRead = [packageNames.query, packageNames.offline].every(
+              (name) => infos.has(name),
             )
-          for (const upload of uploads) {
+            const candidateRead = [packageNames.db, packageNames.react].every(
+              (name) => infos.has(name),
+            )
+            if (stableRead) {
+              reach.reach('stable-registry-read')
+              if (history.stableTagShape === 'no-tags')
+                reach.reach('stable-metadata-no-tags')
+            }
+            if (candidateRead) {
+              reach.reach('candidate-registry-read')
+              if (history.tagShape !== 'ordinary')
+                reach.reach(`metadata-${history.tagShape}`)
+              if (history.reactCandidate !== undefined) {
+                assert.notEqual(
+                  receiver.manifests[0].version,
+                  receiver.manifests[1].version,
+                )
+                reach.reach('different-candidate-versions')
+              }
+              const candidateExpected = expected.filter(({ name }) =>
+                [packageNames.db, packageNames.react].includes(name),
+              )
+              if (history.currentCandidate !== undefined) {
+                assert.equal(
+                  candidateExpected.length,
+                  1,
+                  'exactly one candidate target is missing',
+                )
+                reach.reach('mixed-current-and-missing')
+              }
+              if (history.registry !== 'current') {
+                assert(
+                  candidateExpected.length > 0,
+                  'at least one exact candidate target is missing',
+                )
+                reach.reach('missing-exact-candidate')
+              }
+            }
+            if (stableRead && candidateRead) reach.reach('registry-read')
+            const uploads = state.requests.filter(
+              ({ type }) => type === 'publish',
+            )
+            checkHttpUploadFailures(uploads, controlledFailure)
             assert.deepEqual(
-              { name: upload.archive.name, version: upload.archive.version },
-              { name: upload.name, version: upload.version },
-              'real packed manifest matches publication',
+              [...infos].sort(),
+              Object.values(packageNames).sort(),
+              'both package phases reached registry metadata',
             )
-            assert(upload.archive.files > 0, 'actual packed files arrived')
-          }
-          if (history.registry === 'current') {
-            assert.equal(
-              uploads.length,
-              0,
-              'already-current registry requires no uploads',
+            if (history.failure === 'none')
+              assert.equal(
+                firstError,
+                undefined,
+                'publication without controlled failure fulfills',
+              )
+            else
+              assert.equal(
+                retryError,
+                undefined,
+                'retry after controlled failure fulfills',
+              )
+            for (const upload of uploads) {
+              assert.deepEqual(
+                { name: upload.archive.name, version: upload.archive.version },
+                { name: upload.name, version: upload.version },
+                'real packed manifest matches publication',
+              )
+              assert(upload.archive.files > 0, 'actual packed files arrived')
+              assert.deepEqual(
+                {
+                  dependencies: upload.archive.dependencies,
+                  peerDependencies: upload.archive.peerDependencies,
+                },
+                expectedPackedDependencies(
+                  receiver.manifests,
+                  receiver.manifests.find(({ name }) => name === upload.name),
+                ),
+                'packed runtime and peer dependencies retain authored edges',
+              )
+            }
+            if (history.registry === 'current') {
+              assert.equal(
+                uploads.length,
+                0,
+                'already-current registry requires no uploads',
+              )
+              reach.reach('already-current')
+            } else {
+              assert(uploads.length > 0, 'real packed publication path ran')
+              reach.reach('packed-upload')
+            }
+            checkPublishObservation(
+              state.requests,
+              expected,
+              'real HTTP publication and optional retry',
+              receiver.origin,
             )
-            reach.reach('already-current')
-          } else {
-            assert(uploads.length > 0, 'real packed publication path ran')
-            reach.reach('packed-upload')
-          }
-          checkPublishObservation(
-            state.requests,
-            expected,
-            'real HTTP publication and optional retry',
-            receiver.origin,
-          )
-          checkRegistry(state, receiver.initialRegistry, expected)
-          reach.reach('compared')
-          reach.assertReached()
-        }),
+            checkRegistry(state, receiver.initialRegistry, expected)
+            reach.reach('compared')
+            reach.assertReached()
+          }),
+        history.stableDependency ?? false,
       )
     } catch (error) {
       didFail = true

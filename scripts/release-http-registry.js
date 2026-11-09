@@ -185,6 +185,8 @@ const server = http.createServer((request, response) => {
           name: archive.manifest.name,
           version: archive.manifest.version,
           files: archive.files,
+          dependencies: archive.manifest.dependencies ?? {},
+          peerDependencies: archive.manifest.peerDependencies ?? {},
         },
       })
       if (controlledFailure) {

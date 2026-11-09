@@ -193,8 +193,10 @@ jobs:
         env:
           ELECTRON_RUN_AS_NODE: '1'
         run: |
+          node -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close()"
           pnpm rebuild:electron
-          pnpm exec electron -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close()"
+          pnpm exec electron -e "const { createRequire } = require('node:module'); const Database = createRequire(require('node:path').resolve('.electron-native/package.json'))('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close()"
+          node -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close()"
 
       - name: Run Cloudflare Durable Object persisted collection E2E tests
         if: matrix.group == 'cloud-mobile'

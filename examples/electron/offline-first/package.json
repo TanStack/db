@@ -10,7 +10,7 @@
     "dev:server": "tsx server/index.ts",
     "dev:electron": "wait-on http://localhost:5173 && pnpm rebuild:electron && electron .",
     "server": "tsx server/index.ts",
-    "rebuild:electron": "electron-rebuild --force --only better-sqlite3 --module-dir ."
+    "rebuild:electron": "node scripts/rebuild-electron.mjs"
   },
   "dependencies": {
     "@tanstack/electron-db-sqlite-persistence": "^1.0.0-rc.1.4",

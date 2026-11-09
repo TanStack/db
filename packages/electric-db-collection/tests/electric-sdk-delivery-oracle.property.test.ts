@@ -1495,6 +1495,8 @@ async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
       expect(listeners.registered()).toBe(round + 1)
 
       const deliverRetiredSnapshot = async () => {
+        const retiredMetadata = new Map(metadata.get(retiredStorageId))
+        const currentMetadata = new Map(metadata.get(storageId))
         respond(oldSnapshot, { id: oldId, name: `late-old` }, round * 4 + 1)
         await new Promise<void>((resolve) => setTimeout(resolve, 0))
         expect(collection.get(oldId)).toBeUndefined()
@@ -1502,6 +1504,13 @@ async function checkManagedRotation(cuts: ReadonlyArray<RetiredSnapshotCut>) {
           rows.get(retiredStorageId)!.has(oldId),
           `retired response in retired cache`,
         ).toBe(false)
+        expect(
+          metadata.get(retiredStorageId),
+          `retired response metadata`,
+        ).toEqual(retiredMetadata)
+        expect(metadata.get(storageId), `current generation metadata`).toEqual(
+          currentMetadata,
+        )
         rotationReach?.reach(`retired-target-observed`)
       }
       if (retiredSnapshotCut === `during-rotation`)
@@ -1940,10 +1949,12 @@ sdkCampaigns(
  * The independent model uses only authored HTTP positions and source rows.
  * It never reads ShapeStream state to predict durable metadata.
  *
- * Each history starts changes-only, performs two different demands, then
- * restarts. All tag/consumer/empty-second-response lanes run for each generated
- * position and payload. Distinct demands avoid deduplication; increasing
- * positions are legal, while regressing source positions are excluded.
+ * Each history starts changes-only. Direct and live-query consumers perform
+ * two distinct demands. The cursor consumer makes two physical requests in
+ * one admitted demand. Successful histories restart; rejected writes stop at
+ * rejection. Each tag/consumer/empty-second-response/delivery lane runs fixed
+ * and random campaigns of generated positions and payloads. Distinct demands
+ * avoid deduplication. Increasing positions are legal; regressing ones are not.
  * The first load distinguishes an absent cursor, the second a stale cursor,
  * and the empty neighbor requires progress without a row write. Tagged restart
  * must quarantine cache-only rows; its reset policy is owned separately.
@@ -1969,228 +1980,354 @@ function checkpointRow(row: TestRow | undefined) {
 }
 
 type ResumeCheckpointHistory = { base: number; gap: number; name: string }
-async function checkResumeCheckpoint(history: ResumeCheckpointHistory) {
-  for (const tagged of [false, true])
-    for (const consumer of [`direct`, `live-query`] as const)
-      for (const emptySecond of [false, true]) {
-        const reach = createOracleReach(
-          `electric.sdk-resume-checkpoint.${tagged}.${consumer}.${emptySecond}`,
-          [`cold-cursor`, `advanced-cursor`, `fresh-launch-demand`],
-        )
-        reach.beginHistory()
-        const fixture = managedTagPersistence()
-        const http = controlledHttp()
-        const collectionId = `sdk-resume-checkpoint-${++sequence}`
-        const create = () =>
-          createCollection(
-            persistedCollectionOptions<
-              TestRow,
-              string | number,
-              never,
-              ElectricCollectionUtils<TestRow>
-            >({
-              ...electricCollectionOptions<TestRow>({
-                id: collectionId,
-                shapeOptions: {
-                  url: `http://test-url/${collectionId}`,
-                  params: { table: `rows` },
-                  fetchClient: http.fetchClient,
-                },
-                syncMode: `on-demand`,
-                startSync: true,
-                getKey: (row) => row.id,
-              }),
-              persistence: { adapter: fixture.adapter },
-            }),
-          )
-        const first = create()
-        let current = first
-        const queries: Array<{ cleanup: () => Promise<void> }> = []
-        const demand = (id: number) => {
-          if (consumer === `direct`)
-            return Promise.resolve(
-              current._sync.loadSubset({
-                where: new IR.Func(`eq`, [
-                  new IR.PropRef([`id`]),
-                  new IR.Value(id),
-                ]),
-              }),
-            )
-          const source = current
-          const query = createLiveQueryCollection({
-            startSync: false,
-            query: (q) =>
-              q
-                .from({ row: source })
-                .where(({ row }) => eq(row.id, id))
-                .select(({ row }) => ({
-                  id: row.id,
-                  name: row.name,
-                  stable: row.stable,
-                })),
-          })
-          queries.push(query)
-          return query.preload()
-        }
-        const respond = (
-          request: Request,
-          id: number,
-          offset: number,
-          empty: boolean,
-        ) => {
-          expect(request.url.searchParams.get(`subset__where`)).toBe(
-            `"id" = $1`,
-          )
-          expect(
-            JSON.parse(
-              request.url.searchParams.get(`subset__params`) ?? `null`,
-            ),
-          ).toEqual({ 1: String(id) })
-          request.respond(
-            new Response(
-              JSON.stringify({
-                metadata: {
-                  xmin: `10`,
-                  xmax: `20`,
-                  xip_list: [],
-                  database_lsn: `10`,
-                  snapshot_mark: offset,
-                },
-                data: empty
-                  ? []
-                  : [
-                      {
-                        key: String(id),
-                        value: {
-                          id: String(id),
-                          name: history.name,
-                          stable: `retained`,
-                        },
-                        headers: {
-                          operation: `insert`,
-                          ...(tagged ? { tags: [`selected`] } : {}),
-                        },
-                      },
-                    ],
-              }),
-              {
-                headers: {
-                  ...headers(offset),
-                  'electric-schema': JSON.stringify({
-                    id: { type: `int4` },
-                    name: { type: `text` },
-                    stable: { type: `text` },
-                  }),
-                },
-              },
-            ),
-          )
-        }
-        await withElectricCleanup(async () => {
-          const initial = await atCheckpoint(
-            http.take(),
-            `checkpoint first stream`,
-          )
-          expect(initial.url.searchParams.get(`log`)).toBe(`changes_only`)
-          for (const id of [1, 2]) {
-            const loading = demand(id)
-            void loading.catch(() => undefined)
-            const offset = history.base + (id - 1) * history.gap
-            respond(
-              await atCheckpoint(http.take(true), `checkpoint snapshot ${id}`),
-              id,
-              offset,
-              id === 2 && emptySecond,
-            )
-            await atCheckpoint(loading, `checkpoint demand ${id} applied`)
-            expect(
-              fixture.metadata().get(`electric:resume`),
-              `durable cursor at successful demand settlement`,
-            ).toMatchObject(expectedResumeCheckpoint(offset, tagged))
-            expect(checkpointRow(current.get(id))).toEqual(
-              id === 2 && emptySecond
-                ? undefined
-                : { id, name: history.name, stable: `retained` },
-            )
-            reach.reach(id === 1 ? `cold-cursor` : `advanced-cursor`)
-          }
-          for (const query of queries.splice(0)) await query.cleanup()
-          await first.cleanup()
-          current = create()
-          const resumed = await atCheckpoint(
-            http.take(),
-            `checkpoint restarted stream`,
-          )
-          expect(resumed.url.searchParams.get(`log`)).toBe(`changes_only`)
-          expect(resumed.url.searchParams.get(`offset`)).toBe(
-            tagged ? `now` : `${history.base + history.gap}_0`,
-          )
-          const loading = demand(1)
-          void loading.catch(() => undefined)
-          respond(
-            await atCheckpoint(
-              http.take(true),
-              `checkpoint restarted snapshot`,
-            ),
-            1,
-            history.base + history.gap + 1,
-            false,
-          )
-          await atCheckpoint(loading, `checkpoint restarted demand applied`)
-          expect(checkpointRow(current.get(1))).toEqual({
-            id: 1,
-            name: history.name,
-            stable: `retained`,
-          })
-          expect(fixture.rows().get(1)?.value).toEqual(
-            checkpointRow(current.get(1)),
-          )
-          reach.reach(`fresh-launch-demand`)
-        }, [
-          async () => {
-            for (const query of queries) await query.cleanup()
+type ResumeCheckpointLane = {
+  tagged: boolean
+  consumer: `direct` | `live-query` | `cursor`
+  emptySecond: boolean
+  delivery: `apply` | `hold` | `reject`
+}
+async function checkResumeCheckpoint(
+  history: ResumeCheckpointHistory,
+  { tagged, consumer, emptySecond, delivery }: ResumeCheckpointLane,
+) {
+  const reach = createOracleReach(
+    `electric.sdk-resume-checkpoint.${tagged}.${consumer}.${emptySecond}.${delivery}`,
+    delivery === `reject`
+      ? [`checkpoint-rejected`]
+      : [
+          ...(consumer === `cursor` ? [`next-request`] : [`cold-cursor`]),
+          `advanced-cursor`,
+          `fresh-launch-demand`,
+          ...(delivery === `hold` ? [`held-checkpoint`] : []),
+        ],
+  )
+  reach.beginHistory()
+  const fixture = managedTagPersistence()
+  const entered = deferred<void>()
+  const release = deferred<void>()
+  const checkpointError = new Error(`checkpoint storage failed`)
+  let intercepted = false
+  const apply = fixture.adapter.applyCommittedTx.bind(fixture.adapter)
+  fixture.adapter.applyCommittedTx = async (target, tx) => {
+    if (
+      !intercepted &&
+      tx.collectionMetadataMutations?.some(
+        (mutation) =>
+          mutation.type !== `delete` &&
+          mutation.key === `electric:resume` &&
+          typeof mutation.value === `object` &&
+          mutation.value !== null &&
+          `kind` in mutation.value &&
+          mutation.value.kind === `resume`,
+      )
+    ) {
+      intercepted = true
+      entered.resolve()
+      if (delivery === `hold`) await release.promise
+      if (delivery === `reject`) throw checkpointError
+    }
+    return apply(target, tx)
+  }
+  const http = controlledHttp()
+  const collectionId = `sdk-resume-checkpoint-${++sequence}`
+  const create = () =>
+    createCollection(
+      persistedCollectionOptions<
+        TestRow,
+        string | number,
+        never,
+        ElectricCollectionUtils<TestRow>
+      >({
+        ...electricCollectionOptions<TestRow>({
+          id: collectionId,
+          shapeOptions: {
+            url: `http://test-url/${collectionId}`,
+            params: { table: `rows` },
+            fetchClient: http.fetchClient,
           },
-          () => current.cleanup(),
-          () => first.cleanup(),
-          () => http.close(),
-          () => expect(http.activeCount()).toBe(0),
-        ])
-        reach.assertReached()
-        console.log(
-          `ORACLE_REACH`,
-          JSON.stringify({
-            property: `electric.sdk-resume-checkpoint`,
-            tagged,
-            consumer,
-            emptySecond,
-            counts: Object.fromEntries(reach.counts()),
-          }),
+          syncMode: `on-demand`,
+          startSync: true,
+          getKey: (row) => row.id,
+        }),
+        persistence: { adapter: fixture.adapter },
+      }),
+    )
+  const first = create()
+  let current = first
+  const queries: Array<{ cleanup: () => Promise<void> }> = []
+  let firstLaunch = true
+  const demand = (id: number) => {
+    if (consumer === `cursor` && firstLaunch) {
+      const field = new IR.PropRef([`id`])
+      return Promise.resolve(
+        current._sync.loadSubset({
+          limit: 10,
+          orderBy: [
+            {
+              expression: field,
+              compareOptions: {
+                direction: `asc`,
+                nulls: `last`,
+                stringSort: `lexical`,
+              },
+            },
+          ],
+          cursor: {
+            whereCurrent: new IR.Func(`eq`, [field, new IR.Value(1)]),
+            whereFrom: new IR.Func(`gt`, [field, new IR.Value(1)]),
+            lastKey: 1,
+          },
+        }),
+      )
+    }
+    if (consumer === `direct` || consumer === `cursor`)
+      return Promise.resolve(
+        current._sync.loadSubset({
+          where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
+        }),
+      )
+    const source = current
+    const query = createLiveQueryCollection({
+      startSync: false,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .where(({ row }) => eq(row.id, id))
+          .select(({ row }) => ({
+            id: row.id,
+            name: row.name,
+            stable: row.stable,
+          })),
+    })
+    queries.push(query)
+    return query.preload()
+  }
+  const respond = (
+    request: Request,
+    id: number,
+    offset: number,
+    empty: boolean,
+  ) => {
+    const cursorFrom = consumer === `cursor` && firstLaunch && id === 2
+    expect(request.url.searchParams.get(`subset__where`)).toBe(
+      cursorFrom ? `"id" > $1` : `"id" = $1`,
+    )
+    expect(
+      JSON.parse(request.url.searchParams.get(`subset__params`) ?? `null`),
+    ).toEqual({ 1: String(cursorFrom ? 1 : id) })
+    request.respond(
+      new Response(
+        JSON.stringify({
+          metadata: {
+            xmin: `10`,
+            xmax: `20`,
+            xip_list: [],
+            database_lsn: `10`,
+            snapshot_mark: offset,
+          },
+          data: empty
+            ? []
+            : [
+                {
+                  key: String(id),
+                  value: {
+                    id: String(id),
+                    name: history.name,
+                    stable: `retained`,
+                  },
+                  headers: {
+                    operation: `insert`,
+                    ...(tagged ? { tags: [`selected`] } : {}),
+                  },
+                },
+              ],
+        }),
+        {
+          headers: {
+            ...headers(offset),
+            'electric-schema': JSON.stringify({
+              id: { type: `int4` },
+              name: { type: `text` },
+              stable: { type: `text` },
+            }),
+          },
+        },
+      ),
+    )
+  }
+  await withElectricCleanup(async () => {
+    const initial = await atCheckpoint(http.take(), `checkpoint first stream`)
+    expect(initial.url.searchParams.get(`log`)).toBe(`changes_only`)
+    let queued:
+      { loading: ReturnType<typeof demand>; request: Request } | undefined
+    for (const id of [1, 2]) {
+      let settlement = `pending`
+      const loading = queued?.loading ?? demand(id)
+      void loading.then(
+        () => {
+          settlement = `fulfilled`
+        },
+        () => {
+          settlement = `rejected`
+        },
+      )
+      const offset = history.base + (id - 1) * history.gap
+      respond(
+        queued?.request ??
+          (await atCheckpoint(http.take(true), `checkpoint snapshot ${id}`)),
+        id,
+        offset,
+        id === 2 && emptySecond,
+      )
+      if (id === 1 && delivery !== `apply`) {
+        await atCheckpoint(
+          Promise.race([
+            entered.promise,
+            loading.then(
+              () => undefined,
+              () => undefined,
+            ),
+          ]),
+          `durable checkpoint or load settlement`,
+        )
+        expect(
+          intercepted,
+          `load cannot finish without its durable checkpoint`,
+        ).toBe(true)
+        if (delivery === `reject`) {
+          // The persistence contract exposes its named durability error and
+          // preserves the storage failure as the local cause (core README).
+          await expect(loading).rejects.toMatchObject({
+            name: `PersistedCollectionDurabilityError`,
+            cause: checkpointError,
+          })
+          reach.reach(`checkpoint-rejected`)
+          return
+        }
+        // The adapter reached the durable write, which stays held. Yield only
+        // to expose an incorrectly early load settlement at this semantic cut.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(settlement, `load waits for durable cursor`).toBe(`pending`)
+        reach.reach(`held-checkpoint`)
+        if (consumer === `cursor`) {
+          // Both requests belong to one admitted cursor demand, so this cut
+          // bypasses the persistence wrapper's next-demand hydration barrier.
+          queued = {
+            loading,
+            request: await atCheckpoint(
+              http.take(true),
+              `next physical snapshot while checkpoint is held`,
+            ),
+          }
+          reach.reach(`next-request`)
+          release.resolve()
+          continue
+        }
+        release.resolve()
+      }
+      await atCheckpoint(loading, `checkpoint demand ${id} applied`)
+      expect(
+        fixture.metadata().get(`electric:resume`),
+        `durable cursor at successful demand settlement`,
+      ).toMatchObject(expectedResumeCheckpoint(offset, tagged))
+      expect(checkpointRow(current.get(id))).toEqual(
+        id === 2 && emptySecond
+          ? undefined
+          : { id, name: history.name, stable: `retained` },
+      )
+      reach.reach(id === 1 ? `cold-cursor` : `advanced-cursor`)
+    }
+    for (const query of queries.splice(0)) await query.cleanup()
+    await first.cleanup()
+    firstLaunch = false
+    current = create()
+    const resumed = await atCheckpoint(
+      http.take(),
+      `checkpoint restarted stream`,
+    )
+    expect(resumed.url.searchParams.get(`log`)).toBe(`changes_only`)
+    expect(resumed.url.searchParams.get(`offset`)).toBe(
+      tagged ? `now` : `${history.base + history.gap}_0`,
+    )
+    expect(resumed.url.searchParams.get(`handle`)).toBe(tagged ? null : `shape`)
+    const loading = demand(1)
+    void loading.catch(() => undefined)
+    respond(
+      await atCheckpoint(http.take(true), `checkpoint restarted snapshot`),
+      1,
+      history.base + history.gap + 1,
+      false,
+    )
+    await atCheckpoint(loading, `checkpoint restarted demand applied`)
+    expect(checkpointRow(current.get(1))).toEqual({
+      id: 1,
+      name: history.name,
+      stable: `retained`,
+    })
+    expect(fixture.rows().get(1)?.value).toEqual(checkpointRow(current.get(1)))
+    if (tagged)
+      expect(fixture.metadata().get(`electric:resume`)).toMatchObject({
+        kind: `reset`,
+      })
+    reach.reach(`fresh-launch-demand`)
+  }, [
+    () => release.resolve(),
+    async () => {
+      for (const query of queries) await query.cleanup()
+    },
+    () => current.cleanup(),
+    () => first.cleanup(),
+    () => http.close(),
+    () => expect(http.activeCount()).toBe(0),
+  ])
+  reach.assertReached()
+  console.log(
+    `ORACLE_REACH`,
+    JSON.stringify({
+      property: `electric.sdk-resume-checkpoint`,
+      tagged,
+      consumer,
+      emptySecond,
+      delivery,
+      counts: Object.fromEntries(reach.counts()),
+    }),
+  )
+}
+for (const tagged of [false, true])
+  for (const consumer of [`direct`, `live-query`, `cursor`] as const)
+    for (const emptySecond of [false, true])
+      for (const delivery of [`apply`, `hold`, `reject`] as const) {
+        if (consumer === `cursor` && delivery !== `hold`) continue
+        const property = `electric.sdk-resume-checkpoint.${tagged}.${consumer}.${emptySecond}.${delivery}`
+        const violation = sameViolation()
+        sdkCampaigns(
+          property,
+          `persists each completed SDK snapshot cursor before demand settlement tagged=${tagged} consumer=${consumer} emptySecond=${emptySecond} delivery=${delivery}`,
+          20261109,
+          violation,
+          async (seed) => {
+            await fc.assert(
+              fc.asyncProperty(
+                fc.record({
+                  base: fc.integer({ min: 1, max: 30 }),
+                  gap: fc.integer({ min: 1, max: 5 }),
+                  name: fc.string({ minLength: 1, maxLength: 8 }),
+                }),
+                (history) =>
+                  violation.check(history, () =>
+                    checkResumeCheckpoint(history, {
+                      tagged,
+                      consumer,
+                      emptySecond,
+                      delivery,
+                    }),
+                  ),
+              ),
+              {
+                ...oraclePropertyOptions(8, property),
+                ...(seed === undefined ? {} : { seed }),
+              },
+            )
+          },
         )
       }
-}
-const resumeCheckpointViolation = sameViolation()
-sdkCampaigns(
-  `electric.sdk-resume-checkpoint`,
-  `persists each completed SDK snapshot cursor before demand settlement`,
-  20261109,
-  resumeCheckpointViolation,
-  async (seed) => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.record({
-          base: fc.integer({ min: 1, max: 30 }),
-          gap: fc.integer({ min: 1, max: 5 }),
-          name: fc.string({ minLength: 1, maxLength: 8 }),
-        }),
-        (history) =>
-          resumeCheckpointViolation.check(history, () =>
-            checkResumeCheckpoint(history),
-          ),
-      ),
-      {
-        ...oraclePropertyOptions(8, `electric.sdk-resume-checkpoint`),
-        ...(seed === undefined ? {} : { seed }),
-      },
-    )
-  },
-)
