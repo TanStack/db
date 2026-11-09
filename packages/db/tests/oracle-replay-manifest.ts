@@ -1028,10 +1028,6 @@ const replayTestNames = new Map([
     `retains every touched Collection across mutation shapes.*seed undefined`,
   ],
   [
-    `collection-lifecycle.gc-persisting-transaction`,
-    `retires a Collection only after gcTime.*seed undefined`,
-  ],
-  [
     `collection-lifecycle.gc-retention-boundaries`,
     `preserves retention across transaction phases.*seed undefined`,
   ],
