@@ -153,7 +153,7 @@ const streams: Array<ControlledStream> = []
 // resolves it. Vite's module id is the file this resolves to.
 const electricClientModule = await vi.hoisted(async () => {
   const { readFileSync } = await import(`node:fs`)
-  const { dirname, join } = await import(`node:path`)
+  const { dirname, join: joinPath } = await import(`node:path`)
   const { fileURLToPath } = await import(`node:url`)
   const manifestPath = fileURLToPath(
     new URL(
@@ -167,7 +167,7 @@ const electricClientModule = await vi.hoisted(async () => {
   const importExport = manifest.exports[`.`].import
   const entry =
     typeof importExport === `string` ? importExport : importExport.default
-  return join(dirname(manifestPath), entry)
+  return joinPath(dirname(manifestPath), entry)
 })
 
 vi.mock(electricClientModule, async (importOriginal) => {
