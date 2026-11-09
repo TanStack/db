@@ -1,5 +1,6 @@
 import { tanstackConfig } from '@tanstack/eslint-config'
-import oraclePlugin from './scripts/eslint-plugin-oracle/index.js'
+import oraclePlugin from '@tanstack/eslint-plugin-oracles'
+import { oracleLintSettings } from './scripts/oracle-lint-settings.mjs'
 
 export default [
   ...tanstackConfig,
@@ -11,6 +12,9 @@ export default [
       `**/.nitro/**`,
       `**/traildepot/**`,
       `examples/angular/**`,
+      // The gap report CLI's evidence store and workspace bundles.
+      `**/.oracle-gaps/**`,
+      `**/.oracle-gaps-*`,
       `packages/db-collection-e2e/vite.config.ts`,
       // Third-party adapter source vendored unchanged as a conformance fixture.
       `packages/db-adapter-conformance/tests/neon/vendor/**`,
@@ -49,6 +53,9 @@ export default [
       'import/no-cycle': `error`,
     },
   },
+  // The oracle rules come from @tanstack/eslint-plugin-oracles; the settings
+  // give it TanStack DB's environment prefix and framework modules.
+  { settings: oracleLintSettings },
   oraclePlugin.configs.recommended,
   oraclePlugin.configs.production,
 ]

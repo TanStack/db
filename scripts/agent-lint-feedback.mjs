@@ -47,14 +47,15 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import tsParser from '@typescript-eslint/parser'
 import { ESLint } from 'eslint'
-import oraclePlugin from './eslint-plugin-oracle/index.js'
-import { resolveImportedTestModule } from './eslint-plugin-oracle/rules/no-unit-test.js'
+import oraclePlugin from '@tanstack/eslint-plugin-oracles'
+import { resolveImportedTestModule } from '@tanstack/eslint-plugin-oracles/rules/no-unit-test'
 import {
   describeLoweredRunBudget,
   isOracleFile,
   loweredRunBudgetsBetween,
   mergeBase,
 } from './check-oracle-run-counts.mjs'
+import { oracleLintSettings } from './oracle-lint-settings.mjs'
 
 const { values: options, positionals } = parseArgs({
   options: {
@@ -238,6 +239,7 @@ function createLinter() {
         languageOptions: { parser: tsParser },
       },
       { linterOptions: { noInlineConfig: true } },
+      { settings: oracleLintSettings },
       // `lint` passes only oracle files, chosen by `isOracleFile`, so the rules
       // apply to every file that it passes.
       {
