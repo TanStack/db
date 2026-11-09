@@ -7,7 +7,7 @@
 //
 //   node scripts/bench/production.mjs scripts/bench/incremental-update.ts \
 //     --iterations=100 --warmup=20 --repetitions=3 --outFile=candidate.json
-import { rmSync } from 'node:fs'
+import { realpathSync, rmSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -21,14 +21,19 @@ if (!benchmark)
   throw new Error('Usage: node scripts/bench/production.mjs <benchmark> [args]')
 
 const dbEntry = await assertPackageDistFresh(root, 'db')
-const bundleDir = await mkdtemp(path.join(tmpdir(), 'tanstack-db-bench-'))
+const ivmEntry = await assertPackageDistFresh(root, 'db-ivm')
+const bundleDir = await mkdtemp(
+  path.join(realpathSync(tmpdir()), 'tanstack-db-bench-'),
+)
 process.on('exit', () => rmSync(bundleDir, { recursive: true, force: true }))
 const outfile = path.join(bundleDir, 'benchmark.mjs')
-await build({
+const { metafile } = await build({
   entryPoints: [path.resolve(benchmark)],
   outfile,
   bundle: true,
   minify: true,
+  sourcemap: 'inline',
+  metafile: true,
   format: 'esm',
   platform: 'node',
   // Resolve imports as an app would: the repo's tsconfig paths would
@@ -36,7 +41,7 @@ await build({
   // benchmark imports db's source entry for its types; the bundle takes the
   // built entry instead.
   tsconfigRaw: '{}',
-  alias: { '@tanstack/db-ivm': await assertPackageDistFresh(root, 'db-ivm') },
+  alias: { '@tanstack/db-ivm': ivmEntry },
   plugins: [
     {
       name: 'built-db',
@@ -51,5 +56,17 @@ await build({
   logLevel: 'error',
 })
 
+// A source module in the bundle would measure development code, or a second
+// copy of a package beside its dist.
+const sources = Object.keys(metafile.inputs).filter((input) =>
+  /(^|\/)packages\/[^/]+\/src\//.test(input),
+)
+if (sources.length > 0)
+  throw new Error(
+    `The benchmark bundle must use built packages, but it includes sources:\n${sources.join('\n')}`,
+  )
+
+// The stack trace of a failed benchmark assertion names its source line.
+process.setSourceMapsEnabled(true)
 process.argv = [process.execPath, outfile, ...args]
 await import(pathToFileURL(outfile).href)
