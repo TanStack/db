@@ -926,6 +926,7 @@ function registerExistingHistory<T>(
   seed: number,
   examples: ReadonlyArray<readonly [T]>,
   judge: (history: T) => Promise<void>,
+  fixedId: string,
 ) {
   const law = {
     statement: `The existing settlement ledger and terminal-state model judge each original observation, error, and resource-ownership checkpoint.`,
@@ -946,7 +947,7 @@ function registerExistingHistory<T>(
     check: forwardAssertionJudgment,
   })
   oracleProperty({
-    id: `${id}-fixed`,
+    id: fixedId,
     law,
     histories: examples.map(([history], index) => ({ history, index })),
     label: (entry) => String(entry.index),
@@ -966,6 +967,7 @@ registerExistingHistory(
   1844,
   pagehideExamples,
   runPagehideHistory,
+  `opfs.page-lifecycle-fixed`,
 )
 registerExistingHistory(
   `opfs.mixed-execute`,
@@ -974,6 +976,7 @@ registerExistingHistory(
   1845,
   mixedExamples,
   runMixedExecuteHistory,
+  `opfs.mixed-execute-fixed`,
 )
 registerExistingHistory(
   `opfs.terminal-event`,
@@ -982,6 +985,7 @@ registerExistingHistory(
   1847,
   terminalEventExamples,
   runTerminalEventHistory,
+  `opfs.terminal-event-fixed`,
 )
 registerExistingHistory(
   `opfs.close`,
@@ -990,6 +994,7 @@ registerExistingHistory(
   1848,
   closeExamples,
   runCloseHistory,
+  `opfs.close-fixed`,
 )
 registerExistingHistory(
   `opfs.failure-cleanup`,
@@ -998,4 +1003,5 @@ registerExistingHistory(
   1846,
   failureExamples,
   runFailureHistory,
+  `opfs.failure-cleanup-fixed`,
 )

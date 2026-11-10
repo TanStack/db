@@ -4,6 +4,7 @@ import {
   oracleAssertion,
   recordAssertionJudgment,
   recordedAssertionJudgment,
+  rejectAt,
 } from './oracle-assertion-adapter'
 import type { Observation } from './oracle-property'
 
@@ -26,6 +27,21 @@ function assertion() {
 }
 
 describe(`existing assertion judgment transport`, () => {
+  it(`preserves an explicitly authored comparison error`, async () => {
+    const { plan, trace, observe } = recording()
+    const original = new Error(`independent model mismatch`)
+    const stack = original.stack
+    await recordAssertionJudgment(`existing law`, plan, observe, () => {
+      rejectAt(`authored comparison`, original)
+    })
+    const verdict = recordedAssertionJudgment(plan, trace)
+    expect(verdict.kind).toBe(`violation`)
+    if (verdict.kind !== `violation`) throw new Error(`missing violation`)
+    expect(verdict.cause).toBe(original)
+    expect(original.stack).toBe(stack)
+    expect(verdict.checkpoint).toBe(`authored comparison`)
+  })
+
   it(`keeps the comparison error object, cause and stack outside data observations`, async () => {
     const { plan, trace, observe } = recording()
     const original = assertion()

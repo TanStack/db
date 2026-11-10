@@ -9,6 +9,12 @@ import type { Observation, Verdict } from './oracle-property'
 const comparisonFailures = new WeakMap<Error, string>()
 const judgments = new WeakMap<object, Verdict>()
 
+/** Mark an error at an explicit semantic comparison failure, preserving it. */
+export function rejectAt(checkpoint: string, error: Error): never {
+  comparisonFailures.set(error, checkpoint)
+  throw error
+}
+
 /** Mark only an assertion thrown by an authored comparison, then rethrow the
  * identical object. A production AssertionError outside this boundary is not
  * converted. Awaited matcher failures keep the same Promise rejection too. */

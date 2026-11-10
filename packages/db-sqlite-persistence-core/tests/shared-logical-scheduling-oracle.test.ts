@@ -122,8 +122,8 @@ function check(
     differs(
       `held`,
       `non-preemptible hydration`,
-      held?.admissions,
-      held?.firstQueryAdmissionCount,
+      held.admissions,
+      held.firstQueryAdmissionCount,
     ) ??
     differs(
       `settled`,
