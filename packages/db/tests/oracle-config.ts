@@ -12,6 +12,13 @@ import {
 export * from '@tanstack/oracles'
 
 const staticOracleProperties = [
+  `opfs.page-lifecycle-fixed`,
+  `opfs.mixed-execute-fixed`,
+  `opfs.terminal-event-fixed`,
+  `opfs.close-fixed`,
+  `opfs.failure-cleanup-fixed`,
+  `opfs.request-order-fixed`,
+
   `persisted-readiness.history`,
   `persisted-sync-problem.history`,
   `opfs-worker.diagnostics-fixed`,

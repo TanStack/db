@@ -98,7 +98,12 @@ const config = defineConfig({
     typecheck: {
       enabled: true,
       include: [`tests/**/*.test.ts`, `tests/**/*.test-d.ts`],
-      exclude: [`**/node_modules/**`, `tests/reload-class-oracle.test.ts`],
+      exclude: [
+        `**/node_modules/**`,
+        `tests/reload-class-oracle.test.ts`,
+        `tests/opfs-page-lifecycle-oracle.test.ts`,
+        `tests/opfs-request-order-oracle.test.ts`,
+      ],
     },
   },
 })

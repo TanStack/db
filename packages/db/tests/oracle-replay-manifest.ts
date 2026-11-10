@@ -15,6 +15,16 @@ const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
   [
+    `browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts`,
+    `opfs`,
+    `page-lifecycle-fixed mixed-execute-fixed terminal-event-fixed close-fixed failure-cleanup-fixed`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/opfs-request-order-oracle.test.ts`,
+    `opfs`,
+    `request-order-fixed`,
+  ],
+  [
     `db-sqlite-persistence-core/tests/persisted-readiness-oracle.test.ts`,
     `persisted-readiness`,
     `history`,

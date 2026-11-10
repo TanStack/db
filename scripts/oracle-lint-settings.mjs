@@ -36,14 +36,6 @@ export const oracleLintSettings = {
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts`,
-        reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/browser-db-sqlite-persistence/tests/opfs-request-order-oracle.test.ts`,
-        reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/browser-db-sqlite-persistence/tests/per-collection-coordinator-oracle.test.ts`,
         reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
@@ -149,10 +141,6 @@ export const oracleLintSettings = {
       },
       {
         file: `packages/db-ivm/tests/structural-identity-oracle.property.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db-sqlite-persistence-core/tests/ordinary-transaction-work-oracle.ts`,
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
