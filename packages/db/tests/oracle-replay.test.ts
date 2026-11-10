@@ -621,6 +621,31 @@ describe(`named oracle replay manifest`, () => {
           expect(source).toContain(
             `windowHistoryProperty(driver, \`${family}\`)`,
           )
+      } else if (
+        entry.property.startsWith(
+          `adapter-conformance.eager-live-source.reference`,
+        ) || entry.property === `adapter-conformance.eager-live-source.rxdb`
+      ) {
+        const prefix = `adapter-conformance.eager-live-source.`
+        const [driver, ...variant] = entry.property
+          .slice(prefix.length)
+          .split(`.`)
+        expect(source).toContain(`\`${prefix}${driver}\``)
+        if (variant[0] === `ablation`) {
+          expect(driver).toBe(`reference`)
+          expect(source).toContain('id: `${property}.ablation.${name}`')
+          const [name, state] = variant.slice(1)
+          expect(source).toContain(`\`${name}\``)
+          if (state !== undefined) {
+            expect(source).toContain(`\`${state}\``)
+            expect(source).toContain(
+              'registerAblation(`${kind}.${lost}`, lost,',
+            )
+          }
+        } else if (variant.length > 0) {
+          expect(variant).toHaveLength(1)
+          expect(source).toContain(`id: \`\${property}.${variant[0]}\``)
+        }
       } else if (entry.property.startsWith(`electric.sdk-resume-checkpoint.`)) {
         const [, , tagged, consumer, emptySecond, delivery] =
           entry.property.split(`.`)

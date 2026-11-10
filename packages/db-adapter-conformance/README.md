@@ -58,13 +58,28 @@ Implement `EagerLiveSourceDriver`:
 - **`txidEvidence`:** `change` when txids travel on each row message, so a batch with no change carries none; default `batch`.
 - **`observedView`:** if your rows or keys differ from the conformance row, wrap the Collection with `observedView` and a one-to-one mapping. `conformanceKey` maps string keys; `toSqlRow` and `fromSqlRow` map an absent `note` to and from SQL `NULL`.
 
-Declare only the capabilities your adapter supports; the grammar generates
-only the steps they allow. Then run `eagerLiveSourceProperty(driver, reach)`
-with `fc.assert`. `reach` is a `ReachCounter` (`beginHistory`, `reach`);
-count the states `reachStatesFor(driver)` lists and fail the run when one
-was reached fewer than five times, so histories that miss a state the laws
-need do not pass silently. The in-repo campaigns use `createOracleReach`
-from `packages/db/tests/oracle-reach.ts`.
+Declare only the capabilities your adapter supports. The reference and RxDB
+receivers register their campaigns with `oracleProperty` and use
+`tests/eager-live-source-property-oracle.ts` to retain the shared model and
+comparison. Each campaign keeps its original run budget and seed 2118 beside
+a random campaign. Five independently seeded constructed histories per recipe
+make every state in `reachStatesFor(driver)` required. The recipes vary rows,
+values, and generated suffixes inside the same capability-dependent grammar.
+The original arbitrary's random choices are unchanged.
+The shared comparison also checks every generated construction against its
+declared states; a missing entry fails even when the pinned framework loses
+the generated construction's association. The construction declares what is
+required, and the existing production path records what actually happened.
+
+Campaign histories encode Dates and `Float64Array` values as tagged data.
+`resolveEagerLiveSourceHistory` restores the native values before the provider,
+model, and comparison run, so the strict FID-1 judgments remain unchanged. The
+registration adapter records a `ConformanceViolation` under its original law
+and checkpoint; driver failures and secondary cleanup diagnostics retain their
+original error objects. Other receivers keep `eagerLiveSourceProperty` with
+their existing reach counters and replay routes. The vendored Neon receiver
+also remains on that legacy API while its documented failure-channel baseline
+is RED.
 
 ## Drivers
 

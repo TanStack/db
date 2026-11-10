@@ -7839,7 +7839,17 @@ a step, not only the settled checkpoint. The reference push adapter
 campaigns of 600 histories with declared reach, a per-change variant, an
 outage-threshold variant with client-created values, and 45 law-named
 hostile mutants, with ORC-004 reconstruction, exclusion, and
-ablation controls. The Neon Realtime receiving driver
+ablation controls. These reference campaigns and the RxDB receiving campaign
+register through `oracleProperty`; other receiving drivers keep their legacy
+campaign registration.
+Each declared state has five constructed histories with generated rows and
+suffixes inside the same capability-dependent language. The shared comparison
+checks every generated construction's declared states against independently
+recorded entries, including constructions absent from the pinned framework's
+seeded-example association. Date and
+`Float64Array` history values use tagged data until resolution; the shared
+model and strict comparison still receive native values. Named verdicts keep
+the original conformance law and step checkpoint. The Neon Realtime receiving driver
 (`adapter-conformance.eager-live-source.neon-realtime`, `test:neon`) runs
 `@neon/realtime-tanstack` 0.1.1 vendored at neon-pkgs `7ac55e3e` and is RED on
 READY-4 and HEALTH-1 until that adapter moves to `fail()`; probes show LIFE-10

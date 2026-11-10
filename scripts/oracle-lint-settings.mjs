@@ -144,10 +144,6 @@ export const oracleLintSettings = {
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/db-adapter-conformance/tests/reference-adapter-oracle.property.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db-ivm/tests/distinct-incrementalization-oracle.property.test.ts`,
         reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
@@ -694,10 +690,6 @@ export const oracleLintSettings = {
       {
         file: `packages/react-db/tests/window-render-oracle.test.tsx`,
         reason: `manual reach with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/rxdb-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
         file: `packages/solid-db/tests/row-materialization-oracle.test.tsx`,

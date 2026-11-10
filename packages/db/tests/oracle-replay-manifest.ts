@@ -925,7 +925,15 @@ const ownerGroups: ReadonlyArray<
   [
     `db-adapter-conformance/tests/reference-adapter-oracle.property.test.ts`,
     `adapter-conformance.eager-live-source`,
-    `reference`,
+    [
+      `reference reference.per-change reference.outage`,
+      `reference.ablation.snapshot.first-ready reference.ablation.changes.change-batch`,
+      `reference.ablation.fail.failure-after-ready reference.ablation.restart.restart`,
+      `reference.ablation.wait.wait-before-evidence-fulfilled reference.ablation.disconnect.reconnect`,
+      `reference.ablation.reconnect.reconnect reference.ablation.renew.renewal`,
+      `reference.ablation.transient-failure.transient-failure-reported reference.ablation.changes.change-before-ready`,
+      `reference.ablation.notes reference.ablation.live-values reference.ablation.read-point`,
+    ].join(` `),
   ],
   [
     `db-adapter-conformance/tests/neon-realtime-oracle.property.test.ts`,
@@ -1064,21 +1072,28 @@ const replayTestNames = new Map([
     `includes-work.projection-payload`,
     `nested source payloads need no metadata descriptor scans \\(random or replayed\\)`,
   ],
-  ...[
-    `reference`,
-    `neon-realtime`,
-    `trailbase`,
-    `rxdb`,
-    `powersync`,
-    `electric`,
-    `convex`,
-  ].map(
+  ...[`neon-realtime`, `trailbase`, `powersync`, `electric`, `convex`].map(
     (driver) =>
       [
         `adapter-conformance.eager-live-source.${driver}`,
         `conforms on a random campaign or a replayed seed`,
       ] as const,
   ),
+  ...ownerGroups
+    .filter(
+      ([, prefix, suffixes]) =>
+        prefix === `adapter-conformance.eager-live-source` &&
+        (suffixes.startsWith(`reference`) || suffixes === `rxdb`),
+    )
+    .flatMap(([, prefix, suffixes]) =>
+      suffixes.split(` `).map((suffix) => {
+        const property = `${prefix}.${suffix}`
+        return [
+          property,
+          `${property.replaceAll(`.`, `\\.`)} > random seed`,
+        ] as const
+      }),
+    ),
   [
     `query-db.refetch-held-page-end`,
     `generated same-key page shifts.*replay campaign`,
