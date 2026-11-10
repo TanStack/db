@@ -135,8 +135,13 @@ excluded from the successful root/db/db-ivm filtered install.
 The intended lockfile uses the downloaded commit-pinned tarballs' actual hashes
 and metadata. Upstream moved TypeScript from optional peer to dependency; that
 metadata change is included. A frozen filtered install succeeds with the local
-override. A full clean install and the handoff's scratch-CI lockfile regeneration
-remain pending publication approval; local test success does not establish them.
+override. The handoff's scratch-CI regeneration passed in
+[run 42868324651](https://github.com/TanStack/db/actions/runs/42868324651):
+`pnpm install --lockfile-only --ignore-scripts --no-frozen-lockfile` produced
+no diff against the committed lockfile. PR CI also completed frozen dependency
+installs and all test groups on head `77317dc32`. The downloaded artifact is
+byte-identical; SHA-256 is
+`03a04b417c0c49fc122fbf529af2b03318b0da77b6a91b513fe067c354e5651a`.
 
 The gate assumes valid unique entries and a settings module present at base,
 with literal exports and no imports. The external lint plugin owns malformed
@@ -191,3 +196,32 @@ Conversions must preserve every earlier killed mutant key under the same seed,
 all laws/statements/budgets, and required reach. Literal required histories
 become randomized constructions. Each group needs actual receiving-path
 evidence; an unowned mutation report is not a preservation comparison.
+
+## Review follow-up
+
+CodeRabbit's review of `77317dc32` raised four substantive findings. All were
+verified against that source and addressed without changing shipped behavior:
+
+- The migration ratchet now preserves required Playwright real-host witnesses.
+  The pinned framework registers Vitest tests, so unsupported receiving paths
+  block affected production changes until an equivalent real-host replacement
+  passes; retaining the legacy witness grants no conversion exception.
+- The glossary distinguishes an unreached state's required reach evidence from
+  the named kill needed to close a mutant gap.
+- ORC-015 explains that the pinned API has no numeric minimum-count option.
+  N randomized constructed builders each requiring a state guarantee N reached
+  histories. A direct API probe with ten builders and runs=1 reported ten in
+  both campaigns; a builder that missed the state failed.
+- Temporary gate-fixture commits now isolate inherited Git hooks. The shared
+  grammar generates blocking pre-commit and prepare-commit-msg hooks. Before
+  isolation the latter stopped fixture setup at seed `20261110`, path `0:0:0:0`;
+  afterward all five gate tests and that exact replay pass without a global
+  Git-configuration workaround. Fixed/random campaigns reached the two hook
+  kinds 14/11 and 10/10 times. This RED is a fixture setup defect, not a named
+  product-law mutant kill.
+
+The three scoped repairs are committed in `b7f713f03`; explicit ESLint,
+formatting, changed-file lint and normal commit hooks passed. The earlier gate
+mutation evidence remains bounded by the same membership model and CLI path.
+The runner clarification changes documentation only and does not claim that
+Playwright registration support has been implemented.

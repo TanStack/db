@@ -52,6 +52,15 @@ closes gaps in the production functions that it changes. Scope follows the
 changed functions: an oracle need not own every function in a touched file.
 Use `docs/contributing/oracle-coverage.md` to find the owners.
 
+Preserve required real-host receiving witnesses, including their production
+paths and observation checkpoints. The pinned `oracleProperty` registers Vitest
+tests; importing it into a Playwright spec does not convert that spec. Supply a
+compatible registration path or a Vitest production driver that still runs the
+real browser and provider before changing the functions that witness owns.
+Keep the existing Playwright witness and its legacy entry until that replacement
+passes. An unavailable runner path blocks the affected production change; it
+does not waive conversion or permit a Node-only substitute for real-host evidence.
+
 `oracleProperty` is the only campaign API for new or converted oracles. The
 `legacyCampaigns` entries in `scripts/oracle-lint-settings.mjs` temporarily
 permit the listed files to keep their old campaigns. The list may only shrink.
