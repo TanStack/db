@@ -17,6 +17,7 @@ const config = defineConfig({
       // Vitest still type-checks them through the project's tsc run.
       exclude: [
         `**/node_modules/**`,
+        `tests/persisted-options.test.ts`,
         `tests/reserved-commit-sqlite-adapter-oracle.test.ts`,
         `tests/sqlite-boolean-arity-oracle.test.ts`,
 

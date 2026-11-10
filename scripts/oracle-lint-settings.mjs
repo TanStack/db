@@ -44,18 +44,6 @@ export const oracleLintSettings = {
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
-        file: `packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-campaign-oracle.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db-sqlite-persistence-core/tests/persisted-options-type-oracle.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
-        file: `packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
-        reason: `manual reach; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts`,
         reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },

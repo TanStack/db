@@ -15,6 +15,21 @@ const ownerGroups: ReadonlyArray<
   readonly [string, string, string] | readonly [string, string, string, string]
 > = [
   [
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
+    `persistence`,
+    `crossed-leadership-index`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-options.test.ts`,
+    `persisted-options.types`,
+    `core-fixed`,
+  ],
+  [
+    `browser-db-sqlite-persistence/tests/persisted-options.test.ts`,
+    `persisted-options.types`,
+    `browser-fixed`,
+  ],
+  [
     `db-sqlite-persistence-core/tests/reserved-commit-sqlite-adapter-oracle.test.ts`,
     `sqlite`,
     `reserved-commit-hydration`,

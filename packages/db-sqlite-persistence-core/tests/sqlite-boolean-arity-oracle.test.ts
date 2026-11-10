@@ -761,11 +761,8 @@ oracleProperty({
   resolve: (history) => ({ history }),
   model: recordedAssertionJudgment,
   driver: (plan, observe) =>
-    recordAssertionJudgment(
-      `existing SQLite judgment`,
-      plan,
-      observe,
-      () => () => judgeBooleanHistory(undefined)(plan.history),
+    recordAssertionJudgment(`existing SQLite judgment`, plan, observe, () =>
+      judgeBooleanHistory(undefined),
     ),
   check: forwardAssertionJudgment,
   timeout: 120_000,
