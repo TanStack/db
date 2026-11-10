@@ -2205,7 +2205,9 @@ cover binary range ordering, all JavaScript value kinds, or general Collection
 publication histories.
 
 The [comparison oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/comparison-oracle.property.test.ts)
-owns the transferred same-realm NaN and invalid-Date default-order cases,
+uses the shared grammars and independent checks in
+`packages/db/tests/comparison-laws-oracle.ts` and owns the transferred
+same-realm NaN and invalid-Date default-order cases,
 plus ordinary PlainDate calendar and ZonedDateTime instant order. Its
 independent supplied values predict direct comparator signs and ties. The
 [round 5](oracle-reviews/comparison-unit-retirement-round-5.md) and

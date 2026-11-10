@@ -24,16 +24,8 @@ export const oracleLintSettings = {
     // Frozen migration baseline: remove entries as their files convert. Never add one.
     legacyCampaigns: [
       {
-        file: `packages/db/tests/comparison-oracle.property.test.ts`,
-        reason: `raw campaign with fixed histories; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
-      },
-      {
         file: `packages/db/tests/declared-reach-oracle.property.test.ts`,
         reason: `compatibility helpers are the implementation under test; the outer campaign uses oracleProperty and preserves the complete independent ledger self-test.`,
-      },
-      {
-        file: `packages/db/tests/indexed-db/cross-tab-history-oracle.test.ts`,
-        reason: `raw campaign; preserve its laws, declared states, and run budgets during oracleProperty conversion.`,
       },
       {
         file: `packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts`,
