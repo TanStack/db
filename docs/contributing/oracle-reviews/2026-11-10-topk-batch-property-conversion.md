@@ -133,3 +133,65 @@ scheduling or value-identity policy. The two survivors and ten crashes in the
 wider source report remain the same; the conversion claims preservation of
 previous kills, not closure of every gap in that source file. The Murmur and
 script migration blockers remain separate work.
+
+## Review repair: unrelated keys retain their own contributions
+
+Independent review of commit `dad05e44eb5fb5423dc06cc94846db2c30068386`
+found that the unrelated-payload law named keyed contributions but its recorder
+kept only output length and getter reads. The repaired oracle blob is
+`408d2b455eecfb07338750b003a160287f8fec86`.
+
+The governing TopKBatch contract applies each keyed batch's retractions before
+additions and consolidates only same-key versions. A different source key cannot
+supply a missing key's contribution. The old generated class already contained
+the minimal distinguishing history: `count=2`, with `rank=0` retracted and
+`rank=1` inserted for each key. A wrong result that supplies both replacements
+under key 0 and omits key 1 has length 4 and zero unrelated getter reads. The
+old model and recorder collapse this wrong result and the correct one to the
+same observation, so the old comparison returns `pass`.
+
+This is an in-scope comparison gap, not a lost original mutant kill. The repair
+keeps an array of exact key, source-row reference label, and signed weight for
+every returned entry. It compares a sorted copy with an independent per-key
+contribution bag. Sorting permits unspecified key order. It does not coalesce
+weights or discard duplicate, missing, zero, or negative contributions. Output
+length and zero getter reads remain checked.
+
+- **Law:** Each generated key supplies its own old-row retraction and new-row
+  insertion, with no unrelated getter reads. Authority: the established keyed
+  TopKBatch cancellation/replacement contract stated above.
+- **Reach:** The original 1..100 key grammar, seed 409035, and 25-run budget
+  remain. A constructed history retains the generated count with a minimum of
+  two keys. Both fixed and random campaigns entered `multiple unrelated keys`
+  26 times. The minimal count-2 trace replays through the same model, production
+  driver, and comparison.
+- **RED:** Before changing the recorder/model, the added calibration duplicated
+  the first source key's actual returned entries, preserving length and getter
+  reads. The command below failed because no history made the old comparison
+  reject that wrong answer. The source-extraction probe against `dad05e44e`
+  independently recorded the false-green count-2 observation described above.
+- **GREEN:** After the comparison repair, the same calibration passed. The
+  complete normal owner command passed 22 tests. The extraction probe now
+  returns law `unread unrelated payloads` at `batch and unrelated reads`.
+- **Mutant:** `duplicates one source key and omits another` is an executable
+  mutated production observation through the same driver and comparison. It
+  retains the first key's actual row references and weights while substituting
+  them for every other key's contributions. The repaired oracle rejects it.
+- **Limits:** This extension covers one replacement batch over 1..100 sequential
+  numeric keys, one old rank-0 row and one new rank-1 row per key, unit signed
+  weights, direct TopKBatch output, and unrelated getter reads. Other value
+  families remain with the existing matrix. It makes no new key-order promise.
+
+The RED calibration command, from `packages/db-ivm`, was:
+
+```sh
+../../node_modules/.bin/vitest run tests/operators/topk-batch-contract-oracle.test.ts --maxWorkers=2 --coverage.enabled=false --typecheck.enabled=false -t 'duplicates one source key and omits another'
+```
+
+A complete same-seed report after the repair,
+`/tmp/oracle-property-ivm-topk-unrelated-after/results.json`, retains the original
+47 stable keys and every outcome: 35 killed, 10 crashed, and 2 survived. No prior
+kill was lost. The comparison is
+`/tmp/oracle-property-ivm-topk-unrelated-comparison.json`. The complete named
+replay-manifest integration group passed 69 tests, and the repaired owner
+continued to typecheck with zero diagnostics.

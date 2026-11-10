@@ -3990,6 +3990,10 @@ The post-merge review added three missing domains to existing owners:
   subtrees, unrelated getter reads, and long cancellation. The
   [conversion evidence](oracle-reviews/2026-11-10-topk-batch-property-conversion.md)
   records the same-seed mutation comparison and direct guarded replay.
+  The unrelated-payload campaign compares each source key's exact signed
+  contribution bag and source-row identity, as well as output length and zero
+  getter reads. A multiple-key constructed history and duplicate-key/omitted-key
+  calibration protect that distinction.
 - [Leadership replay](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/leadership-replay-oracle.property.test.ts)
   holds real storage-read delivery across successful and permanently rejected
   durable removals, with bounded scans, concurrent loads, and unfinished peers.

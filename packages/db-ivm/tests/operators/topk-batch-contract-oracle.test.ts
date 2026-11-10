@@ -622,6 +622,78 @@ oracleProperty({
   ],
 })
 
+// Each generated key owes its own old-row retraction and new-row insertion.
+// Key order is not promised. Compare a sorted copy of the contribution bag;
+// do not sum weights or discard duplicate, missing, zero, or negative entries.
+function expectedUnrelated(count: number): Array<ExpectedObservation> {
+  return [
+    {
+      checkpoint: `batch and unrelated reads`,
+      value: {
+        length: count * 2,
+        entries: Array.from({ length: count }, (_, key) => [
+          { key, row: `before`, weight: -1 },
+          { key, row: `after`, weight: 1 },
+        ]).flat(),
+        reads: 0,
+      },
+    },
+  ]
+}
+
+// Calibration can duplicate the first key's contributions while retaining the
+// output length and getter reads. This must not stand in for another key.
+function driveUnrelated(
+  count: number,
+  observe: Observe,
+  duplicateFirstKey = false,
+): void {
+  let reads = 0
+  const make = (rank: number) => ({
+    rank,
+    get unrelated() {
+      reads++
+      return new Array(100).fill(rank)
+    },
+  })
+  type Row = [number, ReturnType<typeof make>]
+  const sources = new Map<Row, RowLabel>()
+  const batch: Array<[Row, number]> = []
+  for (let key = 0; key < count; key++) {
+    const before: Row = [key, make(0)]
+    const after: Row = [key, make(1)]
+    sources.set(before, `before`)
+    sources.set(after, `after`)
+    batch.push([after, 1], [before, -1])
+  }
+  const actual = [...topKBatch([new MultiSet(batch)])]
+  const firstKeyEntries = actual.filter(([[key]]) => key === 0)
+  const observed = duplicateFirstKey
+    ? actual.map(
+        (entry) =>
+          firstKeyEntries.find(([, weight]) => weight === entry[1]) ?? entry,
+      )
+    : actual
+  observe(`batch and unrelated reads`, {
+    length: observed.length,
+    entries: observed
+      .map(([row, weight]) => ({
+        key: row[0],
+        row: sources.get(row) ?? `other`,
+        weight,
+      }))
+      .sort(
+        (left, right) =>
+          left.key - right.key ||
+          left.weight - right.weight ||
+          (left.row < right.row ? -1 : left.row > right.row ? 1 : 0),
+      ),
+    reads,
+  })
+  observe(`reach`, `unrelated payload getters`)
+  if (count > 1) observe(`reach`, `multiple unrelated keys`)
+}
+
 oracleProperty({
   id: `ivm.topk-batch-unrelated-payloads`,
   law: {
@@ -634,39 +706,20 @@ oracleProperty({
     arbitrary: fc.integer({ min: 1, max: 100 }),
     runs: 25,
     fixedSeeds: [409035],
-    states: [`unrelated payload getters`],
+    states: [`unrelated payload getters`, `multiple unrelated keys`],
     constructed: [
       {
-        name: `generated unrelated getters`,
-        enters: [`unrelated payload getters`],
-        build: (count) => count,
+        name: `generated unrelated keys and getters`,
+        enters: [`unrelated payload getters`, `multiple unrelated keys`],
+        build: (count) => Math.max(2, count),
       },
     ],
+    fixed: [
+      { name: `each of two keys contributes its own replacement`, history: 2 },
+    ],
   },
-  model: (count) => [
-    {
-      checkpoint: `batch and unrelated reads`,
-      value: { length: count * 2, reads: 0 },
-    },
-  ],
-  driver: (count, observe) => {
-    let reads = 0
-    const make = (rank: number) => ({
-      rank,
-      get unrelated() {
-        reads++
-        return new Array(100).fill(rank)
-      },
-    })
-    const batch: Array<[[number, ReturnType<typeof make>], number]> = []
-    for (let key = 0; key < count; key++)
-      batch.push([[key, make(1)], 1], [[key, make(0)], -1])
-    observe(`batch and unrelated reads`, {
-      length: [...topKBatch([new MultiSet(batch)])].length,
-      reads,
-    })
-    observe(`reach`, `unrelated payload getters`)
-  },
+  model: expectedUnrelated,
+  driver: driveUnrelated,
   check: (_count, trace, expected) =>
     checkTrace(trace, expected, `unread unrelated payloads`),
   calibrations: [
@@ -674,6 +727,11 @@ oracleProperty({
       name: `omits the unrelated-read result`,
       law: `unread unrelated payloads`,
       corrupt: () => [],
+    },
+    {
+      name: `duplicates one source key and omits another`,
+      law: `unread unrelated payloads`,
+      driver: (count, observe) => driveUnrelated(count, observe, true),
     },
   ],
 })
