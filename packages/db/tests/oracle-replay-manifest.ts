@@ -699,6 +699,11 @@ const ownerGroups: ReadonlyArray<
     `demand-scheduling release-reentry partial-values`,
   ],
   [
+    `db/tests/query/load-subset-joint-replay-oracle.property.test.ts`,
+    `load-subset`,
+    `joint-replay`,
+  ],
+  [
     `db/tests/query/load-subset-oracle.property.test.ts`,
     `load-subset`,
     `exact-completion exact-inflight rejected-waiter`,
@@ -1318,6 +1323,7 @@ export type OracleReplayManifestEntry = {
 // Pagination cells carry their property name in the test title so the guard
 // can select one cell without running the rest of the matrix.
 const replayTestNames = new Map([
+  [`load-subset.joint-replay`, `load-subset\\.joint-replay > random seed`],
   [`evaluators.like`, `evaluators\\.like > random seed`],
   [`evaluators.in`, `evaluators\\.in > random seed`],
   ...[
