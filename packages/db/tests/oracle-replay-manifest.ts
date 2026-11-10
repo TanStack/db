@@ -70,6 +70,11 @@ const ownerGroups: ReadonlyArray<
     `reduce-fast-path`,
   ],
   [
+    `solid-db/tests/row-materialization-oracle.test.tsx`,
+    `solid`,
+    `row-materialization native-parent-materialization descriptor-visibility live-getters shared-graph-calibration shared-graphs callable-fields reserved-fields array-methods`,
+  ],
+  [
     `svelte-db/tests/cache-options-oracle.svelte.test.ts`,
     `svelte`,
     `cache-options`,
@@ -1430,6 +1435,15 @@ const reseededProperties = new Set<string>()
 // Keep their literal registry names here; the owner groups still supply their
 // receiving files and any shared source module.
 const enumeratedProperties = new Set([
+  `solid.row-materialization`,
+  `solid.native-parent-materialization`,
+  `solid.descriptor-visibility`,
+  `solid.live-getters`,
+  `solid.shared-graph-calibration`,
+  `solid.shared-graphs`,
+  `solid.callable-fields`,
+  `solid.reserved-fields`,
+  `solid.array-methods`,
   `svelte.ssr-handoff.cases`,
   `svelte.ssr-receiving-reader.cases`,
   `svelte.ssr-snapshot.cases`,
